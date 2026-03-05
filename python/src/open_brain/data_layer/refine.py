@@ -1,0 +1,109 @@
+"""LLM-powered memory consolidation and refinement."""
+
+import json
+import logging
+import re
+
+from open_brain.config import get_config
+from open_brain.data_layer.interface import Memory, RefineAction
+from open_brain.data_layer.llm import LlmMessage, llm_complete
+
+logger = logging.getLogger(__name__)
+
+
+async def analyze_with_llm(memories: list[Memory]) -> list[RefineAction]:
+    """Analyze memories with LLM and suggest consolidation actions.
+
+    Falls back to simple duplicate detection if no LLM key is configured.
+
+    Args:
+        memories: List of Memory objects to analyze
+
+    Returns:
+        List of suggested RefineAction items
+    """
+    config = get_config()
+    has_key = (
+        bool(config.OPENROUTER_API_KEY)
+        if config.LLM_PROVIDER == "openrouter"
+        else bool(config.ANTHROPIC_API_KEY)
+    )
+
+    if not has_key:
+        return find_obvious_duplicates(memories)
+
+    memory_summary = "\n".join(
+        f"[{m.id}] ({m.type}, priority={m.priority}, stability={m.stability}) "
+        f"{m.title or ''}: {m.content[:200]}"
+        for m in memories
+    )
+
+    try:
+        text = await llm_complete(
+            [
+                LlmMessage(
+                    role="user",
+                    content=f"""Analyze these memories and suggest consolidation actions. Return JSON array of actions.
+
+Memories:
+{memory_summary}
+
+Rules:
+- "merge": combine near-duplicate memories (keep the better one, delete others)
+- "promote": change stability from tentative->stable or stable->canonical for high-quality, frequently-accessed memories
+- "demote": lower priority for outdated or low-quality memories
+- "delete": remove truly redundant or obsolete memories
+
+Return ONLY a JSON array like:
+[{{"action":"merge","memory_ids":[1,2],"reason":"Near-duplicate observations about X"}},{{"action":"promote","memory_ids":[5],"reason":"High-quality canonical knowledge"}}]
+
+If no actions needed, return [].""",
+                )
+            ]
+        )
+
+        json_match = re.search(r"\[[\s\S]*\]", text)
+        if not json_match:
+            return []
+
+        raw_actions = json.loads(json_match.group())
+        return [
+            RefineAction(
+                action=a["action"],
+                memory_ids=a["memory_ids"],
+                reason=a.get("reason", ""),
+                executed=False,
+            )
+            for a in raw_actions
+        ]
+    except Exception as err:
+        logger.error("LLM analysis error: %s", err)
+        return find_obvious_duplicates(memories)
+
+
+def find_obvious_duplicates(memories: list[Memory]) -> list[RefineAction]:
+    """Find obvious duplicates by title/content prefix without LLM.
+
+    Args:
+        memories: List of Memory objects to check
+
+    Returns:
+        List of merge actions for duplicate groups
+    """
+    by_title: dict[str, list[Memory]] = {}
+    for m in memories:
+        key = (m.title or m.content[:50]).lower().strip()
+        by_title.setdefault(key, []).append(m)
+
+    actions: list[RefineAction] = []
+    for group in by_title.values():
+        if len(group) > 1:
+            actions.append(
+                RefineAction(
+                    action="merge",
+                    memory_ids=[m.id for m in group],
+                    reason=f'Duplicate title/content: "{group[0].title or group[0].content[:50]}"',
+                    executed=False,
+                )
+            )
+    return actions
