@@ -1,0 +1,32 @@
+{
+  "name": "open-brain",
+  "version": "0.1.0",
+  "description": "Postgres+pgvector memory system with MCP server for AI assistants",
+  "type": "module",
+  "main": "src/server.ts",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "node --import tsx src/server.ts",
+    "migrate": "tsx src/db/migrate.ts",
+    "migrate:verify": "tsx src/db/migrate.ts --verify"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "express": "^5.1.0",
+    "cors": "^2.8.5",
+    "jose": "^6.0.11",
+    "zod": "^3.24.0",
+    "dotenv": "^16.4.0",
+    "pg": "^8.16.3",
+    "tsx": "^4.19.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/cors": "^2.8.17",
+    "@types/pg": "^8.11.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
