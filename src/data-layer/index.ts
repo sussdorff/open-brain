@@ -40,6 +40,25 @@ export interface Memory {
   updated_at: string;
 }
 
+export interface RefineParams {
+  scope?: string; // "recent" | "project:<name>" | "duplicates" | "low-priority"
+  limit?: number;
+  dryRun?: boolean;
+}
+
+export interface RefineResult {
+  analyzed: number;
+  actions: RefineAction[];
+  summary: string;
+}
+
+export interface RefineAction {
+  action: "merge" | "promote" | "demote" | "delete";
+  memory_ids: number[];
+  reason: string;
+  executed: boolean;
+}
+
 export interface DataLayer {
   search(params: SearchParams): Promise<{ results: Memory[]; total: number }>;
   timeline(
@@ -59,4 +78,5 @@ export interface DataLayer {
     project?: string
   ): Promise<{ sessions: unknown[] }>;
   stats(): Promise<Record<string, unknown>>;
+  refineMemories(params: RefineParams): Promise<RefineResult>;
 }

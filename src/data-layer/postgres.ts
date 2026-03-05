@@ -6,7 +6,10 @@ import type {
   TimelineParams,
   SaveMemoryParams,
   Memory,
+  RefineParams,
+  RefineResult,
 } from "./index.js";
+import { analyzeWithHaiku, executeRefineAction } from "./refine.js";
 
 async function resolveIndexId(project?: string): Promise<number | null> {
   if (!project) return null;
@@ -345,6 +348,69 @@ export function createPostgresDataLayer(): DataLayer {
       );
 
       return { sessions };
+    },
+
+    async refineMemories(params: RefineParams): Promise<RefineResult> {
+      const limit = params.limit || 50;
+      const scope = params.scope || "recent";
+
+      let candidates: Memory[];
+
+      if (scope === "duplicates") {
+        const { rows } = await pool.query(
+          `SELECT DISTINCT ON (m1.id)
+             m1.id, m1.index_id, m1.session_id, m1.type, m1.title, m1.content,
+             m1.metadata, m1.priority, m1.stability, m1.created_at, m1.updated_at,
+             m2.id AS similar_id, 1 - (m1.embedding <=> m2.embedding) AS similarity
+           FROM memories m1
+           JOIN memories m2 ON m1.id < m2.id
+           WHERE m1.embedding IS NOT NULL AND m2.embedding IS NOT NULL
+             AND 1 - (m1.embedding <=> m2.embedding) > 0.85
+           ORDER BY m1.id, similarity DESC
+           LIMIT $1`,
+          [limit]
+        );
+        candidates = rows as Memory[];
+      } else if (scope.startsWith("project:")) {
+        const project = scope.slice(8);
+        const indexId = await resolveIndexId(project);
+        const { rows } = await pool.query(
+          "SELECT * FROM memories WHERE index_id = $1 ORDER BY created_at DESC LIMIT $2",
+          [indexId || 1, limit]
+        );
+        candidates = rows as Memory[];
+      } else if (scope === "low-priority") {
+        const { rows } = await pool.query(
+          "SELECT * FROM memories WHERE priority < 0.2 ORDER BY priority ASC LIMIT $1",
+          [limit]
+        );
+        candidates = rows as Memory[];
+      } else {
+        // "recent" - last N memories
+        const { rows } = await pool.query(
+          "SELECT * FROM memories ORDER BY created_at DESC LIMIT $1",
+          [limit]
+        );
+        candidates = rows as Memory[];
+      }
+
+      if (candidates.length === 0) {
+        return { analyzed: 0, actions: [], summary: "No candidates found" };
+      }
+
+      const actions = await analyzeWithHaiku(candidates);
+
+      if (!params.dryRun) {
+        for (const action of actions) {
+          await executeRefineAction(action);
+        }
+      }
+
+      return {
+        analyzed: candidates.length,
+        actions: actions.map((a) => ({ ...a, executed: !params.dryRun })),
+        summary: `Analyzed ${candidates.length} memories, suggested ${actions.length} actions${params.dryRun ? " (dry run)" : ""}`,
+      };
     },
 
     async stats() {

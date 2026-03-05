@@ -13,6 +13,10 @@ import {
 } from "./search-by-concept.js";
 import { getContextSchema, createGetContextTool } from "./get-context.js";
 import { statsSchema, createStatsTool } from "./stats.js";
+import {
+  refineMemoriesSchema,
+  createRefineMemoriesTool,
+} from "./refine-memories.js";
 
 function wrapTool(fn: (params: Record<string, unknown>) => Promise<unknown>) {
   return async (params: Record<string, unknown>) => {
@@ -106,5 +110,12 @@ export function registerTools(server: McpServer, dl: DataLayer): void {
     "Get database statistics (memory count, sessions, DB size)",
     statsSchema,
     wrapTool(createStatsTool(dl))
+  );
+
+  server.tool(
+    "refine_memories",
+    "Consolidate, deduplicate, and refine memories. Uses Claude Haiku for intelligent analysis. Params: scope, limit, dryRun",
+    refineMemoriesSchema,
+    wrapTool(createRefineMemoriesTool(dl))
   );
 }
