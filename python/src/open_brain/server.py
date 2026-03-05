@@ -369,6 +369,12 @@ def _load_client_name(client_id: str) -> str:
     return "MCP Client"
 
 
+@app.get("/health")
+async def health() -> dict[str, str]:
+    """Health check endpoint."""
+    return {"status": "ok", "service": "open-brain", "runtime": "python"}
+
+
 def create_app() -> FastAPI:
     """Factory function for the FastAPI app."""
     return app
