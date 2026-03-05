@@ -1,7 +1,8 @@
 /**
  * Prune low-quality discoveries from the Postgres memories table.
  *
- * Removes memories with type='discovery' that contain fewer than N facts/sentences.
+ * Removes memories with type='discovery' that have fewer than N facts.
+ * Facts are stored in metadata->'facts' as a JSONB array.
  *
  * Usage:
  *   DATABASE_URL=... tsx scripts/prune-discoveries.ts [--force] [--min-facts=3]
@@ -25,23 +26,20 @@ const MIN_FACTS = parseInt(
   10
 );
 
-/**
- * Count "facts" in a text — roughly the number of meaningful sentences.
- * Splits on sentence-ending punctuation or newlines.
- */
-function countFacts(text: string): number {
-  return text
-    .split(/[.!?\n]+/)
-    .filter((s) => s.trim().length > 10)
-    .length;
-}
-
 const pool = new pg.Pool({ connectionString: DATABASE_URL, max: 3 });
 
 try {
-  // Fetch all discoveries
+  // Count facts from metadata->'facts' JSONB array
   const { rows } = await pool.query(
-    `SELECT id, title, content, created_at
+    `SELECT id, title,
+            COALESCE(
+              jsonb_array_length(
+                CASE WHEN jsonb_typeof(metadata->'facts') = 'array'
+                     THEN metadata->'facts'
+                     ELSE '[]'::jsonb END
+              ), 0
+            ) AS fact_count,
+            LEFT(COALESCE(title, content, ''), 80) AS preview
      FROM memories
      WHERE type = 'discovery'
      ORDER BY created_at ASC`
@@ -51,57 +49,62 @@ try {
   console.log(`Min facts threshold: ${MIN_FACTS}`);
   console.log(`Mode: ${DRY_RUN ? "DRY RUN" : "FORCE DELETE"}\n`);
 
-  const toPrune: Array<{ id: number; title: string | null; facts: number; preview: string }> = [];
+  const toPrune = rows.filter((r) => r.fact_count < MIN_FACTS);
+  const toKeep = rows.filter((r) => r.fact_count >= MIN_FACTS);
 
-  for (const row of rows) {
-    const facts = countFacts(row.content);
-    if (facts < MIN_FACTS) {
-      toPrune.push({
-        id: row.id,
-        title: row.title,
-        facts,
-        preview: row.content.slice(0, 80).replace(/\n/g, " "),
-      });
-    }
+  console.log(`Below threshold: ${toPrune.length}`);
+  console.log(`Keeping:         ${toKeep.length}\n`);
+
+  // Show sample of what gets pruned
+  console.log("Sample pruned (first 10):");
+  for (const item of toPrune.slice(0, 10)) {
+    console.log(`  [id=${item.id}] facts=${item.fact_count} | ${item.preview}`);
   }
 
-  console.log(`Discoveries below threshold: ${toPrune.length}/${rows.length}\n`);
-
-  if (toPrune.length === 0) {
-    console.log("Nothing to prune.");
-    process.exit(0);
+  // Show sample of what gets kept
+  console.log("\nSample kept (first 10):");
+  for (const item of toKeep.slice(0, 10)) {
+    console.log(`  [id=${item.id}] facts=${item.fact_count} | ${item.preview}`);
   }
 
-  // Print table
-  for (const item of toPrune) {
-    console.log(`  [id=${item.id}] facts=${item.facts} | ${item.title || "(no title)"} | ${item.preview}...`);
+  // Fact distribution
+  const factDist = new Map<number, number>();
+  for (const r of rows) {
+    factDist.set(r.fact_count, (factDist.get(r.fact_count) || 0) + 1);
+  }
+  console.log("\nFact count distribution:");
+  for (const [count, num] of [...factDist.entries()].sort((a, b) => a[0] - b[0])) {
+    const marker = count < MIN_FACTS ? "  PRUNE" : "";
+    console.log(`  ${count} facts: ${num} discoveries${marker}`);
   }
 
   if (DRY_RUN) {
     console.log(`\nDry run — no deletions. Pass --force to delete.`);
   } else {
     const ids = toPrune.map((p) => p.id);
-    const placeholders = ids.map((_, i) => `$${i + 1}`).join(", ");
 
-    // Delete related usage logs first
-    await pool.query(
-      `DELETE FROM memory_usage_log WHERE memory_id IN (${placeholders})`,
-      ids
-    );
+    // Delete in batches to avoid huge IN clauses
+    const BATCH = 500;
+    let deleted = 0;
+    for (let i = 0; i < ids.length; i += BATCH) {
+      const batch = ids.slice(i, i + BATCH);
+      const placeholders = batch.map((_, j) => `$${j + 1}`).join(", ");
 
-    // Delete related relationships
-    await pool.query(
-      `DELETE FROM memory_relationships WHERE source_id IN (${placeholders}) OR target_id IN (${placeholders})`,
-      [...ids, ...ids]
-    );
+      await pool.query(`DELETE FROM memory_usage_log WHERE memory_id IN (${placeholders})`, batch);
+      await pool.query(
+        `DELETE FROM memory_relationships WHERE source_id IN (${placeholders}) OR target_id IN (${placeholders})`,
+        [...batch, ...batch]
+      );
+      const result = await pool.query(`DELETE FROM memories WHERE id IN (${placeholders})`, batch);
+      deleted += result.rowCount || 0;
+      console.log(`  Deleted batch ${Math.min(i + BATCH, ids.length)}/${ids.length}`);
+    }
 
-    // Delete the memories
-    const result = await pool.query(
-      `DELETE FROM memories WHERE id IN (${placeholders})`,
-      ids
-    );
+    console.log(`\nDeleted ${deleted} low-quality discoveries.`);
 
-    console.log(`\nDeleted ${result.rowCount} discoveries.`);
+    // Final count
+    const { rows: remaining } = await pool.query("SELECT COUNT(*)::int AS c FROM memories");
+    console.log(`Remaining memories: ${remaining[0].c}`);
   }
 } finally {
   await pool.end();

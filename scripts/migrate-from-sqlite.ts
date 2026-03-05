@@ -1,7 +1,7 @@
 /**
  * SQLite → Postgres migration for open-brain.
  *
- * Reads observations, sessions, and session_summaries from the claude-mem
+ * Reads observations, sdk_sessions, and session_summaries from the claude-mem
  * SQLite database and imports them into the Postgres schema.
  *
  * Usage:
@@ -10,7 +10,7 @@
  * Options:
  *   --dry-run       Print counts without writing to Postgres
  *   --skip-embed    Skip the embedding step (import data only)
- *   --export=<path> Export JSONL to file instead of importing
+ *   --batch=N       Embedding batch size (default: 64)
  */
 
 import Database from "better-sqlite3";
@@ -25,36 +25,37 @@ const SQLITE_PATH = process.argv.find((a) => !a.startsWith("-") && a !== process
 const DATABASE_URL = process.env.DATABASE_URL;
 const DRY_RUN = process.argv.includes("--dry-run");
 const SKIP_EMBED = process.argv.includes("--skip-embed");
-const EXPORT_PATH = process.argv.find((a) => a.startsWith("--export="))?.split("=")[1];
+const EMBED_BATCH_SIZE = parseInt(
+  process.argv.find((a) => a.startsWith("--batch="))?.split("=")[1] || "64", 10
+);
 
 if (!SQLITE_PATH) {
   console.error("Usage: tsx scripts/migrate-from-sqlite.ts <sqlite-path>");
-  console.error("  DATABASE_URL must be set (unless --export)");
+  console.error("  DATABASE_URL must be set");
   process.exit(1);
 }
 
-if (!DATABASE_URL && !EXPORT_PATH && !DRY_RUN) {
-  console.error("Error: DATABASE_URL must be set (or use --export / --dry-run)");
+if (!DATABASE_URL && !DRY_RUN) {
+  console.error("Error: DATABASE_URL must be set (or use --dry-run)");
   process.exit(1);
 }
 
 // ---------------------------------------------------------------------------
-// Embedding helpers (inline to avoid importing config.ts which requires all env vars)
+// Embedding helpers
 // ---------------------------------------------------------------------------
 
 const VOYAGE_API_URL = "https://api.voyageai.com/v1/embeddings";
-const VOYAGE_MODEL = "voyage-3-large";
+const VOYAGE_MODEL = process.env.VOYAGE_MODEL || "voyage-4";
 const EMBEDDING_DIM = 1024;
 
 async function embedBatch(texts: string[]): Promise<number[][]> {
   const VOYAGE_API_KEY = process.env.VOYAGE_API_KEY;
   if (!VOYAGE_API_KEY) throw new Error("VOYAGE_API_KEY must be set for embedding");
 
-  const BATCH_SIZE = 64;
   const results: number[][] = [];
 
-  for (let i = 0; i < texts.length; i += BATCH_SIZE) {
-    const batch = texts.slice(i, i + BATCH_SIZE);
+  for (let i = 0; i < texts.length; i += EMBED_BATCH_SIZE) {
+    const batch = texts.slice(i, i + EMBED_BATCH_SIZE);
     const res = await fetch(VOYAGE_API_URL, {
       method: "POST",
       headers: {
@@ -77,11 +78,12 @@ async function embedBatch(texts: string[]): Promise<number[][]> {
     const data = (await res.json()) as { data: Array<{ embedding: number[] }> };
     results.push(...data.data.map((d) => d.embedding));
 
-    if (i + BATCH_SIZE < texts.length) {
+    // Rate limit: 200ms between batches
+    if (i + EMBED_BATCH_SIZE < texts.length) {
       await new Promise((r) => setTimeout(r, 200));
     }
 
-    console.log(`  Embedded ${Math.min(i + BATCH_SIZE, texts.length)}/${texts.length}`);
+    console.log(`  Embedded ${Math.min(i + EMBED_BATCH_SIZE, texts.length)}/${texts.length}`);
   }
 
   return results;
@@ -92,35 +94,60 @@ function toPgVector(embedding: number[]): string {
 }
 
 // ---------------------------------------------------------------------------
-// SQLite types
+// SQLite types (matching actual claude-mem schema)
 // ---------------------------------------------------------------------------
 
 interface SqliteObservation {
   id: number;
-  session_id: string | null;
-  type: string | null;
+  memory_session_id: string;
+  project: string;
+  text: string | null;
+  type: string;
   title: string | null;
-  content: string;
-  obs_type: string | null;
-  project: string | null;
-  file_path: string | null;
-  metadata: string | null;
+  subtitle: string | null;
+  facts: string | null;
+  narrative: string | null;
+  concepts: string | null;
+  files_read: string | null;
+  files_modified: string | null;
+  prompt_number: number | null;
+  discovery_tokens: number;
   created_at: string;
+  created_at_epoch: number;
+  content_hash: string | null;
 }
 
-interface SqliteSession {
+interface SqliteSdkSession {
   id: number;
-  session_id: string;
-  project: string | null;
+  content_session_id: string;
+  memory_session_id: string | null;
+  project: string;
+  user_prompt: string | null;
   started_at: string;
-  ended_at: string | null;
+  started_at_epoch: number;
+  completed_at: string | null;
+  completed_at_epoch: number | null;
+  status: string;
+  prompt_counter: number;
+  custom_title: string | null;
 }
 
 interface SqliteSessionSummary {
   id: number;
-  session_id: string;
-  summary: string;
+  memory_session_id: string;
+  project: string;
+  request: string | null;
+  investigated: string | null;
+  learned: string | null;
+  completed: string | null;
+  next_steps: string | null;
+  files_read: string | null;
+  files_edited: string | null;
+  notes: string | null;
+  prompt_number: number | null;
+  discovery_tokens: number;
   created_at: string;
+  created_at_epoch: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -131,52 +158,28 @@ console.log(`Opening SQLite database: ${SQLITE_PATH}`);
 const db = new Database(SQLITE_PATH, { readonly: true });
 
 const observations = db.prepare("SELECT * FROM observations ORDER BY id").all() as SqliteObservation[];
-const sessions = db.prepare("SELECT * FROM sessions ORDER BY id").all() as SqliteSession[];
+const sdkSessions = db.prepare("SELECT * FROM sdk_sessions ORDER BY id").all() as SqliteSdkSession[];
 const sessionSummaries = db.prepare("SELECT * FROM session_summaries ORDER BY id").all() as SqliteSessionSummary[];
 
 console.log(`SQLite counts:`);
 console.log(`  observations:      ${observations.length}`);
-console.log(`  sessions:          ${sessions.length}`);
+console.log(`  sdk_sessions:      ${sdkSessions.length}`);
 console.log(`  session_summaries: ${sessionSummaries.length}`);
 
-db.close();
+// Type distribution
+const typeCounts = new Map<string, number>();
+for (const obs of observations) {
+  typeCounts.set(obs.type, (typeCounts.get(obs.type) || 0) + 1);
+}
+console.log(`  type distribution: ${[...typeCounts.entries()].map(([k, v]) => `${k}=${v}`).join(", ")}`);
 
 // Collect unique projects
 const projects = new Set<string>();
-for (const obs of observations) {
-  if (obs.project) projects.add(obs.project);
-}
-for (const sess of sessions) {
-  if (sess.project) projects.add(sess.project);
-}
+for (const obs of observations) projects.add(obs.project);
+for (const sess of sdkSessions) projects.add(sess.project);
 console.log(`  unique projects:   ${projects.size} (${[...projects].join(", ")})`);
 
-// ---------------------------------------------------------------------------
-// JSONL export mode
-// ---------------------------------------------------------------------------
-
-if (EXPORT_PATH) {
-  const { writeFileSync } = await import("node:fs");
-  const lines: string[] = [];
-
-  for (const obs of observations) {
-    lines.push(JSON.stringify({ _table: "observation", ...obs }));
-  }
-  for (const sess of sessions) {
-    lines.push(JSON.stringify({ _table: "session", ...sess }));
-  }
-  for (const ss of sessionSummaries) {
-    lines.push(JSON.stringify({ _table: "session_summary", ...ss }));
-  }
-
-  if (EXPORT_PATH === "-") {
-    for (const line of lines) console.log(line);
-  } else {
-    writeFileSync(EXPORT_PATH, lines.join("\n") + "\n");
-    console.log(`Exported ${lines.length} records to ${EXPORT_PATH}`);
-  }
-  process.exit(0);
-}
+db.close();
 
 if (DRY_RUN) {
   console.log("\n--dry-run: No data written.");
@@ -192,15 +195,7 @@ const pool = new pg.Pool({ connectionString: DATABASE_URL, max: 5 });
 try {
   // 1. Create memory_indexes entries
   console.log("\n--- Creating memory indexes ---");
-  const indexMap = new Map<string, number>(); // project name → index_id
-
-  // Ensure "default" exists
-  const { rows: defaultRows } = await pool.query(
-    "SELECT id FROM memory_indexes WHERE name = 'default'"
-  );
-  if (defaultRows.length > 0) {
-    indexMap.set("default", defaultRows[0].id);
-  }
+  const indexMap = new Map<string, number>();
 
   for (const project of projects) {
     const { rows } = await pool.query(
@@ -214,25 +209,40 @@ try {
     console.log(`  Index: ${project} → id=${rows[0].id}`);
   }
 
-  function getIndexId(project: string | null): number {
-    if (!project) return indexMap.get("default") || 1;
-    return indexMap.get(project) || indexMap.get("default") || 1;
+  function getIndexId(project: string): number {
+    return indexMap.get(project) || 1;
   }
 
-  // 2. Import sessions
+  // 2. Import sdk_sessions → sessions
   console.log("\n--- Importing sessions ---");
-  const sessionIdMap = new Map<string, number>(); // sqlite session_id → postgres sessions.id
+  const sessionIdMap = new Map<string, number>(); // memory_session_id → postgres sessions.id
 
-  for (const sess of sessions) {
-    const indexId = getIndexId(sess.project);
+  for (const sess of sdkSessions) {
     const { rows } = await pool.query(
-      `INSERT INTO sessions (session_id, index_id, project, started_at, ended_at)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO sessions (session_id, index_id, project, started_at, ended_at, status, prompt_counter, metadata)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        ON CONFLICT (session_id) DO UPDATE SET ended_at = COALESCE(EXCLUDED.ended_at, sessions.ended_at)
        RETURNING id`,
-      [sess.session_id, indexId, sess.project, sess.started_at, sess.ended_at]
+      [
+        sess.memory_session_id || sess.content_session_id,
+        getIndexId(sess.project),
+        sess.project,
+        sess.started_at,
+        sess.completed_at,
+        sess.status,
+        sess.prompt_counter || 0,
+        JSON.stringify({
+          content_session_id: sess.content_session_id,
+          custom_title: sess.custom_title,
+          _sqlite_id: sess.id,
+        }),
+      ]
     );
-    sessionIdMap.set(sess.session_id, rows[0].id);
+    // Map by memory_session_id for FK lookups
+    if (sess.memory_session_id) {
+      sessionIdMap.set(sess.memory_session_id, rows[0].id);
+    }
+    sessionIdMap.set(sess.content_session_id, rows[0].id);
   }
   console.log(`  Imported ${sessionIdMap.size} sessions`);
 
@@ -244,45 +254,54 @@ try {
 
   for (const obs of observations) {
     const indexId = getIndexId(obs.project);
-    const sessionPgId = obs.session_id ? sessionIdMap.get(obs.session_id) || null : null;
-    const memType = obs.obs_type || obs.type || "observation";
+    const sessionPgId = sessionIdMap.get(obs.memory_session_id) || null;
 
-    // Build metadata JSONB
-    let metadata: Record<string, unknown> = {};
-    if (obs.metadata) {
-      try {
-        metadata = JSON.parse(obs.metadata);
-      } catch {
-        // ignore parse errors
-      }
+    // Build content from text field
+    const content = obs.text || "";
+
+    // Build metadata
+    const metadata: Record<string, unknown> = {
+      _sqlite_id: obs.id,
+      discovery_tokens: obs.discovery_tokens,
+    };
+    if (obs.content_hash) metadata.content_hash = obs.content_hash;
+    if (obs.files_read) {
+      try { metadata.files_read = JSON.parse(obs.files_read); } catch { metadata.files_read = obs.files_read; }
     }
-    if (obs.file_path) {
-      metadata.filePath = obs.file_path;
+    if (obs.files_modified) {
+      try { metadata.files_modified = JSON.parse(obs.files_modified); } catch { metadata.files_modified = obs.files_modified; }
     }
-    // Preserve original sqlite id for traceability
-    metadata._sqlite_id = obs.id;
+    if (obs.concepts) {
+      try { metadata.concepts = JSON.parse(obs.concepts); } catch { metadata.concepts = obs.concepts; }
+    }
+    if (obs.facts) {
+      try { metadata.facts = JSON.parse(obs.facts); } catch { metadata.facts = obs.facts; }
+    }
 
     const { rows } = await pool.query(
-      `INSERT INTO memories (index_id, session_id, type, title, content, metadata, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO memories (index_id, session_id, type, title, subtitle, narrative, content, metadata, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING id`,
       [
         indexId,
         sessionPgId,
-        memType,
+        obs.type,
         obs.title || null,
-        obs.content,
+        obs.subtitle || null,
+        obs.narrative || null,
+        content,
         JSON.stringify(metadata),
         obs.created_at,
       ]
     );
 
     memoryIds.push(rows[0].id);
-    const textToEmbed = [obs.title, obs.content].filter(Boolean).join(": ");
-    memoryTexts.push(textToEmbed);
+    // Build embedding text: title + subtitle + content
+    const textToEmbed = [obs.title, obs.subtitle, obs.text].filter(Boolean).join(": ");
+    memoryTexts.push(textToEmbed || "(empty)");
     memoriesImported++;
 
-    if (memoriesImported % 100 === 0) {
+    if (memoriesImported % 500 === 0) {
       console.log(`  ... ${memoriesImported}/${observations.length}`);
     }
   }
@@ -291,26 +310,51 @@ try {
   // 4. Import session_summaries
   console.log("\n--- Importing session summaries ---");
   let summariesImported = 0;
+  let summariesSkipped = 0;
 
   for (const ss of sessionSummaries) {
-    const sessionPgId = sessionIdMap.get(ss.session_id);
+    const sessionPgId = sessionIdMap.get(ss.memory_session_id);
     if (!sessionPgId) {
-      console.warn(`  Warning: session_id "${ss.session_id}" not found in session map, skipping summary`);
+      summariesSkipped++;
       continue;
     }
 
+    // Build summary text from structured fields
+    const summaryParts = [
+      ss.request && `Request: ${ss.request}`,
+      ss.investigated && `Investigated: ${ss.investigated}`,
+      ss.learned && `Learned: ${ss.learned}`,
+      ss.completed && `Completed: ${ss.completed}`,
+      ss.next_steps && `Next steps: ${ss.next_steps}`,
+    ].filter(Boolean);
+    const summary = summaryParts.join("\n") || null;
+
     await pool.query(
-      `INSERT INTO session_summaries (session_id, summary, created_at)
-       VALUES ($1, $2, $3)`,
-      [sessionPgId, ss.summary, ss.created_at]
+      `INSERT INTO session_summaries (session_id, summary, request, investigated, learned, completed, next_steps,
+                                      files_read, files_edited, notes, prompt_number, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      [
+        sessionPgId,
+        summary,
+        ss.request,
+        ss.investigated,
+        ss.learned,
+        ss.completed,
+        ss.next_steps,
+        ss.files_read ? JSON.stringify(ss.files_read) : null,
+        ss.files_edited ? JSON.stringify(ss.files_edited) : null,
+        ss.notes,
+        ss.prompt_number,
+        ss.created_at,
+      ]
     );
     summariesImported++;
   }
-  console.log(`  Imported ${summariesImported} session summaries`);
+  console.log(`  Imported ${summariesImported} session summaries (skipped ${summariesSkipped} with missing session)`);
 
   // 5. Batch re-embed
   if (!SKIP_EMBED && memoryTexts.length > 0) {
-    console.log(`\n--- Embedding ${memoryTexts.length} memories ---`);
+    console.log(`\n--- Embedding ${memoryTexts.length} memories with ${VOYAGE_MODEL} ---`);
     try {
       const embeddings = await embedBatch(memoryTexts);
 
@@ -321,7 +365,7 @@ try {
           [toPgVector(embeddings[i]), memoryIds[i]]
         );
 
-        if ((i + 1) % 100 === 0) {
+        if ((i + 1) % 500 === 0) {
           console.log(`  ... ${i + 1}/${embeddings.length}`);
         }
       }
@@ -339,13 +383,17 @@ try {
   const { rows: memCount } = await pool.query("SELECT COUNT(*)::int AS count FROM memories");
   const { rows: sessCount } = await pool.query("SELECT COUNT(*)::int AS count FROM sessions");
   const { rows: sumCount } = await pool.query("SELECT COUNT(*)::int AS count FROM session_summaries");
+  const { rows: embCount } = await pool.query("SELECT COUNT(*)::int AS count FROM memories WHERE embedding IS NOT NULL");
+  const { rows: typeStats } = await pool.query("SELECT type, COUNT(*)::int AS count FROM memories GROUP BY type ORDER BY count DESC");
 
   console.log(`  Postgres memories:          ${memCount[0].count} (source: ${observations.length})`);
-  console.log(`  Postgres sessions:          ${sessCount[0].count} (source: ${sessions.length})`);
+  console.log(`  Postgres sessions:          ${sessCount[0].count} (source: ${sdkSessions.length})`);
   console.log(`  Postgres session_summaries: ${sumCount[0].count} (source: ${sessionSummaries.length})`);
+  console.log(`  Embedded memories:          ${embCount[0].count}`);
+  console.log(`  Type distribution:          ${typeStats.map((r: any) => `${r.type}=${r.count}`).join(", ")}`);
 
   const memOk = memCount[0].count >= observations.length;
-  const sessOk = sessCount[0].count >= sessions.length;
+  const sessOk = sessCount[0].count >= sdkSessions.length;
   console.log(`  Status: ${memOk && sessOk ? "OK" : "MISMATCH - check data"}`);
 
   console.log("\nMigration complete.");
