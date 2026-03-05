@@ -4,3 +4,7 @@ dist/
 clients.json
 logs/
 *.log
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db
