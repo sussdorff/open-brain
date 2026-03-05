@@ -1,8 +1,7 @@
-import { z } from "zod";
-import { workerGet } from "../worker-client.js";
+import type { DataLayer } from "../data-layer/index.js";
 
 export const statsSchema = {};
 
-export async function statsTool(_params: Record<string, unknown>) {
-  return workerGet("/api/stats");
+export function createStatsTool(dl: DataLayer) {
+  return async (_params: Record<string, unknown>) => dl.stats();
 }

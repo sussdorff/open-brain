@@ -19,7 +19,9 @@ export async function issueAccessToken(claims: TokenClaims): Promise<string> {
     .sign(secret);
 }
 
-export async function issueRefreshToken(claims: TokenClaims): Promise<string> {
+export async function issueRefreshToken(
+  claims: TokenClaims
+): Promise<string> {
   return new SignJWT({
     clientId: claims.clientId,
     scopes: claims.scopes,

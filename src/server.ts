@@ -8,6 +8,7 @@ import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middlew
 import { config } from "./config.js";
 import { oauthProvider, handleAuthorizeSubmit } from "./auth/provider.js";
 import { registerTools } from "./tools/index.js";
+import { createPostgresDataLayer } from "./data-layer/postgres.js";
 
 const app = express();
 
@@ -18,9 +19,17 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// DataLayer instance
+const dataLayer = createPostgresDataLayer();
+
 // Health endpoint (no auth)
-app.get("/health", (_req, res) => {
-  res.json({ status: "ok" });
+app.get("/health", async (_req, res) => {
+  try {
+    const stats = await dataLayer.stats();
+    res.json({ status: "ok", ...stats });
+  } catch {
+    res.status(503).json({ status: "degraded", error: "database unreachable" });
+  }
 });
 
 // OAuth auth router (well-known, authorize, token, register)
@@ -48,12 +57,11 @@ const bearerAuth = requireBearerAuth({
 // Session management: map session IDs to transports
 const sessions = new Map<string, StreamableHTTPServerTransport>();
 
-// MCP handler - mounted on both /mcp and / (claude.ai POSTs to the server URL directly)
+// MCP handler
 const mcpHandler: express.RequestHandler = async (req, res) => {
   const sessionId = req.headers["mcp-session-id"] as string | undefined;
 
   if (req.method === "GET" || req.method === "DELETE") {
-    // GET = SSE stream, DELETE = close session
     if (!sessionId || !sessions.has(sessionId)) {
       res.status(400).json({ error: "Invalid or missing session ID" });
       return;
@@ -68,7 +76,6 @@ const mcpHandler: express.RequestHandler = async (req, res) => {
 
   // POST
   if (sessionId && sessions.has(sessionId)) {
-    // Existing session
     const transport = sessions.get(sessionId)!;
     await transport.handleRequest(req, res, req.body);
     return;
@@ -79,7 +86,7 @@ const mcpHandler: express.RequestHandler = async (req, res) => {
     name: "open-brain",
     version: "1.0.0",
   });
-  registerTools(server);
+  registerTools(server, dataLayer);
 
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: () => randomUUID(),
@@ -93,7 +100,7 @@ const mcpHandler: express.RequestHandler = async (req, res) => {
   await server.connect(transport);
   await transport.handleRequest(req, res, req.body);
 
-  // Store session after handleRequest so sessionId is set by the transport
+  // Store session after handleRequest so sessionId is set
   const sid = transport.sessionId;
   if (sid) {
     sessions.set(sid, transport);
@@ -106,6 +113,6 @@ app.get("/", bearerAuth, mcpHandler);
 app.delete("/", bearerAuth, mcpHandler);
 
 app.listen(config.PORT, "0.0.0.0", () => {
-  console.log(`MCP Server listening on port ${config.PORT}`);
+  console.log(`open-brain MCP Server listening on port ${config.PORT}`);
   console.log(`OAuth issuer: ${config.MCP_SERVER_URL}`);
 });

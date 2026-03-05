@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { workerGet } from "../worker-client.js";
+import type { DataLayer } from "../data-layer/index.js";
 
 export const searchByConceptSchema = {
   query: z.string().describe("Semantic concept to search for"),
@@ -7,6 +7,11 @@ export const searchByConceptSchema = {
   project: z.string().optional().describe("Filter by project name"),
 };
 
-export async function searchByConceptTool(params: Record<string, unknown>) {
-  return workerGet("/api/search/by-concept", params as Record<string, string | number | undefined>);
+export function createSearchByConceptTool(dl: DataLayer) {
+  return async (params: Record<string, unknown>) =>
+    dl.searchByConcept(
+      params.query as string,
+      params.limit as number | undefined,
+      params.project as string | undefined
+    );
 }

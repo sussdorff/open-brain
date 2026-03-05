@@ -1,7 +1,14 @@
 import { randomBytes } from "node:crypto";
 import type { Response } from "express";
-import type { OAuthServerProvider, AuthorizationParams } from "@modelcontextprotocol/sdk/server/auth/provider.js";
-import type { OAuthClientInformationFull, OAuthTokens, OAuthTokenRevocationRequest } from "@modelcontextprotocol/sdk/shared/auth.js";
+import type {
+  OAuthServerProvider,
+  AuthorizationParams,
+} from "@modelcontextprotocol/sdk/server/auth/provider.js";
+import type {
+  OAuthClientInformationFull,
+  OAuthTokens,
+  OAuthTokenRevocationRequest,
+} from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { clientsStore } from "./clients-store.js";
 import { issueAccessToken, issueRefreshToken, verifyToken } from "./tokens.js";
@@ -32,7 +39,6 @@ export const oauthProvider: OAuthServerProvider = {
     params: AuthorizationParams,
     res: Response
   ): Promise<void> {
-    // Render a simple login form
     const formHtml = `<!DOCTYPE html>
 <html><head><title>open-brain Login</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -41,7 +47,6 @@ export const oauthProvider: OAuthServerProvider = {
   input { display: block; width: 100%; padding: 8px; margin: 8px 0; box-sizing: border-box; }
   button { padding: 10px 20px; background: #2563eb; color: white; border: none; border-radius: 4px; cursor: pointer; width: 100%; }
   button:hover { background: #1d4ed8; }
-  .error { color: red; }
   h2 { margin-bottom: 4px; }
   p { color: #666; margin-top: 0; }
 </style></head>
@@ -162,7 +167,6 @@ export const oauthProvider: OAuthServerProvider = {
 
 /**
  * Handle the login form submission (POST /authorize/submit).
- * Called from Express route, not from the SDK.
  */
 export function handleAuthorizeSubmit(
   body: {
@@ -176,7 +180,6 @@ export function handleAuthorizeSubmit(
   },
   res: Response
 ): void {
-  // Validate credentials
   if (
     body.username !== config.AUTH_USER ||
     body.password !== config.AUTH_PASSWORD

@@ -1,13 +1,15 @@
 import { z } from "zod";
-import { workerPost } from "../worker-client.js";
+import type { DataLayer } from "../data-layer/index.js";
 
 export const getObservationsSchema = {
-  ids: z.array(z.number()).describe("Array of observation IDs to fetch (required)"),
-  orderBy: z.string().optional().describe("Sort order"),
-  limit: z.number().optional().describe("Max results"),
-  project: z.string().optional().describe("Filter by project"),
+  ids: z
+    .array(z.number())
+    .describe("Array of observation IDs to fetch (required)"),
 };
 
-export async function getObservationsTool(params: Record<string, unknown>) {
-  return workerPost("/api/observations/batch", params);
+export function createGetObservationsTool(dl: DataLayer) {
+  return async (params: Record<string, unknown>) => {
+    const ids = params.ids as number[];
+    return dl.getObservations(ids);
+  };
 }
