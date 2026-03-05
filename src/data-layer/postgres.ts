@@ -23,6 +23,33 @@ async function resolveIndexId(project?: string): Promise<number | null> {
   return result.rows[0].id;
 }
 
+async function logUsage(
+  memoryIds: number[],
+  eventType: "search_hit" | "retrieved" | "cited",
+  sessionContext?: string
+) {
+  if (memoryIds.length === 0) return;
+  const values = memoryIds
+    .map((_, i) => `($${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3})`)
+    .join(", ");
+  const params = memoryIds.flatMap((id) => [
+    id,
+    eventType,
+    sessionContext || null,
+  ]);
+  await pool.query(
+    `INSERT INTO memory_usage_log (memory_id, event_type, session_context) VALUES ${values}`,
+    params
+  );
+
+  // Update priority: boost by 0.02 per access, cap at 1.0
+  const placeholders = memoryIds.map((_, i) => `$${i + 1}`).join(", ");
+  await pool.query(
+    `UPDATE memories SET priority = LEAST(priority + 0.02, 1.0), updated_at = now() WHERE id IN (${placeholders})`,
+    memoryIds
+  );
+}
+
 export function createPostgresDataLayer(): DataLayer {
   return {
     async search(params: SearchParams) {
@@ -67,6 +94,10 @@ export function createPostgresDataLayer(): DataLayer {
               indexId,
             ]
           );
+          // Fire-and-forget: log search hits
+          const hitIds = (rows as Memory[]).map((r) => r.id);
+          logUsage(hitIds, "search_hit").catch(() => {});
+
           return { results: rows as Memory[], total: rows.length };
         } catch {
           // Fallback to FTS if embedding fails
@@ -100,6 +131,10 @@ export function createPostgresDataLayer(): DataLayer {
         `SELECT COUNT(*)::int AS total FROM memories m ${where}`,
         values
       );
+
+      // Fire-and-forget: log search hits
+      const hitIds = (rows as Memory[]).map((r) => r.id);
+      logUsage(hitIds, "search_hit").catch(() => {});
 
       return {
         results: rows as Memory[],
@@ -179,6 +214,10 @@ export function createPostgresDataLayer(): DataLayer {
         `SELECT * FROM memories WHERE id IN (${placeholders}) ORDER BY created_at ASC`,
         ids
       );
+      // Fire-and-forget: log retrieved
+      const retrievedIds = (rows as Memory[]).map((r) => r.id);
+      logUsage(retrievedIds, "retrieved").catch(() => {});
+
       return rows as Memory[];
     },
 
@@ -199,19 +238,51 @@ export function createPostgresDataLayer(): DataLayer {
 
       const memoryId = rows[0].id;
 
-      // Embed async (don't block response)
+      // Embed async (don't block response), then auto-link similar memories
       const textToEmbed = [params.title, params.text]
         .filter(Boolean)
         .join(": ");
       embed(textToEmbed)
         .then(async (embedding) => {
+          const pgVec = toPgVector(embedding);
           await pool.query(
             "UPDATE memories SET embedding = $1 WHERE id = $2",
-            [toPgVector(embedding), memoryId]
+            [pgVec, memoryId]
           );
+
+          // Auto-link: find top 5 similar memories with cosine similarity > 0.65
+          const { rows: similar } = await pool.query(
+            `SELECT m.id, 1 - (m.embedding <=> $1::vector) AS similarity
+             FROM memories m
+             WHERE m.id != $2
+               AND m.embedding IS NOT NULL
+               AND 1 - (m.embedding <=> $1::vector) > 0.65
+             ORDER BY m.embedding <=> $1::vector
+             LIMIT 5`,
+            [pgVec, memoryId]
+          );
+
+          // Create bidirectional similar_to relationships
+          for (const row of similar) {
+            await pool.query(
+              `INSERT INTO memory_relationships (source_id, target_id, relation_type, weight)
+               VALUES ($1, $2, 'similar_to', $3)
+               ON CONFLICT (source_id, target_id, relation_type) DO UPDATE SET weight = $3`,
+              [memoryId, row.id, row.similarity]
+            );
+          }
+
+          if (similar.length > 0) {
+            console.log(
+              `Auto-linked memory ${memoryId} to ${similar.length} similar memories`
+            );
+          }
         })
         .catch((err) => {
-          console.error(`Embedding failed for memory ${memoryId}:`, err);
+          console.error(
+            `Embedding/linking failed for memory ${memoryId}:`,
+            err
+          );
         });
 
       return { id: memoryId, message: "Memory saved" };
