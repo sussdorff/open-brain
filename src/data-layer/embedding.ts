@@ -1,7 +1,7 @@
 import { config } from "../config.js";
 
 const VOYAGE_API_URL = "https://api.voyageai.com/v1/embeddings";
-const VOYAGE_MODEL = "voyage-3-large";
+const VOYAGE_MODEL = config.VOYAGE_MODEL;
 const EMBEDDING_DIM = 1024;
 
 export interface EmbeddingResult {

@@ -9,7 +9,7 @@ import type {
   RefineParams,
   RefineResult,
 } from "./index.js";
-import { analyzeWithHaiku, executeRefineAction } from "./refine.js";
+import { analyzeWithLlm, executeRefineAction } from "./refine.js";
 
 async function resolveIndexId(project?: string): Promise<number | null> {
   if (!project) return null;
@@ -398,7 +398,7 @@ export function createPostgresDataLayer(): DataLayer {
         return { analyzed: 0, actions: [], summary: "No candidates found" };
       }
 
-      const actions = await analyzeWithHaiku(candidates);
+      const actions = await analyzeWithLlm(candidates);
 
       if (!params.dryRun) {
         for (const action of actions) {

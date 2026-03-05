@@ -1,11 +1,17 @@
 import type { Memory, RefineAction } from "./index.js";
 import { config } from "../config.js";
 import { pool } from "../db/pool.js";
+import { llmComplete } from "./llm.js";
 
-export async function analyzeWithHaiku(
+export async function analyzeWithLlm(
   memories: Memory[]
 ): Promise<RefineAction[]> {
-  if (!config.ANTHROPIC_API_KEY) {
+  const hasKey =
+    config.LLM_PROVIDER === "openrouter"
+      ? !!config.OPENROUTER_API_KEY
+      : !!config.ANTHROPIC_API_KEY;
+
+  if (!hasKey) {
     return findObviousDuplicates(memories);
   }
 
@@ -16,20 +22,11 @@ export async function analyzeWithHaiku(
     )
     .join("\n");
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": config.ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 1024,
-      messages: [
-        {
-          role: "user",
-          content: `Analyze these memories and suggest consolidation actions. Return JSON array of actions.
+  try {
+    const text = await llmComplete([
+      {
+        role: "user",
+        content: `Analyze these memories and suggest consolidation actions. Return JSON array of actions.
 
 Memories:
 ${memorySummary}
@@ -44,28 +41,15 @@ Return ONLY a JSON array like:
 [{"action":"merge","memory_ids":[1,2],"reason":"Near-duplicate observations about X"},{"action":"promote","memory_ids":[5],"reason":"High-quality canonical knowledge"}]
 
 If no actions needed, return [].`,
-        },
-      ],
-    }),
-  });
+      },
+    ]);
 
-  if (!response.ok) {
-    console.error(`Haiku API error: ${response.status}`);
-    return findObviousDuplicates(memories);
-  }
-
-  const data = (await response.json()) as {
-    content: Array<{ text: string }>;
-  };
-  const text = data.content[0]?.text || "[]";
-
-  try {
     const jsonMatch = text.match(/\[[\s\S]*\]/);
     if (!jsonMatch) return [];
     return JSON.parse(jsonMatch[0]) as RefineAction[];
-  } catch {
-    console.error("Failed to parse Haiku response:", text);
-    return [];
+  } catch (err) {
+    console.error(`LLM analysis error:`, err);
+    return findObviousDuplicates(memories);
   }
 }
 

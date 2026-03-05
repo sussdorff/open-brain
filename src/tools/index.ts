@@ -114,7 +114,7 @@ export function registerTools(server: McpServer, dl: DataLayer): void {
 
   server.tool(
     "refine_memories",
-    "Consolidate, deduplicate, and refine memories. Uses Claude Haiku for intelligent analysis. Params: scope, limit, dryRun",
+    "Consolidate, deduplicate, and refine memories. Uses configured LLM for intelligent analysis. Params: scope, limit, dryRun",
     refineMemoriesSchema,
     wrapTool(createRefineMemoriesTool(dl))
   );
