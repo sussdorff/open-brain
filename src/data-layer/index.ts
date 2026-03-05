@@ -24,6 +24,8 @@ export interface SaveMemoryParams {
   type?: string;
   project?: string;
   title?: string;
+  subtitle?: string;
+  narrative?: string;
 }
 
 export interface Memory {
@@ -32,10 +34,14 @@ export interface Memory {
   session_id: number | null;
   type: string;
   title: string | null;
+  subtitle: string | null;
+  narrative: string | null;
   content: string;
   metadata: Record<string, unknown>;
   priority: number;
   stability: string;
+  access_count: number;
+  last_accessed_at: string | null;
   created_at: string;
   updated_at: string;
 }

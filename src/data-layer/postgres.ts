@@ -28,7 +28,7 @@ async function resolveIndexId(project?: string): Promise<number | null> {
 
 async function logUsage(
   memoryIds: number[],
-  eventType: "search_hit" | "retrieved" | "cited",
+  eventType: "search_hit" | "retrieved" | "cited" | "updated",
   sessionContext?: string
 ) {
   if (memoryIds.length === 0) return;
@@ -45,12 +45,10 @@ async function logUsage(
     params
   );
 
-  // Update priority: boost by 0.02 per access, cap at 1.0
-  const placeholders = memoryIds.map((_, i) => `$${i + 1}`).join(", ");
-  await pool.query(
-    `UPDATE memories SET priority = LEAST(priority + 0.02, 1.0), updated_at = now() WHERE id IN (${placeholders})`,
-    memoryIds
-  );
+  // Update priority using 3-factor formula (recency + importance + usage)
+  for (const id of memoryIds) {
+    await pool.query("SELECT update_priority($1)", [id]);
+  }
 }
 
 export function createPostgresDataLayer(): DataLayer {
@@ -105,7 +103,7 @@ export function createPostgresDataLayer(): DataLayer {
         } catch {
           // Fallback to FTS if embedding fails
           conditions.push(
-            `to_tsvector('english', coalesce(m.title, '') || ' ' || m.content) @@ plainto_tsquery('english', $${paramIdx++})`
+            `m.search_vector @@ websearch_to_tsquery('english', $${paramIdx++})`
           );
           values.push(params.query);
         }
@@ -121,8 +119,8 @@ export function createPostgresDataLayer(): DataLayer {
           : "m.created_at DESC";
 
       const { rows } = await pool.query(
-        `SELECT m.id, m.index_id, m.session_id, m.type, m.title, m.content,
-                m.metadata, m.priority, m.stability, m.created_at, m.updated_at
+        `SELECT m.id, m.index_id, m.session_id, m.type, m.title, m.subtitle, m.narrative, m.content,
+                m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.created_at, m.updated_at
          FROM memories m ${where}
          ORDER BY ${orderBy}
          LIMIT $${paramIdx++} OFFSET $${paramIdx++}`,
@@ -157,13 +155,9 @@ export function createPostgresDataLayer(): DataLayer {
 
         const { rows } = await pool.query(
           `SELECT m.id FROM memories m
-           WHERE to_tsvector('english', coalesce(m.title, '') || ' ' || m.content)
-                 @@ plainto_tsquery('english', $1)
+           WHERE m.search_vector @@ websearch_to_tsquery('english', $1)
            ${indexFilter}
-           ORDER BY ts_rank_cd(
-             to_tsvector('english', coalesce(m.title, '') || ' ' || m.content),
-             plainto_tsquery('english', $1)
-           ) DESC
+           ORDER BY ts_rank_cd(m.search_vector, websearch_to_tsquery('english', $1)) DESC
            LIMIT 1`,
           queryValues
         );
@@ -194,13 +188,13 @@ export function createPostgresDataLayer(): DataLayer {
       if (indexId) baseValues.push(indexId);
 
       const { rows } = await pool.query(
-        `(SELECT m.id, m.index_id, m.session_id, m.type, m.title, m.content,
-                 m.metadata, m.priority, m.stability, m.created_at, m.updated_at
+        `(SELECT m.id, m.index_id, m.session_id, m.type, m.title, m.subtitle, m.narrative, m.content,
+                 m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.created_at, m.updated_at
           FROM memories m WHERE m.created_at <= $1 ${indexFilter}
           ORDER BY m.created_at DESC LIMIT ${depthBefore + 1})
          UNION ALL
-         (SELECT m.id, m.index_id, m.session_id, m.type, m.title, m.content,
-                 m.metadata, m.priority, m.stability, m.created_at, m.updated_at
+         (SELECT m.id, m.index_id, m.session_id, m.type, m.title, m.subtitle, m.narrative, m.content,
+                 m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.created_at, m.updated_at
           FROM memories m WHERE m.created_at > $1 ${indexFilter}
           ORDER BY m.created_at ASC LIMIT ${depthAfter})
          ORDER BY created_at ASC`,
@@ -228,13 +222,15 @@ export function createPostgresDataLayer(): DataLayer {
       const indexId = await resolveIndexId(params.project);
 
       const { rows } = await pool.query(
-        `INSERT INTO memories (index_id, type, title, content)
-         VALUES ($1, $2, $3, $4)
+        `INSERT INTO memories (index_id, type, title, subtitle, narrative, content)
+         VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING id`,
         [
           indexId || 1,
           params.type || "observation",
           params.title || null,
+          params.subtitle || null,
+          params.narrative || null,
           params.text,
         ]
       );
@@ -242,7 +238,7 @@ export function createPostgresDataLayer(): DataLayer {
       const memoryId = rows[0].id;
 
       // Embed async (don't block response), then auto-link similar memories
-      const textToEmbed = [params.title, params.text]
+      const textToEmbed = [params.title, params.subtitle, params.narrative, params.text]
         .filter(Boolean)
         .join(": ");
       embed(textToEmbed)
@@ -268,9 +264,9 @@ export function createPostgresDataLayer(): DataLayer {
           // Create bidirectional similar_to relationships
           for (const row of similar) {
             await pool.query(
-              `INSERT INTO memory_relationships (source_id, target_id, relation_type, weight)
+              `INSERT INTO memory_relationships (source_id, target_id, relation_type, confidence)
                VALUES ($1, $2, 'similar_to', $3)
-               ON CONFLICT (source_id, target_id, relation_type) DO UPDATE SET weight = $3`,
+               ON CONFLICT (source_id, target_id, relation_type) DO UPDATE SET confidence = $3`,
               [memoryId, row.id, row.similarity]
             );
           }
@@ -308,8 +304,8 @@ export function createPostgresDataLayer(): DataLayer {
       values.push(maxResults);
 
       const { rows } = await pool.query(
-        `SELECT m.id, m.index_id, m.session_id, m.type, m.title, m.content,
-                m.metadata, m.priority, m.stability, m.created_at, m.updated_at,
+        `SELECT m.id, m.index_id, m.session_id, m.type, m.title, m.subtitle, m.narrative, m.content,
+                m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.created_at, m.updated_at,
                 1 - (m.embedding <=> $1::vector) AS similarity
          FROM memories m
          WHERE ${conditions.join(" AND ")}

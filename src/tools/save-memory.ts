@@ -15,6 +15,14 @@ export const saveMemorySchema = {
     .string()
     .optional()
     .describe("Optional title for the observation"),
+  subtitle: z
+    .string()
+    .optional()
+    .describe("Optional subtitle or one-line summary"),
+  narrative: z
+    .string()
+    .optional()
+    .describe("Optional longer narrative context"),
 };
 
 export function createSaveMemoryTool(dl: DataLayer) {

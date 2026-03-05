@@ -86,7 +86,7 @@ export function registerTools(server: McpServer, dl: DataLayer): void {
 
   server.tool(
     "save_memory",
-    "Save a new observation to memory (auto-embeds via Voyage). Params: text (required), type, project, title",
+    "Save a new observation to memory (auto-embeds via Voyage). Params: text (required), type, project, title, subtitle, narrative",
     saveMemorySchema,
     wrapTool(createSaveMemoryTool(dl))
   );
