@@ -6,6 +6,7 @@ import time
 
 import jwt
 import pytest
+from httpx import ASGITransport, AsyncClient
 
 from open_brain.auth.tokens import (
     TokenClaims,
@@ -307,3 +308,77 @@ class TestOAuthProvider:
         oauth_provider.revoke_token(refresh_token)
         with pytest.raises(ValueError, match="revoked"):
             oauth_provider.exchange_refresh_token("c", refresh_token)
+
+
+# ─── Dynamic Client Registration Tests ───────────────────────────────────────
+
+class TestDynamicClientRegistration:
+    def test_register_and_get_client(self, oauth_provider):
+        client = oauth_provider.register_client(client_name="Test App")
+        assert client.client_name == "Test App"
+        assert client.client_id
+        retrieved = oauth_provider.get_client(client.client_id)
+        assert retrieved is not None
+        assert retrieved.client_name == "Test App"
+
+    def test_get_unknown_client_returns_none(self, oauth_provider):
+        assert oauth_provider.get_client("nonexistent") is None
+
+
+# ─── Bearer Auth Middleware Tests (HTTP-level) ────────────────────────────────
+
+@pytest.fixture
+def auth_client():
+    """AsyncClient for testing the FastAPI app with Bearer auth middleware."""
+    from open_brain.server import app
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    return AsyncClient(transport=transport, base_url="http://testserver")
+
+
+def _make_bearer(scopes: list[str] | None = None) -> str:
+    """Issue a valid Bearer token for tests."""
+    claims = TokenClaims(sub="testuser", client_id="test-client", scopes=scopes or [])
+    return f"Bearer {issue_access_token(claims)}"
+
+
+class TestBearerAuthMiddleware:
+    @pytest.mark.asyncio
+    async def test_public_health_no_auth(self, auth_client):
+        resp = await auth_client.get("/health")
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_public_oauth_metadata_no_auth(self, auth_client):
+        resp = await auth_client.get("/.well-known/oauth-authorization-server")
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_mcp_without_token_returns_401(self, auth_client):
+        resp = await auth_client.post("/mcp", json={})
+        assert resp.status_code == 401
+        assert resp.json()["error"] == "unauthorized"
+        assert "WWW-Authenticate" in resp.headers
+
+    @pytest.mark.asyncio
+    async def test_mcp_with_invalid_token_returns_401(self, auth_client):
+        resp = await auth_client.post(
+            "/mcp", json={}, headers={"Authorization": "Bearer invalid-token"}
+        )
+        assert resp.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_mcp_with_refresh_token_returns_401(self, auth_client):
+        claims = TokenClaims(sub="testuser", client_id="c", scopes=[])
+        refresh = issue_refresh_token(claims)
+        resp = await auth_client.post(
+            "/mcp", json={}, headers={"Authorization": f"Bearer {refresh}"}
+        )
+        assert resp.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_mcp_with_valid_token_passes_through(self, auth_client):
+        resp = await auth_client.post(
+            "/mcp", json={}, headers={"Authorization": _make_bearer()}
+        )
+        # Should NOT be 401 — whatever status the MCP handler returns is fine
+        assert resp.status_code != 401

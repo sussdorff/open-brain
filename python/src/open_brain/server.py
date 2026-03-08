@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
+
+from starlette.middleware import Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from open_brain.auth.provider import get_provider
 from open_brain.auth.tokens import verify_token
@@ -25,7 +30,15 @@ from open_brain.data_layer.postgres import PostgresDataLayer, close_pool
 logger = logging.getLogger(__name__)
 
 # MCP server (FastMCP high-level API)
-mcp = FastMCP("open-brain")
+_config = get_config()
+_host = _config.MCP_SERVER_URL.replace("https://", "").replace("http://", "").rstrip("/")
+mcp = FastMCP(
+    "open-brain",
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=[_host, f"{_host}:443", "localhost:8091", "127.0.0.1:8091"],
+    ),
+)
 
 # Shared data layer instance
 _dl: PostgresDataLayer | None = None
@@ -220,24 +233,57 @@ async def refine_memories(
 
 # ─── FastAPI App ──────────────────────────────────────────────────────────────
 
-app = FastAPI(title="open-brain MCP Server", version="0.1.0")
+# Build the MCP sub-app first so session_manager is available
+_mcp_app = mcp.streamable_http_app()
+
+# OAuth paths that must remain unauthenticated
+_PUBLIC_PATHS = {
+    "/authorize", "/authorize/submit", "/token", "/register", "/revoke",
+    "/.well-known/oauth-authorization-server", "/health",
+}
 
 
-@app.on_event("startup")
-async def startup() -> None:
-    """Log startup."""
+class BearerAuthMiddleware(BaseHTTPMiddleware):
+    """Validate Bearer tokens on MCP endpoints (everything not in _PUBLIC_PATHS)."""
+
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path in _PUBLIC_PATHS:
+            return await call_next(request)
+
+        auth_header = request.headers.get("authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return JSONResponse(
+                {"error": "unauthorized", "error_description": "Missing Bearer token"},
+                status_code=401,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        token = auth_header[7:]  # Strip "Bearer "
+        try:
+            provider = get_provider()
+            provider.verify_access_token(token)
+        except Exception:
+            return JSONResponse(
+                {"error": "unauthorized", "error_description": "Invalid or expired token"},
+                status_code=401,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        return await call_next(request)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage MCP session manager and DB pool lifecycle."""
     config = get_config()
     logger.info("open-brain starting on port %d", config.PORT)
-
-
-@app.on_event("shutdown")
-async def shutdown() -> None:
-    """Close DB pool on shutdown."""
+    async with mcp.session_manager.run():
+        yield
     await close_pool()
 
 
-# Mount MCP server at /mcp
-app.mount("/mcp", mcp.streamable_http_app())
+app = FastAPI(title="open-brain MCP Server", version="0.1.0", lifespan=lifespan)
+app.add_middleware(BearerAuthMiddleware)
 
 
 # ─── OAuth 2.1 Routes ─────────────────────────────────────────────────────────
@@ -338,6 +384,32 @@ async def revoke_endpoint(request: Request) -> JSONResponse:
     return JSONResponse({})
 
 
+@app.post("/register")
+async def register_client(request: Request) -> JSONResponse:
+    """Dynamic Client Registration (RFC 7591)."""
+    body = await request.json()
+    provider = get_provider()
+    client = provider.register_client(
+        client_name=body.get("client_name", "MCP Client"),
+        redirect_uris=body.get("redirect_uris", []),
+        grant_types=body.get("grant_types", ["authorization_code", "refresh_token"]),
+        response_types=body.get("response_types", ["code"]),
+        scope=body.get("scope", ""),
+    )
+    return JSONResponse(
+        {
+            "client_id": client.client_id,
+            "client_name": client.client_name,
+            "redirect_uris": client.redirect_uris,
+            "grant_types": client.grant_types,
+            "response_types": client.response_types,
+            "scope": client.scope,
+            "client_id_issued_at": client.client_id_issued_at,
+        },
+        status_code=201,
+    )
+
+
 @app.get("/.well-known/oauth-authorization-server")
 async def oauth_metadata() -> JSONResponse:
     """OAuth 2.1 server metadata."""
@@ -347,6 +419,7 @@ async def oauth_metadata() -> JSONResponse:
         "issuer": base,
         "authorization_endpoint": f"{base}/authorize",
         "token_endpoint": f"{base}/token",
+        "registration_endpoint": f"{base}/register",
         "revocation_endpoint": f"{base}/revoke",
         "response_types_supported": ["code"],
         "grant_types_supported": ["authorization_code", "refresh_token"],
@@ -355,7 +428,13 @@ async def oauth_metadata() -> JSONResponse:
 
 
 def _load_client_name(client_id: str) -> str:
-    """Load client name from the clients JSON file."""
+    """Load client name from dynamic registry or clients JSON file."""
+    # Check dynamically registered clients first
+    provider = get_provider()
+    registered = provider.get_client(client_id)
+    if registered:
+        return registered.client_name
+    # Fall back to static clients file
     try:
         config = get_config()
         clients_path = Path(config.CLIENTS_FILE)
@@ -373,6 +452,10 @@ def _load_client_name(client_id: str) -> str:
 async def health() -> dict[str, str]:
     """Health check endpoint."""
     return {"status": "ok", "service": "open-brain", "runtime": "python"}
+
+
+# Mount MCP sub-app AFTER all routes (mount at "/" catches everything)
+app.mount("/", _mcp_app)
 
 
 def create_app() -> FastAPI:

@@ -1,6 +1,8 @@
 # Project: open-brain
 
-Postgres+pgvector memory system with MCP server for AI assistants.
+**Python** MCP server — Postgres+pgvector memory system for AI assistants.
+
+**IMPORTANT: This is a Python project. The TypeScript code in `src-ts-DEPRECATED/` is legacy and must not be used or referenced.**
 
 ## Context
 
@@ -11,31 +13,31 @@ Postgres+pgvector memory system with MCP server for AI assistants.
 
 ## Structure
 
-- `src/server.ts` -- Express + MCP server setup
-- `src/auth/` -- OAuth 2.1 provider (JWT, PKCE)
-- `src/tools/` -- MCP tools (search, timeline, save_memory, etc.)
-- `src/data-layer/` -- DataLayer interface + Postgres implementation
-- `src/db/` -- Connection pool + migration runner
-- `src/db/migrations/` -- SQL migration files
-- `scripts/` -- Migration + pruning scripts
+- `python/src/open_brain/` -- Main Python package
+- `python/src/open_brain/server.py` -- MCP server setup
+- `python/src/open_brain/auth/` -- OAuth 2.1 provider
+- `python/src/open_brain/tools/` -- MCP tools (search, timeline, save_memory, etc.)
+- `python/tests/` -- Test suite
+- `scripts/` -- Migration scripts (TypeScript, for one-time use)
+- `src-ts-DEPRECATED/` -- **DEPRECATED** old TypeScript server, do not use
 
 ## Commands
 
 ```bash
-npm run dev          # Dev server with watch
-npm run start        # Production start
-npm run migrate      # Run DB migrations
-npm run migrate:verify  # Verify migration state
+cd python
+uv run python -m open_brain        # Run server
+uv run pytest                      # Run tests
 ```
 
 ## Deployment
 
-Deployed on LXC 116 (Elysium Proxmox). Deploy scripts live in
-`elysium-proxmox` repo under `lxc/services/`.
+- **Server**: LXC 116 (Elysium Proxmox) at `/opt/open-brain/`
+- **Old TS server**: `/opt/mcp-server-ts-DEPRECATED/` (do not use)
+- Deploy scripts live in `elysium-proxmox` repo under `lxc/services/`
 
 ## Key Decisions
 
-- TypeScript (matches MCP SDK ecosystem)
+- Python (simpler deployment, UV for dependency management)
 - Voyage-4 for embeddings (14% better retrieval vs. text-embedding-3-small)
 - Claude Haiku 4.5 for metadata extraction (not gpt-4o-mini)
 - Shared Postgres instance with Langfuse on LXC 116

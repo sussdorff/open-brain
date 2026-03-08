@@ -66,12 +66,52 @@ class AuthInfo:
     expires_at: int | None
 
 
+@dataclass
+class RegisteredClient:
+    """Dynamically registered OAuth client (RFC 7591)."""
+
+    client_id: str
+    client_name: str
+    redirect_uris: list[str]
+    grant_types: list[str]
+    response_types: list[str]
+    scope: str
+    client_id_issued_at: int
+
+
 class OAuthProvider:
     """Custom OAuth 2.1 provider with in-memory auth codes and PKCE support."""
 
     def __init__(self) -> None:
         self._auth_codes: dict[str, AuthCodeEntry] = {}
         self._revoked_tokens: set[str] = set()
+        self._clients: dict[str, RegisteredClient] = {}
+
+    def register_client(
+        self,
+        client_name: str = "MCP Client",
+        redirect_uris: list[str] | None = None,
+        grant_types: list[str] | None = None,
+        response_types: list[str] | None = None,
+        scope: str = "",
+    ) -> RegisteredClient:
+        """Register a new OAuth client dynamically (RFC 7591)."""
+        client_id = secrets.token_hex(16)
+        client = RegisteredClient(
+            client_id=client_id,
+            client_name=client_name,
+            redirect_uris=redirect_uris or [],
+            grant_types=grant_types or ["authorization_code", "refresh_token"],
+            response_types=response_types or ["code"],
+            scope=scope,
+            client_id_issued_at=int(time.time()),
+        )
+        self._clients[client_id] = client
+        return client
+
+    def get_client(self, client_id: str) -> RegisteredClient | None:
+        """Look up a registered client."""
+        return self._clients.get(client_id)
 
     def build_login_form(
         self,
