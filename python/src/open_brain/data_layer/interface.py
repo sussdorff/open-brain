@@ -35,42 +35,65 @@ class TimelineParams:
 
 @dataclass
 class SaveMemoryParams:
-    """Parameters for saving a new memory."""
+    """Parameters for saving a new memory.
 
-    text: str
+    Field semantics:
+    - text       → stored as ``content`` column. PRIMARY searchable body. Required.
+                   Put the main substance here — this is what gets embedded and FTS-indexed.
+                   Do NOT leave this minimal while putting all substance in ``narrative``.
+    - narrative  → optional prose context: background story, reasoning, or "why".
+                   Supplements ``text``; also embedded. Use when the *why* adds value beyond the fact.
+    - title      → short headline / identifier (1 line).
+    - subtitle   → secondary label, tags, or category hint.
+    """
+
+    text: str  # PRIMARY content → stored as `content` column; embedded + FTS-searched
     type: str | None = None
     project: str | None = None
-    title: str | None = None
-    subtitle: str | None = None
-    narrative: str | None = None
+    title: str | None = None  # short headline
+    subtitle: str | None = None  # secondary label / tags
+    narrative: str | None = None  # optional prose context / reasoning (supplements text)
     session_ref: str | None = None
 
 
 @dataclass
 class UpdateMemoryParams:
-    """Parameters for updating an existing memory."""
+    """Parameters for updating an existing memory.
+
+    See ``SaveMemoryParams`` for field semantics.
+    Only provided (non-None) fields are applied; others are left unchanged.
+    """
 
     id: int
-    text: str | None = None
+    text: str | None = None  # PRIMARY content → stored as `content` column; embedded + FTS-searched
     type: str | None = None
     project: str | None = None
-    title: str | None = None
-    subtitle: str | None = None
-    narrative: str | None = None
+    title: str | None = None  # short headline
+    subtitle: str | None = None  # secondary label / tags
+    narrative: str | None = None  # optional prose context / reasoning (supplements text)
 
 
 @dataclass
 class Memory:
-    """A single memory entry."""
+    """A single memory entry.
+
+    Field semantics:
+    - content   → PRIMARY searchable body (stored from ``SaveMemoryParams.text``).
+                  Embedded and FTS-indexed. Should contain the main substance.
+    - narrative → optional supplementary prose context or reasoning.
+                  Also embedded, but secondary to ``content``.
+    - title     → short headline / identifier.
+    - subtitle  → secondary label, tags, or category hint.
+    """
 
     id: int
     index_id: int
     session_id: int | None
     type: str
-    title: str | None
-    subtitle: str | None
-    narrative: str | None
-    content: str
+    title: str | None  # short headline
+    subtitle: str | None  # secondary label / tags
+    narrative: str | None  # optional prose context / reasoning (supplements content)
+    content: str  # PRIMARY searchable body (from SaveMemoryParams.text); embedded + FTS-indexed
     metadata: dict[str, Any]
     priority: float
     stability: str

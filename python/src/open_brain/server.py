@@ -161,6 +161,10 @@ async def get_observations(ids: list[int]) -> str:
     "project is REQUIRED — use git repo name, folder name, or Claude Desktop project name. If ambiguous, ask the user. "
     "type: check existing types via stats() before inventing new ones. Prefer existing vocabulary "
     "(discovery, change, feature, decision, bugfix, refactor, session_summary). New types are allowed when none fit. "
+    "text: PRIMARY content — put the main substance here. Required. Gets embedded and full-text searched. "
+    "Do NOT leave text minimal while putting all substance in narrative. "
+    "title: short headline (1 line). subtitle: secondary label, tags, or category hint. "
+    "narrative: optional prose context or reasoning that SUPPLEMENTS text (also embedded). Use for background story or 'why'. "
     "session_ref: optional stable identifier (e.g. bead ID or 'session-YYYY-MM-DD'). When type='session_summary' "
     "and session_ref is set, re-calling with the same session_ref updates the existing memory instead of inserting a duplicate. "
     "is_test: set to true to skip persistence (returns mock response, useful for integration tests). "
@@ -198,6 +202,7 @@ async def save_memory(
     description="Update an existing memory by ID. Only provided fields are changed. "
     "Re-embeds automatically if text/title/subtitle/narrative change. "
     "Use to correct, consolidate, or enrich existing memories instead of creating duplicates. "
+    "text: PRIMARY content (gets embedded+searched). narrative: supplementary prose context/reasoning. "
     "Params: id (required), text, type, project, title, subtitle, narrative"
 )
 async def update_memory(
