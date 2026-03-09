@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- Timeline anchor mode passed orphaned param to asyncpg query
+
+### Features
+
+- Add OAuth protected resource metadata (RFC 9728) for Claude.ai MCP discovery
+
+### Miscellaneous
+
+- Bump version to v2026.03.5
+- Sync uv.lock
+
+## [2026.03.5] - 2026-03-09
+
+### Bug Fixes
+
 - Add uv to PATH in deploy script
 - Parse ISO date strings to datetime for asyncpg compatibility
 - Handle metadata as string in _row_to_memory
