@@ -43,6 +43,7 @@ class SaveMemoryParams:
     title: str | None = None
     subtitle: str | None = None
     narrative: str | None = None
+    session_ref: str | None = None
 
 
 @dataclass

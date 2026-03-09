@@ -47,6 +47,11 @@ async def get_pool() -> asyncpg.Pool:
     if _pool is None:
         config = get_config()
         _pool = await asyncpg.create_pool(config.DATABASE_URL, min_size=2, max_size=10)
+        # Ensure session_ref column exists (idempotent migration)
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                "ALTER TABLE memories ADD COLUMN IF NOT EXISTS session_ref TEXT;"
+            )
     return _pool
 
 
@@ -368,14 +373,59 @@ class PostgresDataLayer:
             return memories
 
     async def save_memory(self, params: SaveMemoryParams) -> SaveMemoryResult:
-        """Insert a new memory and trigger async embedding."""
+        """Insert a new memory and trigger async embedding.
+
+        Upsert behaviour: when type='session_summary' and session_ref is provided,
+        an existing memory with the same session_ref is updated (content appended,
+        title/subtitle/narrative replaced if provided) instead of inserting a new row.
+        """
         pool = await get_pool()
         async with pool.acquire() as conn:
             index_id = await self._resolve_index_id(conn, params.project)
 
+            # ── Upsert path for session_summary ──
+            if params.type == "session_summary" and params.session_ref:
+                existing = await conn.fetchrow(
+                    "SELECT id, content FROM memories WHERE session_ref = $1 LIMIT 1",
+                    params.session_ref,
+                )
+                if existing:
+                    existing_id: int = existing["id"]
+                    merged_content = existing["content"] + "\n\n---\n\n" + params.text
+                    updates: dict[str, Any] = {"content": merged_content}
+                    if params.title is not None:
+                        updates["title"] = params.title
+                    if params.subtitle is not None:
+                        updates["subtitle"] = params.subtitle
+                    if params.narrative is not None:
+                        updates["narrative"] = params.narrative
+
+                    set_parts = []
+                    values: list[Any] = []
+                    param_idx = 1
+                    for col, val in updates.items():
+                        set_parts.append(f"{col} = ${param_idx}")
+                        values.append(val)
+                        param_idx += 1
+                    set_parts.append("updated_at = NOW()")
+                    values.append(existing_id)
+                    await conn.execute(
+                        f"UPDATE memories SET {', '.join(set_parts)} WHERE id = ${param_idx}",
+                        *values,
+                    )
+
+                    text_to_embed = ": ".join(
+                        part
+                        for part in [params.title, params.subtitle, params.narrative, merged_content]
+                        if part
+                    )
+                    asyncio.create_task(self._embed_and_link(existing_id, text_to_embed))
+                    return SaveMemoryResult(id=existing_id, message="Memory updated (upsert)")
+
+            # ── Normal insert path ──
             row = await conn.fetchrow(
-                """INSERT INTO memories (index_id, type, title, subtitle, narrative, content)
-                   VALUES ($1, $2, $3, $4, $5, $6)
+                """INSERT INTO memories (index_id, type, title, subtitle, narrative, content, session_ref)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7)
                    RETURNING id""",
                 index_id or 1,
                 params.type or "observation",
@@ -383,6 +433,7 @@ class PostgresDataLayer:
                 params.subtitle,
                 params.narrative,
                 params.text,
+                params.session_ref,
             )
             memory_id: int = row["id"]
 

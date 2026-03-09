@@ -160,8 +160,10 @@ async def get_observations(ids: list[int]) -> str:
     description="Save a new observation to memory (auto-embeds via Voyage). "
     "project is REQUIRED — use git repo name, folder name, or Claude Desktop project name. If ambiguous, ask the user. "
     "type: check existing types via stats() before inventing new ones. Prefer existing vocabulary "
-    "(discovery, change, feature, decision, bugfix, refactor). New types are allowed when none fit. "
-    "Params: text (required), type, project, title, subtitle, narrative"
+    "(discovery, change, feature, decision, bugfix, refactor, session_summary). New types are allowed when none fit. "
+    "session_ref: optional stable identifier (e.g. bead ID or 'session-YYYY-MM-DD'). When type='session_summary' "
+    "and session_ref is set, re-calling with the same session_ref updates the existing memory instead of inserting a duplicate. "
+    "Params: text (required), type, project, title, subtitle, narrative, session_ref"
 )
 async def save_memory(
     text: str,
@@ -170,6 +172,7 @@ async def save_memory(
     title: str | None = None,
     subtitle: str | None = None,
     narrative: str | None = None,
+    session_ref: str | None = None,
 ) -> str:
     """Save a new memory entry."""
     dl = get_dl()
@@ -181,6 +184,7 @@ async def save_memory(
             title=title,
             subtitle=subtitle,
             narrative=narrative,
+            session_ref=session_ref,
         )
     )
     return json.dumps({"id": result.id, "message": result.message})

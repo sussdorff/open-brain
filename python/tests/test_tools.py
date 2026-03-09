@@ -196,6 +196,36 @@ class TestSaveMemoryTool:
             assert call_args.subtitle == "My Subtitle"
             assert call_args.narrative == "Context here"
 
+    @pytest.mark.asyncio
+    async def test_save_memory_session_ref_accepted(self, mock_dl):
+        """session_ref param is accepted and forwarded to the data layer."""
+        with patch("open_brain.server.get_dl", return_value=mock_dl):
+            from open_brain.server import save_memory
+            await save_memory(
+                text="Session content",
+                type="session_summary",
+                project="myproj",
+                session_ref="open-brain-193",
+            )
+            call_args = mock_dl.save_memory.call_args[0][0]
+            assert call_args.session_ref == "open-brain-193"
+            assert call_args.type == "session_summary"
+
+    @pytest.mark.asyncio
+    async def test_save_memory_upsert_returns_updated_message(self, mock_dl):
+        """When upsert occurs, response message reflects the update."""
+        mock_dl.save_memory.return_value = SaveMemoryResult(id=42, message="Memory updated (upsert)")
+        with patch("open_brain.server.get_dl", return_value=mock_dl):
+            from open_brain.server import save_memory
+            result = await save_memory(
+                text="Updated summary",
+                type="session_summary",
+                session_ref="open-brain-193",
+            )
+            data = json.loads(result)
+            assert data["id"] == 42
+            assert data["message"] == "Memory updated (upsert)"
+
 
 # ─── SearchByConcept tool ─────────────────────────────────────────────────────
 

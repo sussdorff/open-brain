@@ -70,6 +70,124 @@ class TestRowToMemory:
         assert memory.metadata == {}
 
 
+class TestPostgresSaveMemory:
+    @pytest.fixture
+    def dl(self):
+        return PostgresDataLayer()
+
+    @pytest.mark.asyncio
+    async def test_save_memory_inserts_with_session_ref(self, dl):
+        """Normal insert stores session_ref in the new column."""
+        inserted_row = MagicMock()
+        inserted_row.__getitem__ = lambda self, key: 99 if key == "id" else None
+
+        conn = AsyncMock()
+        conn.fetchrow.side_effect = [
+            None,          # _resolve_index_id: no existing index
+            {"id": 1},     # _resolve_index_id: INSERT new index
+            None,          # upsert check: no existing session_summary with this session_ref
+            inserted_row,  # INSERT INTO memories ... RETURNING id
+        ]
+        pool = _make_pool(conn)
+
+        with (
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
+        ):
+            mock_asyncio.create_task = MagicMock()
+            result = await dl.save_memory(
+                SaveMemoryParams(
+                    text="Session content",
+                    type="session_summary",
+                    project="myproj",
+                    title="Summary Title",
+                    session_ref="open-brain-193",
+                )
+            )
+
+        assert result.id == 99
+        assert result.message == "Memory saved"
+        # Verify session_ref was passed in the INSERT call
+        insert_call = conn.fetchrow.call_args_list[-1]
+        insert_sql = insert_call[0][0]
+        assert "session_ref" in insert_sql
+        insert_args = insert_call[0]
+        assert "open-brain-193" in insert_args
+
+    @pytest.mark.asyncio
+    async def test_session_summary_upsert_updates_existing(self, dl):
+        """When a memory with the same session_ref exists, it is updated instead of inserted."""
+        existing_row = MagicMock()
+        existing_row.__getitem__ = lambda self, key: {
+            "id": 55, "content": "Original content"
+        }[key]
+
+        conn = AsyncMock()
+        # fetchrow calls: _resolve_index_id (no project), then SELECT by session_ref
+        conn.fetchrow.side_effect = [
+            existing_row,  # SELECT ... WHERE session_ref = $1
+        ]
+        pool = _make_pool(conn)
+
+        with (
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
+        ):
+            mock_asyncio.create_task = MagicMock()
+            result = await dl.save_memory(
+                SaveMemoryParams(
+                    text="New summary text",
+                    type="session_summary",
+                    title="Updated Title",
+                    session_ref="open-brain-193",
+                )
+            )
+
+        assert result.id == 55
+        assert result.message == "Memory updated (upsert)"
+        # Verify an UPDATE was executed (not an INSERT)
+        conn.execute.assert_called_once()
+        update_sql = conn.execute.call_args[0][0]
+        assert "UPDATE memories" in update_sql
+        # Verify merged content contains both old and new text
+        update_args = conn.execute.call_args[0]
+        merged = update_args[1]  # first positional value after the SQL
+        assert "Original content" in merged
+        assert "New summary text" in merged
+
+    @pytest.mark.asyncio
+    async def test_non_session_summary_skips_upsert(self, dl):
+        """For types other than session_summary, no upsert check is made."""
+        inserted_row = MagicMock()
+        inserted_row.__getitem__ = lambda self, key: 77 if key == "id" else None
+
+        conn = AsyncMock()
+        conn.fetchrow.side_effect = [
+            None,          # _resolve_index_id: no existing index
+            {"id": 1},     # _resolve_index_id: INSERT
+            inserted_row,  # INSERT INTO memories
+        ]
+        pool = _make_pool(conn)
+
+        with (
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
+        ):
+            mock_asyncio.create_task = MagicMock()
+            result = await dl.save_memory(
+                SaveMemoryParams(
+                    text="Regular memory",
+                    type="discovery",
+                    project="myproj",
+                    session_ref="open-brain-193",  # session_ref provided but type != session_summary
+                )
+            )
+
+        assert result.message == "Memory saved"
+        # No UPDATE should have been called
+        conn.execute.assert_not_called()
+
+
 class TestPostgresTimeline:
     @pytest.fixture
     def dl(self):
