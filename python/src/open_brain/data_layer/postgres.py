@@ -104,11 +104,79 @@ class PostgresDataLayer:
             await conn.execute("SELECT update_priority($1)", mid)
 
     async def search(self, params: SearchParams) -> SearchResult:
-        """Hybrid search: vector + FTS via RRF, with optional filter conditions."""
+        """Hybrid search: vector + FTS via RRF, with optional filter conditions.
+
+        Browse mode: when no query (or query is '*'), returns filtered/paginated
+        results sorted by date without any semantic scoring.
+        """
         pool = await get_pool()
         async with pool.acquire() as conn:
             index_id = await self._resolve_index_id(conn, params.project)
+            type_value = params.type or params.obs_type
+            limit = params.limit or 20
+            offset = params.offset or 0
 
+            # Normalize empty/wildcard queries to None (browse mode)
+            query = params.query.strip() if params.query else None
+            if query in ("", "*"):
+                query = None
+
+            # ── Hybrid search mode ──
+            if query:
+                try:
+                    query_embedding = await embed_query(query)
+
+                    # Use hybrid_search for scoring, join memories for full rows + filters
+                    post_conditions: list[str] = []
+                    post_values: list[Any] = [
+                        query, to_pg_vector(query_embedding), limit * 3, index_id,
+                    ]
+                    param_idx = 5  # after the 4 hybrid_search params
+
+                    if type_value:
+                        post_conditions.append(f"m.type = ${param_idx}")
+                        post_values.append(type_value)
+                        param_idx += 1
+                    if params.date_start:
+                        post_conditions.append(f"m.created_at >= ${param_idx}")
+                        post_values.append(params.date_start)
+                        param_idx += 1
+                    if params.date_end:
+                        post_conditions.append(f"m.created_at <= ${param_idx}")
+                        post_values.append(params.date_end)
+                        param_idx += 1
+                    if params.file_path:
+                        post_conditions.append(f"m.metadata->>'filePath' = ${param_idx}")
+                        post_values.append(params.file_path)
+                        param_idx += 1
+
+                    post_where = f"AND {' AND '.join(post_conditions)}" if post_conditions else ""
+
+                    rows = await conn.fetch(
+                        f"""WITH scored AS (
+                            SELECT id, score FROM hybrid_search($1, $2::vector, $3, 60, $4)
+                        )
+                        SELECT m.id, m.index_id, m.session_id, m.type, m.title, m.subtitle,
+                               m.narrative, m.content, m.metadata, m.priority, m.stability,
+                               m.access_count, m.last_accessed_at, m.created_at, m.updated_at
+                        FROM scored s
+                        JOIN memories m ON m.id = s.id
+                        WHERE 1=1 {post_where}
+                        ORDER BY s.score DESC
+                        LIMIT ${param_idx} OFFSET ${param_idx + 1}""",
+                        *post_values, limit, offset,
+                    )
+
+                    memories = [_row_to_memory(r) for r in rows]
+                    asyncio.create_task(
+                        self._log_usage_background([m.id for m in memories], "search_hit")
+                    )
+                    return SearchResult(results=memories, total=len(memories))
+
+                except Exception:
+                    logger.exception("Hybrid search failed, falling back to filter+FTS")
+
+            # ── Browse / filter mode (no query, or hybrid failed) ──
             conditions: list[str] = []
             values: list[Any] = []
             param_idx = 1
@@ -117,58 +185,31 @@ class PostgresDataLayer:
                 conditions.append(f"m.index_id = ${param_idx}")
                 values.append(index_id)
                 param_idx += 1
-
-            type_value = params.type or params.obs_type
             if type_value:
                 conditions.append(f"m.type = ${param_idx}")
                 values.append(type_value)
                 param_idx += 1
-
             if params.date_start:
                 conditions.append(f"m.created_at >= ${param_idx}")
                 values.append(params.date_start)
                 param_idx += 1
-
             if params.date_end:
                 conditions.append(f"m.created_at <= ${param_idx}")
                 values.append(params.date_end)
                 param_idx += 1
-
             if params.file_path:
                 conditions.append(f"m.metadata->>'filePath' = ${param_idx}")
                 values.append(params.file_path)
                 param_idx += 1
-
-            # Hybrid search if query provided
-            if params.query:
-                try:
-                    query_embedding = await embed_query(params.query)
-                    limit = params.limit or 20
-                    rows = await conn.fetch(
-                        f"SELECT * FROM hybrid_search(${param_idx}, ${param_idx+1}::vector, ${param_idx+2}, 60, ${param_idx+3})",
-                        *values,
-                        params.query,
-                        to_pg_vector(query_embedding),
-                        limit,
-                        index_id,
-                    )
-                    memories = [_row_to_memory(r) for r in rows]
-                    hit_ids = [m.id for m in memories]
-                    asyncio.create_task(
-                        self._log_usage_background(hit_ids, "search_hit")
-                    )
-                    return SearchResult(results=memories, total=len(memories))
-                except Exception:
-                    # Fallback to FTS if embedding fails
-                    conditions.append(
-                        f"m.search_vector @@ websearch_to_tsquery('english', ${param_idx})"
-                    )
-                    values.append(params.query)
-                    param_idx += 1
+            # FTS fallback when hybrid failed but we have a query
+            if query:
+                conditions.append(
+                    f"m.search_vector @@ websearch_to_tsquery('english', ${param_idx})"
+                )
+                values.append(query)
+                param_idx += 1
 
             where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-            limit = params.limit or 50
-            offset = params.offset or 0
             order_by = "m.created_at ASC" if params.order_by == "oldest" else "m.created_at DESC"
 
             rows = await conn.fetch(
@@ -177,9 +218,7 @@ class PostgresDataLayer:
                  FROM memories m {where}
                  ORDER BY {order_by}
                  LIMIT ${param_idx} OFFSET ${param_idx+1}""",
-                *values,
-                limit,
-                offset,
+                *values, limit, offset,
             )
 
             count_row = await conn.fetchrow(
@@ -188,9 +227,9 @@ class PostgresDataLayer:
             )
 
             memories = [_row_to_memory(r) for r in rows]
-            hit_ids = [m.id for m in memories]
-            asyncio.create_task(self._log_usage_background(hit_ids, "search_hit"))
-
+            asyncio.create_task(
+                self._log_usage_background([m.id for m in memories], "search_hit")
+            )
             return SearchResult(results=memories, total=count_row["total"])
 
     async def _log_usage_background(self, memory_ids: list[int], event_type: str) -> None:
@@ -205,12 +244,50 @@ class PostgresDataLayer:
             logger.error("Failed to log usage: %s", err)
 
     async def timeline(self, params: TimelineParams) -> TimelineResult:
-        """Get anchor-based context window around a memory."""
+        """Get context window around a memory (anchor mode) or browse a date range (date window mode).
+
+        Modes:
+        - Anchor mode: anchor ID (or query to find one), returns N memories before/after.
+        - Date window mode: date_start and/or date_end, returns memories in that range.
+        """
         pool = await get_pool()
         async with pool.acquire() as conn:
             anchor_id = params.anchor
             index_id = await self._resolve_index_id(conn, params.project)
 
+            # ── Date window mode ──
+            if not anchor_id and not params.query and (params.date_start or params.date_end):
+                conditions: list[str] = []
+                values: list[Any] = []
+                param_idx = 1
+
+                if index_id is not None:
+                    conditions.append(f"m.index_id = ${param_idx}")
+                    values.append(index_id)
+                    param_idx += 1
+                if params.date_start:
+                    conditions.append(f"m.created_at >= ${param_idx}")
+                    values.append(params.date_start)
+                    param_idx += 1
+                if params.date_end:
+                    conditions.append(f"m.created_at <= ${param_idx}")
+                    values.append(params.date_end)
+                    param_idx += 1
+
+                where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+                limit = (params.depth_before or 5) + (params.depth_after or 5) + 1
+
+                rows = await conn.fetch(
+                    f"""SELECT m.id, m.index_id, m.session_id, m.type, m.title, m.subtitle, m.narrative, m.content,
+                            m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.created_at, m.updated_at
+                     FROM memories m {where}
+                     ORDER BY m.created_at ASC
+                     LIMIT ${param_idx}""",
+                    *values, limit,
+                )
+                return TimelineResult(results=[_row_to_memory(r) for r in rows], anchor_id=None)
+
+            # ── Anchor mode ──
             # If query provided, find best match as anchor
             if not anchor_id and params.query:
                 index_filter = "AND m.index_id = $2" if index_id is not None else ""
@@ -485,7 +562,7 @@ class PostgresDataLayer:
             return {"sessions": [dict(r) for r in rows]}
 
     async def stats(self) -> dict[str, Any]:
-        """Get database aggregate statistics."""
+        """Get database aggregate statistics including type taxonomy."""
         pool = await get_pool()
         async with pool.acquire() as conn:
             memories_row = await conn.fetchrow("SELECT COUNT(*)::int AS count FROM memories")
@@ -496,6 +573,9 @@ class PostgresDataLayer:
             db_size_row = await conn.fetchrow(
                 "SELECT pg_database_size(current_database()) AS size"
             )
+            type_rows = await conn.fetch(
+                "SELECT type, COUNT(*)::int AS count FROM memories GROUP BY type ORDER BY count DESC"
+            )
 
         size_bytes = int(db_size_row["size"])
         return {
@@ -504,6 +584,7 @@ class PostgresDataLayer:
             "relationships": relationships_row["count"],
             "db_size_bytes": size_bytes,
             "db_size_mb": round(size_bytes / 1024 / 1024, 2),
+            "types": {row["type"]: row["count"] for row in type_rows},
         }
 
     async def refine_memories(self, params: RefineParams) -> RefineResult:

@@ -29,6 +29,8 @@ class TimelineParams:
     depth_before: int | None = None
     depth_after: int | None = None
     project: str | None = None
+    date_start: str | None = None
+    date_end: str | None = None
 
 
 @dataclass

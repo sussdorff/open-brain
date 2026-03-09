@@ -71,6 +71,7 @@ async def __IMPORTANT() -> str:  # noqa: N802
 
 @mcp.tool(
     description="Step 1: Search memory (hybrid: vector + FTS). Returns index with IDs. "
+    "Browse mode: omit query (or use '*') to list memories with filters only. "
     "Params: query, limit, project, type, obs_type, dateStart, dateEnd, offset, orderBy, filePath"
 )
 async def search(
@@ -85,7 +86,7 @@ async def search(
     order_by: str | None = None,
     file_path: str | None = None,
 ) -> str:
-    """Step 1: Hybrid memory search."""
+    """Step 1: Hybrid memory search or browse mode."""
     dl = get_dl()
     result = await dl.search(
         SearchParams(
@@ -108,8 +109,10 @@ async def search(
 
 
 @mcp.tool(
-    description="Step 2: Get context around results. "
-    "Params: anchor (observation ID) OR query (finds anchor automatically), depth_before, depth_after, project"
+    description="Step 2: Get context around results. Two modes: "
+    "(a) Anchor mode: anchor (observation ID) OR query (finds anchor automatically), shows N memories before/after. "
+    "(b) Date window mode: date_start and/or date_end (ISO format), browse memories in that time range. "
+    "Params: anchor, query, depth_before, depth_after, project, date_start, date_end"
 )
 async def timeline(
     anchor: int | None = None,
@@ -117,8 +120,10 @@ async def timeline(
     depth_before: int | None = None,
     depth_after: int | None = None,
     project: str | None = None,
+    date_start: str | None = None,
+    date_end: str | None = None,
 ) -> str:
-    """Step 2: Anchor-based timeline context."""
+    """Step 2: Anchor-based or date-window timeline context."""
     dl = get_dl()
     result = await dl.timeline(
         TimelineParams(
@@ -127,6 +132,8 @@ async def timeline(
             depth_before=depth_before,
             depth_after=depth_after,
             project=project,
+            date_start=date_start,
+            date_end=date_end,
         )
     )
     return json.dumps(
@@ -151,6 +158,9 @@ async def get_observations(ids: list[int]) -> str:
 
 @mcp.tool(
     description="Save a new observation to memory (auto-embeds via Voyage). "
+    "project is REQUIRED — use git repo name, folder name, or Claude Desktop project name. If ambiguous, ask the user. "
+    "type: check existing types via stats() before inventing new ones. Prefer existing vocabulary "
+    "(discovery, change, feature, decision, bugfix, refactor). New types are allowed when none fit. "
     "Params: text (required), type, project, title, subtitle, narrative"
 )
 async def save_memory(
@@ -179,6 +189,7 @@ async def save_memory(
 @mcp.tool(
     description="Update an existing memory by ID. Only provided fields are changed. "
     "Re-embeds automatically if text/title/subtitle/narrative change. "
+    "Use to correct, consolidate, or enrich existing memories instead of creating duplicates. "
     "Params: id (required), text, type, project, title, subtitle, narrative"
 )
 async def update_memory(
@@ -231,7 +242,7 @@ async def get_context(limit: int | None = None, project: str | None = None) -> s
     return json.dumps(result, default=str)
 
 
-@mcp.tool(description="Get database statistics (memory count, sessions, DB size)")
+@mcp.tool(description="Get database statistics (memory count, sessions, DB size, type taxonomy with counts)")
 async def stats() -> str:
     """Get DB statistics."""
     dl = get_dl()
