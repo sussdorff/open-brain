@@ -69,7 +69,7 @@ def _row_to_memory(row: asyncpg.Record) -> Memory:
         subtitle=row.get("subtitle"),
         narrative=row.get("narrative"),
         content=row["content"],
-        metadata=dict(row["metadata"]) if row.get("metadata") else {},
+        metadata=row["metadata"] if isinstance(row.get("metadata"), dict) else {},
         priority=float(row["priority"]),
         stability=row["stability"],
         access_count=row["access_count"],
