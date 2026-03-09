@@ -775,7 +775,7 @@ async def _execute_refine_action(conn: asyncpg.Connection, action: RefineAction)
         case "demote":
             placeholders = ", ".join(f"${i+1}" for i in range(len(action.memory_ids)))
             await conn.execute(
-                f"UPDATE memories SET priority = GREATEST(priority - 0.1, 0.01), updated_at = now() WHERE id IN ({placeholders})",
+                f"UPDATE memories SET priority = GREATEST(priority - 0.1, 0.05), updated_at = now() WHERE id IN ({placeholders})",
                 *action.memory_ids,
             )
         case "delete":
