@@ -81,6 +81,53 @@ If no actions needed, return [].""",
         return find_obvious_duplicates(memories)
 
 
+async def merge_memories_with_llm(memories: list[Memory]) -> dict[str, str]:
+    """Ask the LLM to produce a combined version of memories being merged.
+
+    Args:
+        memories: The memories to merge (first one will be updated, rest deleted).
+
+    Returns:
+        Dict with updated fields: title, subtitle, narrative, content, type.
+    """
+    memory_details = "\n---\n".join(
+        f"[{m.id}] type={m.type}, priority={m.priority}, stability={m.stability}\n"
+        f"Title: {m.title or '(none)'}\n"
+        f"Subtitle: {m.subtitle or '(none)'}\n"
+        f"Narrative: {m.narrative or '(none)'}\n"
+        f"Content: {m.content or '(none)'}"
+        for m in memories
+    )
+
+    text = await llm_complete(
+        [
+            LlmMessage(
+                role="user",
+                content=f"""Merge these memories into a single consolidated version. Combine the best information from all sources into one coherent memory.
+
+Memories to merge:
+{memory_details}
+
+Return ONLY a JSON object with these fields:
+- "type": the best fitting type (discovery/change/feature/decision/bugfix/refactor/test)
+- "title": concise title for the merged memory
+- "subtitle": one-sentence summary
+- "narrative": detailed combined narrative (preserve all important details, remove redundancy)
+- "content": any structured content to preserve (empty string if narrative covers everything)
+
+Keep the highest quality information from all sources. Do not lose important details.""",
+            )
+        ]
+    )
+
+    json_match = re.search(r"\{[\s\S]*\}", text)
+    if not json_match:
+        logger.warning("LLM merge returned no JSON, keeping original")
+        return {}
+
+    return json.loads(json_match.group())
+
+
 def find_obvious_duplicates(memories: list[Memory]) -> list[RefineAction]:
     """Find obvious duplicates by title/content prefix without LLM.
 

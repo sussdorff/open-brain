@@ -677,18 +677,58 @@ async def _execute_refine_action(conn: asyncpg.Connection, action: RefineAction)
     """Execute a single refinement action against the database."""
     match action.action:
         case "merge":
+            from open_brain.data_layer.refine import merge_memories_with_llm
+
+            keep_id = action.memory_ids[0]
             ids_to_remove = action.memory_ids[1:]
-            if ids_to_remove:
-                placeholders = ", ".join(f"${i+1}" for i in range(len(ids_to_remove)))
+            if not ids_to_remove:
+                return
+
+            # Fetch full memories for LLM merge
+            all_ids = action.memory_ids
+            placeholders = ", ".join(f"${i+1}" for i in range(len(all_ids)))
+            rows = await conn.fetch(
+                f"SELECT * FROM memories WHERE id IN ({placeholders})", *all_ids
+            )
+            memories = [_row_to_memory(r) for r in rows]
+
+            # Ask LLM to combine them
+            try:
+                merged = await merge_memories_with_llm(memories)
+            except Exception as err:
+                logger.warning("LLM merge failed (%s), keeping original", err)
+                merged = {}
+
+            # Update the kept memory with merged content
+            if merged:
                 await conn.execute(
-                    f"DELETE FROM memories WHERE id IN ({placeholders})",
-                    *ids_to_remove,
+                    """UPDATE memories SET
+                        type = COALESCE($2, type),
+                        title = COALESCE($3, title),
+                        subtitle = COALESCE($4, subtitle),
+                        narrative = COALESCE($5, narrative),
+                        content = COALESCE($6, content),
+                        updated_at = now()
+                      WHERE id = $1""",
+                    keep_id,
+                    merged.get("type"),
+                    merged.get("title"),
+                    merged.get("subtitle"),
+                    merged.get("narrative"),
+                    merged.get("content"),
                 )
-                logger.info(
-                    "Merged: kept %d, deleted %s",
-                    action.memory_ids[0],
-                    ", ".join(str(i) for i in ids_to_remove),
-                )
+
+            # Delete the duplicates
+            del_placeholders = ", ".join(f"${i+1}" for i in range(len(ids_to_remove)))
+            await conn.execute(
+                f"DELETE FROM memories WHERE id IN ({del_placeholders})",
+                *ids_to_remove,
+            )
+            logger.info(
+                "Merged: updated %d with LLM-combined content, deleted %s",
+                keep_id,
+                ", ".join(str(i) for i in ids_to_remove),
+            )
         case "promote":
             for mid in action.memory_ids:
                 await conn.execute(
