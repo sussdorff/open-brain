@@ -7,5 +7,6 @@
 {"key":"compact_tier2_days","value":"90"}
 {"key":"compact_tier2_dep_levels","value":"5"}
 {"key":"compaction_enabled","value":"false"}
+{"key":"dolt-data-dir","value":"/Users/malte/.dolt-data"}
 {"key":"issue_prefix","value":"open-brain"}
 {"key":"schema_version","value":"6"}
