@@ -10,40 +10,41 @@ from open_brain.data_layer.llm import LlmMessage, llm_complete
 
 logger = logging.getLogger(__name__)
 
+ANALYSIS_BATCH_SIZE = 50
 
-async def analyze_with_llm(memories: list[Memory]) -> list[RefineAction]:
-    """Analyze memories with LLM and suggest consolidation actions.
 
-    Falls back to simple duplicate detection if no LLM key is configured.
+def _parse_json_array(text: str) -> list[dict]:
+    """Extract and parse a JSON array from LLM text, with repair for common issues."""
+    json_match = re.search(r"\[[\s\S]*\]", text)
+    if not json_match:
+        return []
 
-    Args:
-        memories: List of Memory objects to analyze
+    raw = json_match.group()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        # Try to repair: remove trailing commas before ] or }
+        repaired = re.sub(r",\s*([}\]])", r"\1", raw)
+        try:
+            return json.loads(repaired)
+        except json.JSONDecodeError as err:
+            logger.warning("JSON repair failed: %s", err)
+            return []
 
-    Returns:
-        List of suggested RefineAction items
-    """
-    config = get_config()
-    has_key = (
-        bool(config.OPENROUTER_API_KEY)
-        if config.LLM_PROVIDER == "openrouter"
-        else bool(config.ANTHROPIC_API_KEY)
-    )
 
-    if not has_key:
-        return find_obvious_duplicates(memories)
-
+async def _analyze_batch(memories: list[Memory]) -> list[RefineAction]:
+    """Analyze a single batch of memories with the LLM."""
     memory_summary = "\n".join(
-        f"[{m.id}] ({m.type}, priority={m.priority}, stability={m.stability}) "
-        f"{m.title or ''}: {m.content[:200]}"
+        f"[{m.id}] ({m.type}, priority={m.priority:.2f}, stability={m.stability}) "
+        f"{m.title or ''}: {(m.content or m.narrative or '')[:200]}"
         for m in memories
     )
 
-    try:
-        text = await llm_complete(
-            [
-                LlmMessage(
-                    role="user",
-                    content=f"""Analyze these memories and suggest consolidation actions. Return JSON array of actions.
+    text = await llm_complete(
+        [
+            LlmMessage(
+                role="user",
+                content=f"""Analyze these memories and suggest consolidation actions. Return JSON array of actions.
 
 Memories:
 {memory_summary}
@@ -59,25 +60,47 @@ Return ONLY a JSON array like:
 [{{"action":"merge","memory_ids":[1,2],"reason":"Near-duplicate observations about X"}},{{"action":"promote","memory_ids":[5],"reason":"High-quality canonical knowledge"}}]
 
 If no actions needed, return [].""",
-                )
-            ]
-        )
-
-        json_match = re.search(r"\[[\s\S]*\]", text)
-        if not json_match:
-            return []
-
-        raw_actions = json.loads(json_match.group())
-        return [
-            RefineAction(
-                action=a["action"],
-                memory_ids=a["memory_ids"],
-                reason=a.get("reason", ""),
-                executed=False,
             )
-            for a in raw_actions
-            if len(a.get("memory_ids", [])) >= (2 if a["action"] == "merge" else 1)
         ]
+    )
+
+    raw_actions = _parse_json_array(text)
+    return [
+        RefineAction(
+            action=a["action"],
+            memory_ids=a["memory_ids"],
+            reason=a.get("reason", ""),
+            executed=False,
+        )
+        for a in raw_actions
+        if len(a.get("memory_ids", [])) >= (2 if a["action"] == "merge" else 1)
+    ]
+
+
+async def analyze_with_llm(memories: list[Memory]) -> list[RefineAction]:
+    """Analyze memories with LLM and suggest consolidation actions.
+
+    Batches large sets into chunks to avoid LLM context limits.
+    Falls back to simple duplicate detection if no LLM key is configured.
+    """
+    config = get_config()
+    has_key = (
+        bool(config.OPENROUTER_API_KEY)
+        if config.LLM_PROVIDER == "openrouter"
+        else bool(config.ANTHROPIC_API_KEY)
+    )
+
+    if not has_key:
+        return find_obvious_duplicates(memories)
+
+    try:
+        all_actions: list[RefineAction] = []
+        for i in range(0, len(memories), ANALYSIS_BATCH_SIZE):
+            batch = memories[i : i + ANALYSIS_BATCH_SIZE]
+            logger.info("Analyzing batch %d-%d of %d memories", i, i + len(batch), len(memories))
+            actions = await _analyze_batch(batch)
+            all_actions.extend(actions)
+        return all_actions
     except Exception as err:
         logger.error("LLM analysis error: %s", err)
         return find_obvious_duplicates(memories)
@@ -118,8 +141,8 @@ Return ONLY a JSON object with these fields:
 - "content": any structured content to preserve (empty string if narrative covers everything)
 
 Prioritize density over completeness: a tight summary that captures the essential knowledge is better than a verbose narrative that preserves every detail.""",
-            )
-        ]
+        )
+    ]
     )
 
     json_match = re.search(r"\{[\s\S]*\}", text)
@@ -127,7 +150,15 @@ Prioritize density over completeness: a tight summary that captures the essentia
         logger.warning("LLM merge returned no JSON, keeping original")
         return {}
 
-    return json.loads(json_match.group())
+    try:
+        return json.loads(json_match.group())
+    except json.JSONDecodeError:
+        repaired = re.sub(r",\s*([}\]])", r"\1", json_match.group())
+        try:
+            return json.loads(repaired)
+        except json.JSONDecodeError as err:
+            logger.warning("LLM merge JSON repair failed: %s", err)
+            return {}
 
 
 def find_obvious_duplicates(memories: list[Memory]) -> list[RefineAction]:
