@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Features
+
+- Add Docker setup, CI, and README for public release
+
+## [2026.03.7] - 2026-03-09
+
 ### Bug Fixes
 
 - Add missing columns to duplicates query in refine_memories
@@ -25,6 +31,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous
 
 - Add MCP reconnect reminder to deploy script output
+- *(changelog)* Update for v2026.03.7
 
 ## [2026.03.6] - 2026-03-09
 
