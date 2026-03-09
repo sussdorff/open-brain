@@ -329,8 +329,8 @@ class PostgresDataLayer:
             if not anchor_row:
                 return TimelineResult(results=[], anchor_id=None)
 
-            index_filter = "AND m.index_id = $3" if index_id is not None else ""
-            base_values: list[Any] = [anchor_row["created_at"], depth_before + depth_after + 1]
+            index_filter = "AND m.index_id = $2" if index_id is not None else ""
+            base_values: list[Any] = [anchor_row["created_at"]]
             if index_id is not None:
                 base_values.append(index_id)
 
