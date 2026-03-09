@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime
 from typing import Any
 
 import asyncpg
@@ -28,6 +29,16 @@ from open_brain.data_layer.refine import analyze_with_llm
 logger = logging.getLogger(__name__)
 
 _pool: asyncpg.Pool | None = None
+
+
+def _parse_date(value: str | None) -> datetime | None:
+    """Parse ISO date string to datetime. Accepts 'YYYY-MM-DD' or full ISO datetime."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 async def get_pool() -> asyncpg.Pool:
@@ -139,11 +150,11 @@ class PostgresDataLayer:
                         param_idx += 1
                     if params.date_start:
                         post_conditions.append(f"m.created_at >= ${param_idx}")
-                        post_values.append(params.date_start)
+                        post_values.append(_parse_date(params.date_start))
                         param_idx += 1
                     if params.date_end:
                         post_conditions.append(f"m.created_at <= ${param_idx}")
-                        post_values.append(params.date_end)
+                        post_values.append(_parse_date(params.date_end))
                         param_idx += 1
                     if params.file_path:
                         post_conditions.append(f"m.metadata->>'filePath' = ${param_idx}")
@@ -191,11 +202,11 @@ class PostgresDataLayer:
                 param_idx += 1
             if params.date_start:
                 conditions.append(f"m.created_at >= ${param_idx}")
-                values.append(params.date_start)
+                values.append(_parse_date(params.date_start))
                 param_idx += 1
             if params.date_end:
                 conditions.append(f"m.created_at <= ${param_idx}")
-                values.append(params.date_end)
+                values.append(_parse_date(params.date_end))
                 param_idx += 1
             if params.file_path:
                 conditions.append(f"m.metadata->>'filePath' = ${param_idx}")
@@ -267,11 +278,11 @@ class PostgresDataLayer:
                     param_idx += 1
                 if params.date_start:
                     conditions.append(f"m.created_at >= ${param_idx}")
-                    values.append(params.date_start)
+                    values.append(_parse_date(params.date_start))
                     param_idx += 1
                 if params.date_end:
                     conditions.append(f"m.created_at <= ${param_idx}")
-                    values.append(params.date_end)
+                    values.append(_parse_date(params.date_end))
                     param_idx += 1
 
                 where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
