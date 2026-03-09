@@ -281,7 +281,7 @@ _mcp_app = mcp.streamable_http_app()
 # OAuth paths that must remain unauthenticated
 _PUBLIC_PATHS = {
     "/authorize", "/authorize/submit", "/token", "/register", "/revoke",
-    "/.well-known/oauth-authorization-server", "/health",
+    "/.well-known/oauth-authorization-server", "/.well-known/oauth-protected-resource", "/health",
 }
 
 
@@ -488,6 +488,18 @@ def _load_client_name(client_id: str) -> str:
     except Exception:
         pass
     return "MCP Client"
+
+
+@app.get("/.well-known/oauth-protected-resource")
+async def oauth_protected_resource() -> JSONResponse:
+    """OAuth 2.0 Protected Resource Metadata (RFC 9728)."""
+    config = get_config()
+    base = config.MCP_SERVER_URL.rstrip("/")
+    return JSONResponse({
+        "resource": base,
+        "authorization_servers": [base],
+        "bearer_methods_supported": ["header"],
+    })
 
 
 @app.get("/health")
