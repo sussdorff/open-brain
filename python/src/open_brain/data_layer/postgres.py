@@ -608,8 +608,8 @@ class PostgresDataLayer:
             if scope == "duplicates":
                 rows = await conn.fetch(
                     """SELECT DISTINCT ON (m1.id)
-                         m1.id, m1.index_id, m1.session_id, m1.type, m1.title, m1.content,
-                         m1.metadata, m1.priority, m1.stability, m1.created_at, m1.updated_at,
+                         m1.id, m1.index_id, m1.session_id, m1.type, m1.title, m1.subtitle, m1.narrative, m1.content,
+                         m1.metadata, m1.priority, m1.stability, m1.access_count, m1.last_accessed_at, m1.created_at, m1.updated_at,
                          m2.id AS similar_id, 1 - (m1.embedding <=> m2.embedding) AS similarity
                        FROM memories m1
                        JOIN memories m2 ON m1.id < m2.id
