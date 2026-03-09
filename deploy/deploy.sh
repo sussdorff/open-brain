@@ -21,4 +21,7 @@ echo "Waiting for startup..."
 sleep 2
 systemctl status open-brain --no-pager -l
 
+echo ""
 echo "Deploy complete."
+echo "NOTE: MCP clients (e.g. Claude Code) must reconnect after deploy."
+echo "  Run: /mcp reconnect open-brain"
