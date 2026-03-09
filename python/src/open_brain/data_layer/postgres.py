@@ -674,6 +674,7 @@ class PostgresDataLayer:
                 executed=not params.dry_run and bool(a.memory_ids),
             )
             for a in actions
+            if a.memory_ids  # drop actions with empty IDs (skipped or malformed)
         ]
 
         return RefineResult(
