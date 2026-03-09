@@ -649,16 +649,29 @@ class PostgresDataLayer:
 
         if not params.dry_run:
             pool = await get_pool()
+            deleted_ids: set[int] = set()
             async with pool.acquire() as conn:
                 for action in actions:
+                    # Skip actions referencing already-deleted IDs
+                    remaining = [mid for mid in action.memory_ids if mid not in deleted_ids]
+                    if not remaining or (action.action == "merge" and len(remaining) < 2):
+                        logger.info("Skipping %s on %s — IDs already deleted", action.action, action.memory_ids)
+                        action.memory_ids = []  # mark as skipped
+                        continue
+                    action.memory_ids = remaining
                     await _execute_refine_action(conn, action)
+                    # Track IDs deleted by merge/delete actions
+                    if action.action == "merge":
+                        deleted_ids.update(action.memory_ids[1:])
+                    elif action.action == "delete":
+                        deleted_ids.update(action.memory_ids)
 
         executed_actions = [
             RefineAction(
                 action=a.action,
                 memory_ids=a.memory_ids,
                 reason=a.reason,
-                executed=not params.dry_run,
+                executed=not params.dry_run and bool(a.memory_ids),
             )
             for a in actions
         ]
@@ -699,7 +712,7 @@ async def _execute_refine_action(conn: asyncpg.Connection, action: RefineAction)
                 logger.warning("LLM merge failed (%s), keeping original", err)
                 merged = {}
 
-            # Update the kept memory with merged content
+            # Update the kept memory with merged content and re-embed
             if merged:
                 await conn.execute(
                     """UPDATE memories SET
@@ -717,6 +730,26 @@ async def _execute_refine_action(conn: asyncpg.Connection, action: RefineAction)
                     merged.get("narrative"),
                     merged.get("content"),
                 )
+
+                # Re-embed with updated content
+                text_to_embed = ": ".join(
+                    part for part in [
+                        merged.get("title"),
+                        merged.get("subtitle"),
+                        merged.get("narrative"),
+                        merged.get("content"),
+                    ] if part
+                )
+                if text_to_embed:
+                    try:
+                        embedding = await embed(text_to_embed)
+                        pg_vec = to_pg_vector(embedding)
+                        await conn.execute(
+                            "UPDATE memories SET embedding = $1 WHERE id = $2",
+                            pg_vec, keep_id,
+                        )
+                    except Exception as err:
+                        logger.warning("Re-embedding failed for %d: %s", keep_id, err)
 
             # Delete the duplicates
             del_placeholders = ", ".join(f"${i+1}" for i in range(len(ids_to_remove)))

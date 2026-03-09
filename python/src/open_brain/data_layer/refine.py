@@ -75,6 +75,7 @@ If no actions needed, return [].""",
                 executed=False,
             )
             for a in raw_actions
+            if len(a.get("memory_ids", [])) >= (2 if a["action"] == "merge" else 1)
         ]
     except Exception as err:
         logger.error("LLM analysis error: %s", err)
@@ -110,12 +111,12 @@ Memories to merge:
 
 Return ONLY a JSON object with these fields:
 - "type": the best fitting type (discovery/change/feature/decision/bugfix/refactor/test)
-- "title": concise title for the merged memory
-- "subtitle": one-sentence summary
-- "narrative": detailed combined narrative (preserve all important details, remove redundancy)
+- "title": concise title for the merged memory (max 80 chars)
+- "subtitle": one-sentence summary (max 150 chars)
+- "narrative": consolidated narrative — keep key facts, decisions, and specifics but eliminate redundancy and verbose descriptions. Aim for 3-8 sentences, not walls of text.
 - "content": any structured content to preserve (empty string if narrative covers everything)
 
-Keep the highest quality information from all sources. Do not lose important details.""",
+Prioritize density over completeness: a tight summary that captures the essential knowledge is better than a verbose narrative that preserves every detail.""",
             )
         ]
     )
