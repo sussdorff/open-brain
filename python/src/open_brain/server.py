@@ -24,6 +24,7 @@ from open_brain.data_layer.interface import (
     SaveMemoryParams,
     SearchParams,
     TimelineParams,
+    UpdateMemoryParams,
 )
 from open_brain.data_layer.postgres import PostgresDataLayer, close_pool
 
@@ -164,6 +165,36 @@ async def save_memory(
     dl = get_dl()
     result = await dl.save_memory(
         SaveMemoryParams(
+            text=text,
+            type=type,
+            project=project,
+            title=title,
+            subtitle=subtitle,
+            narrative=narrative,
+        )
+    )
+    return json.dumps({"id": result.id, "message": result.message})
+
+
+@mcp.tool(
+    description="Update an existing memory by ID. Only provided fields are changed. "
+    "Re-embeds automatically if text/title/subtitle/narrative change. "
+    "Params: id (required), text, type, project, title, subtitle, narrative"
+)
+async def update_memory(
+    id: int,
+    text: str | None = None,
+    type: str | None = None,
+    project: str | None = None,
+    title: str | None = None,
+    subtitle: str | None = None,
+    narrative: str | None = None,
+) -> str:
+    """Update an existing memory entry."""
+    dl = get_dl()
+    result = await dl.update_memory(
+        UpdateMemoryParams(
+            id=id,
             text=text,
             type=type,
             project=project,

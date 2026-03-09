@@ -18,6 +18,7 @@ from open_brain.data_layer.interface import (
     SaveMemoryParams,
     SaveMemoryResult,
     SearchParams,
+    UpdateMemoryParams,
     SearchResult,
     TimelineParams,
     TimelineResult,
@@ -306,6 +307,71 @@ class PostgresDataLayer:
         asyncio.create_task(self._embed_and_link(memory_id, text_to_embed))
 
         return SaveMemoryResult(id=memory_id, message="Memory saved")
+
+    async def update_memory(self, params: UpdateMemoryParams) -> SaveMemoryResult:
+        """Update an existing memory's fields and re-embed if content changed."""
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            # Verify the memory exists
+            existing = await conn.fetchrow(
+                "SELECT id, content, title, subtitle, narrative FROM memories WHERE id = $1",
+                params.id,
+            )
+            if not existing:
+                raise ValueError(f"Memory {params.id} not found")
+
+            # Build SET clause dynamically from provided fields
+            updates: dict[str, Any] = {}
+            if params.text is not None:
+                updates["content"] = params.text
+            if params.type is not None:
+                updates["type"] = params.type
+            if params.title is not None:
+                updates["title"] = params.title
+            if params.subtitle is not None:
+                updates["subtitle"] = params.subtitle
+            if params.narrative is not None:
+                updates["narrative"] = params.narrative
+            if params.project is not None:
+                index_id = await self._resolve_index_id(conn, params.project)
+                updates["index_id"] = index_id or 1
+
+            if not updates:
+                return SaveMemoryResult(id=params.id, message="No fields to update")
+
+            # Build parameterized query
+            set_parts = []
+            values: list[Any] = []
+            param_idx = 1
+            for col, val in updates.items():
+                set_parts.append(f"{col} = ${param_idx}")
+                values.append(val)
+                param_idx += 1
+            set_parts.append(f"updated_at = NOW()")
+
+            values.append(params.id)
+            query = f"UPDATE memories SET {', '.join(set_parts)} WHERE id = ${param_idx}"
+            await conn.execute(query, *values)
+
+        # Re-embed if text-related fields changed
+        content_changed = any(
+            k in updates for k in ("content", "title", "subtitle", "narrative")
+        )
+        if content_changed:
+            # Use updated values, falling back to existing
+            text_to_embed = ": ".join(
+                part
+                for part in [
+                    params.title if params.title is not None else existing["title"],
+                    params.subtitle if params.subtitle is not None else existing["subtitle"],
+                    params.narrative if params.narrative is not None else existing["narrative"],
+                    params.text if params.text is not None else existing["content"],
+                ]
+                if part
+            )
+            asyncio.create_task(self._embed_and_link(params.id, text_to_embed))
+
+        return SaveMemoryResult(id=params.id, message="Memory updated")
 
     async def _embed_and_link(self, memory_id: int, text: str) -> None:
         """Background task: embed a memory and auto-link similar ones."""

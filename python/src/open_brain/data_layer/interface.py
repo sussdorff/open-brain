@@ -44,6 +44,19 @@ class SaveMemoryParams:
 
 
 @dataclass
+class UpdateMemoryParams:
+    """Parameters for updating an existing memory."""
+
+    id: int
+    text: str | None = None
+    type: str | None = None
+    project: str | None = None
+    title: str | None = None
+    subtitle: str | None = None
+    narrative: str | None = None
+
+
+@dataclass
 class Memory:
     """A single memory entry."""
 
@@ -126,6 +139,8 @@ class DataLayer(Protocol):
     async def get_observations(self, ids: list[int]) -> list[Memory]: ...
 
     async def save_memory(self, params: SaveMemoryParams) -> SaveMemoryResult: ...
+
+    async def update_memory(self, params: UpdateMemoryParams) -> SaveMemoryResult: ...
 
     async def search_by_concept(
         self, query: str, limit: int | None = None, project: str | None = None
