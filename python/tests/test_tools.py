@@ -226,6 +226,21 @@ class TestSaveMemoryTool:
             assert data["id"] == 42
             assert data["message"] == "Memory updated (upsert)"
 
+    @pytest.mark.asyncio
+    async def test_save_memory_filters_test_artifacts(self, mock_dl):
+        """When is_test=True, data layer is NOT called and response signals non-persistence."""
+        with patch("open_brain.server.get_dl", return_value=mock_dl):
+            from open_brain.server import save_memory
+            result = await save_memory(
+                text="Integration test memory",
+                title="API test probe",
+                is_test=True,
+            )
+            data = json.loads(result)
+            assert data["id"] == -1
+            assert "not persisted" in data["message"]
+            mock_dl.save_memory.assert_not_called()
+
 
 # ─── SearchByConcept tool ─────────────────────────────────────────────────────
 

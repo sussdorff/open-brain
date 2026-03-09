@@ -163,7 +163,8 @@ async def get_observations(ids: list[int]) -> str:
     "(discovery, change, feature, decision, bugfix, refactor, session_summary). New types are allowed when none fit. "
     "session_ref: optional stable identifier (e.g. bead ID or 'session-YYYY-MM-DD'). When type='session_summary' "
     "and session_ref is set, re-calling with the same session_ref updates the existing memory instead of inserting a duplicate. "
-    "Params: text (required), type, project, title, subtitle, narrative, session_ref"
+    "is_test: set to true to skip persistence (returns mock response, useful for integration tests). "
+    "Params: text (required), type, project, title, subtitle, narrative, session_ref, is_test"
 )
 async def save_memory(
     text: str,
@@ -173,8 +174,11 @@ async def save_memory(
     subtitle: str | None = None,
     narrative: str | None = None,
     session_ref: str | None = None,
+    is_test: bool = False,
 ) -> str:
     """Save a new memory entry."""
+    if is_test:
+        return json.dumps({"id": -1, "message": "Test artifact — not persisted"})
     dl = get_dl()
     result = await dl.save_memory(
         SaveMemoryParams(
