@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- Add missing columns to duplicates query in refine_memories
+- Four refine_memories improvements
+- Instruct LLM to use each memory ID in at most one action
+- Batch large memory sets for LLM analysis + robust JSON parsing
+- Filter empty-ID actions from refine_memories response
+- Raise priority floor from 0.01 to 0.05 to prevent infinite demotion
+
+### Documentation
+
+- *(memory)* Clarify content vs narrative field semantics
+
+### Features
+
+- LLM-powered merge in refine_memories combines content before deleting
+- *(memory)* Add session_ref field + upsert for session_summary type
+- *(memory)* Add is_test flag to save_memory to prevent test artifact persistence
+
+### Miscellaneous
+
+- Add MCP reconnect reminder to deploy script output
+
+## [2026.03.6] - 2026-03-09
+
+### Bug Fixes
+
 - Timeline anchor mode passed orphaned param to asyncpg query
 
 ### Features
@@ -15,6 +40,7 @@ All notable changes to this project will be documented in this file.
 
 - Bump version to v2026.03.5
 - Sync uv.lock
+- Update changelog for v2026.03.6
 
 ## [2026.03.5] - 2026-03-09
 
