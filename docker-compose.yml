@@ -1,0 +1,37 @@
+# open-brain — standalone stack (Postgres + app)
+# For 1Password users: op run --env-file=.env.tpl -- docker compose up
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: open_brain
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: open_brain
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U open_brain"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  open-brain:
+    build: .
+    env_file: .env
+    environment:
+      # Override DATABASE_URL to point at the local postgres service
+      DATABASE_URL: postgresql://open_brain:${POSTGRES_PASSWORD:-changeme}@postgres:5432/open_brain
+    ports:
+      - "8091:8091"
+    volumes:
+      # Mount clients.json for OAuth client registrations (optional)
+      - ./clients.json:/app/clients.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

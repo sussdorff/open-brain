@@ -1,0 +1,35 @@
+# open-brain — service-only compose file for embedding into existing stacks
+#
+# Usage with Docker Compose include: feature (v2.20+):
+#
+#   # In your project's docker-compose.yml:
+#   include:
+#     - path: ../open-brain/docker-compose.service.yml
+#
+#   services:
+#     your-service:
+#       depends_on:
+#         - open-brain
+#
+# Requires an external DATABASE_URL pointing at your existing Postgres instance.
+# All other config is read from .env in the open-brain directory (env_file path
+# is relative to this file's location).
+
+services:
+  open-brain:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file: .env
+    ports:
+      - "8091:8091"
+    volumes:
+      # Mount clients.json for OAuth client registrations (optional)
+      - ./clients.json:/app/clients.json:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8091/health')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
