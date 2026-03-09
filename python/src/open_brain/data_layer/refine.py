@@ -49,10 +49,11 @@ Memories:
 {memory_summary}
 
 Rules:
-- "merge": combine near-duplicate memories (keep the better one, delete others)
+- "merge": combine near-duplicate memories (keep the better one, delete others). Requires at least 2 IDs.
 - "promote": change stability from tentative->stable or stable->canonical for high-quality, frequently-accessed memories
 - "demote": lower priority for outdated or low-quality memories
 - "delete": remove truly redundant or obsolete memories
+- IMPORTANT: Each memory ID must appear in AT MOST ONE action. Never reference the same ID in multiple actions.
 
 Return ONLY a JSON array like:
 [{{"action":"merge","memory_ids":[1,2],"reason":"Near-duplicate observations about X"}},{{"action":"promote","memory_ids":[5],"reason":"High-quality canonical knowledge"}}]
