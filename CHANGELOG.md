@@ -1,6 +1,18 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [unreleased]
+
+### Bug Fixes
+
+- Add uv to PATH in deploy script
+- Parse ISO date strings to datetime for asyncpg compatibility
+- Handle metadata as string in _row_to_memory
+
+### Features
+
+- Search browse mode, timeline date window, type taxonomy, tool guidance
+
 ## [2026.03.4] - 2026-03-09
 
 ### Documentation
@@ -10,6 +22,10 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - Add update_memory MCP tool and deploy scripts
+
+### Miscellaneous
+
+- Bump version to v2026.03.4
 
 ## [2026.03.3] - 2026-03-08
 
