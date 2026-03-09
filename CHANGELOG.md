@@ -1,11 +1,25 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
-## [unreleased]
+## [2026.03.4] - 2026-03-09
+
+### Documentation
+
+- Update CLAUDE.md with deployment runbook
+
+### Features
+
+- Add update_memory MCP tool and deploy scripts
+
+## [2026.03.3] - 2026-03-08
 
 ### Features
 
 - Add /health endpoint to Python MCP server
+
+### Miscellaneous
+
+- Bump version to v2026.03.3
 
 ### Refactoring
 
