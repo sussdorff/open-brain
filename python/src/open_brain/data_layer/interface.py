@@ -157,6 +157,26 @@ class SaveMemoryResult:
     message: str
 
 
+@dataclass
+class DeleteParams:
+    """Parameters for bulk-deleting memories.
+
+    At least one filter must be provided (ids, or project/type/before combo).
+    """
+
+    ids: list[int] | None = None
+    project: str | None = None
+    type: str | None = None
+    before: str | None = None  # ISO date, e.g. "2026-03-01"
+
+
+@dataclass
+class DeleteResult:
+    """Result of a delete operation."""
+
+    deleted: int
+
+
 class DataLayer(Protocol):
     """Protocol defining the data layer interface."""
 
@@ -181,3 +201,5 @@ class DataLayer(Protocol):
     async def stats(self) -> dict[str, Any]: ...
 
     async def refine_memories(self, params: RefineParams) -> RefineResult: ...
+
+    async def delete_memories(self, params: DeleteParams) -> DeleteResult: ...

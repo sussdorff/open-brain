@@ -13,6 +13,8 @@ from open_brain.config import get_config
 from open_brain.data_layer.embedding import embed, embed_query, to_pg_vector
 from open_brain.data_layer.reranker import rerank
 from open_brain.data_layer.interface import (
+    DeleteParams,
+    DeleteResult,
     Memory,
     RefineAction,
     RefineParams,
@@ -963,3 +965,50 @@ async def _execute_refine_action(conn: asyncpg.Connection, action: RefineAction)
                 f"DELETE FROM memories WHERE id IN ({placeholders})",
                 *action.memory_ids,
             )
+
+    async def delete_memories(self, params: DeleteParams) -> DeleteResult:
+        """Delete memories by IDs or by filter (project + type + before)."""
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            if params.ids is not None:
+                result = await conn.execute(
+                    "DELETE FROM memories WHERE id = ANY($1::int[])",
+                    params.ids,
+                )
+                count = int(result.split()[-1])
+                return DeleteResult(deleted=count)
+
+            # Filter-based delete: build WHERE clause dynamically
+            conditions: list[str] = []
+            values: list[Any] = []
+            idx = 1
+
+            if params.project:
+                index_id = await self._resolve_index_id(conn, params.project)
+                if index_id is None:
+                    return DeleteResult(deleted=0)
+                conditions.append(f"index_id = ${idx}")
+                values.append(index_id)
+                idx += 1
+
+            if params.type:
+                conditions.append(f"type = ${idx}")
+                values.append(params.type)
+                idx += 1
+
+            if params.before:
+                conditions.append(f"created_at < ${idx}::timestamptz")
+                values.append(params.before)
+                idx += 1
+
+            if not conditions:
+                raise ValueError("At least one filter (ids, project, type, before) is required")
+
+            where = " AND ".join(conditions)
+            result = await conn.execute(
+                f"DELETE FROM memories WHERE {where}", *values
+            )
+            count = int(result.split()[-1])
+            logger.info("Deleted %d memories (project=%s, type=%s, before=%s)",
+                        count, params.project, params.type, params.before)
+            return DeleteResult(deleted=count)

@@ -21,6 +21,7 @@ from open_brain.auth.provider import get_provider
 from open_brain.auth.tokens import verify_token
 from open_brain.config import get_config
 from open_brain.data_layer.interface import (
+    DeleteParams,
     RefineParams,
     SaveMemoryParams,
     SearchParams,
@@ -733,6 +734,36 @@ Respond with ONLY valid JSON, no markdown fences."""
         logger.info("Session summary saved for %s [%s]", session_id, hook_type)
     except Exception:
         logger.exception("Failed to process summarize")
+
+
+@app.delete("/api/memories")
+async def api_delete_memories(request: Request) -> JSONResponse:
+    """Delete memories by IDs or by filter (project + type + before).
+
+    Body: {"ids": [1,2,3]} or {"project": "x", "type": "discovery", "before": "2026-03-01"}
+    At least one filter is required.
+    """
+    body = await request.json()
+
+    params = DeleteParams(
+        ids=body.get("ids"),
+        project=body.get("project"),
+        type=body.get("type"),
+        before=body.get("before"),
+    )
+
+    if params.ids is None and not params.project and not params.type and not params.before:
+        return JSONResponse(
+            {"error": "At least one filter (ids, project, type, before) is required"},
+            status_code=400,
+        )
+
+    dl = get_dl()
+    try:
+        result = await dl.delete_memories(params)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return JSONResponse({"deleted": result.deleted})
 
 
 @app.get("/api/context")
