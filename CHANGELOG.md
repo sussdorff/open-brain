@@ -1,7 +1,13 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
-## [unreleased]
+## [2026.03.15] - 2026-03-10
+
+### Features
+
+- *(triage)* Add memory lifecycle triage and materialization pipeline
+
+## [2026.03.14] - 2026-03-10
 
 ### Bug Fixes
 
@@ -16,6 +22,7 @@ All notable changes to this project will be documented in this file.
 
 - *(changelog)* Update for v2026.03.13
 - *(deps)* Update legacy TS deps to latest (audit fix attempt)
+- *(changelog)* Update for next release
 
 ## [2026.03.13] - 2026-03-10
 
