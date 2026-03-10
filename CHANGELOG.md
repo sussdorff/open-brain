@@ -1,11 +1,22 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [unreleased]
+
+### Features
+
+- *(plugin)* Add ob-triage skill with HITL convention
+- *(plugin)* Ob-triage uses AskUserQuestion for HITL decisions
+
 ## [2026.03.15] - 2026-03-10
 
 ### Features
 
 - *(triage)* Add memory lifecycle triage and materialization pipeline
+
+### Miscellaneous
+
+- *(changelog)* Update for v2026.03.15
 
 ## [2026.03.14] - 2026-03-10
 
