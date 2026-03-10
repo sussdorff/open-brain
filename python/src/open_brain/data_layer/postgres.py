@@ -693,9 +693,6 @@ class PostgresDataLayer:
         limit = params.limit or 50
         scope = params.scope or "recent"
 
-        # Track similarity scores for duplicates scope
-        similarity_map: dict[tuple[int, int], float] = {}
-
         async with pool.acquire() as conn:
             if scope == "duplicates":
                 rows = await conn.fetch(
@@ -712,10 +709,6 @@ class PostgresDataLayer:
                     limit,
                 )
                 candidates = [_row_to_memory(r) for r in rows]
-                # Build similarity map for merge decisions
-                for r in rows:
-                    pair = (min(r["id"], r["similar_id"]), max(r["id"], r["similar_id"]))
-                    similarity_map[pair] = float(r["similarity"])
             elif scope.startswith("project:"):
                 project = scope[8:]
                 index_id = await self._resolve_index_id(conn, project)
@@ -744,21 +737,42 @@ class PostgresDataLayer:
         actions = await analyze_with_llm(candidates)
 
         # Decide skip_llm_merge per action based on scope + similarity
+        merge_actions = [a for a in actions if a.action == "merge"]
+        if scope == "duplicates" and merge_actions:
+            # Compute actual pairwise similarity for LLM-suggested merge groups
+            all_merge_ids = list({mid for a in merge_actions for mid in a.memory_ids})
+            if all_merge_ids:
+                async with pool.acquire() as conn:
+                    placeholders = ", ".join(f"${i+1}" for i in range(len(all_merge_ids)))
+                    sim_rows = await conn.fetch(
+                        f"""SELECT m1.id AS id1, m2.id AS id2,
+                                   1 - (m1.embedding <=> m2.embedding) AS similarity
+                              FROM memories m1
+                              JOIN memories m2 ON m1.id < m2.id
+                             WHERE m1.id IN ({placeholders})
+                               AND m2.id IN ({placeholders})
+                               AND m1.embedding IS NOT NULL
+                               AND m2.embedding IS NOT NULL""",
+                        *all_merge_ids,
+                    )
+                    similarity_map = {
+                        (r["id1"], r["id2"]): float(r["similarity"]) for r in sim_rows
+                    }
+
         for action in actions:
             if action.action != "merge":
                 continue
             if scope == "low-priority":
                 action.skip_llm_merge = True
             elif scope == "duplicates":
-                # Check similarity for any pair in this merge group
                 ids = action.memory_ids
-                max_sim = max(
+                min_sim = min(
                     (similarity_map.get((min(a, b), max(a, b)), 0.0)
                      for a in ids for b in ids if a != b),
                     default=0.0,
                 )
-                action.similarity = max_sim
-                if max_sim >= 0.92:
+                action.similarity = min_sim
+                if min_sim >= 0.92:
                     action.skip_llm_merge = True
 
         if not params.dry_run:
