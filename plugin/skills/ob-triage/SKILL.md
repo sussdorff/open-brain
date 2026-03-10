@@ -45,118 +45,89 @@ The triage returns memory IDs and actions. Before presenting to the user, fetch 
 memory texts using `mcp__open-brain__get_observations(ids=[...])` for all actionable items
 (everything except "keep").
 
-### Step 3: Present Results by Action Type
+### Step 3: Present Results via AskUserQuestion
 
-Group results and present in this order:
+Use the `AskUserQuestion` tool for all HITL decisions. This provides structured UI
+with selectable options instead of free-text back-and-forth.
 
 #### Keep (no approval needed)
-Brief summary only:
+Output as text only — no question needed:
 ```
 **Keep** (3 memories): "Deploy setup notes", "Voyage API config", "Auth flow docs"
 ```
 
-#### Merge — show details, ask en-bloc or individual
+#### Merge, Archive, Delete — batch via AskUserQuestion
 
-**En-bloc view:**
+First output a text summary explaining what the triage found. Then present one
+`AskUserQuestion` call with up to 4 questions (one per actionable memory).
+
+For each memory, include the title, ID, triage reason, and a brief text excerpt
+in the question text. Options depend on the recommended action:
+
+**Merge** question (show both sources + proposed merge text in question):
 ```
-**Merge** (2 pairs):
-
-1. "Deploy-Probleme open-brain" (#10612) + "uv PATH auf Server" (#10606)
-   → Grund: Both describe server deployment quirks
-
-2. "Voyage API retry" (#10590) + "Embedding-Fehler bei leeren Strings" (#10585)
-   → Grund: Both cover Voyage-4 error handling
-
-Alle mergen oder einzeln durchgehen?
-```
-
-**Individual view** (when user chooses "einzeln"):
-```
-── Merge 1 ──────────────────────────────
-Source A (#10612): "Deploy-Probleme open-brain"
-  Text: Nach deploy.sh dropped MCP connection. Muss /mcp reconnect...
-
-Source B (#10606): "uv PATH auf Server"
-  Text: uv ist unter ~/.local/bin/uv, deploy script setzt PATH...
-
-Vorgeschlagener Merge-Text:
-  "Deployment open-brain: Nach deploy.sh dropped MCP connection,
-   muss /mcp reconnect. uv unter ~/.local/bin/uv — deploy script
-   setzt PATH aber manuelle SSH-Commands brauchen full path..."
-
-→ [Annehmen / Ablehnen / Ändern]
+AskUserQuestion:
+  question: "#10612 'Deploy-Probleme' + #10606 'uv PATH auf Server' — Grund: Both describe
+             server deployment quirks. Merge-Text: 'Deployment open-brain: Nach deploy.sh
+             dropped MCP connection, muss /mcp reconnect. uv unter ~/.local/bin/uv...'
+             Was tun?"
+  header: "Merge #10612"
+  options:
+    - label: "Mergen"          description: "Zu einem Memory zusammenführen mit dem vorgeschlagenen Text"
+    - label: "Behalten"        description: "Beide unverändert lassen"
+    - label: "Löschen"         description: "Beide entfernen — Info existiert anderswo"
 ```
 
-To generate the merge text: call `mcp__open-brain__refine_memories` with
-`scope="duplicates"` or construct the merged text from both sources, keeping
-all unique information and removing redundancy.
-
-#### Archive — show with reason
-
+**Archive/Delete** question:
 ```
-**Archive** (2 memories — remain searchable at low priority):
-
-1. (#10608) "Session Summary 2026-03-08" — session_summary, 2 days old
-   → Grund: Session summary, context already captured in project memory
-
-2. (#10561) "Initial server setup notes" — observation, 30 days old
-   → Grund: Setup complete, info now in CLAUDE.md
-
-Archive all or review individually?
+AskUserQuestion:
+  question: "#10608 'Session Summary v2026.03.14' — Release notes, Docker-publish bead close.
+             Grund: Transient session record, info in git tags. Was tun?"
+  header: "#10608"
+  options:
+    - label: "Archivieren"     description: "Prio auf 0.1, bleibt durchsuchbar"
+    - label: "Löschen"         description: "Komplett entfernen"
+    - label: "Behalten"        description: "Unverändert lassen"
 ```
 
-#### Delete — show with reason (separate from archive!)
+**Batching**: Group up to 4 questions per AskUserQuestion call. If there are more
+than 4 actionable items, use multiple calls. This allows the user to decide on all
+items at once in a single UI interaction.
+
+#### Promote — ALWAYS individual via AskUserQuestion
+
+Each promote gets its own question with destination options. Show the memory text
+and narrative in the question text so the user has full context:
 
 ```
-**Delete** (1 memory — permanently removed):
-
-1. (#10555) "test observation" — observation
-   → Grund: Test data, no meaningful content
-
-Delete? [Ja / Nein / Einzeln]
+AskUserQuestion:
+  question: "#10564 'UV muss mit --python 3.14 gesynct werden' (learning, open-brain)
+             Text: 'Bei uv sync auf dem Server muss --python 3.14 angegeben werden,
+             sonst wird die System-Python verwendet...'
+             Wohin materialisieren?"
+  header: "Promote"
+  options:
+    - label: "CLAUDE.md (projekt)"   description: "Deployment-Sektion im Projekt-CLAUDE.md"
+    - label: "CLAUDE.md (global)"    description: "Allgemeine UV-Konvention in ~/.claude/CLAUDE.md"
+    - label: "standards/"            description: "Standard-Datei für UV-basierte Projekte"
+    - label: "Bead"                  description: "Aufgabe erstellen via bd create"
 ```
 
-#### Promote — ALWAYS individual HITL
+After the user selects a destination, show the proposed text/content and get final
+approval before writing.
 
-For each promote action, show the memory AND discuss the destination:
-
-```
-**Promote** (#10564): "UV muss mit --python 3.14 gesynct werden"
-  Type: learning | Project: open-brain
-  Text: "Bei uv sync auf dem Server muss --python 3.14 angegeben werden,
-         sonst wird die System-Python verwendet..."
-
-  Empfohlenes Ziel: CLAUDE.md (Deployment-Sektion)
-
-  Mögliche Ziele:
-  - CLAUDE.md (projekt) → Deployment-Hinweis
-  - CLAUDE.md (global) → Allgemeine UV-Konvention
-  - standards/ → Standard für UV-basierte Projekte
-  - Skill → z.B. project-setup Skill erweitern
-  - Bead → Aufgabe erstellen (bd create)
-
-  Wohin materialisieren?
-```
-
-Wait for the user to choose. Then:
-- **CLAUDE.md** → Show the proposed text addition and target section. User approves before writing.
-- **standards/** → Show proposed standard content. User approves file path + content.
-- **Skill** → Show which skill and what to add. User approves.
-- **Bead** → Show proposed `bd create` command. User approves before execution.
-
-#### Scaffold — ALWAYS individual HITL
+#### Scaffold — individual via AskUserQuestion
 
 ```
-**Scaffold** (#10570): "API rate limiting fehlt noch"
-  Type: observation | Project: open-brain
-
-  Vorgeschlagener Bead:
-    Title: "Implement API rate limiting for open-brain"
-    Type: feature
-    Priority: 3
-    Description: "..."
-
-  Erstellen? [Ja / Nein / Ändern]
+AskUserQuestion:
+  question: "#10570 'API rate limiting fehlt noch' (observation, open-brain)
+             Vorgeschlagener Bead: 'Implement API rate limiting' (feature, P3)
+             Erstellen?"
+  header: "Scaffold"
+  options:
+    - label: "Erstellen"       description: "Bead mit vorgeschlagenem Titel/Prio anlegen"
+    - label: "Ändern"          description: "Titel, Typ oder Prio anpassen vor Erstellung"
+    - label: "Ablehnen"        description: "Kein Bead erstellen"
 ```
 
 ### Step 4: Execute Approved Actions
@@ -169,8 +140,10 @@ After the user has reviewed and approved actions, execute them:
 
 2. **Archive**: Call `mcp__open-brain__materialize_memories` with the approved archive actions.
 
-3. **Delete**: Call `mcp__open-brain__update_memory` to delete, or use materialize with
-   a delete action if supported. If not supported via MCP, inform the user.
+3. **Delete**: No MCP delete tool exists (by design — see decision #10597). Delete via
+   REST API on the server: `ssh services 'curl -s -X DELETE "http://localhost:8091/api/memories"
+   -H "Content-Type: application/json" -H "X-API-Key: <key>" -d "{\"ids\": [...]}"'`.
+   Read the API key from `/opt/open-brain/.env.tpl` on the server (API_KEYS= line).
 
 4. **Promote**: Execute the materialization to the chosen target:
    - CLAUDE.md → Use Edit tool on the target CLAUDE.md file
