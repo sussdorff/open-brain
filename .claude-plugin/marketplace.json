@@ -1,0 +1,21 @@
+{
+  "name": "open-brain-marketplace",
+  "owner": {
+    "name": "Malte Sussdorff",
+    "email": "malte.sussdorff@gmail.com"
+  },
+  "metadata": {
+    "description": "Postgres+pgvector memory system for AI assistants with Claude Code plugin",
+    "version": "1.0.0",
+    "repository": "https://github.com/sussdorff/open-brain"
+  },
+  "plugins": [
+    {
+      "name": "open-brain",
+      "source": "./plugin",
+      "description": "Automatic memory capture for Claude Code — observations, session summaries, and context injection backed by open-brain Postgres+pgvector server",
+      "version": "0.1.0",
+      "keywords": ["memory", "context", "persistence", "hooks", "observations", "pgvector"]
+    }
+  ]
+}
