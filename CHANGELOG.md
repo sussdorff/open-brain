@@ -1,12 +1,41 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [unreleased]
+
+### Bug Fixes
+
+- *(plugin)* Remove PostToolUse hook — only keep session/agent summaries
+- *(refine)* Propagate similarity + skip_llm_merge to output actions
+- *(refine)* Compute pairwise similarity on-demand for LLM merge groups
+
+### Features
+
+- *(api)* Add DELETE /api/memories endpoint for bulk memory cleanup
+
+### Performance
+
+- *(refine)* Parallelize merge actions + skip LLM merge for high-similarity duplicates
+
 ## [2026.03.12] - 2026-03-10
 
 ### Features
 
 - *(plugin)* Add marketplace.json for Claude Code plugin distribution
+
+### Miscellaneous
+
+- *(changelog)* Update for v2026.03.11
+
+## [2026.03.11] - 2026-03-10
+
+### Features
+
 - *(reranker)* Add Voyage Rerank-2.5 second-pass reranker
+
+### Miscellaneous
+
+- *(changelog)* Update for Voyage Rerank-2.5 feature
 
 ## [2026.03.10] - 2026-03-10
 
