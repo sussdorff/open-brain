@@ -5,7 +5,21 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- *(plugin)* Add Claude Code plugin for automatic memory capture
+
+### Miscellaneous
+
+- Add __pycache__ and *.pyc to .gitignore
+
+## [2026.03.8] - 2026-03-09
+
+### Features
+
 - Add Docker setup, CI, and README for public release
+
+### Miscellaneous
+
+- *(changelog)* Update for v2026.03.8
 
 ## [2026.03.7] - 2026-03-09
 
