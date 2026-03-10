@@ -15,6 +15,8 @@ from open_brain.data_layer.reranker import rerank
 from open_brain.data_layer.interface import (
     DeleteParams,
     DeleteResult,
+    MaterializeParams,
+    MaterializeResult,
     Memory,
     RefineAction,
     RefineParams,
@@ -22,6 +24,8 @@ from open_brain.data_layer.interface import (
     SaveMemoryParams,
     SaveMemoryResult,
     SearchParams,
+    TriageParams,
+    TriageResult,
     UpdateMemoryParams,
     SearchResult,
     TimelineParams,
@@ -805,6 +809,128 @@ class PostgresDataLayer:
                 f"{' (dry run)' if params.dry_run else ''}"
             ),
         )
+
+    async def triage_memories(self, params: TriageParams) -> TriageResult:
+        """Classify memories into lifecycle actions using LLM triage."""
+        from open_brain.data_layer.triage import triage_with_llm
+
+        pool = await get_pool()
+        limit = params.limit or 50
+        scope = params.scope or "recent"
+
+        async with pool.acquire() as conn:
+            if scope.startswith("project:"):
+                project = scope[8:]
+                index_id = await self._resolve_index_id(conn, project)
+                rows = await conn.fetch(
+                    "SELECT * FROM memories WHERE index_id = $1 ORDER BY created_at DESC LIMIT $2",
+                    index_id or 1,
+                    limit,
+                )
+            elif scope.startswith("type:"):
+                mem_type = scope[5:]
+                rows = await conn.fetch(
+                    "SELECT * FROM memories WHERE type = $1 ORDER BY created_at DESC LIMIT $2",
+                    mem_type,
+                    limit,
+                )
+            elif scope == "low-priority":
+                rows = await conn.fetch(
+                    "SELECT * FROM memories WHERE priority < 0.2 ORDER BY priority ASC LIMIT $1",
+                    limit,
+                )
+            else:
+                # "recent" — last N memories
+                rows = await conn.fetch(
+                    "SELECT * FROM memories ORDER BY created_at DESC LIMIT $1", limit
+                )
+            candidates = [_row_to_memory(r) for r in rows]
+
+        if not candidates:
+            return TriageResult(analyzed=0, actions=[], summary="No candidates found")
+
+        actions = await triage_with_llm(candidates)
+
+        if not params.dry_run:
+            for action in actions:
+                action.executed = True
+
+        action_counts: dict[str, int] = {}
+        for a in actions:
+            action_counts[a.action] = action_counts.get(a.action, 0) + 1
+
+        summary_parts = [f"{count} {act}" for act, count in sorted(action_counts.items())]
+        summary = (
+            f"Triaged {len(candidates)} memories: {', '.join(summary_parts)}"
+            f"{' (dry run)' if params.dry_run else ''}"
+        )
+
+        return TriageResult(analyzed=len(candidates), actions=actions, summary=summary)
+
+    async def materialize_memories(self, params: MaterializeParams) -> MaterializeResult:
+        """Execute materialization for a list of triage actions."""
+        from open_brain.data_layer.materialize import execute_triage_actions
+
+        if not params.triage_actions:
+            return MaterializeResult(processed=0, results=[], summary="No actions to materialize")
+
+        # Collect all memory IDs and fetch them in one query
+        memory_ids = [a.memory_id for a in params.triage_actions]
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            placeholders = ", ".join(f"${i+1}" for i in range(len(memory_ids)))
+            rows = await conn.fetch(
+                f"SELECT * FROM memories WHERE id IN ({placeholders})",
+                *memory_ids,
+            )
+            # Also fetch project names for index_ids
+            index_ids = list({row["index_id"] for row in rows if row["index_id"]})
+            project_rows = []
+            if index_ids:
+                idx_placeholders = ", ".join(f"${i+1}" for i in range(len(index_ids)))
+                project_rows = await conn.fetch(
+                    f"SELECT id, name FROM memory_indexes WHERE id IN ({idx_placeholders})",
+                    *index_ids,
+                )
+
+        memories_by_id = {_row_to_memory(r).id: _row_to_memory(r) for r in rows}
+        project_by_index_id = {r["id"]: r["name"] for r in project_rows}
+
+        async def _archive_fn(memory_id: int, priority: float) -> None:
+            pool_ = await get_pool()
+            async with pool_.acquire() as conn_:
+                await conn_.execute(
+                    "UPDATE memories SET priority = $1, updated_at = now() WHERE id = $2",
+                    priority,
+                    memory_id,
+                )
+
+        if params.dry_run:
+            # In dry run, return what would happen without executing
+            from open_brain.data_layer.interface import MaterializeActionResult
+            results = [
+                MaterializeActionResult(
+                    memory_id=a.memory_id,
+                    action=a.action,
+                    success=True,
+                    detail="dry run — not executed",
+                )
+                for a in params.triage_actions
+            ]
+        else:
+            results = await execute_triage_actions(
+                params.triage_actions,
+                memories_by_id,
+                _archive_fn,
+                project_by_index_id,
+            )
+
+        succeeded = sum(1 for r in results if r.success)
+        failed = len(results) - succeeded
+        summary = f"Materialized {succeeded}/{len(results)} actions" + (
+            f" ({failed} failed)" if failed else ""
+        )
+        return MaterializeResult(processed=len(results), results=results, summary=summary)
 
     async def delete_memories(self, params: DeleteParams) -> DeleteResult:
         """Delete memories by IDs or by filter (project + type + before)."""
