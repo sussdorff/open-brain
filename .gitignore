@@ -4,6 +4,8 @@ dist/
 clients.json
 logs/
 *.log
+__pycache__/
+*.pyc
 
 # Dolt database files (added by bd init)
 .dolt/
