@@ -10,16 +10,15 @@ cd "$REPO_DIR"
 echo "Pulling latest changes..."
 git pull --ff-only
 
-echo "Syncing dependencies (Python 3.14)..."
-cd python
-uv sync
+echo "Disabling old systemd unit (if present)..."
+systemctl disable --now open-brain 2>/dev/null || true
 
-echo "Restarting service..."
-systemctl restart open-brain
+echo "Building and starting Docker container..."
+op run --env-file=.env.tpl -- docker compose -f docker-compose.service.yml up --build -d
 
 echo "Waiting for startup..."
-sleep 2
-systemctl status open-brain --no-pager -l
+sleep 5
+curl -sf http://localhost:8091/health && echo "" || echo "WARNING: health check failed"
 
 echo ""
 echo "Deploy complete."
