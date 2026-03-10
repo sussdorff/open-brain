@@ -1,5 +1,5 @@
 {
-  "description": "open-brain automatic memory capture hooks",
+  "description": "open-brain memory hooks: context injection at start, session/agent summaries at end",
   "hooks": {
     "SessionStart": [
       {
@@ -8,17 +8,6 @@
           {
             "type": "command",
             "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/context_inject.py",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hook_runner.py",
             "timeout": 10
           }
         ]
