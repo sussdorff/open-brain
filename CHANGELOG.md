@@ -1,10 +1,11 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
-## [unreleased]
+## [2026.03.12] - 2026-03-10
 
 ### Features
 
+- *(plugin)* Add marketplace.json for Claude Code plugin distribution
 - *(reranker)* Add Voyage Rerank-2.5 second-pass reranker
 
 ## [2026.03.10] - 2026-03-10
