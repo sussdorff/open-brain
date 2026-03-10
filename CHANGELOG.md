@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Bug Fixes
+
+- *(deploy)* Load OP service account token from /etc/op-service-account-token
+
+### Features
+
+- *(deploy)* Migrate to Docker Compose on services (LXC 116)
+
+## [2026.03.9] - 2026-03-10
+
 ### Features
 
 - *(plugin)* Add Claude Code plugin for automatic memory capture
@@ -10,6 +20,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous
 
 - Add __pycache__ and *.pyc to .gitignore
+- *(changelog)* Update for next release
 
 ## [2026.03.8] - 2026-03-09
 
