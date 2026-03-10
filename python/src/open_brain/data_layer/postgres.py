@@ -693,6 +693,9 @@ class PostgresDataLayer:
         limit = params.limit or 50
         scope = params.scope or "recent"
 
+        # Track similarity scores for duplicates scope
+        similarity_map: dict[tuple[int, int], float] = {}
+
         async with pool.acquire() as conn:
             if scope == "duplicates":
                 rows = await conn.fetch(
@@ -709,6 +712,10 @@ class PostgresDataLayer:
                     limit,
                 )
                 candidates = [_row_to_memory(r) for r in rows]
+                # Build similarity map for merge decisions
+                for r in rows:
+                    pair = (min(r["id"], r["similar_id"]), max(r["id"], r["similar_id"]))
+                    similarity_map[pair] = float(r["similarity"])
             elif scope.startswith("project:"):
                 project = scope[8:]
                 index_id = await self._resolve_index_id(conn, project)
@@ -736,24 +743,26 @@ class PostgresDataLayer:
 
         actions = await analyze_with_llm(candidates)
 
+        # Decide skip_llm_merge per action based on scope + similarity
+        for action in actions:
+            if action.action != "merge":
+                continue
+            if scope == "low-priority":
+                action.skip_llm_merge = True
+            elif scope == "duplicates":
+                # Check similarity for any pair in this merge group
+                ids = action.memory_ids
+                max_sim = max(
+                    (similarity_map.get((min(a, b), max(a, b)), 0.0)
+                     for a in ids for b in ids if a != b),
+                    default=0.0,
+                )
+                action.similarity = max_sim
+                if max_sim >= 0.92:
+                    action.skip_llm_merge = True
+
         if not params.dry_run:
-            pool = await get_pool()
-            deleted_ids: set[int] = set()
-            async with pool.acquire() as conn:
-                for action in actions:
-                    # Skip actions referencing already-deleted IDs
-                    remaining = [mid for mid in action.memory_ids if mid not in deleted_ids]
-                    if not remaining or (action.action == "merge" and len(remaining) < 2):
-                        logger.info("Skipping %s on %s — IDs already deleted", action.action, action.memory_ids)
-                        action.memory_ids = []  # mark as skipped
-                        continue
-                    action.memory_ids = remaining
-                    await _execute_refine_action(conn, action)
-                    # Track IDs deleted by merge/delete actions
-                    if action.action == "merge":
-                        deleted_ids.update(action.memory_ids[1:])
-                    elif action.action == "delete":
-                        deleted_ids.update(action.memory_ids)
+            await _execute_refine_actions(actions)
 
         executed_actions = [
             RefineAction(
@@ -776,31 +785,95 @@ class PostgresDataLayer:
         )
 
 
+async def _execute_refine_actions(actions: list[RefineAction]) -> None:
+    """Execute refinement actions, parallelizing independent ones.
+
+    Groups actions into waves: actions within a wave have no overlapping memory IDs
+    and can run concurrently. Actions with ID conflicts run in subsequent waves.
+    """
+    pool = await get_pool()
+    deleted_ids: set[int] = set()
+
+    # First pass: filter out actions with already-deleted IDs
+    valid_actions: list[RefineAction] = []
+    for action in actions:
+        remaining = [mid for mid in action.memory_ids if mid not in deleted_ids]
+        if not remaining or (action.action == "merge" and len(remaining) < 2):
+            logger.info("Skipping %s on %s — IDs already deleted", action.action, action.memory_ids)
+            action.memory_ids = []
+            continue
+        action.memory_ids = remaining
+        valid_actions.append(action)
+        # Pre-compute which IDs will be deleted to avoid conflicts
+        if action.action == "merge":
+            deleted_ids.update(action.memory_ids[1:])
+        elif action.action == "delete":
+            deleted_ids.update(action.memory_ids)
+
+    # Build waves of non-overlapping actions for parallel execution
+    waves: list[list[RefineAction]] = []
+    assigned: set[int] = set()
+
+    for action in valid_actions:
+        action_ids = set(action.memory_ids)
+        # Try to fit into an existing wave
+        placed = False
+        for wave in waves:
+            wave_ids = {mid for a in wave for mid in a.memory_ids}
+            if not action_ids & wave_ids:
+                wave.append(action)
+                placed = True
+                break
+        if not placed:
+            waves.append([action])
+
+    # Execute waves: actions within a wave run in parallel
+    for wave_idx, wave in enumerate(waves):
+        logger.info("Executing wave %d/%d (%d actions)", wave_idx + 1, len(waves), len(wave))
+        if len(wave) == 1:
+            async with pool.acquire() as conn:
+                await _execute_refine_action(conn, wave[0])
+        else:
+            async def _run_action(act: RefineAction) -> None:
+                async with pool.acquire() as conn:
+                    await _execute_refine_action(conn, act)
+
+            await asyncio.gather(*[_run_action(a) for a in wave])
+
+
 async def _execute_refine_action(conn: asyncpg.Connection, action: RefineAction) -> None:
     """Execute a single refinement action against the database."""
     match action.action:
         case "merge":
-            from open_brain.data_layer.refine import merge_memories_with_llm
-
             keep_id = action.memory_ids[0]
             ids_to_remove = action.memory_ids[1:]
             if not ids_to_remove:
                 return
 
-            # Fetch full memories for LLM merge
-            all_ids = action.memory_ids
-            placeholders = ", ".join(f"${i+1}" for i in range(len(all_ids)))
-            rows = await conn.fetch(
-                f"SELECT * FROM memories WHERE id IN ({placeholders})", *all_ids
-            )
-            memories = [_row_to_memory(r) for r in rows]
+            merged: dict[str, str] = {}
 
-            # Ask LLM to combine them
-            try:
-                merged = await merge_memories_with_llm(memories)
-            except Exception as err:
-                logger.warning("LLM merge failed (%s), keeping original", err)
-                merged = {}
+            if not action.skip_llm_merge:
+                from open_brain.data_layer.refine import merge_memories_with_llm
+
+                # Fetch full memories for LLM merge
+                all_ids = action.memory_ids
+                placeholders = ", ".join(f"${i+1}" for i in range(len(all_ids)))
+                rows = await conn.fetch(
+                    f"SELECT * FROM memories WHERE id IN ({placeholders})", *all_ids
+                )
+                memories = [_row_to_memory(r) for r in rows]
+
+                try:
+                    merged = await merge_memories_with_llm(memories)
+                except Exception as err:
+                    logger.warning("LLM merge failed (%s), keeping original", err)
+                    merged = {}
+            else:
+                logger.info(
+                    "Skipping LLM merge for IDs %s (similarity=%.3f)",
+                    action.memory_ids,
+                    action.similarity or 0.0,
+                )
 
             # Update the kept memory with merged content and re-embed
             if merged:
@@ -848,8 +921,9 @@ async def _execute_refine_action(conn: asyncpg.Connection, action: RefineAction)
                 *ids_to_remove,
             )
             logger.info(
-                "Merged: updated %d with LLM-combined content, deleted %s",
+                "Merged: updated %d%s, deleted %s",
                 keep_id,
+                " (LLM-combined)" if merged else " (kept original)",
                 ", ".join(str(i) for i in ids_to_remove),
             )
         case "promote":

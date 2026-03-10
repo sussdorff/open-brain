@@ -120,6 +120,8 @@ class RefineAction:
     memory_ids: list[int]
     reason: str
     executed: bool = False
+    similarity: float | None = None  # cosine similarity (duplicates scope only)
+    skip_llm_merge: bool = False  # skip LLM-powered content merge
 
 
 @dataclass
