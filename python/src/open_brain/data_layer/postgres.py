@@ -770,6 +770,8 @@ class PostgresDataLayer:
                 memory_ids=a.memory_ids,
                 reason=a.reason,
                 executed=not params.dry_run and bool(a.memory_ids),
+                similarity=a.similarity,
+                skip_llm_merge=a.skip_llm_merge,
             )
             for a in actions
             if a.memory_ids  # drop actions with empty IDs (skipped or malformed)
