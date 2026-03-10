@@ -21,6 +21,9 @@ class Config(BaseSettings):
     VOYAGE_API_KEY: str
     VOYAGE_MODEL: str = "voyage-4"
 
+    # API key auth for plugin hooks (comma-separated list of valid keys)
+    API_KEYS: str = ""
+
     # LLM for metadata extraction / refinement
     LLM_PROVIDER: Literal["anthropic", "openrouter"] = "anthropic"
     LLM_MODEL: str = "claude-haiku-4-5-20251001"

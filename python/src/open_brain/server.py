@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
@@ -26,9 +27,19 @@ from open_brain.data_layer.interface import (
     TimelineParams,
     UpdateMemoryParams,
 )
+from open_brain.data_layer.llm import LlmMessage, llm_complete
 from open_brain.data_layer.postgres import PostgresDataLayer, close_pool
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_llm_json(text: str) -> dict:
+    """Parse JSON from LLM response, stripping markdown fences if present."""
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+        text = text.rsplit("```", 1)[0]
+    return json.loads(text)
 
 # MCP server (FastMCP high-level API)
 _config = get_config()
@@ -301,14 +312,30 @@ _PUBLIC_PATHS = {
 class BearerAuthMiddleware(BaseHTTPMiddleware):
     """Validate Bearer tokens on MCP endpoints (everything not in _PUBLIC_PATHS)."""
 
+    def _get_api_keys(self) -> frozenset[str]:
+        """Return valid API keys from current config (config is cached by get_config())."""
+        config = get_config()
+        return frozenset(k.strip() for k in config.API_KEYS.split(",") if k.strip())
+
     async def dispatch(self, request: Request, call_next):
         if request.url.path in _PUBLIC_PATHS:
             return await call_next(request)
 
+        # Check API key first (for plugin hooks)
+        api_key = request.headers.get("x-api-key", "")
+        if api_key:
+            if api_key in self._get_api_keys():
+                return await call_next(request)
+            return JSONResponse(
+                {"error": "unauthorized", "error_description": "Invalid API key"},
+                status_code=401,
+            )
+
+        # Fall back to Bearer token
         auth_header = request.headers.get("authorization", "")
         if not auth_header.startswith("Bearer "):
             return JSONResponse(
-                {"error": "unauthorized", "error_description": "Missing Bearer token"},
+                {"error": "unauthorized", "error_description": "Missing Bearer token or API key"},
                 status_code=401,
                 headers={"WWW-Authenticate": "Bearer"},
             )
@@ -519,6 +546,241 @@ async def oauth_protected_resource() -> JSONResponse:
 async def health() -> dict[str, str]:
     """Health check endpoint."""
     return {"status": "ok", "service": "open-brain", "runtime": "python"}
+
+
+# ─── REST API Endpoints (Plugin Hooks) ────────────────────────────────────────
+
+# Skip list for observation capture — tools with no learning value
+_INGEST_SKIP_TOOLS = {
+    "Read", "Glob", "Grep", "Skill", "ToolSearch", "AskUserQuestion",
+    "TaskCreate", "TaskUpdate", "TaskGet", "TaskList", "TaskOutput", "TaskStop",
+    "CronCreate", "CronDelete", "CronList", "SendMessage",
+    "ListMcpResourcesTool", "ReadMcpResourceTool",
+    "EnterPlanMode", "ExitPlanMode", "EnterWorktree",
+    "NotebookEdit",
+}
+
+
+@app.post("/api/ingest")
+async def api_ingest(request: Request) -> JSONResponse:
+    """Ingest tool observation from plugin hook. Returns 202, processes async."""
+    body = await request.json()
+    tool_name = body.get("tool_name", "")
+
+    # Server-side skip list check
+    if tool_name in _INGEST_SKIP_TOOLS:
+        return JSONResponse({"status": "skipped"}, status_code=202)
+
+    asyncio.create_task(_process_ingest(body))
+
+    return JSONResponse({"status": "accepted"}, status_code=202)
+
+
+async def _process_ingest(body: dict) -> None:
+    """Background task: extract observation from tool data and save."""
+    try:
+        tool_name = body.get("tool_name", "")
+        tool_input = body.get("tool_input", "")
+        tool_response = body.get("tool_response", "")
+        project = body.get("project", "unknown")
+        session_id = body.get("session_id", "")
+        cwd = body.get("cwd", "")
+
+        extraction = await _extract_observation(tool_name, tool_input, tool_response, cwd)
+        if not extraction:
+            return
+
+        dl = get_dl()
+        await dl.save_memory(
+            SaveMemoryParams(
+                text=extraction["content"],
+                type=extraction.get("type", "observation"),
+                project=project,
+                title=extraction.get("title"),
+                subtitle=extraction.get("subtitle"),
+                narrative=extraction.get("narrative"),
+                session_ref=session_id if session_id else None,
+            )
+        )
+        logger.info("Ingested observation: %s [%s]", extraction.get("title", ""), tool_name)
+    except Exception:
+        logger.exception("Failed to process ingest")
+
+
+async def _extract_observation(
+    tool_name: str, tool_input: str, tool_response: str, cwd: str
+) -> dict | None:
+    """Use LLM to extract a structured observation from tool data."""
+    prompt = f"""Extract a concise, meaningful observation from this tool execution.
+
+Tool: {tool_name}
+Working Directory: {cwd}
+Input: {tool_input[:2000]}
+Output: {tool_response[:2000]}
+
+Respond in JSON with these fields:
+- "title": short headline (max 80 chars) capturing the core action
+- "type": one of: bugfix, feature, refactor, discovery, decision, change
+- "content": 2-4 sentences describing WHAT happened and WHY it matters. This is the primary searchable text.
+- "subtitle": one-line secondary label or tags (max 100 chars)
+- "narrative": optional broader context or reasoning (1-2 sentences, or null if not needed)
+- "skip": true if this tool execution has no learning value (routine operations, failed reads, etc.)
+
+Rules:
+- Focus on the LEARNING or CHANGE, not the mechanics of the tool
+- If the tool execution is routine (e.g., running tests with no failures, simple file reads), set skip=true
+- Content should be self-contained and understandable without seeing the raw tool data
+- Use the working directory to infer project context
+
+Respond with ONLY valid JSON, no markdown fences."""
+
+    try:
+        response = await llm_complete(
+            [LlmMessage(role="user", content=prompt)],
+            model="claude-haiku-4-5-20251001",
+            max_tokens=512,
+        )
+        result = _parse_llm_json(response)
+
+        if result.get("skip"):
+            return None
+
+        return result
+    except Exception:
+        logger.exception("Extraction failed")
+        return None
+
+
+@app.post("/api/summarize")
+async def api_summarize(request: Request) -> JSONResponse:
+    """Generate session summary from recent observations. Returns 202, processes async."""
+    body = await request.json()
+
+    asyncio.create_task(_process_summarize(body))
+
+    return JSONResponse({"status": "accepted"}, status_code=202)
+
+
+async def _process_summarize(body: dict) -> None:
+    """Background task: generate and save session summary."""
+    try:
+        session_id = body.get("session_id", "")
+        project = body.get("project", "unknown")
+        hook_type = body.get("hook_type", "Stop")
+
+        if not session_id:
+            logger.warning("Summarize called without session_id")
+            return
+
+        dl = get_dl()
+
+        # Fetch recent observations for this session
+        result = await dl.search(
+            SearchParams(project=project, limit=30, order_by="oldest")
+        )
+
+        if not result.results:
+            # No observations yet — save minimal summary
+            await dl.save_memory(
+                SaveMemoryParams(
+                    text=f"Session {session_id} ended ({hook_type}). No observations captured.",
+                    type="session_summary",
+                    project=project,
+                    title=f"Session summary ({hook_type})",
+                    session_ref=session_id,
+                )
+            )
+            return
+
+        # Build context from observations
+        obs_text = "\n".join(
+            f"- [{m.type}] {m.title}: {m.content[:200]}"
+            for m in result.results[-20:]  # Last 20 observations
+        )
+
+        summary_prompt = f"""Summarize this coding session based on the observations below.
+
+Session Type: {hook_type} ({"main session ended" if hook_type == "Stop" else "subagent completed"})
+Project: {project}
+
+Observations:
+{obs_text}
+
+Respond in JSON:
+- "title": short session headline (max 80 chars)
+- "content": 3-5 sentence summary covering: what was worked on, key decisions made, outcome
+- "narrative": what was learned or discovered (1-2 sentences, or null)
+
+Respond with ONLY valid JSON, no markdown fences."""
+
+        response = await llm_complete(
+            [LlmMessage(role="user", content=summary_prompt)],
+            model="claude-haiku-4-5-20251001",
+            max_tokens=512,
+        )
+        summary = _parse_llm_json(response)
+
+        await dl.save_memory(
+            SaveMemoryParams(
+                text=summary.get("content", f"Session {session_id} ended."),
+                type="session_summary",
+                project=project,
+                title=summary.get("title", f"Session summary ({hook_type})"),
+                narrative=summary.get("narrative"),
+                session_ref=session_id,
+            )
+        )
+        logger.info("Session summary saved for %s [%s]", session_id, hook_type)
+    except Exception:
+        logger.exception("Failed to process summarize")
+
+
+@app.get("/api/context")
+async def api_context(
+    project: str | None = None,
+    limit: int = 50,
+) -> Response:
+    """Get recent memory context formatted as markdown for plugin injection."""
+    dl = get_dl()
+
+    # Get recent observations
+    result = await dl.search(
+        SearchParams(project=project, limit=limit, order_by=None)
+    )
+
+    # Get recent session summaries
+    context = await dl.get_context(limit=3, project=project)
+
+    # Format as markdown
+    lines = []
+
+    # Session summaries first
+    sessions = context.get("sessions", [])
+    if sessions:
+        lines.append("## Recent Sessions\n")
+        for s in sessions[:3]:
+            title = s.get("title", "Session")
+            content = s.get("content", "")[:200]
+            lines.append(f"- **{title}**: {content}")
+        lines.append("")
+
+    # Recent observations as table
+    if result.results:
+        lines.append("## Recent Observations\n")
+        lines.append("| Type | Title | When |")
+        lines.append("|------|-------|------|")
+        for m in result.results[:30]:
+            type_label = m.type or "observation"
+            title = (m.title or m.content[:60])[:60]
+            when = m.created_at[:10] if m.created_at else "?"
+            lines.append(f"| {type_label} | {title} | {when} |")
+        lines.append("")
+
+    if not lines:
+        return Response(content="", media_type="text/markdown")
+
+    md = "\n".join(lines)
+    return Response(content=md, media_type="text/markdown")
 
 
 # Mount MCP sub-app AFTER all routes (mount at "/" catches everything)
