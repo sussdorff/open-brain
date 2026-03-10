@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(api)* Move delete_memories into PostgresDataLayer class
+
+### Features
+
+- *(refine)* Drop merge actions with similarity < 0.4 as false positives
+- *(ci)* Publish Docker image to ghcr.io/sussdorff/open-brain
+
+### Miscellaneous
+
+- *(changelog)* Update for v2026.03.13
+- *(deps)* Update legacy TS deps to latest (audit fix attempt)
+
+## [2026.03.13] - 2026-03-10
+
+### Bug Fixes
+
 - *(plugin)* Remove PostToolUse hook — only keep session/agent summaries
 - *(refine)* Propagate similarity + skip_llm_merge to output actions
 - *(refine)* Compute pairwise similarity on-demand for LLM merge groups
