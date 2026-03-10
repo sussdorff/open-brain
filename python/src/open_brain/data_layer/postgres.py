@@ -11,6 +11,7 @@ import asyncpg
 
 from open_brain.config import get_config
 from open_brain.data_layer.embedding import embed, embed_query, to_pg_vector
+from open_brain.data_layer.reranker import rerank
 from open_brain.data_layer.interface import (
     Memory,
     RefineAction,
@@ -140,12 +141,16 @@ class PostgresDataLayer:
             # ── Hybrid search mode ──
             if query:
                 try:
+                    config = get_config()
                     query_embedding = await embed_query(query)
+
+                    # Fetch 3x candidates for reranking (capped at 100)
+                    fetch_limit = min(limit * 3, 100)
 
                     # Use hybrid_search for scoring, join memories for full rows + filters
                     post_conditions: list[str] = []
                     post_values: list[Any] = [
-                        query, to_pg_vector(query_embedding), limit * 3, index_id,
+                        query, to_pg_vector(query_embedding), fetch_limit * 3, index_id,
                     ]
                     param_idx = 5  # after the 4 hybrid_search params
 
@@ -180,10 +185,24 @@ class PostgresDataLayer:
                         WHERE 1=1 {post_where}
                         ORDER BY s.score DESC
                         LIMIT ${param_idx} OFFSET ${param_idx + 1}""",
-                        *post_values, limit, offset,
+                        *post_values, fetch_limit, offset,
                     )
 
                     memories = [_row_to_memory(r) for r in rows]
+
+                    # Second-pass reranking with Voyage Rerank-2.5
+                    if config.RERANK_ENABLED and memories:
+                        documents = [m.content for m in memories]
+                        reranked_indices = await rerank(
+                            query=query,
+                            documents=documents,
+                            model=config.RERANK_MODEL,
+                            top_k=limit,
+                        )
+                        memories = [memories[i] for i in reranked_indices]
+                    else:
+                        memories = memories[:limit]
+
                     asyncio.create_task(
                         self._log_usage_background([m.id for m in memories], "search_hit")
                     )
@@ -562,11 +581,15 @@ class PostgresDataLayer:
         self, query: str, limit: int | None = None, project: str | None = None
     ) -> dict[str, list[Memory]]:
         """Pure vector search using cosine similarity."""
+        config = get_config()
         pool = await get_pool()
         async with pool.acquire() as conn:
             index_id = await self._resolve_index_id(conn, project)
             query_embedding = await embed_query(query)
             max_results = limit or 10
+
+            # Fetch 3x candidates when reranking is enabled
+            fetch_limit = min(max_results * 3, 100) if config.RERANK_ENABLED else max_results
 
             conditions = ["m.embedding IS NOT NULL"]
             values: list[Any] = [to_pg_vector(query_embedding)]
@@ -577,7 +600,7 @@ class PostgresDataLayer:
                 values.append(index_id)
                 param_idx += 1
 
-            values.append(max_results)
+            values.append(fetch_limit)
 
             rows = await conn.fetch(
                 f"""SELECT m.id, m.index_id, m.session_id, m.type, m.title, m.subtitle, m.narrative, m.content,
@@ -589,7 +612,22 @@ class PostgresDataLayer:
                  LIMIT ${param_idx}""",
                 *values,
             )
-            return {"results": [_row_to_memory(r) for r in rows]}
+            memories = [_row_to_memory(r) for r in rows]
+
+            # Second-pass reranking with Voyage Rerank-2.5
+            if config.RERANK_ENABLED and memories:
+                documents = [m.content for m in memories]
+                reranked_indices = await rerank(
+                    query=query,
+                    documents=documents,
+                    model=config.RERANK_MODEL,
+                    top_k=max_results,
+                )
+                memories = [memories[i] for i in reranked_indices]
+            else:
+                memories = memories[:max_results]
+
+            return {"results": memories}
 
     async def get_context(
         self, limit: int | None = None, project: str | None = None

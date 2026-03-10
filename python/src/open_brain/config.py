@@ -20,6 +20,8 @@ class Config(BaseSettings):
     CLIENTS_FILE: str = "/opt/open-brain/clients.json"
     VOYAGE_API_KEY: str
     VOYAGE_MODEL: str = "voyage-4"
+    RERANK_ENABLED: bool = True
+    RERANK_MODEL: str = "rerank-2.5"
 
     # API key auth for plugin hooks (comma-separated list of valid keys)
     API_KEYS: str = ""

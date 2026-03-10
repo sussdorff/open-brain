@@ -268,6 +268,7 @@ class TestPostgresSearchByConcept:
         with (
             patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.embed_query", new_callable=AsyncMock) as mock_embed,
+            patch("open_brain.data_layer.postgres.rerank", new_callable=AsyncMock, return_value=[0]),
         ):
             mock_embed.return_value = [0.1] * 1024
             result = await dl.search_by_concept("test concept")
