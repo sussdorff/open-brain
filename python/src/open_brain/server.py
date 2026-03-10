@@ -22,10 +22,12 @@ from open_brain.auth.tokens import verify_token
 from open_brain.config import get_config
 from open_brain.data_layer.interface import (
     DeleteParams,
+    MaterializeParams,
     RefineParams,
     SaveMemoryParams,
     SearchParams,
     TimelineParams,
+    TriageParams,
     UpdateMemoryParams,
 )
 from open_brain.data_layer.llm import LlmMessage, llm_complete
@@ -294,6 +296,122 @@ async def refine_memories(
             "analyzed": result.analyzed,
             "summary": result.summary,
             "actions": [vars(a) for a in result.actions],
+        }
+    )
+
+
+@mcp.tool(
+    description="Classify memories into lifecycle actions: keep | merge | promote | scaffold | archive. "
+    "Uses LLM with type-aware logic: learning→promote, session_summary→archive, observation→keep/merge. "
+    "Params: scope (recent|project:<name>|type:<name>|low-priority), limit, dry_run"
+)
+async def triage_memories(
+    scope: str | None = None,
+    limit: int | None = None,
+    dry_run: bool = False,
+) -> str:
+    """LLM-powered memory triage."""
+    dl = get_dl()
+    result = await dl.triage_memories(
+        TriageParams(scope=scope, limit=limit, dry_run=dry_run)
+    )
+    return json.dumps(
+        {
+            "analyzed": result.analyzed,
+            "summary": result.summary,
+            "actions": [vars(a) for a in result.actions],
+        }
+    )
+
+
+@mcp.tool(
+    description="Execute materialization for triage actions. "
+    "promote→writes to ~/.claude/projects/<project>/MEMORY.md. "
+    "scaffold→runs bd create to make a task/bead. "
+    "archive→sets memory priority to 0.1. "
+    "merge→delegates to refine_memories. "
+    "keep→no-op. "
+    "Params: triage_actions (list of {action, memory_id, reason, memory_type, memory_title}), dry_run"
+)
+async def materialize_memories(
+    triage_actions: list[dict],
+    dry_run: bool = False,
+) -> str:
+    """Materialize triage actions (promote, scaffold, archive, merge, keep)."""
+    from open_brain.data_layer.interface import TriageAction
+
+    actions = [
+        TriageAction(
+            action=a["action"],
+            memory_id=a["memory_id"],
+            reason=a.get("reason", ""),
+            memory_type=a.get("memory_type", "observation"),
+            memory_title=a.get("memory_title"),
+            executed=False,
+        )
+        for a in triage_actions
+    ]
+
+    dl = get_dl()
+    result = await dl.materialize_memories(
+        MaterializeParams(triage_actions=actions, dry_run=dry_run)
+    )
+    return json.dumps(
+        {
+            "processed": result.processed,
+            "summary": result.summary,
+            "results": [vars(r) for r in result.results],
+        }
+    )
+
+
+@mcp.tool(
+    description="Run the full memory lifecycle pipeline: triage → materialize. "
+    "Returns a structured report with triage summary, actions taken, and materialization results. "
+    "Params: scope, dry_run"
+)
+async def run_lifecycle_pipeline(
+    scope: str | None = None,
+    dry_run: bool = False,
+) -> str:
+    """Chain triage_memories → materialize_memories into one pipeline run."""
+    dl = get_dl()
+
+    # Step 1: Triage
+    triage_result = await dl.triage_memories(
+        TriageParams(scope=scope, dry_run=dry_run)
+    )
+
+    if not triage_result.actions:
+        return json.dumps(
+            {
+                "triage_summary": triage_result.summary,
+                "materialization_summary": "No actions to materialize",
+                "actions_taken": [],
+            }
+        )
+
+    # Step 2: Materialize non-keep actions (keep is a no-op, skip for brevity unless dry_run)
+    non_keep = [a for a in triage_result.actions if a.action != "keep"]
+    keep_count = len(triage_result.actions) - len(non_keep)
+
+    mat_result = await dl.materialize_memories(
+        MaterializeParams(triage_actions=non_keep, dry_run=dry_run)
+    )
+
+    # Step 3: Build pipeline report
+    action_counts: dict[str, int] = {}
+    for a in triage_result.actions:
+        action_counts[a.action] = action_counts.get(a.action, 0) + 1
+
+    return json.dumps(
+        {
+            "triage_summary": triage_result.summary,
+            "triage_action_counts": action_counts,
+            "materialization_summary": mat_result.summary,
+            "actions_taken": [vars(r) for r in mat_result.results],
+            "kept_count": keep_count,
+            "dry_run": dry_run,
         }
     )
 

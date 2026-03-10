@@ -177,6 +177,63 @@ class DeleteResult:
     deleted: int
 
 
+@dataclass
+class TriageParams:
+    """Parameters for memory triage."""
+
+    scope: str | None = None  # "recent" | "project:<name>" | "type:<name>" | None
+    limit: int | None = None
+    dry_run: bool = False
+
+
+@dataclass
+class TriageAction:
+    """A single triage decision for one memory."""
+
+    action: str  # "keep" | "merge" | "promote" | "scaffold" | "archive"
+    memory_id: int
+    reason: str
+    memory_type: str
+    memory_title: str | None
+    executed: bool = False
+
+
+@dataclass
+class TriageResult:
+    """Result of a triage_memories operation."""
+
+    analyzed: int
+    actions: list[TriageAction]
+    summary: str
+
+
+@dataclass
+class MaterializeParams:
+    """Parameters for materializing triage actions."""
+
+    triage_actions: list[TriageAction]
+    dry_run: bool = False
+
+
+@dataclass
+class MaterializeActionResult:
+    """Result of a single materialization action."""
+
+    memory_id: int
+    action: str
+    success: bool
+    detail: str
+
+
+@dataclass
+class MaterializeResult:
+    """Result of a materialize_memories operation."""
+
+    processed: int
+    results: list[MaterializeActionResult]
+    summary: str
+
+
 class DataLayer(Protocol):
     """Protocol defining the data layer interface."""
 
@@ -203,3 +260,7 @@ class DataLayer(Protocol):
     async def refine_memories(self, params: RefineParams) -> RefineResult: ...
 
     async def delete_memories(self, params: DeleteParams) -> DeleteResult: ...
+
+    async def triage_memories(self, params: TriageParams) -> TriageResult: ...
+
+    async def materialize_memories(self, params: MaterializeParams) -> MaterializeResult: ...
