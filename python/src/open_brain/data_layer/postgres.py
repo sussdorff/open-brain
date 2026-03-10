@@ -761,7 +761,7 @@ class PostgresDataLayer:
                         (r["id1"], r["id2"]): float(r["similarity"]) for r in sim_rows
                     }
 
-        for action in actions:
+        for action in list(actions):
             if action.action != "merge":
                 continue
             if scope == "low-priority":
@@ -774,7 +774,11 @@ class PostgresDataLayer:
                     default=0.0,
                 )
                 action.similarity = min_sim
-                if min_sim >= 0.92:
+                if min_sim < 0.4:
+                    # Too dissimilar — likely a false positive from the LLM
+                    logger.info("Dropping merge %s — similarity %.3f below floor", ids, min_sim)
+                    actions.remove(action)
+                elif min_sim >= 0.92:
                     action.skip_llm_merge = True
 
         if not params.dry_run:
