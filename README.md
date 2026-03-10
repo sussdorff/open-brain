@@ -24,17 +24,23 @@ Layer 4: Agent orchestration
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/your-org/open-brain.git
+git clone https://github.com/sussdorff/open-brain.git
 cd open-brain
 
 # 2. Create your .env from the example
 cp .env.example .env
 # Edit .env — fill in VOYAGE_API_KEY, AUTH_PASSWORD, JWT_SECRET, MCP_SERVER_URL
 
-# 3. Start the stack
+# 3. (Optional) Use the pre-built image instead of building locally
+#    In docker-compose.yml, uncomment the image line and remove the build line:
+#      image: ghcr.io/sussdorff/open-brain:latest
+#    Or override inline:
+#      OPEN_BRAIN_IMAGE=ghcr.io/sussdorff/open-brain:latest docker compose up -d
+
+# 4. Start the stack
 docker compose up -d
 
-# 4. Verify
+# 5. Verify
 curl http://localhost:8091/health
 # {"status":"ok","service":"open-brain","runtime":"python"}
 ```

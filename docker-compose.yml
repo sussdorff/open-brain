@@ -18,6 +18,8 @@ services:
     restart: unless-stopped
 
   open-brain:
+    # Use pre-built image (faster startup):
+    # image: ghcr.io/sussdorff/open-brain:latest
     build: .
     env_file: .env
     environment:
