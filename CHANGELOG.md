@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Features
+
+- *(reranker)* Add Voyage Rerank-2.5 second-pass reranker
+
+## [2026.03.10] - 2026-03-10
+
 ### Bug Fixes
 
 - *(deploy)* Load OP service account token from /etc/op-service-account-token
@@ -10,6 +16,10 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - *(deploy)* Migrate to Docker Compose on services (LXC 116)
+
+### Miscellaneous
+
+- *(changelog)* Update for Docker Compose deployment
 
 ## [2026.03.9] - 2026-03-10
 
