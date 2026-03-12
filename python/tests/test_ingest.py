@@ -205,9 +205,10 @@ class TestApiContext:
 
     @pytest.mark.asyncio
     async def test_includes_session_summaries_when_present(self, api_client, mock_dl):
-        mock_dl.get_context.return_value = {
-            "sessions": [{"title": "Big refactor session", "content": "Refactored the data layer"}]
-        }
+        session_mem = _make_memory(
+            id=99, title="Big refactor session", type="session_summary"
+        )
+        mock_dl.search.return_value = SearchResult(results=[session_mem], total=1)
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             resp = await api_client.get("/api/context", headers=_api_headers())
         assert "Big refactor session" in resp.text
@@ -215,7 +216,6 @@ class TestApiContext:
     @pytest.mark.asyncio
     async def test_returns_empty_string_when_no_data(self, api_client, mock_dl):
         mock_dl.search.return_value = SearchResult(results=[], total=0)
-        mock_dl.get_context.return_value = {"sessions": []}
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             resp = await api_client.get("/api/context", headers=_api_headers())
         assert resp.status_code == 200
