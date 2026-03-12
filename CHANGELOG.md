@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(deploy)* Mount users.json into container for multi-user auth
+
+## [2026.03.23] - 2026-03-12
+
+### Bug Fixes
+
 - *(auth)* Use hmac.compare_digest for constant-time password comparison, eliminate redundant verify_token call
 - *(search)* Pre-constrain author filter in hybrid_search DB function
 
@@ -17,6 +23,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous
 
 - *(changelog)* Update for v2026.03.22
+- *(changelog)* Update for v2026.03.23
 
 ## [2026.03.22] - 2026-03-12
 
