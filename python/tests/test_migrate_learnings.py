@@ -213,10 +213,14 @@ class TestFullMetadataMapping:
         assert m["created_at"] is None
 
     def test_minimal_entry_does_not_crash(self):
-        """A truly minimal entry (just content) maps without error."""
+        """A truly minimal entry (just content) maps without error.
+
+        Entries without an id get a content-hash-based session_ref for idempotency.
+        """
         m = ml.map_entry(MINIMAL_ENTRY)
         assert m["content"] == MINIMAL_ENTRY["content"]
-        assert m["session_ref"] is None
+        assert m["session_ref"] is not None
+        assert m["session_ref"].startswith("lrn-")
         assert m["project"] is None
         assert m["created_at"] is None
 
