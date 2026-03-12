@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Features
+
+- *(api)* Add /api/session-capture endpoint for auto-capture hooks
+
+### Miscellaneous
+
+- Add .gitleaksignore for test JWT secret false positive
+
+## [2026.03.17] - 2026-03-12
+
 ### Miscellaneous
 
 - *(beads)* Research yju — AST feature spec for ob-smart-explore
