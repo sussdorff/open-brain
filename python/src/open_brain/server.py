@@ -854,6 +854,121 @@ Respond with ONLY valid JSON, no markdown fences."""
         logger.exception("Failed to process summarize")
 
 
+@app.post("/api/session-capture")
+async def api_session_capture(request: Request) -> JSONResponse:
+    """Extract observations from a conversation transcript and save them.
+
+    Body: {
+        "session_id": "abc123",
+        "project": "open-brain",
+        "conversation": "User: ... \nAssistant: ...",
+        "message_count": 15
+    }
+
+    Skips sessions with fewer than 3 user messages (rate limiting).
+    Returns 202, processes async.
+    """
+    body = await request.json()
+    message_count = body.get("message_count", 0)
+
+    if message_count < 3:
+        return JSONResponse({"status": "skipped", "reason": "too_few_messages"}, status_code=202)
+
+    asyncio.create_task(_process_session_capture(body))
+    return JSONResponse({"status": "accepted"}, status_code=202)
+
+
+async def _process_session_capture(body: dict) -> None:
+    """Background task: extract observations from conversation and save."""
+    try:
+        session_id = body.get("session_id", "")
+        project = body.get("project", "unknown")
+        conversation = body.get("conversation", "")
+
+        if not conversation.strip():
+            logger.warning("Session capture called with empty conversation")
+            return
+
+        # Truncate to ~8k chars to stay within Haiku context
+        if len(conversation) > 8000:
+            conversation = conversation[:4000] + "\n\n[...truncated...]\n\n" + conversation[-4000:]
+
+        extraction_prompt = f"""Analyze this coding conversation and extract the most important observations.
+
+Project: {project}
+Session ID: {session_id}
+
+Conversation:
+{conversation}
+
+Extract 1-5 observations (only things worth remembering for future sessions).
+Focus on: decisions made, problems solved, new knowledge gained, patterns discovered.
+Skip: routine operations, greetings, simple file reads, test runs with no issues.
+
+Respond with ONLY valid JSON (no markdown fences):
+{{
+  "observations": [
+    {{
+      "title": "short headline (max 80 chars)",
+      "type": "decision|discovery|bugfix|feature|refactor|change|learning",
+      "content": "2-4 sentences describing WHAT and WHY",
+      "narrative": "optional broader context (1-2 sentences, or null)"
+    }}
+  ],
+  "session_summary": {{
+    "title": "short session headline (max 80 chars)",
+    "content": "3-5 sentence summary of the session",
+    "narrative": "what was learned or discovered (1-2 sentences, or null)"
+  }}
+}}
+
+If nothing worth remembering happened, return: {{"observations": [], "session_summary": null}}"""
+
+        response = await llm_complete(
+            [LlmMessage(role="user", content=extraction_prompt)],
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1024,
+        )
+        result = _parse_llm_json(response)
+
+        dl = get_dl()
+
+        # Save individual observations
+        for obs in result.get("observations", []):
+            await dl.save_memory(
+                SaveMemoryParams(
+                    text=obs["content"],
+                    type=obs.get("type", "discovery"),
+                    project=project,
+                    title=obs.get("title"),
+                    narrative=obs.get("narrative"),
+                    session_ref=session_id,
+                )
+            )
+
+        # Save session summary
+        summary = result.get("session_summary")
+        if summary and summary.get("content"):
+            await dl.save_memory(
+                SaveMemoryParams(
+                    text=summary["content"],
+                    type="session_summary",
+                    project=project,
+                    title=summary.get("title", "Session summary"),
+                    narrative=summary.get("narrative"),
+                    session_ref=session_id,
+                )
+            )
+
+        obs_count = len(result.get("observations", []))
+        logger.info(
+            "Session capture: %d observations + summary for %s [%s]",
+            obs_count, session_id, project,
+        )
+    except Exception:
+        logger.exception("Failed to process session capture")
+
+
 @app.delete("/api/memories")
 async def api_delete_memories(request: Request) -> JSONResponse:
     """Delete memories by IDs or by filter (project + type + before).
