@@ -838,31 +838,37 @@ class PostgresDataLayer:
         limit = params.limit or 50
         scope = params.scope or "recent"
 
+        # Exclude memories already processed (materialized/discarded)
+        _lifecycle_filter = (
+            "AND (metadata->>'status' IS NULL "
+            "OR metadata->>'status' NOT IN ('materialized', 'discarded'))"
+        )
+
         async with pool.acquire() as conn:
             if scope.startswith("project:"):
                 project = scope[8:]
                 index_id = await self._resolve_index_id(conn, project)
                 rows = await conn.fetch(
-                    "SELECT * FROM memories WHERE index_id = $1 ORDER BY created_at DESC LIMIT $2",
+                    f"SELECT * FROM memories WHERE index_id = $1 {_lifecycle_filter} ORDER BY created_at DESC LIMIT $2",
                     index_id or 1,
                     limit,
                 )
             elif scope.startswith("type:"):
                 mem_type = scope[5:]
                 rows = await conn.fetch(
-                    "SELECT * FROM memories WHERE type = $1 ORDER BY created_at DESC LIMIT $2",
+                    f"SELECT * FROM memories WHERE type = $1 {_lifecycle_filter} ORDER BY created_at DESC LIMIT $2",
                     mem_type,
                     limit,
                 )
             elif scope == "low-priority":
                 rows = await conn.fetch(
-                    "SELECT * FROM memories WHERE priority < 0.2 ORDER BY priority ASC LIMIT $1",
+                    f"SELECT * FROM memories WHERE priority < 0.2 {_lifecycle_filter} ORDER BY priority ASC LIMIT $1",
                     limit,
                 )
             else:
                 # "recent" — last N memories
                 rows = await conn.fetch(
-                    "SELECT * FROM memories ORDER BY created_at DESC LIMIT $1", limit
+                    f"SELECT * FROM memories WHERE 1=1 {_lifecycle_filter} ORDER BY created_at DESC LIMIT $1", limit
                 )
             candidates = [_row_to_memory(r) for r in rows]
 
