@@ -150,16 +150,28 @@ class OAuthProvider:
             On failure, redirect_url contains error parameters.
             On success, redirect_url contains the authorization code.
         """
+        import bcrypt
         import hmac
         users_map = get_users_map()
         stored = users_map.get(username)
-        if stored is None or not hmac.compare_digest(stored, password):
-            error_url = _build_url(redirect_uri, {
-                "error": "access_denied",
-                "error_description": "Invalid credentials",
-            })
-            if state:
-                error_url = _append_param(error_url, "state", state)
+        error_url = _build_url(redirect_uri, {
+            "error": "access_denied",
+            "error_description": "Invalid credentials",
+        })
+        if state:
+            error_url = _append_param(error_url, "state", state)
+        if stored is None:
+            # Prevent timing oracle on unknown usernames
+            bcrypt.checkpw(b"dummy", bcrypt.hashpw(b"dummy", bcrypt.gensalt()))
+            return False, error_url
+
+        # Detect hash type: bcrypt hashes start with $2b$, $2a$, or $2y$
+        if stored.startswith(("$2b$", "$2a$", "$2y$")):
+            valid = bcrypt.checkpw(password.encode("utf-8"), stored.encode("utf-8"))
+        else:
+            valid = hmac.compare_digest(stored, password)
+
+        if not valid:
             return False, error_url
 
         code = secrets.token_hex(32)

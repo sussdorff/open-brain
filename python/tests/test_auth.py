@@ -399,32 +399,37 @@ class TestMultiUserAuth:
     def test_get_users_map_loads_users_file(self, monkeypatch, tmp_path):
         """When USERS_FILE points to a valid JSON file, loads those users."""
         import json
+        import bcrypt
         import open_brain.config as config_module
+        alice_hash = bcrypt.hashpw(b"alicepass", bcrypt.gensalt()).decode()
+        bob_hash = bcrypt.hashpw(b"bobpass", bcrypt.gensalt()).decode()
         users_file = tmp_path / "users.json"
         users_file.write_text(json.dumps([
-            {"username": "alice", "password": "alicepass"},
-            {"username": "bob", "password": "bobpass"},
+            {"username": "alice", "password": alice_hash},
+            {"username": "bob", "password": bob_hash},
         ]))
         config_module._config = None
         monkeypatch.setenv("USERS_FILE", str(users_file))
         from open_brain.config import get_users_map
         users_map = get_users_map()
         assert "alice" in users_map
-        assert users_map["alice"] == "alicepass"
+        assert users_map["alice"] == alice_hash
         assert "bob" in users_map
-        assert users_map["bob"] == "bobpass"
+        assert users_map["bob"] == bob_hash
 
     def test_get_users_map_single_entry_in_file(self, monkeypatch, tmp_path):
         """Single user in users.json is parsed correctly."""
         import json
+        import bcrypt
         import open_brain.config as config_module
+        charlie_hash = bcrypt.hashpw(b"charliepass", bcrypt.gensalt()).decode()
         users_file = tmp_path / "users.json"
-        users_file.write_text(json.dumps([{"username": "charlie", "password": "charliepass"}]))
+        users_file.write_text(json.dumps([{"username": "charlie", "password": charlie_hash}]))
         config_module._config = None
         monkeypatch.setenv("USERS_FILE", str(users_file))
         from open_brain.config import get_users_map
         users_map = get_users_map()
-        assert users_map == {"charlie": "charliepass"}
+        assert users_map == {"charlie": charlie_hash}
 
     def test_get_users_map_fallback_when_file_missing(self, monkeypatch):
         """When USERS_FILE path doesn't exist, falls back to AUTH_USER/AUTH_PASSWORD."""
@@ -439,11 +444,12 @@ class TestMultiUserAuth:
     def test_handle_login_submit_multi_user_success(self, oauth_provider, monkeypatch, tmp_path):
         """Multi-user: second user can log in when users.json is present."""
         import json
+        import bcrypt
         import open_brain.config as config_module
         users_file = tmp_path / "users.json"
         users_file.write_text(json.dumps([
-            {"username": "alice", "password": "alicepass"},
-            {"username": "bob", "password": "bobpass"},
+            {"username": "alice", "password": bcrypt.hashpw(b"alicepass", bcrypt.gensalt()).decode()},
+            {"username": "bob", "password": bcrypt.hashpw(b"bobpass", bcrypt.gensalt()).decode()},
         ]))
         config_module._config = None
         monkeypatch.setenv("USERS_FILE", str(users_file))
@@ -462,11 +468,12 @@ class TestMultiUserAuth:
     def test_handle_login_submit_multi_user_wrong_password(self, oauth_provider, monkeypatch, tmp_path):
         """Multi-user: wrong password for a valid username is rejected."""
         import json
+        import bcrypt
         import open_brain.config as config_module
         users_file = tmp_path / "users.json"
         users_file.write_text(json.dumps([
-            {"username": "alice", "password": "alicepass"},
-            {"username": "bob", "password": "bobpass"},
+            {"username": "alice", "password": bcrypt.hashpw(b"alicepass", bcrypt.gensalt()).decode()},
+            {"username": "bob", "password": bcrypt.hashpw(b"bobpass", bcrypt.gensalt()).decode()},
         ]))
         config_module._config = None
         monkeypatch.setenv("USERS_FILE", str(users_file))
@@ -485,9 +492,10 @@ class TestMultiUserAuth:
     def test_handle_login_submit_multi_user_unknown_user(self, oauth_provider, monkeypatch, tmp_path):
         """Multi-user: unknown username is rejected."""
         import json
+        import bcrypt
         import open_brain.config as config_module
         users_file = tmp_path / "users.json"
-        users_file.write_text(json.dumps([{"username": "alice", "password": "alicepass"}]))
+        users_file.write_text(json.dumps([{"username": "alice", "password": bcrypt.hashpw(b"alicepass", bcrypt.gensalt()).decode()}]))
         config_module._config = None
         monkeypatch.setenv("USERS_FILE", str(users_file))
         success, redirect_url = oauth_provider.handle_login_submit(
@@ -523,11 +531,12 @@ class TestMultiUserAuth:
     def test_exchange_authorization_code_encodes_second_user_sub(self, oauth_provider, monkeypatch, tmp_path):
         """JWT sub claim correctly reflects the second user's username."""
         import json
+        import bcrypt
         import open_brain.config as config_module
         users_file = tmp_path / "users.json"
         users_file.write_text(json.dumps([
-            {"username": "alice", "password": "alicepass"},
-            {"username": "bob", "password": "bobpass"},
+            {"username": "alice", "password": bcrypt.hashpw(b"alicepass", bcrypt.gensalt()).decode()},
+            {"username": "bob", "password": bcrypt.hashpw(b"bobpass", bcrypt.gensalt()).decode()},
         ]))
         config_module._config = None
         monkeypatch.setenv("USERS_FILE", str(users_file))
