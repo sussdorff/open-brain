@@ -16,6 +16,7 @@ All notable changes to this project will be documented in this file.
 - *(data-layer)* Add metadata parameter to save_memory, update_memory, and search
 - *(ob-triage)* Add status tracking after promote/discard actions
 - *(scripts)* Add migrate_learnings.py with complete JSONL→open-brain field mapping
+- *(plugin)* Add ob-smart-explore skills (search/outline/unfold)
 
 ### Miscellaneous
 
