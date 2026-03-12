@@ -3,6 +3,26 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Bug Fixes
+
+- *(plugin)* Remove duplicate hooks reference from plugin.json
+
+### Documentation
+
+- *(ob-triage)* Document learning lifecycle in SKILL.md
+
+### Features
+
+- *(data-layer)* Add metadata parameter to save_memory, update_memory, and search
+- *(ob-triage)* Add status tracking after promote/discard actions
+- *(scripts)* Add migrate_learnings.py with complete JSONL→open-brain field mapping
+
+### Miscellaneous
+
+- *(changelog)* Update for v2026.03.18
+
+## [2026.03.18] - 2026-03-12
+
 ### Features
 
 - *(api)* Add /api/session-capture endpoint for auto-capture hooks
