@@ -3,9 +3,19 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Miscellaneous
+
+- *(deps)* Bun update — fix express-rate-limit high vuln, hono moderate vuln
+
+## [2026.03.24] - 2026-03-12
+
 ### Bug Fixes
 
 - *(deploy)* Mount users.json into container for multi-user auth
+
+### Miscellaneous
+
+- *(changelog)* Update for v2026.03.24
 
 ## [2026.03.23] - 2026-03-12
 
