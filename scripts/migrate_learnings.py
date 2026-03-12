@@ -119,9 +119,19 @@ def map_entry(entry: dict) -> dict:
       content, session_ref, project, created_at, metadata
     """
     raw_id: str = entry.get("id", "")
-    # IDs in the JSONL are already prefixed (e.g. 'lrn-abc123').
+    # IDs in the JSONL may have various prefixes (lrn-, learn-, learning-, or hash-based).
     # Use them directly as session_ref for idempotency.
-    session_ref = raw_id if raw_id else None
+    # Fallback: generate from content_hash or content for entries without id.
+    if raw_id:
+        session_ref = raw_id
+    else:
+        content_hash = entry.get("content_hash", "")
+        if content_hash:
+            session_ref = f"lrn-{content_hash[:8]}"
+        else:
+            import hashlib
+            content = entry.get("content", "")
+            session_ref = f"lrn-{hashlib.sha256(content.encode()).hexdigest()[:8]}"
 
     content: str = entry.get("content", "")
 
@@ -189,9 +199,9 @@ async def resolve_index_id(conn: asyncpg.Connection, project: str | None) -> int
 
 
 async def get_existing_session_refs(conn: asyncpg.Connection) -> set[str]:
-    """Return all session_refs already in the DB that start with 'lrn:'."""
+    """Return all session_refs already in the DB for type='learning'."""
     rows = await conn.fetch(
-        "SELECT session_ref FROM memories WHERE session_ref LIKE 'lrn-%'"
+        "SELECT session_ref FROM memories WHERE type = 'learning' AND session_ref IS NOT NULL"
     )
     return {r["session_ref"] for r in rows}
 
