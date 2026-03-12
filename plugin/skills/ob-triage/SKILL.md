@@ -209,15 +209,44 @@ First argument (optional) sets the scope:
 - `scope:low-priority` — low-priority / stale memories
 - `limit:<n>` — max number of memories to triage
 
+## Learning Lifecycle
+
+open-brain is the Single Source of Truth for all learnings. The full lifecycle of a learning:
+
+```
+save_memory(type="learning")          →  status: open (default)
+      │
+      ▼
+/ob-triage type:learning              →  review each learning interactively
+      │
+      ├─ Promote → materialized      →  update_memory(metadata={'status': 'materialized',
+      │                                                          'materialized_to': '<target>'})
+      │            Write to target (CLAUDE.md, standards/, skill, bead)
+      │
+      └─ Discard → discarded         →  update_memory(metadata={'status': 'discarded',
+                                                                 'discard_reason': '<reason>'})
+                   Archive or delete the memory
+```
+
+### Workflow for `/ob-triage type:learning`
+
+When the user runs `/ob-triage type:learning`, the triage presents all learnings with
+`status: open` for review. Each learning gets its own `AskUserQuestion` call (Promote flow,
+see above) because learnings always need an explicit materialization target or discard reason.
+
+**Never batch learnings** — each one must be individually reviewed and routed to:
+- A CLAUDE.md section (project or global)
+- A standards file
+- A skill's SKILL.md
+- A bead (for actionable follow-up work)
+- Discarded (if superseded, duplicate, or no longer relevant)
+
+After every promote or discard, update the memory's `status` metadata so it no longer
+appears in future `/ob-triage type:learning` runs.
+
 ## Integration with learnings-pipeline
 
-This skill replaces the `review` phase of the `learnings-pipeline` skill.
-The extraction phase (`/learnings-pipeline extract`) remains unchanged but should
-write to open-brain via `save_memory` instead of `learnings.jsonl`.
-
-For migration of existing learnings.jsonl entries, use:
-```
-/ob-triage migrate-learnings
-```
-This imports all entries from `~/.claude/learnings/learnings.jsonl` into open-brain
-as type "learning" and marks the JSONL entries as migrated.
+open-brain is the Single Source of Truth for all learnings. The `learnings-pipeline` skill's
+extraction phase (`/learnings-pipeline extract`) writes new learnings directly to open-brain
+via `save_memory(type="learning")`. The review phase is handled entirely by this skill
+(`/ob-triage type:learning`) — no separate review step in `learnings-pipeline` is needed.
