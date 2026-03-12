@@ -69,7 +69,11 @@ Actions and when to use them:
 - "archive": transient or low-value memory (e.g. session summaries, outdated observations)
 
 Type-specific guidance:
-- "learning" type → prefer "promote" (extract to standards) or "keep" if already well-known
+- "learning" type:
+  - "promote" if it's a reusable workflow pattern, best practice, or convention applicable across projects
+  - "keep" if it's domain-specific knowledge (billing rules, DB schemas, API quirks) — valuable as searchable reference but not a standard
+  - "archive" if it states something already implemented or no longer actionable ("already mapped", "no change needed")
+  - "merge" if it overlaps significantly with another learning in this batch
 - "session_summary" type → prefer "archive" unless it contains critical decisions
 - "observation" type → prefer "keep" or "merge" if duplicate; "scaffold" if it describes a todo
 
