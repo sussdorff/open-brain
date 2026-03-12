@@ -3,9 +3,16 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Features
+
+- *(cli)* Add ob CLI wrapper for open-brain MCP tools
+
+## [2026.03.25] - 2026-03-12
+
 ### Miscellaneous
 
 - *(deps)* Bun update — fix express-rate-limit high vuln, hono moderate vuln
+- *(changelog)* Update for v2026.03.25
 
 ## [2026.03.24] - 2026-03-12
 
