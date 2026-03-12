@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Added
+- MIT LICENSE file
+- CONTRIBUTING.md, SECURITY.md, CODE_OF_CONDUCT.md
+- Architecture documentation with diagrams (`docs/architecture.md`)
+- This CHANGELOG reformatted for public consumption
+
+### Changed
+- Scrubbed internal infrastructure references from documentation for OSS readiness
+- Expanded `.gitignore` (`.beads/`, `.claude/`, `.pytest_cache/`, `.coverage`, `.venv/`)
+
 ### Bug Fixes
 
 - *(tests)* Update minimal_entry test to expect content-hash session_ref

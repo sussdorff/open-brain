@@ -3,7 +3,7 @@
 
 services:
   postgres:
-    image: pgvector/pgvector:pg17
+    image: pgvector/pgvector:pg18-bookworm
     environment:
       POSTGRES_USER: open_brain
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}

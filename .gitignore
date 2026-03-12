@@ -6,8 +6,18 @@ logs/
 *.log
 __pycache__/
 *.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
 
 # Dolt database files (added by bd init)
 .dolt/
 *.db
 src-ts-DEPRECATED/
+
+# Beads issue tracker (local, syncs via Dolt)
+.beads/
+
+# Claude Code user config
+.claude/

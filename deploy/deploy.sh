@@ -1,9 +1,9 @@
 #!/bin/bash
-# Deploy open-brain on the server (run via SSH or directly on LXC 116)
+# Deploy open-brain on the server
 set -euo pipefail
 
 export PATH="$HOME/.local/bin:$PATH"
-REPO_DIR="/opt/open-brain"
+REPO_DIR="${OPEN_BRAIN_DIR:-/opt/open-brain}"
 
 cd "$REPO_DIR"
 

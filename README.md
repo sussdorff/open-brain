@@ -1,190 +1,232 @@
 # open-brain
 
-A production-grade MCP (Model Context Protocol) memory server that gives AI assistants long-term, searchable memory across sessions. Built on Postgres + pgvector with hybrid search (vector + full-text), OAuth 2.1 authentication, and a configurable LLM backend.
+[![CI](https://github.com/sussdorff/open-brain/actions/workflows/ci.yml/badge.svg)](https://github.com/sussdorff/open-brain/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/)
+[![MCP](https://img.shields.io/badge/protocol-MCP-green.svg)](https://modelcontextprotocol.io/)
 
-## Architecture
+A pluggable MCP memory server that gives AI assistants long-term, searchable memory across sessions and projects.
 
-open-brain is Layer 2 in a 4-layer knowledge system:
+**The problem:** AI assistants forget everything between sessions. They can't retain learnings, recall past decisions, or build on previous work. When you're running multiple agents across multiple projects, context is constantly lost.
+
+**open-brain solves this** by providing a shared memory layer that any MCP-compatible assistant can read from and write to — with hybrid search (vector + full-text), human-in-the-loop triage, and a memory lifecycle that promotes valuable learnings into persistent artifacts like coding standards, skills, or project documentation.
+
+## How It Works
 
 ```
-Layer 1: Raw data / documents
-Layer 2: open-brain (this project) — semantic memory, observations, session summaries
-Layer 3: Knowledge graph / structured reasoning
-Layer 4: Agent orchestration
+  AI Assistant (Claude Code, IDE, etc.)
+       │
+       │  MCP protocol
+       ▼
+  ┌─────────────────────────┐
+  │     open-brain Server    │
+  │                         │
+  │  save ──► embed ──► search
+  │                    ▲
+  │  refine (auto)     │
+  │  triage (human) ───┘
+  │  materialize ──► files, issues, standards
+  └──────────┬──────────────┘
+             │
+             ▼
+  Postgres + pgvector + Voyage-4
 ```
 
-**Stack:**
-- **Storage**: Postgres 17 + pgvector (1024-dim embeddings)
-- **Embeddings**: Voyage AI (`voyage-4`) — 14% better retrieval than OpenAI text-embedding-3-small
-- **Search**: Hybrid (cosine similarity + tsvector FTS via Reciprocal Rank Fusion)
-- **Transport**: Streamable HTTP (MCP spec), OAuth 2.1
-- **LLM**: Configurable — Anthropic Claude or OpenRouter (used for `refine_memories`)
+1. **Save**: Observations, learnings, and session summaries are stored with embeddings
+2. **Search**: Hybrid search combines keyword matching (FTS) and semantic similarity (pgvector) via Reciprocal Rank Fusion
+3. **Refine**: Automatic consolidation — finds duplicates, merges similar memories, adjusts priority
+4. **Triage**: Human-in-the-loop review — classify memories as keep, merge, promote, or archive
+5. **Materialize**: Write approved learnings to their target — project docs, coding standards, work items
 
-## Quick Start (Standalone Docker Compose)
+See [docs/architecture.md](docs/architecture.md) for detailed diagrams and technical deep-dives.
+
+## Quick Start
+
+### Docker Compose (recommended)
 
 ```bash
-# 1. Clone the repo
 git clone https://github.com/sussdorff/open-brain.git
 cd open-brain
 
-# 2. Create your .env from the example
+# Create .env from template
 cp .env.example .env
 # Edit .env — fill in VOYAGE_API_KEY, AUTH_PASSWORD, JWT_SECRET, MCP_SERVER_URL
 
-# 3. (Optional) Use the pre-built image instead of building locally
-#    In docker-compose.yml, uncomment the image line and remove the build line:
-#      image: ghcr.io/sussdorff/open-brain:latest
-#    Or override inline:
-#      OPEN_BRAIN_IMAGE=ghcr.io/sussdorff/open-brain:latest docker compose up -d
-
-# 4. Start the stack
+# Start the stack (Postgres + open-brain)
 docker compose up -d
 
-# 5. Verify
+# Verify
 curl http://localhost:8091/health
 # {"status":"ok","service":"open-brain","runtime":"python"}
 ```
 
-**For 1Password users:**
+### Pre-built Image
+
 ```bash
-op run --env-file=.env.tpl -- docker compose up -d
+OPEN_BRAIN_IMAGE=ghcr.io/sussdorff/open-brain:latest docker compose up -d
+```
+
+### Connect Claude Code
+
+Add to your Claude Code MCP config:
+
+```json
+{
+  "mcpServers": {
+    "open-brain": {
+      "type": "streamable-http",
+      "url": "https://your-server.example.com/mcp"
+    }
+  }
+}
 ```
 
 ## Configuration
 
-All configuration is via environment variables (loaded from `.env` or injected by your orchestrator).
+All configuration is via environment variables (`.env` file or injected by your orchestrator).
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `MCP_SERVER_URL` | Yes | — | Public HTTPS URL of this server (e.g. `https://brain.example.com`) |
-| `DATABASE_URL` | Yes | `postgresql://open_brain:password@localhost:5432/open_brain` | Postgres connection string |
-| `AUTH_USER` | Yes | — | Username for the OAuth login form |
+| `MCP_SERVER_URL` | Yes | — | Public HTTPS URL of this server |
+| `DATABASE_URL` | Yes | `postgresql://...localhost` | Postgres connection string |
+| `AUTH_USER` | Yes | — | Username for OAuth login |
 | `AUTH_PASSWORD` | Yes | — | Password (min 8 chars) |
-| `JWT_SECRET` | Yes | — | Secret for JWT signing (min 32 chars, use a random hex string) |
-| `CLIENTS_FILE` | No | `/app/clients.json` (Docker) | Path to the OAuth clients JSON file |
-| `PORT` | No | `8091` | Port to listen on |
-| `VOYAGE_API_KEY` | Yes | — | Voyage AI API key for embeddings |
-| `VOYAGE_MODEL` | No | `voyage-4` | Voyage embedding model |
-| `LLM_PROVIDER` | No | `anthropic` | LLM for metadata extraction: `anthropic` or `openrouter` |
-| `LLM_MODEL` | No | `claude-haiku-4-5-20251001` | Model name (must match the provider) |
-| `ANTHROPIC_API_KEY` | Conditional | — | Required when `LLM_PROVIDER=anthropic` |
-| `OPENROUTER_API_KEY` | Conditional | — | Required when `LLM_PROVIDER=openrouter` |
+| `JWT_SECRET` | Yes | — | JWT signing secret (min 32 chars) |
+| `VOYAGE_API_KEY` | Yes | — | [Voyage AI](https://www.voyageai.com/) API key |
+| `VOYAGE_MODEL` | No | `voyage-4` | Embedding model |
+| `LLM_PROVIDER` | No | `anthropic` | `anthropic` or `openrouter` |
+| `LLM_MODEL` | No | `claude-haiku-4-5-20251001` | Model for refine/triage |
+| `ANTHROPIC_API_KEY` | Cond. | — | Required when `LLM_PROVIDER=anthropic` |
+| `OPENROUTER_API_KEY` | Cond. | — | Required when `LLM_PROVIDER=openrouter` |
+| `PORT` | No | `8091` | Server port |
+| `CLIENTS_FILE` | No | `/app/clients.json` | OAuth client registry path |
 
-See `.env.example` for a ready-to-copy template with comments.
+See `.env.example` for a complete template with comments.
 
-## MCP Tools Reference
+## MCP Tools
 
-AI assistants access memory through these MCP tools. The recommended workflow is a 3-step funnel that minimizes token usage:
+AI assistants interact with memory through MCP tools. The recommended workflow is a **3-step funnel** that minimizes token usage:
 
 ```
-search(query)          ->  index with IDs (~50-100 tokens/result)
-  timeline(anchor=ID)  ->  context around interesting results
-    get_observations([IDs])  ->  full details ONLY for filtered IDs
+search(query)          →  compact index with IDs (~50-100 tokens/result)
+  timeline(anchor=ID)  →  context around interesting results
+    get_observations([IDs])  →  full details ONLY for what you need
 ```
 
 ### Memory Access
 
 | Tool | Description |
 |---|---|
-| `__IMPORTANT` | Workflow reminder — always call this first to load the 3-step pattern |
-| `search` | Step 1: Hybrid search (vector + FTS). Supports filtering by `project`, `type`, `obs_type`, date range, `file_path`. Omit query for browse mode. |
-| `timeline` | Step 2: Context around a result. Anchor mode (by ID) or date-window mode. Shows N memories before/after. |
-| `get_observations` | Step 3: Fetch full details for a list of IDs. Only call after filtering via search/timeline. |
-| `search_by_concept` | Pure vector search across memories (no FTS). Good for conceptual/"what did I learn about X?" queries. |
-| `get_context` | Get recent session summaries. Useful at conversation start. |
-| `stats` | DB statistics: memory count, sessions, DB size, type taxonomy with counts. |
+| `search` | Hybrid search (vector + FTS). Filter by `project`, `type`, date range, `file_path`. Omit query for browse mode. |
+| `timeline` | Context around a result (anchor mode by ID) or date window. |
+| `get_observations` | Fetch full details for a list of IDs. |
+| `search_by_concept` | Pure vector search — good for "what did I learn about X?" |
+| `get_context` | Recent session summaries — useful at conversation start. |
+| `stats` | Database statistics: memory count, type taxonomy, DB size. |
 
 ### Memory Writing
 
 | Tool | Description |
 |---|---|
-| `save_memory` | Save a new observation. `text` is the primary content (embedded + searched). `project` is required. `type` should reuse existing vocabulary (check `stats()` first). Optional: `title`, `subtitle`, `narrative`, `session_ref`. |
-| `update_memory` | Update an existing memory by ID. Only provided fields are changed. Re-embeds automatically when content changes. |
-| `refine_memories` | LLM-powered consolidation: deduplication, merging, cleanup. Supports `scope`, `limit`, `dry_run`. |
+| `save_memory` | Store an observation. `text` + `project` required. Auto-embeds async. |
+| `update_memory` | Update fields on an existing memory. Re-embeds if content changes. |
+| `refine_memories` | Automatic consolidation: dedup, merge, priority adjustment. |
+| `triage_memories` | Human-in-the-loop classification into lifecycle actions. |
+| `materialize_memories` | Execute triage actions (promote to docs, create issues, archive). |
 
-### Memory Types (conventional vocabulary)
+### Memory Types
 
-`discovery`, `change`, `feature`, `decision`, `bugfix`, `refactor`, `session_summary`
+`discovery`, `change`, `feature`, `decision`, `bugfix`, `refactor`, `session_summary`, `learning`
 
-New types are allowed when none of the above fit. Check `stats()` to see what exists before inventing new ones.
+New types are allowed when none fit. Check `stats()` to see existing vocabulary.
 
-## Mira Integration
+## Multi-User
 
-open-brain is designed to be embedded into larger Docker Compose stacks via the `include:` feature (Docker Compose v2.20+).
+open-brain currently supports a **single user** per instance (one `AUTH_USER` / `AUTH_PASSWORD` pair). Multiple MCP clients can connect simultaneously via OAuth or API keys, but all share the same memory pool.
 
-**In your project's `docker-compose.yml`:**
+Memory is segmented by `project`, not by user. This works well for individual use or small teams where shared context is the goal.
+
+**Planned**: Shared memory with user attribution — memories tagged by author, visible to all authenticated users, filterable by contributor.
+
+## Claude Code Plugin
+
+The plugin provides **automatic memory capture** — no manual MCP calls needed:
+
+- **Session start**: Injects recent memories and session summaries as narrative context
+- **Session end**: Generates and saves a session summary from recent observations
+
+Install:
+```bash
+claude plugin add /path/to/open-brain/plugin
+```
+
+See [plugin/](plugin/) for configuration details.
+
+## Embedding into Existing Stacks
+
+open-brain can be embedded into larger Docker Compose stacks via `include:`:
+
 ```yaml
 include:
   - path: ../open-brain/docker-compose.service.yml
 
 services:
   your-app:
-    # ...
     depends_on:
       - open-brain
 ```
 
-**Requirements:**
-- Set `DATABASE_URL` in open-brain's `.env` to point at your existing Postgres instance
-- open-brain's `.env` file must exist at the path relative to `docker-compose.service.yml`
-- open-brain exposes port `8091`
-
-The `docker-compose.service.yml` contains only the `open-brain` service (no Postgres), making it suitable for stacks that provide their own database.
+The `docker-compose.service.yml` contains only the open-brain service (no Postgres) — bring your own database.
 
 ## Development
 
 ```bash
-# Install dependencies
 cd python
 uv sync --dev
 
-# Run tests (no external services needed)
+# Unit tests (no external services)
 uv run pytest -m "not integration"
 
-# Run all tests (requires VOYAGE_API_KEY env var)
+# All tests (needs VOYAGE_API_KEY)
 uv run pytest
 
-# Run the server locally
+# Run locally
 uv run python -m open_brain
 ```
 
-**Health check:**
+## Deployment
+
 ```bash
-curl http://localhost:8091/health
+# Standalone (includes Postgres)
+docker compose up -d
+
+# Service-only (bring your own Postgres)
+docker compose -f docker-compose.service.yml up --build -d
 ```
 
-## Deployment (Production)
-
-The production server runs on LXC 116 via systemd + 1Password secret injection.
+Secrets can be injected via `.env`, environment variables, or a secrets manager:
 
 ```bash
-# After git push — SSH into the server and deploy
-ssh services /opt/open-brain/deploy/deploy.sh
-
-# Verify
-ssh services 'curl -s http://localhost:8091/health'
-```
-
-### 1Password Integration
-
-Secrets are injected at startup via `op run` and never written to disk:
-
-```bash
-# .env.tpl references 1Password items:
-# DATABASE_URL=op://vault/open-brain/DATABASE_URL
-# VOYAGE_API_KEY=op://vault/open-brain/VOYAGE_API_KEY
-# ...
-
+# 1Password example
 op run --env-file=.env.tpl -- docker compose up -d
 ```
 
 ### OAuth Client Registration
 
-Clients are registered dynamically via the `/register` endpoint (RFC 7591) or statically via `clients.json`. In Docker, mount your clients file:
+Clients register dynamically via `/register` (RFC 7591) or statically via `clients.json`:
 
 ```yaml
 volumes:
   - ./clients.json:/app/clients.json:ro
 ```
 
-The `CLIENTS_FILE` env var controls where open-brain looks for static client registrations. Defaults to `/app/clients.json` in Docker.
+## Documentation
+
+- [Architecture & Diagrams](docs/architecture.md) — system design, hybrid search, memory lifecycle, auth flow
+- [Contributing](CONTRIBUTING.md) — development setup, PR process, coding guidelines
+- [Security](SECURITY.md) — vulnerability reporting, security considerations
+- [Changelog](CHANGELOG.md) — version history
+
+## License
+
+[MIT](LICENSE)

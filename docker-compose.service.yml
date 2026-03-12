@@ -1,9 +1,9 @@
 # open-brain — service-only compose file for embedding into existing stacks
 #
-# Usage: op run --env-file=.env.tpl -- docker compose -f docker-compose.service.yml up --build -d
+# Usage: docker compose -f docker-compose.service.yml up --build -d
 #
-# Connects to existing external network (services_default) where elysium-postgres lives.
-# All secrets are injected via op run from .env.tpl — no .env file needed on disk.
+# Connects to an existing external Docker network where your Postgres instance lives.
+# Configure the network name below to match your setup.
 
 services:
   open-brain:
