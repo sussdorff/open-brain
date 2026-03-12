@@ -3,20 +3,30 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
-### Added
-- MIT LICENSE file
-- CONTRIBUTING.md, SECURITY.md, CODE_OF_CONDUCT.md
-- Architecture documentation with diagrams (`docs/architecture.md`)
-- This CHANGELOG reformatted for public consumption
+### Bug Fixes
 
-### Changed
-- Scrubbed internal infrastructure references from documentation for OSS readiness
-- Expanded `.gitignore` (`.beads/`, `.claude/`, `.pytest_cache/`, `.coverage`, `.venv/`)
+- *(triage)* Nuanced learning classification prompt
+- *(triage)* Exclude materialized/discarded memories from triage queries
+- *(tests)* Update context endpoint tests to match search-based implementation
+
+### Features
+
+- *(context)* Narrative summary instead of raw table for session startup
+
+### Miscellaneous
+
+- *(oss)* Prepare repository for public release
+
+## [2026.03.21] - 2026-03-12
 
 ### Bug Fixes
 
 - *(tests)* Update minimal_entry test to expect content-hash session_ref
 - *(triage)* Fix LLM classification — increase max_tokens and handle string IDs
+
+### Miscellaneous
+
+- *(changelog)* Update for v2026.03.21
 
 ## [2026.03.20] - 2026-03-12
 
