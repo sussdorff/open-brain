@@ -7,6 +7,5 @@
   },
   "repository": "https://github.com/sussdorff/open-brain",
   "license": "MIT",
-  "keywords": ["memory", "context", "persistence", "hooks", "observations"],
-  "hooks": "./hooks/hooks.json"
+  "keywords": ["memory", "context", "persistence", "hooks", "observations"]
 }
