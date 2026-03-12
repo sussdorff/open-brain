@@ -18,6 +18,9 @@ class Config(BaseSettings):
     AUTH_PASSWORD: str
     JWT_SECRET: str
     CLIENTS_FILE: str = "/opt/open-brain/clients.json"
+    # Path to users.json file for multi-user auth. NOT in git — managed on the server.
+    # Format: [{"username": "alice", "password": "secret"}, ...]
+    USERS_FILE: str = "/opt/open-brain/users.json"
     VOYAGE_API_KEY: str
     VOYAGE_MODEL: str = "voyage-4"
     RERANK_ENABLED: bool = True
@@ -25,9 +28,6 @@ class Config(BaseSettings):
 
     # API key auth for plugin hooks (comma-separated list of valid keys)
     API_KEYS: str = ""
-
-    # Multi-user auth: "user1:pass1,user2:pass2". If empty, falls back to AUTH_USER/AUTH_PASSWORD.
-    USERS: str = ""
 
     # LLM for metadata extraction / refinement
     LLM_PROVIDER: Literal["anthropic", "openrouter"] = "anthropic"
@@ -66,16 +66,32 @@ def get_config() -> Config:
 def get_users_map() -> dict[str, str]:
     """Return a username→password map for authentication.
 
-    If USERS env var is set (format: ``user1:pass1,user2:pass2``), parse it.
-    Otherwise fall back to single-user AUTH_USER / AUTH_PASSWORD.
+    If USERS_FILE exists on disk, load it and parse as JSON array:
+    ``[{"username": "alice", "password": "secret"}, ...]``
+
+    If the file does not exist or cannot be read, fall back to the single-user
+    AUTH_USER / AUTH_PASSWORD env vars.
+
+    The users.json file is NOT in git — it is managed directly on the server,
+    analogous to clients.json.
     """
+    import json
+    import logging
+    from pathlib import Path
+
+    logger = logging.getLogger(__name__)
     config = get_config()
-    if config.USERS.strip():
-        users: dict[str, str] = {}
-        for entry in config.USERS.split(","):
-            entry = entry.strip()
-            if ":" in entry:
-                username, password = entry.split(":", 1)
-                users[username.strip()] = password.strip()
-        return users
+    users_path = Path(config.USERS_FILE)
+    if users_path.exists():
+        try:
+            entries = json.loads(users_path.read_text())
+            users: dict[str, str] = {}
+            for entry in entries:
+                username = entry.get("username", "").strip()
+                password = entry.get("password", "").strip()
+                if username and password:
+                    users[username] = password
+            return users
+        except Exception as exc:
+            logger.error("Failed to load users from %s: %s — falling back to AUTH_USER", users_path, exc)
     return {config.AUTH_USER: config.AUTH_PASSWORD}

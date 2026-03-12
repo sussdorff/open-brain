@@ -495,7 +495,14 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage MCP session manager and DB pool lifecycle."""
+    """Manage MCP session manager and DB pool lifecycle.
+
+    Server-side files expected at their configured paths (NOT in git):
+    - config.CLIENTS_FILE (default: /opt/open-brain/clients.json) — OAuth client registrations
+    - config.USERS_FILE   (default: /opt/open-brain/users.json)   — multi-user credentials
+      Format: [{"username": "alice", "password": "secret"}, ...]
+      If absent, falls back to single-user AUTH_USER/AUTH_PASSWORD env vars.
+    """
     config = get_config()
     logger.info("open-brain starting on port %d", config.PORT)
     async with mcp.session_manager.run():

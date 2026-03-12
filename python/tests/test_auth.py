@@ -387,20 +387,26 @@ class TestBearerAuthMiddleware:
 # ─── Multi-user Auth Tests ────────────────────────────────────────────────────
 
 class TestMultiUserAuth:
-    """Tests for USERS env var multi-user authentication."""
+    """Tests for users.json file-based multi-user authentication."""
 
     def test_get_users_map_fallback_to_single_user(self):
-        """When USERS is empty, falls back to AUTH_USER/AUTH_PASSWORD."""
+        """When USERS_FILE does not exist, falls back to AUTH_USER/AUTH_PASSWORD."""
         from open_brain.config import get_users_map
         users_map = get_users_map()
         assert "testuser" in users_map
         assert users_map["testuser"] == "testpassword123"
 
-    def test_get_users_map_parses_users_env(self, monkeypatch):
-        """When USERS is set, parses user1:pass1,user2:pass2 format."""
+    def test_get_users_map_loads_users_file(self, monkeypatch, tmp_path):
+        """When USERS_FILE points to a valid JSON file, loads those users."""
+        import json
         import open_brain.config as config_module
+        users_file = tmp_path / "users.json"
+        users_file.write_text(json.dumps([
+            {"username": "alice", "password": "alicepass"},
+            {"username": "bob", "password": "bobpass"},
+        ]))
         config_module._config = None
-        monkeypatch.setenv("USERS", "alice:alicepass,bob:bobpass")
+        monkeypatch.setenv("USERS_FILE", str(users_file))
         from open_brain.config import get_users_map
         users_map = get_users_map()
         assert "alice" in users_map
@@ -408,20 +414,39 @@ class TestMultiUserAuth:
         assert "bob" in users_map
         assert users_map["bob"] == "bobpass"
 
-    def test_get_users_map_single_user_in_users_env(self, monkeypatch):
-        """Single user in USERS env var is parsed correctly."""
+    def test_get_users_map_single_entry_in_file(self, monkeypatch, tmp_path):
+        """Single user in users.json is parsed correctly."""
+        import json
         import open_brain.config as config_module
+        users_file = tmp_path / "users.json"
+        users_file.write_text(json.dumps([{"username": "charlie", "password": "charliepass"}]))
         config_module._config = None
-        monkeypatch.setenv("USERS", "charlie:charliepass")
+        monkeypatch.setenv("USERS_FILE", str(users_file))
         from open_brain.config import get_users_map
         users_map = get_users_map()
         assert users_map == {"charlie": "charliepass"}
 
-    def test_handle_login_submit_multi_user_success(self, oauth_provider, monkeypatch):
-        """Multi-user: second user can log in when USERS is set."""
+    def test_get_users_map_fallback_when_file_missing(self, monkeypatch):
+        """When USERS_FILE path doesn't exist, falls back to AUTH_USER/AUTH_PASSWORD."""
         import open_brain.config as config_module
         config_module._config = None
-        monkeypatch.setenv("USERS", "alice:alicepass,bob:bobpass")
+        monkeypatch.setenv("USERS_FILE", "/nonexistent/path/users.json")
+        from open_brain.config import get_users_map
+        users_map = get_users_map()
+        assert "testuser" in users_map
+        assert users_map["testuser"] == "testpassword123"
+
+    def test_handle_login_submit_multi_user_success(self, oauth_provider, monkeypatch, tmp_path):
+        """Multi-user: second user can log in when users.json is present."""
+        import json
+        import open_brain.config as config_module
+        users_file = tmp_path / "users.json"
+        users_file.write_text(json.dumps([
+            {"username": "alice", "password": "alicepass"},
+            {"username": "bob", "password": "bobpass"},
+        ]))
+        config_module._config = None
+        monkeypatch.setenv("USERS_FILE", str(users_file))
         success, redirect_url = oauth_provider.handle_login_submit(
             username="bob",
             password="bobpass",
@@ -434,11 +459,17 @@ class TestMultiUserAuth:
         assert success is True
         assert "code=" in redirect_url
 
-    def test_handle_login_submit_multi_user_wrong_password(self, oauth_provider, monkeypatch):
+    def test_handle_login_submit_multi_user_wrong_password(self, oauth_provider, monkeypatch, tmp_path):
         """Multi-user: wrong password for a valid username is rejected."""
+        import json
         import open_brain.config as config_module
+        users_file = tmp_path / "users.json"
+        users_file.write_text(json.dumps([
+            {"username": "alice", "password": "alicepass"},
+            {"username": "bob", "password": "bobpass"},
+        ]))
         config_module._config = None
-        monkeypatch.setenv("USERS", "alice:alicepass,bob:bobpass")
+        monkeypatch.setenv("USERS_FILE", str(users_file))
         success, redirect_url = oauth_provider.handle_login_submit(
             username="alice",
             password="wrongpass",
@@ -451,11 +482,14 @@ class TestMultiUserAuth:
         assert success is False
         assert "error=access_denied" in redirect_url
 
-    def test_handle_login_submit_multi_user_unknown_user(self, oauth_provider, monkeypatch):
+    def test_handle_login_submit_multi_user_unknown_user(self, oauth_provider, monkeypatch, tmp_path):
         """Multi-user: unknown username is rejected."""
+        import json
         import open_brain.config as config_module
+        users_file = tmp_path / "users.json"
+        users_file.write_text(json.dumps([{"username": "alice", "password": "alicepass"}]))
         config_module._config = None
-        monkeypatch.setenv("USERS", "alice:alicepass")
+        monkeypatch.setenv("USERS_FILE", str(users_file))
         success, redirect_url = oauth_provider.handle_login_submit(
             username="mallory",
             password="alicepass",
@@ -486,11 +520,17 @@ class TestMultiUserAuth:
         payload = pyjwt.decode(tokens.access_token, options={"verify_signature": False})
         assert payload["sub"] == "testuser"
 
-    def test_exchange_authorization_code_encodes_second_user_sub(self, oauth_provider, monkeypatch):
+    def test_exchange_authorization_code_encodes_second_user_sub(self, oauth_provider, monkeypatch, tmp_path):
         """JWT sub claim correctly reflects the second user's username."""
+        import json
         import open_brain.config as config_module
+        users_file = tmp_path / "users.json"
+        users_file.write_text(json.dumps([
+            {"username": "alice", "password": "alicepass"},
+            {"username": "bob", "password": "bobpass"},
+        ]))
         config_module._config = None
-        monkeypatch.setenv("USERS", "alice:alicepass,bob:bobpass")
+        monkeypatch.setenv("USERS_FILE", str(users_file))
         success, redirect_url = oauth_provider.handle_login_submit(
             username="alice",
             password="alicepass",
@@ -508,7 +548,7 @@ class TestMultiUserAuth:
         assert payload["sub"] == "alice"
 
     def test_backward_compat_single_user(self, oauth_provider):
-        """Backward compat: existing AUTH_USER/AUTH_PASSWORD still works."""
+        """Backward compat: existing AUTH_USER/AUTH_PASSWORD still works when no users.json."""
         success, redirect_url = oauth_provider.handle_login_submit(
             username="testuser",
             password="testpassword123",
