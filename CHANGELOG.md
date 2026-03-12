@@ -3,6 +3,20 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Bug Fixes
+
+- *(plugin)* Remove duplicate hooks reference from plugin.json
+
+### Features
+
+- *(plugin)* Add ob-smart-explore skills (search/outline/unfold)
+
+### Miscellaneous
+
+- *(changelog)* Update for v2026.03.18
+
+## [2026.03.18] - 2026-03-12
+
 ### Features
 
 - *(api)* Add /api/session-capture endpoint for auto-capture hooks
