@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,9 @@ from open_brain.data_layer.llm import LlmMessage, llm_complete
 from open_brain.data_layer.postgres import PostgresDataLayer, close_pool
 
 logger = logging.getLogger(__name__)
+
+# ContextVar to track the authenticated user ID for the current request
+_current_user_id: ContextVar[str | None] = ContextVar("current_user_id", default=None)
 
 
 def _parse_llm_json(text: str) -> dict:
@@ -86,7 +90,7 @@ async def __IMPORTANT() -> str:  # noqa: N802
 @mcp.tool(
     description="Step 1: Search memory (hybrid: vector + FTS). Returns index with IDs. "
     "Browse mode: omit query (or use '*') to list memories with filters only. "
-    "Params: query, limit, project, type, obs_type, dateStart, dateEnd, offset, orderBy, filePath, metadata_filter"
+    "Params: query, limit, project, type, obs_type, dateStart, dateEnd, offset, orderBy, filePath, metadata_filter, author"
 )
 async def search(
     query: str | None = None,
@@ -100,6 +104,7 @@ async def search(
     order_by: str | None = None,
     file_path: str | None = None,
     metadata_filter: dict | None = None,
+    author: str | None = None,
 ) -> str:
     """Step 1: Hybrid memory search or browse mode."""
     dl = get_dl()
@@ -116,6 +121,7 @@ async def search(
             order_by=order_by,
             file_path=file_path,
             metadata_filter=metadata_filter,
+            author=author,
         )
     )
     return json.dumps(
@@ -201,6 +207,7 @@ async def save_memory(
     if is_test:
         return json.dumps({"id": -1, "message": "Test artifact — not persisted"})
     dl = get_dl()
+    user_id = _current_user_id.get()
     result = await dl.save_memory(
         SaveMemoryParams(
             text=text,
@@ -211,6 +218,7 @@ async def save_memory(
             narrative=narrative,
             session_ref=session_ref,
             metadata=metadata,
+            user_id=user_id,
         )
     )
     return json.dumps({"id": result.id, "message": result.message})
@@ -468,8 +476,11 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
 
         token = auth_header[7:]  # Strip "Bearer "
         try:
+            # verify_token validates signature + expiry; verify_access_token checks revocation
+            verified = verify_token(token)
             provider = get_provider()
             provider.verify_access_token(token)
+            user_token = _current_user_id.set(verified.sub)
         except Exception:
             return JSONResponse(
                 {"error": "unauthorized", "error_description": "Invalid or expired token"},
@@ -477,12 +488,22 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        return await call_next(request)
+        try:
+            return await call_next(request)
+        finally:
+            _current_user_id.reset(user_token)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage MCP session manager and DB pool lifecycle."""
+    """Manage MCP session manager and DB pool lifecycle.
+
+    Server-side files expected at their configured paths (NOT in git):
+    - config.CLIENTS_FILE (default: /opt/open-brain/clients.json) — OAuth client registrations
+    - config.USERS_FILE   (default: /opt/open-brain/users.json)   — multi-user credentials
+      Format: [{"username": "alice", "password": "secret"}, ...]
+      If absent, falls back to single-user AUTH_USER/AUTH_PASSWORD env vars.
+    """
     config = get_config()
     logger.info("open-brain starting on port %d", config.PORT)
     async with mcp.session_manager.run():

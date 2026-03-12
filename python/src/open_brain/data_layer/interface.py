@@ -19,6 +19,7 @@ class SearchParams:
     order_by: str | None = None
     file_path: str | None = None
     metadata_filter: dict[str, str] | None = None
+    author: str | None = None  # filter by user_id (contributor)
 
 
 @dataclass
@@ -56,6 +57,7 @@ class SaveMemoryParams:
     narrative: str | None = None  # optional prose context / reasoning (supplements text)
     session_ref: str | None = None
     metadata: dict[str, Any] | None = None
+    user_id: str | None = None  # authenticated user who created this memory
 
 
 @dataclass
@@ -104,6 +106,7 @@ class Memory:
     last_accessed_at: str | None
     created_at: str
     updated_at: str
+    user_id: str | None = None  # user who created this memory (NULL for pre-feature or API key auth)
 
 
 @dataclass

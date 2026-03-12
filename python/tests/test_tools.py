@@ -360,6 +360,113 @@ class TestImportantTool:
         assert "____IMPORTANT" in tool_names or "__IMPORTANT" in tool_names
 
 
+# ─── User Attribution Tests ───────────────────────────────────────────────────
+
+class TestUserAttribution:
+    """Tests for user_id tagging and author filtering."""
+
+    @pytest.mark.asyncio
+    async def test_save_memory_passes_user_id_from_context(self, mock_dl):
+        """save_memory reads user_id from _current_user_id ContextVar."""
+        with patch("open_brain.server.get_dl", return_value=mock_dl):
+            import open_brain.server as server_module
+            token = server_module._current_user_id.set("alice")
+            try:
+                from open_brain.server import save_memory
+                await save_memory(text="Alice's memory")
+                call_args = mock_dl.save_memory.call_args[0][0]
+                assert call_args.user_id == "alice"
+            finally:
+                server_module._current_user_id.reset(token)
+
+    @pytest.mark.asyncio
+    async def test_save_memory_user_id_none_when_no_context(self, mock_dl):
+        """save_memory sets user_id=None when no user in context (e.g., API key auth)."""
+        with patch("open_brain.server.get_dl", return_value=mock_dl):
+            import open_brain.server as server_module
+            # Ensure ContextVar is cleared
+            token = server_module._current_user_id.set(None)
+            try:
+                from open_brain.server import save_memory
+                await save_memory(text="Anonymous memory")
+                call_args = mock_dl.save_memory.call_args[0][0]
+                assert call_args.user_id is None
+            finally:
+                server_module._current_user_id.reset(token)
+
+    @pytest.mark.asyncio
+    async def test_search_passes_author_param(self, mock_dl):
+        """search tool forwards author param to SearchParams."""
+        with patch("open_brain.server.get_dl", return_value=mock_dl):
+            from open_brain.server import search
+            await search(query="test", author="alice")
+            call_args = mock_dl.search.call_args[0][0]
+            assert call_args.author == "alice"
+
+    @pytest.mark.asyncio
+    async def test_search_author_none_by_default(self, mock_dl):
+        """search author defaults to None (no filter)."""
+        with patch("open_brain.server.get_dl", return_value=mock_dl):
+            from open_brain.server import search
+            await search(query="test")
+            call_args = mock_dl.search.call_args[0][0]
+            assert call_args.author is None
+
+    @pytest.mark.asyncio
+    async def test_stats_returns_by_user(self, mock_dl):
+        """stats() includes by_user breakdown."""
+        mock_dl.stats.return_value = {
+            "memories": 100, "sessions": 10, "relationships": 50,
+            "db_size_bytes": 1048576, "db_size_mb": 1.0,
+            "types": {"observation": 80, "decision": 20},
+            "by_user": {"alice": 60, "bob": 40},
+        }
+        with patch("open_brain.server.get_dl", return_value=mock_dl):
+            from open_brain.server import stats
+            result = await stats()
+            data = json.loads(result)
+            assert "by_user" in data
+            assert data["by_user"]["alice"] == 60
+            assert data["by_user"]["bob"] == 40
+
+    def test_memory_has_user_id_field(self):
+        """Memory dataclass has user_id field."""
+        from open_brain.data_layer.interface import Memory
+        m = Memory(
+            id=1, index_id=1, session_id=None, type="observation",
+            title=None, subtitle=None, narrative=None,
+            content="test", metadata={}, priority=0.5, stability="stable",
+            access_count=0, last_accessed_at=None,
+            created_at="2026-01-01T00:00:00", updated_at="2026-01-01T00:00:00",
+            user_id="alice",
+        )
+        assert m.user_id == "alice"
+
+    def test_memory_user_id_defaults_to_none(self):
+        """Memory user_id defaults to None for backward compat."""
+        from open_brain.data_layer.interface import Memory
+        m = Memory(
+            id=1, index_id=1, session_id=None, type="observation",
+            title=None, subtitle=None, narrative=None,
+            content="test", metadata={}, priority=0.5, stability="stable",
+            access_count=0, last_accessed_at=None,
+            created_at="2026-01-01T00:00:00", updated_at="2026-01-01T00:00:00",
+        )
+        assert m.user_id is None
+
+    def test_save_memory_params_has_user_id_field(self):
+        """SaveMemoryParams accepts user_id."""
+        from open_brain.data_layer.interface import SaveMemoryParams
+        p = SaveMemoryParams(text="test", user_id="bob")
+        assert p.user_id == "bob"
+
+    def test_search_params_has_author_field(self):
+        """SearchParams accepts author field."""
+        from open_brain.data_layer.interface import SearchParams
+        p = SearchParams(query="test", author="alice")
+        assert p.author == "alice"
+
+
 # ─── Integration tests (skipped by default) ───────────────────────────────────
 
 @pytest.mark.integration

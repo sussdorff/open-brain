@@ -54,11 +54,64 @@ async def get_pool() -> asyncpg.Pool:
     if _pool is None:
         config = get_config()
         _pool = await asyncpg.create_pool(config.DATABASE_URL, min_size=2, max_size=10)
-        # Ensure session_ref column exists (idempotent migration)
+        # Idempotent migrations
         async with _pool.acquire() as conn:
             await conn.execute(
                 "ALTER TABLE memories ADD COLUMN IF NOT EXISTS session_ref TEXT;"
             )
+            await conn.execute(
+                "ALTER TABLE memories ADD COLUMN IF NOT EXISTS user_id TEXT;"
+            )
+            await conn.execute("""
+                CREATE OR REPLACE FUNCTION public.hybrid_search(
+                    query_text text,
+                    query_embedding vector,
+                    match_limit integer DEFAULT 20,
+                    rrf_k integer DEFAULT 60,
+                    p_index_id integer DEFAULT NULL,
+                    p_user_id text DEFAULT NULL
+                )
+                RETURNS TABLE(id integer, title text, subtitle text, type text, score real, created_at timestamp with time zone)
+                LANGUAGE sql
+                STABLE
+                AS $fn$
+                  WITH fts AS (
+                    SELECT m.id,
+                           ROW_NUMBER() OVER (
+                             ORDER BY ts_rank_cd(m.search_vector, websearch_to_tsquery('english', query_text)) DESC
+                           ) AS rank
+                    FROM memories m
+                    WHERE m.search_vector @@ websearch_to_tsquery('english', query_text)
+                      AND (p_index_id IS NULL OR m.index_id = p_index_id)
+                      AND (p_user_id IS NULL OR m.user_id = p_user_id)
+                    ORDER BY ts_rank_cd(m.search_vector, websearch_to_tsquery('english', query_text)) DESC
+                    LIMIT match_limit * 2
+                  ),
+                  vec AS (
+                    SELECT m.id,
+                           ROW_NUMBER() OVER (ORDER BY m.embedding <=> query_embedding) AS rank
+                    FROM memories m
+                    WHERE m.embedding IS NOT NULL
+                      AND (p_index_id IS NULL OR m.index_id = p_index_id)
+                      AND (p_user_id IS NULL OR m.user_id = p_user_id)
+                    ORDER BY m.embedding <=> query_embedding
+                    LIMIT match_limit * 2
+                  ),
+                  combined AS (
+                    SELECT
+                      COALESCE(f.id, v.id) AS id,
+                      (COALESCE(1.0 / (rrf_k + f.rank), 0.0) +
+                       COALESCE(1.0 / (rrf_k + v.rank), 0.0))::REAL AS score
+                    FROM fts f
+                    FULL OUTER JOIN vec v ON f.id = v.id
+                  )
+                  SELECT m.id, m.title, m.subtitle, m.type, c.score, m.created_at
+                  FROM combined c
+                  JOIN memories m ON m.id = c.id
+                  ORDER BY c.score DESC
+                  LIMIT match_limit;
+                $fn$;
+            """)
     return _pool
 
 
@@ -88,6 +141,7 @@ def _row_to_memory(row: asyncpg.Record) -> Memory:
         last_accessed_at=str(row["last_accessed_at"]) if row.get("last_accessed_at") else None,
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
+        user_id=row.get("user_id"),
     )
 
 
@@ -154,11 +208,12 @@ class PostgresDataLayer:
                     fetch_limit = min(limit * 3, 100)
 
                     # Use hybrid_search for scoring, join memories for full rows + filters
+                    # author (p_user_id) is pre-constrained inside hybrid_search as $5
                     post_conditions: list[str] = []
                     post_values: list[Any] = [
-                        query, to_pg_vector(query_embedding), fetch_limit * 3, index_id,
+                        query, to_pg_vector(query_embedding), fetch_limit * 3, index_id, params.author,
                     ]
-                    param_idx = 5  # after the 4 hybrid_search params
+                    param_idx = 6  # after the 5 hybrid_search params ($1–$5)
 
                     if type_value:
                         post_conditions.append(f"m.type = ${param_idx}")
@@ -181,16 +236,17 @@ class PostgresDataLayer:
                             post_conditions.append(f"m.metadata->>${param_idx} = ${param_idx + 1}")
                             post_values.extend([key, val])
                             param_idx += 2
+                    # author is now pre-constrained inside hybrid_search ($5), not a post-filter
 
                     post_where = f"AND {' AND '.join(post_conditions)}" if post_conditions else ""
 
                     rows = await conn.fetch(
                         f"""WITH scored AS (
-                            SELECT id, score FROM hybrid_search($1, $2::vector, $3, 60, $4)
+                            SELECT id, score FROM hybrid_search($1, $2::vector, $3, 60, $4, $5)
                         )
                         SELECT m.id, m.index_id, m.session_id, m.type, m.title, m.subtitle,
                                m.narrative, m.content, m.metadata, m.priority, m.stability,
-                               m.access_count, m.last_accessed_at, m.created_at, m.updated_at
+                               m.access_count, m.last_accessed_at, m.created_at, m.updated_at, m.user_id
                         FROM scored s
                         JOIN memories m ON m.id = s.id
                         WHERE 1=1 {post_where}
@@ -252,6 +308,10 @@ class PostgresDataLayer:
                     conditions.append(f"m.metadata->>${param_idx} = ${param_idx + 1}")
                     values.extend([key, val])
                     param_idx += 2
+            if params.author:
+                conditions.append(f"m.user_id = ${param_idx}")
+                values.append(params.author)
+                param_idx += 1
             # FTS fallback when hybrid failed but we have a query
             if query:
                 conditions.append(
@@ -265,7 +325,7 @@ class PostgresDataLayer:
 
             rows = await conn.fetch(
                 f"""SELECT m.id, m.index_id, m.session_id, m.type, m.title, m.subtitle, m.narrative, m.content,
-                        m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.created_at, m.updated_at
+                        m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.created_at, m.updated_at, m.user_id
                  FROM memories m {where}
                  ORDER BY {order_by}
                  LIMIT ${param_idx} OFFSET ${param_idx+1}""",
@@ -461,8 +521,8 @@ class PostgresDataLayer:
             import json as _json
             metadata_json = _json.dumps(params.metadata) if params.metadata else "{}"
             row = await conn.fetchrow(
-                """INSERT INTO memories (index_id, type, title, subtitle, narrative, content, session_ref, metadata)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+                """INSERT INTO memories (index_id, type, title, subtitle, narrative, content, session_ref, metadata, user_id)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
                    RETURNING id""",
                 index_id or 1,
                 params.type or "observation",
@@ -472,6 +532,7 @@ class PostgresDataLayer:
                 params.text,
                 params.session_ref,
                 metadata_json,
+                params.user_id,
             )
             memory_id: int = row["id"]
 
@@ -688,7 +749,7 @@ class PostgresDataLayer:
             return {"sessions": [dict(r) for r in rows]}
 
     async def stats(self) -> dict[str, Any]:
-        """Get database aggregate statistics including type taxonomy."""
+        """Get database aggregate statistics including type taxonomy and per-user counts."""
         pool = await get_pool()
         async with pool.acquire() as conn:
             memories_row = await conn.fetchrow("SELECT COUNT(*)::int AS count FROM memories")
@@ -702,6 +763,9 @@ class PostgresDataLayer:
             type_rows = await conn.fetch(
                 "SELECT type, COUNT(*)::int AS count FROM memories GROUP BY type ORDER BY count DESC"
             )
+            user_rows = await conn.fetch(
+                "SELECT user_id, COUNT(*)::int AS count FROM memories GROUP BY user_id ORDER BY count DESC"
+            )
 
         size_bytes = int(db_size_row["size"])
         return {
@@ -711,6 +775,7 @@ class PostgresDataLayer:
             "db_size_bytes": size_bytes,
             "db_size_mb": round(size_bytes / 1024 / 1024, 2),
             "types": {row["type"]: row["count"] for row in type_rows},
+            "by_user": {(row["user_id"] or "unknown"): row["count"] for row in user_rows},
         }
 
     async def refine_memories(self, params: RefineParams) -> RefineResult:

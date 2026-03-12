@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass, field
 
 from open_brain.auth.tokens import TokenClaims, issue_access_token, issue_refresh_token, verify_token
-from open_brain.config import get_config
+from open_brain.config import get_config, get_users_map
 
 
 LOGIN_FORM_TEMPLATE = """<!DOCTYPE html>
@@ -44,6 +44,7 @@ class AuthCodeEntry:
     redirect_uri: str
     scopes: list[str]
     expires_at: float  # Unix timestamp
+    username: str = ""  # authenticated username
 
 
 @dataclass
@@ -149,14 +150,28 @@ class OAuthProvider:
             On failure, redirect_url contains error parameters.
             On success, redirect_url contains the authorization code.
         """
-        config = get_config()
-        if username != config.AUTH_USER or password != config.AUTH_PASSWORD:
-            error_url = _build_url(redirect_uri, {
-                "error": "access_denied",
-                "error_description": "Invalid credentials",
-            })
-            if state:
-                error_url = _append_param(error_url, "state", state)
+        import bcrypt
+        import hmac
+        users_map = get_users_map()
+        stored = users_map.get(username)
+        error_url = _build_url(redirect_uri, {
+            "error": "access_denied",
+            "error_description": "Invalid credentials",
+        })
+        if state:
+            error_url = _append_param(error_url, "state", state)
+        if stored is None:
+            # Prevent timing oracle on unknown usernames
+            bcrypt.checkpw(b"dummy", bcrypt.hashpw(b"dummy", bcrypt.gensalt()))
+            return False, error_url
+
+        # Detect hash type: bcrypt hashes start with $2b$, $2a$, or $2y$
+        if stored.startswith(("$2b$", "$2a$", "$2y$")):
+            valid = bcrypt.checkpw(password.encode("utf-8"), stored.encode("utf-8"))
+        else:
+            valid = hmac.compare_digest(stored, password)
+
+        if not valid:
             return False, error_url
 
         code = secrets.token_hex(32)
@@ -167,6 +182,7 @@ class OAuthProvider:
             redirect_uri=redirect_uri,
             scopes=scopes,
             expires_at=time.time() + 5 * 60,  # 5 minutes
+            username=username,
         )
 
         redirect_url = _build_url(redirect_uri, {"code": code})
@@ -202,9 +218,8 @@ class OAuthProvider:
         # Consume the code
         del self._auth_codes[authorization_code]
 
-        config = get_config()
         claims = TokenClaims(
-            sub=config.AUTH_USER,
+            sub=entry.username,
             client_id=client_id,
             scopes=entry.scopes,
         )
@@ -236,9 +251,8 @@ class OAuthProvider:
         if verified.token_type != "refresh":
             raise ValueError("Not a refresh token")
 
-        config = get_config()
         claims = TokenClaims(
-            sub=config.AUTH_USER,
+            sub=verified.sub,
             client_id=client_id,
             scopes=scopes if scopes is not None else verified.scopes,
         )

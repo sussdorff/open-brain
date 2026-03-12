@@ -382,3 +382,189 @@ class TestBearerAuthMiddleware:
         )
         # Should NOT be 401 — whatever status the MCP handler returns is fine
         assert resp.status_code != 401
+
+
+# ─── Multi-user Auth Tests ────────────────────────────────────────────────────
+
+class TestMultiUserAuth:
+    """Tests for users.json file-based multi-user authentication."""
+
+    def test_get_users_map_fallback_to_single_user(self):
+        """When USERS_FILE does not exist, falls back to AUTH_USER/AUTH_PASSWORD."""
+        from open_brain.config import get_users_map
+        users_map = get_users_map()
+        assert "testuser" in users_map
+        assert users_map["testuser"] == "testpassword123"
+
+    def test_get_users_map_loads_users_file(self, monkeypatch, tmp_path):
+        """When USERS_FILE points to a valid JSON file, loads those users."""
+        import json
+        import bcrypt
+        import open_brain.config as config_module
+        alice_hash = bcrypt.hashpw(b"alicepass", bcrypt.gensalt()).decode()
+        bob_hash = bcrypt.hashpw(b"bobpass", bcrypt.gensalt()).decode()
+        users_file = tmp_path / "users.json"
+        users_file.write_text(json.dumps([
+            {"username": "alice", "password": alice_hash},
+            {"username": "bob", "password": bob_hash},
+        ]))
+        config_module._config = None
+        monkeypatch.setenv("USERS_FILE", str(users_file))
+        from open_brain.config import get_users_map
+        users_map = get_users_map()
+        assert "alice" in users_map
+        assert users_map["alice"] == alice_hash
+        assert "bob" in users_map
+        assert users_map["bob"] == bob_hash
+
+    def test_get_users_map_single_entry_in_file(self, monkeypatch, tmp_path):
+        """Single user in users.json is parsed correctly."""
+        import json
+        import bcrypt
+        import open_brain.config as config_module
+        charlie_hash = bcrypt.hashpw(b"charliepass", bcrypt.gensalt()).decode()
+        users_file = tmp_path / "users.json"
+        users_file.write_text(json.dumps([{"username": "charlie", "password": charlie_hash}]))
+        config_module._config = None
+        monkeypatch.setenv("USERS_FILE", str(users_file))
+        from open_brain.config import get_users_map
+        users_map = get_users_map()
+        assert users_map == {"charlie": charlie_hash}
+
+    def test_get_users_map_fallback_when_file_missing(self, monkeypatch):
+        """When USERS_FILE path doesn't exist, falls back to AUTH_USER/AUTH_PASSWORD."""
+        import open_brain.config as config_module
+        config_module._config = None
+        monkeypatch.setenv("USERS_FILE", "/nonexistent/path/users.json")
+        from open_brain.config import get_users_map
+        users_map = get_users_map()
+        assert "testuser" in users_map
+        assert users_map["testuser"] == "testpassword123"
+
+    def test_handle_login_submit_multi_user_success(self, oauth_provider, monkeypatch, tmp_path):
+        """Multi-user: second user can log in when users.json is present."""
+        import json
+        import bcrypt
+        import open_brain.config as config_module
+        users_file = tmp_path / "users.json"
+        users_file.write_text(json.dumps([
+            {"username": "alice", "password": bcrypt.hashpw(b"alicepass", bcrypt.gensalt()).decode()},
+            {"username": "bob", "password": bcrypt.hashpw(b"bobpass", bcrypt.gensalt()).decode()},
+        ]))
+        config_module._config = None
+        monkeypatch.setenv("USERS_FILE", str(users_file))
+        success, redirect_url = oauth_provider.handle_login_submit(
+            username="bob",
+            password="bobpass",
+            client_id="client1",
+            redirect_uri="http://localhost/callback",
+            code_challenge="challenge",
+            state="",
+            scopes_str="",
+        )
+        assert success is True
+        assert "code=" in redirect_url
+
+    def test_handle_login_submit_multi_user_wrong_password(self, oauth_provider, monkeypatch, tmp_path):
+        """Multi-user: wrong password for a valid username is rejected."""
+        import json
+        import bcrypt
+        import open_brain.config as config_module
+        users_file = tmp_path / "users.json"
+        users_file.write_text(json.dumps([
+            {"username": "alice", "password": bcrypt.hashpw(b"alicepass", bcrypt.gensalt()).decode()},
+            {"username": "bob", "password": bcrypt.hashpw(b"bobpass", bcrypt.gensalt()).decode()},
+        ]))
+        config_module._config = None
+        monkeypatch.setenv("USERS_FILE", str(users_file))
+        success, redirect_url = oauth_provider.handle_login_submit(
+            username="alice",
+            password="wrongpass",
+            client_id="client1",
+            redirect_uri="http://localhost/callback",
+            code_challenge="challenge",
+            state="",
+            scopes_str="",
+        )
+        assert success is False
+        assert "error=access_denied" in redirect_url
+
+    def test_handle_login_submit_multi_user_unknown_user(self, oauth_provider, monkeypatch, tmp_path):
+        """Multi-user: unknown username is rejected."""
+        import json
+        import bcrypt
+        import open_brain.config as config_module
+        users_file = tmp_path / "users.json"
+        users_file.write_text(json.dumps([{"username": "alice", "password": bcrypt.hashpw(b"alicepass", bcrypt.gensalt()).decode()}]))
+        config_module._config = None
+        monkeypatch.setenv("USERS_FILE", str(users_file))
+        success, redirect_url = oauth_provider.handle_login_submit(
+            username="mallory",
+            password="alicepass",
+            client_id="client1",
+            redirect_uri="http://localhost/callback",
+            code_challenge="challenge",
+            state="",
+            scopes_str="",
+        )
+        assert success is False
+        assert "error=access_denied" in redirect_url
+
+    def test_exchange_authorization_code_encodes_username_in_sub(self, oauth_provider):
+        """JWT sub claim contains the authenticated username."""
+        success, redirect_url = oauth_provider.handle_login_submit(
+            username="testuser",
+            password="testpassword123",
+            client_id="client1",
+            redirect_uri="http://localhost/callback",
+            code_challenge="challenge",
+            state="",
+            scopes_str="read",
+        )
+        assert success is True
+        code = redirect_url.split("code=")[1].split("&")[0]
+        tokens = oauth_provider.exchange_authorization_code("client1", code)
+        import jwt as pyjwt
+        payload = pyjwt.decode(tokens.access_token, options={"verify_signature": False})
+        assert payload["sub"] == "testuser"
+
+    def test_exchange_authorization_code_encodes_second_user_sub(self, oauth_provider, monkeypatch, tmp_path):
+        """JWT sub claim correctly reflects the second user's username."""
+        import json
+        import bcrypt
+        import open_brain.config as config_module
+        users_file = tmp_path / "users.json"
+        users_file.write_text(json.dumps([
+            {"username": "alice", "password": bcrypt.hashpw(b"alicepass", bcrypt.gensalt()).decode()},
+            {"username": "bob", "password": bcrypt.hashpw(b"bobpass", bcrypt.gensalt()).decode()},
+        ]))
+        config_module._config = None
+        monkeypatch.setenv("USERS_FILE", str(users_file))
+        success, redirect_url = oauth_provider.handle_login_submit(
+            username="alice",
+            password="alicepass",
+            client_id="client1",
+            redirect_uri="http://localhost/callback",
+            code_challenge="challenge",
+            state="",
+            scopes_str="read",
+        )
+        assert success is True
+        code = redirect_url.split("code=")[1].split("&")[0]
+        tokens = oauth_provider.exchange_authorization_code("client1", code)
+        import jwt as pyjwt
+        payload = pyjwt.decode(tokens.access_token, options={"verify_signature": False})
+        assert payload["sub"] == "alice"
+
+    def test_backward_compat_single_user(self, oauth_provider):
+        """Backward compat: existing AUTH_USER/AUTH_PASSWORD still works when no users.json."""
+        success, redirect_url = oauth_provider.handle_login_submit(
+            username="testuser",
+            password="testpassword123",
+            client_id="client1",
+            redirect_uri="http://localhost/callback",
+            code_challenge="challenge",
+            state="",
+            scopes_str="",
+        )
+        assert success is True
