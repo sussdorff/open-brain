@@ -11,7 +11,7 @@ from open_brain.data_layer.llm import LlmMessage, llm_complete
 
 logger = logging.getLogger(__name__)
 
-TRIAGE_BATCH_SIZE = 30
+TRIAGE_BATCH_SIZE = 20
 
 # Type-specific default actions when LLM is unavailable
 _TYPE_DEFAULTS: dict[str, str] = {
@@ -78,8 +78,10 @@ Example: [{{"memory_id":1,"action":"keep","reason":"Core factual knowledge"}},{{
 
 Every memory in the input must appear exactly once in the output.""",
             )
-        ]
+        ],
+        max_tokens=4096,
     )
+    logger.debug("LLM triage raw response (first 500 chars): %s", text[:500])
 
     raw_items = _parse_json_array(text)
     memory_by_id = {m.id: m for m in memories}
@@ -92,7 +94,12 @@ Every memory in the input must appear exactly once in the output.""",
         action = item.get("action", "keep")
         reason = item.get("reason", "")
 
+        # Coerce string IDs to int (LLMs sometimes return "1234" instead of 1234)
+        if isinstance(memory_id, str) and memory_id.isdigit():
+            memory_id = int(memory_id)
+
         if not isinstance(memory_id, int) or memory_id not in memory_by_id:
+            logger.debug("Skipping item with unrecognized memory_id=%r (known IDs: %s)", memory_id, list(memory_by_id.keys()))
             continue
         if memory_id in seen_ids:
             continue

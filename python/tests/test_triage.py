@@ -172,6 +172,71 @@ class TestTriageClassification:
         assert action_map[1] == "promote"
         assert action_map[2] == "keep"
 
+    @pytest.mark.asyncio
+    async def test_string_memory_ids_are_coerced(self):
+        """LLM returning memory_id as string '1234' instead of int 1234 is handled."""
+        memories = [_make_memory(1, "learning"), _make_memory(2, "observation")]
+        # LLM returns IDs as strings — a common LLM quirk
+        llm_response = json.dumps([
+            {"memory_id": "1", "action": "promote", "reason": "Good learning"},
+            {"memory_id": "2", "action": "archive", "reason": "Old note"},
+        ])
+
+        with patch("open_brain.data_layer.triage.llm_complete", new_callable=AsyncMock) as mock_llm:
+            mock_llm.return_value = llm_response
+            actions = await triage_with_llm(memories)
+
+        assert len(actions) == 2
+        action_map = {a.memory_id: a for a in actions}
+        # Both should be LLM-classified, NOT type defaults
+        assert action_map[1].action == "promote"
+        assert action_map[1].reason == "Good learning"
+        assert action_map[2].action == "archive"
+        assert action_map[2].reason == "Old note"
+
+    @pytest.mark.asyncio
+    async def test_llm_call_uses_4096_max_tokens(self):
+        """triage_with_llm passes max_tokens=4096 to llm_complete to avoid truncation."""
+        memories = [_make_memory(1)]
+        llm_response = json.dumps([
+            {"memory_id": 1, "action": "keep", "reason": "Fine"},
+        ])
+
+        with patch("open_brain.data_layer.triage.llm_complete", new_callable=AsyncMock) as mock_llm:
+            mock_llm.return_value = llm_response
+            await triage_with_llm(memories)
+
+        mock_llm.assert_awaited_once()
+        _, kwargs = mock_llm.call_args
+        assert kwargs.get("max_tokens") == 4096, (
+            f"Expected max_tokens=4096 to prevent response truncation, got {kwargs.get('max_tokens')}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_type_default_fallback_when_llm_functional(self):
+        """When LLM classifies all memories, none get the type-default fallback reason."""
+        memories = [
+            _make_memory(1, "learning"),
+            _make_memory(2, "session_summary"),
+            _make_memory(3, "observation"),
+        ]
+        llm_response = json.dumps([
+            {"memory_id": 1, "action": "keep", "reason": "Already well-known pattern"},
+            {"memory_id": 2, "action": "archive", "reason": "Routine session"},
+            {"memory_id": 3, "action": "scaffold", "reason": "Describes a todo item"},
+        ])
+
+        with patch("open_brain.data_layer.triage.llm_complete", new_callable=AsyncMock) as mock_llm:
+            mock_llm.return_value = llm_response
+            actions = await triage_with_llm(memories)
+
+        fallback_reasons = [
+            a for a in actions if "using type default" in (a.reason or "")
+        ]
+        assert len(fallback_reasons) == 0, (
+            f"Expected no type-default fallbacks, got: {fallback_reasons}"
+        )
+
 
 # ─── Test: type differentiation ───────────────────────────────────────────────
 
