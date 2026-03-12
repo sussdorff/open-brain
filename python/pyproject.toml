@@ -23,6 +23,9 @@ dev = [
     "pytest-mock>=3.12.0",
 ]
 
+[project.scripts]
+ob = "open_brain.cli.main:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
