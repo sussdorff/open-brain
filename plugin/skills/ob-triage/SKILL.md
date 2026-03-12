@@ -136,20 +136,41 @@ After the user has reviewed and approved actions, execute them:
 
 1. **Merge**: Call `mcp__open-brain__refine_memories(scope="duplicates")` or
    `mcp__open-brain__update_memory` to update the surviving memory with merged text,
-   then archive/delete the duplicate.
+   then archive/delete the duplicate. After merging, mark the deleted memory as discarded:
+   ```
+   update_memory(id=<deleted-id>, metadata={'status': 'discarded', 'discard_reason': 'merged into #<surviving-id>'})
+   ```
 
 2. **Archive**: Call `mcp__open-brain__materialize_memories` with the approved archive actions.
+   Then mark the memory as discarded:
+   ```
+   update_memory(id=<id>, metadata={'status': 'discarded', 'discard_reason': 'archived — <reason>'})
+   ```
 
 3. **Delete**: No MCP delete tool exists (by design — see decision #10597). Delete via
    REST API on the server: `ssh services 'curl -s -X DELETE "http://localhost:8091/api/memories"
    -H "Content-Type: application/json" -H "X-API-Key: <key>" -d "{\"ids\": [...]}"'`.
    Read the API key from `/opt/open-brain/.env.tpl` on the server (API_KEYS= line).
+   Before deleting, mark the memory as discarded:
+   ```
+   update_memory(id=<id>, metadata={'status': 'discarded', 'discard_reason': 'deleted — <reason>'})
+   ```
 
 4. **Promote**: Execute the materialization to the chosen target:
    - CLAUDE.md → Use Edit tool on the target CLAUDE.md file
    - standards/ → Use Write/Edit tool on the standard file + update index.yml
    - Skill → Use Edit tool on the skill's SKILL.md
    - Bead → Run `bd create` via Bash
+
+   After writing to the target, mark the memory as materialized:
+   ```
+   update_memory(id=<id>, metadata={'status': 'materialized', 'materialized_to': '<target>'})
+   ```
+   Where `<target>` is the human-readable destination, e.g.:
+   - `"CLAUDE.md (open-brain, Deployment section)"`
+   - `"~/.claude/CLAUDE.md (UV conventions)"`
+   - `"standards/dev/uv.md"`
+   - `"bead open-brain-xyz"`
 
 5. **Scaffold**: Run `bd create` with the approved parameters.
 
