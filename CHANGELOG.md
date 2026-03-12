@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(tests)* Update minimal_entry test to expect content-hash session_ref
+- *(triage)* Fix LLM classification — increase max_tokens and handle string IDs
+
+## [2026.03.20] - 2026-03-12
+
+### Bug Fixes
+
+- *(scripts)* Improve migrate_learnings.py idempotency for non-lrn prefixed IDs
+
+### Features
+
+- *(plugin)* Add ob-smart-explore skills (search/outline/unfold)
+
+### Miscellaneous
+
+- *(changelog)* Update for v2026.03.19
+- *(changelog)* Update for v2026.03.19
+
+## [2026.03.19] - 2026-03-12
+
+### Bug Fixes
+
 - *(plugin)* Remove duplicate hooks reference from plugin.json
 
 ### Documentation
@@ -16,7 +38,6 @@ All notable changes to this project will be documented in this file.
 - *(data-layer)* Add metadata parameter to save_memory, update_memory, and search
 - *(ob-triage)* Add status tracking after promote/discard actions
 - *(scripts)* Add migrate_learnings.py with complete JSONL→open-brain field mapping
-- *(plugin)* Add ob-smart-explore skills (search/outline/unfold)
 
 ### Miscellaneous
 
