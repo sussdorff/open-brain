@@ -150,8 +150,10 @@ class OAuthProvider:
             On failure, redirect_url contains error parameters.
             On success, redirect_url contains the authorization code.
         """
+        import hmac
         users_map = get_users_map()
-        if username not in users_map or users_map[username] != password:
+        stored = users_map.get(username)
+        if stored is None or not hmac.compare_digest(stored, password):
             error_url = _build_url(redirect_uri, {
                 "error": "access_denied",
                 "error_description": "Invalid credentials",

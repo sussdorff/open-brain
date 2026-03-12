@@ -476,9 +476,10 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
 
         token = auth_header[7:]  # Strip "Bearer "
         try:
+            # verify_token validates signature + expiry; verify_access_token checks revocation
+            verified = verify_token(token)
             provider = get_provider()
             provider.verify_access_token(token)
-            verified = verify_token(token)
             user_token = _current_user_id.set(verified.sub)
         except Exception:
             return JSONResponse(
