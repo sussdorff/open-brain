@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(auth)* Use hmac.compare_digest for constant-time password comparison, eliminate redundant verify_token call
+- *(search)* Pre-constrain author filter in hybrid_search DB function
+
+### Features
+
+- *(auth)* Multi-user support with shared memory and user attribution
+- *(auth)* Replace USERS env var with users.json file for multi-user auth
+- *(auth)* Bcrypt hashing for users.json passwords
+
+### Miscellaneous
+
+- *(changelog)* Update for v2026.03.22
+
+## [2026.03.22] - 2026-03-12
+
+### Bug Fixes
+
 - *(triage)* Nuanced learning classification prompt
 - *(triage)* Exclude materialized/discarded memories from triage queries
 - *(tests)* Update context endpoint tests to match search-based implementation
