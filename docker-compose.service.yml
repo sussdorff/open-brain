@@ -23,10 +23,12 @@ services:
       - LLM_MODEL=${LLM_MODEL}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - CLIENTS_FILE=/app/clients.json
+      - USERS_FILE=/app/users.json
     ports:
       - "8091:8091"
     volumes:
       - ./clients.json:/app/clients.json:ro
+      - ./users.json:/app/users.json:ro
     networks:
       - services_default
     restart: unless-stopped
