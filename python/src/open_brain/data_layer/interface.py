@@ -18,6 +18,7 @@ class SearchParams:
     date_end: str | None = None
     order_by: str | None = None
     file_path: str | None = None
+    metadata_filter: dict[str, str] | None = None
 
 
 @dataclass
@@ -54,6 +55,7 @@ class SaveMemoryParams:
     subtitle: str | None = None  # secondary label / tags
     narrative: str | None = None  # optional prose context / reasoning (supplements text)
     session_ref: str | None = None
+    metadata: dict[str, Any] | None = None
 
 
 @dataclass
@@ -71,6 +73,7 @@ class UpdateMemoryParams:
     title: str | None = None  # short headline
     subtitle: str | None = None  # secondary label / tags
     narrative: str | None = None  # optional prose context / reasoning (supplements text)
+    metadata: dict[str, Any] | None = None  # JSONB-merged into existing metadata
 
 
 @dataclass

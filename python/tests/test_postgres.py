@@ -13,6 +13,7 @@ from open_brain.data_layer.interface import (
     SaveMemoryParams,
     SearchParams,
     TimelineParams,
+    UpdateMemoryParams,
 )
 from open_brain.data_layer.postgres import PostgresDataLayer, _execute_refine_action, _row_to_memory
 from open_brain.data_layer.interface import RefineAction
@@ -458,3 +459,217 @@ class TestExecuteRefineAction:
         conn.execute.assert_called_once()
         call_args = conn.execute.call_args[0]
         assert "DELETE" in call_args[0]
+
+
+class TestSaveMemoryWithMetadata:
+    @pytest.fixture
+    def dl(self):
+        return PostgresDataLayer()
+
+    @pytest.mark.asyncio
+    async def test_save_memory_with_metadata(self, dl):
+        """AK1: save_memory(metadata={...}) persists JSON in DB."""
+        inserted_row = MagicMock()
+        inserted_row.__getitem__ = lambda self, key: 42 if key == "id" else None
+
+        conn = AsyncMock()
+        conn.fetchrow.side_effect = [
+            None,          # _resolve_index_id: no existing index
+            {"id": 1},     # _resolve_index_id: INSERT new index
+            inserted_row,  # INSERT INTO memories ... RETURNING id
+        ]
+        pool = _make_pool(conn)
+
+        with (
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
+        ):
+            mock_asyncio.create_task = MagicMock()
+            result = await dl.save_memory(
+                SaveMemoryParams(
+                    text="Memory with metadata",
+                    type="discovery",
+                    project="test-project",
+                    metadata={"status": "open", "source": "bot"},
+                )
+            )
+
+        assert result.id == 42
+        assert result.message == "Memory saved"
+        # Verify metadata was passed in the INSERT call
+        insert_call = conn.fetchrow.call_args_list[-1]
+        insert_sql = insert_call[0][0]
+        assert "metadata" in insert_sql
+        # Check the metadata JSON was passed as an argument
+        insert_args = insert_call[0]
+        metadata_arg = next((a for a in insert_args if isinstance(a, str) and "status" in a), None)
+        assert metadata_arg is not None
+        import json
+        parsed = json.loads(metadata_arg)
+        assert parsed["status"] == "open"
+        assert parsed["source"] == "bot"
+
+    @pytest.mark.asyncio
+    async def test_save_memory_without_metadata_defaults_to_empty(self, dl):
+        """save_memory without metadata sends '{}' for the metadata column."""
+        inserted_row = MagicMock()
+        inserted_row.__getitem__ = lambda self, key: 10 if key == "id" else None
+
+        conn = AsyncMock()
+        conn.fetchrow.side_effect = [
+            None,
+            {"id": 1},
+            inserted_row,
+        ]
+        pool = _make_pool(conn)
+
+        with (
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
+        ):
+            mock_asyncio.create_task = MagicMock()
+            result = await dl.save_memory(SaveMemoryParams(text="No metadata", project="proj"))
+
+        assert result.id == 10
+        insert_call = conn.fetchrow.call_args_list[-1]
+        insert_args = insert_call[0]
+        # The empty metadata JSON '{}' should be among the args
+        assert "{}" in insert_args
+
+
+class TestUpdateMemoryMetadataMerge:
+    @pytest.fixture
+    def dl(self):
+        return PostgresDataLayer()
+
+    @pytest.mark.asyncio
+    async def test_update_memory_metadata_merge(self, dl):
+        """AK2: update_memory(metadata={...}) merges JSONB (uses metadata || $n::jsonb)."""
+        existing_row = MagicMock()
+        existing_row_data = {
+            "id": 5,
+            "content": "existing content",
+            "title": "existing title",
+            "subtitle": None,
+            "narrative": None,
+        }
+        existing_row.__getitem__ = lambda self, key: existing_row_data[key]
+
+        conn = AsyncMock()
+        conn.fetchrow.return_value = existing_row
+        pool = _make_pool(conn)
+
+        with (
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
+        ):
+            mock_asyncio.create_task = MagicMock()
+            result = await dl.update_memory(
+                UpdateMemoryParams(
+                    id=5,
+                    metadata={"status": "closed", "reviewer": "alice"},
+                )
+            )
+
+        assert result.id == 5
+        assert result.message == "Memory updated"
+        # Verify UPDATE was called with JSONB merge syntax
+        conn.execute.assert_called_once()
+        update_sql = conn.execute.call_args[0][0]
+        assert "metadata || " in update_sql
+        assert "::jsonb" in update_sql
+        # Verify the metadata JSON was passed
+        update_args = conn.execute.call_args[0]
+        import json
+        metadata_arg = next(
+            (a for a in update_args if isinstance(a, str) and "status" in a), None
+        )
+        assert metadata_arg is not None
+        parsed = json.loads(metadata_arg)
+        assert parsed["status"] == "closed"
+        assert parsed["reviewer"] == "alice"
+
+    @pytest.mark.asyncio
+    async def test_update_memory_metadata_only_no_other_updates(self, dl):
+        """update_memory with only metadata (no text/title/etc.) still triggers an UPDATE."""
+        existing_row = MagicMock()
+        existing_row_data = {
+            "id": 7, "content": "c", "title": None, "subtitle": None, "narrative": None,
+        }
+        existing_row.__getitem__ = lambda self, key: existing_row_data[key]
+
+        conn = AsyncMock()
+        conn.fetchrow.return_value = existing_row
+        pool = _make_pool(conn)
+
+        with (
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
+        ):
+            mock_asyncio.create_task = MagicMock()
+            result = await dl.update_memory(UpdateMemoryParams(id=7, metadata={"key": "value"}))
+
+        # Should NOT return "No fields to update"
+        assert result.message == "Memory updated"
+        conn.execute.assert_called_once()
+
+
+class TestSearchMetadataFilter:
+    @pytest.fixture
+    def dl(self):
+        return PostgresDataLayer()
+
+    @pytest.mark.asyncio
+    async def test_search_metadata_filter_in_browse_mode(self, dl):
+        """AK3: search(metadata_filter={'status': 'open'}) adds JSONB condition to WHERE clause."""
+        count_row = MagicMock()
+        count_row.__getitem__ = lambda self, key: 1 if key == "total" else None
+
+        conn = AsyncMock()
+        conn.fetchrow.return_value = count_row  # COUNT query (no project, no _resolve_index_id call)
+        conn.fetch.return_value = [_make_row()]
+        pool = _make_pool(conn)
+
+        with (
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
+        ):
+            mock_asyncio.create_task = MagicMock()
+            result = await dl.search(
+                SearchParams(metadata_filter={"status": "open"})
+            )
+
+        assert len(result.results) == 1
+        # Verify the fetch call included a metadata filter condition
+        fetch_call = conn.fetch.call_args
+        fetch_sql = fetch_call[0][0]
+        assert "metadata->>" in fetch_sql
+        # The key "status" and value "open" should appear in the args
+        fetch_args = fetch_call[0]
+        assert "status" in fetch_args
+        assert "open" in fetch_args
+
+    @pytest.mark.asyncio
+    async def test_search_metadata_filter_multiple_keys(self, dl):
+        """search with multiple metadata_filter keys generates one condition per key."""
+        count_row = MagicMock()
+        count_row.__getitem__ = lambda self, key: 0 if key == "total" else None
+
+        conn = AsyncMock()
+        conn.fetchrow.return_value = count_row
+        conn.fetch.return_value = []
+        pool = _make_pool(conn)
+
+        with (
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
+        ):
+            mock_asyncio.create_task = MagicMock()
+            result = await dl.search(
+                SearchParams(metadata_filter={"status": "open", "source": "bot"})
+            )
+
+        fetch_call = conn.fetch.call_args
+        fetch_sql = fetch_call[0][0]
+        # Two metadata conditions — metadata->> appears twice
+        assert fetch_sql.count("metadata->>") == 2

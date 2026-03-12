@@ -86,7 +86,7 @@ async def __IMPORTANT() -> str:  # noqa: N802
 @mcp.tool(
     description="Step 1: Search memory (hybrid: vector + FTS). Returns index with IDs. "
     "Browse mode: omit query (or use '*') to list memories with filters only. "
-    "Params: query, limit, project, type, obs_type, dateStart, dateEnd, offset, orderBy, filePath"
+    "Params: query, limit, project, type, obs_type, dateStart, dateEnd, offset, orderBy, filePath, metadata_filter"
 )
 async def search(
     query: str | None = None,
@@ -99,6 +99,7 @@ async def search(
     offset: int | None = None,
     order_by: str | None = None,
     file_path: str | None = None,
+    metadata_filter: dict | None = None,
 ) -> str:
     """Step 1: Hybrid memory search or browse mode."""
     dl = get_dl()
@@ -114,6 +115,7 @@ async def search(
             offset=offset,
             order_by=order_by,
             file_path=file_path,
+            metadata_filter=metadata_filter,
         )
     )
     return json.dumps(
@@ -193,6 +195,7 @@ async def save_memory(
     narrative: str | None = None,
     session_ref: str | None = None,
     is_test: bool = False,
+    metadata: dict | None = None,
 ) -> str:
     """Save a new memory entry."""
     if is_test:
@@ -207,6 +210,7 @@ async def save_memory(
             subtitle=subtitle,
             narrative=narrative,
             session_ref=session_ref,
+            metadata=metadata,
         )
     )
     return json.dumps({"id": result.id, "message": result.message})
@@ -217,7 +221,8 @@ async def save_memory(
     "Re-embeds automatically if text/title/subtitle/narrative change. "
     "Use to correct, consolidate, or enrich existing memories instead of creating duplicates. "
     "text: PRIMARY content (gets embedded+searched). narrative: supplementary prose context/reasoning. "
-    "Params: id (required), text, type, project, title, subtitle, narrative"
+    "metadata: JSONB-merged into existing metadata (use to add/update keys without overwriting others). "
+    "Params: id (required), text, type, project, title, subtitle, narrative, metadata"
 )
 async def update_memory(
     id: int,
@@ -227,6 +232,7 @@ async def update_memory(
     title: str | None = None,
     subtitle: str | None = None,
     narrative: str | None = None,
+    metadata: dict | None = None,
 ) -> str:
     """Update an existing memory entry."""
     dl = get_dl()
@@ -239,6 +245,7 @@ async def update_memory(
             title=title,
             subtitle=subtitle,
             narrative=narrative,
+            metadata=metadata,
         )
     )
     return json.dumps({"id": result.id, "message": result.message})

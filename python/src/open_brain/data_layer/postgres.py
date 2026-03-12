@@ -176,6 +176,11 @@ class PostgresDataLayer:
                         post_conditions.append(f"m.metadata->>'filePath' = ${param_idx}")
                         post_values.append(params.file_path)
                         param_idx += 1
+                    if params.metadata_filter:
+                        for key, val in params.metadata_filter.items():
+                            post_conditions.append(f"m.metadata->>${param_idx} = ${param_idx + 1}")
+                            post_values.extend([key, val])
+                            param_idx += 2
 
                     post_where = f"AND {' AND '.join(post_conditions)}" if post_conditions else ""
 
@@ -242,6 +247,11 @@ class PostgresDataLayer:
                 conditions.append(f"m.metadata->>'filePath' = ${param_idx}")
                 values.append(params.file_path)
                 param_idx += 1
+            if params.metadata_filter:
+                for key, val in params.metadata_filter.items():
+                    conditions.append(f"m.metadata->>${param_idx} = ${param_idx + 1}")
+                    values.extend([key, val])
+                    param_idx += 2
             # FTS fallback when hybrid failed but we have a query
             if query:
                 conditions.append(
@@ -448,9 +458,11 @@ class PostgresDataLayer:
                     return SaveMemoryResult(id=existing_id, message="Memory updated (upsert)")
 
             # ── Normal insert path ──
+            import json as _json
+            metadata_json = _json.dumps(params.metadata) if params.metadata else "{}"
             row = await conn.fetchrow(
-                """INSERT INTO memories (index_id, type, title, subtitle, narrative, content, session_ref)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7)
+                """INSERT INTO memories (index_id, type, title, subtitle, narrative, content, session_ref, metadata)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
                    RETURNING id""",
                 index_id or 1,
                 params.type or "observation",
@@ -459,6 +471,7 @@ class PostgresDataLayer:
                 params.narrative,
                 params.text,
                 params.session_ref,
+                metadata_json,
             )
             memory_id: int = row["id"]
 
@@ -500,16 +513,23 @@ class PostgresDataLayer:
                 index_id = await self._resolve_index_id(conn, params.project)
                 updates["index_id"] = index_id or 1
 
-            if not updates:
+            has_metadata_merge = params.metadata is not None
+
+            if not updates and not has_metadata_merge:
                 return SaveMemoryResult(id=params.id, message="No fields to update")
 
             # Build parameterized query
+            import json as _json
             set_parts = []
             values: list[Any] = []
             param_idx = 1
             for col, val in updates.items():
                 set_parts.append(f"{col} = ${param_idx}")
                 values.append(val)
+                param_idx += 1
+            if has_metadata_merge:
+                set_parts.append(f"metadata = metadata || ${param_idx}::jsonb")
+                values.append(_json.dumps(params.metadata))
                 param_idx += 1
             set_parts.append(f"updated_at = NOW()")
 
