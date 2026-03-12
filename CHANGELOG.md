@@ -3,10 +3,20 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Miscellaneous
+
+- *(beads)* Research yju — AST feature spec for ob-smart-explore
+
+## [2026.03.16] - 2026-03-10
+
 ### Features
 
 - *(plugin)* Add ob-triage skill with HITL convention
 - *(plugin)* Ob-triage uses AskUserQuestion for HITL decisions
+
+### Miscellaneous
+
+- *(changelog)* Update for v2026.03.16
 
 ## [2026.03.15] - 2026-03-10
 

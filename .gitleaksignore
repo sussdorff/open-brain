@@ -1,0 +1,2 @@
+# Test JWT secret in conftest.py (dummy value, not a real secret)
+c3611d05ba06ac5d7c574078b658c66d25c5ff15:python/tests/conftest.py:generic-api-key:12
