@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import AnyHttpUrl, field_validator
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,6 +25,9 @@ class Config(BaseSettings):
 
     # API key auth for plugin hooks (comma-separated list of valid keys)
     API_KEYS: str = ""
+
+    # Multi-user auth: "user1:pass1,user2:pass2". If empty, falls back to AUTH_USER/AUTH_PASSWORD.
+    USERS: str = ""
 
     # LLM for metadata extraction / refinement
     LLM_PROVIDER: Literal["anthropic", "openrouter"] = "anthropic"
@@ -58,3 +61,21 @@ def get_config() -> Config:
     if _config is None:
         _config = Config()  # type: ignore[call-arg]
     return _config
+
+
+def get_users_map() -> dict[str, str]:
+    """Return a username→password map for authentication.
+
+    If USERS env var is set (format: ``user1:pass1,user2:pass2``), parse it.
+    Otherwise fall back to single-user AUTH_USER / AUTH_PASSWORD.
+    """
+    config = get_config()
+    if config.USERS.strip():
+        users: dict[str, str] = {}
+        for entry in config.USERS.split(","):
+            entry = entry.strip()
+            if ":" in entry:
+                username, password = entry.split(":", 1)
+                users[username.strip()] = password.strip()
+        return users
+    return {config.AUTH_USER: config.AUTH_PASSWORD}

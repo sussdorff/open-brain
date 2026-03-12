@@ -54,10 +54,13 @@ async def get_pool() -> asyncpg.Pool:
     if _pool is None:
         config = get_config()
         _pool = await asyncpg.create_pool(config.DATABASE_URL, min_size=2, max_size=10)
-        # Ensure session_ref column exists (idempotent migration)
+        # Idempotent migrations
         async with _pool.acquire() as conn:
             await conn.execute(
                 "ALTER TABLE memories ADD COLUMN IF NOT EXISTS session_ref TEXT;"
+            )
+            await conn.execute(
+                "ALTER TABLE memories ADD COLUMN IF NOT EXISTS user_id TEXT;"
             )
     return _pool
 
@@ -88,6 +91,7 @@ def _row_to_memory(row: asyncpg.Record) -> Memory:
         last_accessed_at=str(row["last_accessed_at"]) if row.get("last_accessed_at") else None,
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
+        user_id=row.get("user_id"),
     )
 
 
@@ -181,6 +185,10 @@ class PostgresDataLayer:
                             post_conditions.append(f"m.metadata->>${param_idx} = ${param_idx + 1}")
                             post_values.extend([key, val])
                             param_idx += 2
+                    if params.author:
+                        post_conditions.append(f"m.user_id = ${param_idx}")
+                        post_values.append(params.author)
+                        param_idx += 1
 
                     post_where = f"AND {' AND '.join(post_conditions)}" if post_conditions else ""
 
@@ -190,7 +198,7 @@ class PostgresDataLayer:
                         )
                         SELECT m.id, m.index_id, m.session_id, m.type, m.title, m.subtitle,
                                m.narrative, m.content, m.metadata, m.priority, m.stability,
-                               m.access_count, m.last_accessed_at, m.created_at, m.updated_at
+                               m.access_count, m.last_accessed_at, m.created_at, m.updated_at, m.user_id
                         FROM scored s
                         JOIN memories m ON m.id = s.id
                         WHERE 1=1 {post_where}
@@ -252,6 +260,10 @@ class PostgresDataLayer:
                     conditions.append(f"m.metadata->>${param_idx} = ${param_idx + 1}")
                     values.extend([key, val])
                     param_idx += 2
+            if params.author:
+                conditions.append(f"m.user_id = ${param_idx}")
+                values.append(params.author)
+                param_idx += 1
             # FTS fallback when hybrid failed but we have a query
             if query:
                 conditions.append(
@@ -265,7 +277,7 @@ class PostgresDataLayer:
 
             rows = await conn.fetch(
                 f"""SELECT m.id, m.index_id, m.session_id, m.type, m.title, m.subtitle, m.narrative, m.content,
-                        m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.created_at, m.updated_at
+                        m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.created_at, m.updated_at, m.user_id
                  FROM memories m {where}
                  ORDER BY {order_by}
                  LIMIT ${param_idx} OFFSET ${param_idx+1}""",
@@ -461,8 +473,8 @@ class PostgresDataLayer:
             import json as _json
             metadata_json = _json.dumps(params.metadata) if params.metadata else "{}"
             row = await conn.fetchrow(
-                """INSERT INTO memories (index_id, type, title, subtitle, narrative, content, session_ref, metadata)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+                """INSERT INTO memories (index_id, type, title, subtitle, narrative, content, session_ref, metadata, user_id)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
                    RETURNING id""",
                 index_id or 1,
                 params.type or "observation",
@@ -472,6 +484,7 @@ class PostgresDataLayer:
                 params.text,
                 params.session_ref,
                 metadata_json,
+                params.user_id,
             )
             memory_id: int = row["id"]
 
@@ -688,7 +701,7 @@ class PostgresDataLayer:
             return {"sessions": [dict(r) for r in rows]}
 
     async def stats(self) -> dict[str, Any]:
-        """Get database aggregate statistics including type taxonomy."""
+        """Get database aggregate statistics including type taxonomy and per-user counts."""
         pool = await get_pool()
         async with pool.acquire() as conn:
             memories_row = await conn.fetchrow("SELECT COUNT(*)::int AS count FROM memories")
@@ -702,6 +715,9 @@ class PostgresDataLayer:
             type_rows = await conn.fetch(
                 "SELECT type, COUNT(*)::int AS count FROM memories GROUP BY type ORDER BY count DESC"
             )
+            user_rows = await conn.fetch(
+                "SELECT user_id, COUNT(*)::int AS count FROM memories GROUP BY user_id ORDER BY count DESC"
+            )
 
         size_bytes = int(db_size_row["size"])
         return {
@@ -711,6 +727,7 @@ class PostgresDataLayer:
             "db_size_bytes": size_bytes,
             "db_size_mb": round(size_bytes / 1024 / 1024, 2),
             "types": {row["type"]: row["count"] for row in type_rows},
+            "by_user": {(row["user_id"] or "unknown"): row["count"] for row in user_rows},
         }
 
     async def refine_memories(self, params: RefineParams) -> RefineResult:

@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass, field
 
 from open_brain.auth.tokens import TokenClaims, issue_access_token, issue_refresh_token, verify_token
-from open_brain.config import get_config
+from open_brain.config import get_config, get_users_map
 
 
 LOGIN_FORM_TEMPLATE = """<!DOCTYPE html>
@@ -44,6 +44,7 @@ class AuthCodeEntry:
     redirect_uri: str
     scopes: list[str]
     expires_at: float  # Unix timestamp
+    username: str = ""  # authenticated username
 
 
 @dataclass
@@ -149,8 +150,8 @@ class OAuthProvider:
             On failure, redirect_url contains error parameters.
             On success, redirect_url contains the authorization code.
         """
-        config = get_config()
-        if username != config.AUTH_USER or password != config.AUTH_PASSWORD:
+        users_map = get_users_map()
+        if username not in users_map or users_map[username] != password:
             error_url = _build_url(redirect_uri, {
                 "error": "access_denied",
                 "error_description": "Invalid credentials",
@@ -167,6 +168,7 @@ class OAuthProvider:
             redirect_uri=redirect_uri,
             scopes=scopes,
             expires_at=time.time() + 5 * 60,  # 5 minutes
+            username=username,
         )
 
         redirect_url = _build_url(redirect_uri, {"code": code})
@@ -202,9 +204,8 @@ class OAuthProvider:
         # Consume the code
         del self._auth_codes[authorization_code]
 
-        config = get_config()
         claims = TokenClaims(
-            sub=config.AUTH_USER,
+            sub=entry.username,
             client_id=client_id,
             scopes=entry.scopes,
         )
@@ -236,9 +237,8 @@ class OAuthProvider:
         if verified.token_type != "refresh":
             raise ValueError("Not a refresh token")
 
-        config = get_config()
         claims = TokenClaims(
-            sub=config.AUTH_USER,
+            sub=verified.sub,
             client_id=client_id,
             scopes=scopes if scopes is not None else verified.scopes,
         )

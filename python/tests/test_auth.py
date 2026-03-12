@@ -382,3 +382,140 @@ class TestBearerAuthMiddleware:
         )
         # Should NOT be 401 — whatever status the MCP handler returns is fine
         assert resp.status_code != 401
+
+
+# ─── Multi-user Auth Tests ────────────────────────────────────────────────────
+
+class TestMultiUserAuth:
+    """Tests for USERS env var multi-user authentication."""
+
+    def test_get_users_map_fallback_to_single_user(self):
+        """When USERS is empty, falls back to AUTH_USER/AUTH_PASSWORD."""
+        from open_brain.config import get_users_map
+        users_map = get_users_map()
+        assert "testuser" in users_map
+        assert users_map["testuser"] == "testpassword123"
+
+    def test_get_users_map_parses_users_env(self, monkeypatch):
+        """When USERS is set, parses user1:pass1,user2:pass2 format."""
+        import open_brain.config as config_module
+        config_module._config = None
+        monkeypatch.setenv("USERS", "alice:alicepass,bob:bobpass")
+        from open_brain.config import get_users_map
+        users_map = get_users_map()
+        assert "alice" in users_map
+        assert users_map["alice"] == "alicepass"
+        assert "bob" in users_map
+        assert users_map["bob"] == "bobpass"
+
+    def test_get_users_map_single_user_in_users_env(self, monkeypatch):
+        """Single user in USERS env var is parsed correctly."""
+        import open_brain.config as config_module
+        config_module._config = None
+        monkeypatch.setenv("USERS", "charlie:charliepass")
+        from open_brain.config import get_users_map
+        users_map = get_users_map()
+        assert users_map == {"charlie": "charliepass"}
+
+    def test_handle_login_submit_multi_user_success(self, oauth_provider, monkeypatch):
+        """Multi-user: second user can log in when USERS is set."""
+        import open_brain.config as config_module
+        config_module._config = None
+        monkeypatch.setenv("USERS", "alice:alicepass,bob:bobpass")
+        success, redirect_url = oauth_provider.handle_login_submit(
+            username="bob",
+            password="bobpass",
+            client_id="client1",
+            redirect_uri="http://localhost/callback",
+            code_challenge="challenge",
+            state="",
+            scopes_str="",
+        )
+        assert success is True
+        assert "code=" in redirect_url
+
+    def test_handle_login_submit_multi_user_wrong_password(self, oauth_provider, monkeypatch):
+        """Multi-user: wrong password for a valid username is rejected."""
+        import open_brain.config as config_module
+        config_module._config = None
+        monkeypatch.setenv("USERS", "alice:alicepass,bob:bobpass")
+        success, redirect_url = oauth_provider.handle_login_submit(
+            username="alice",
+            password="wrongpass",
+            client_id="client1",
+            redirect_uri="http://localhost/callback",
+            code_challenge="challenge",
+            state="",
+            scopes_str="",
+        )
+        assert success is False
+        assert "error=access_denied" in redirect_url
+
+    def test_handle_login_submit_multi_user_unknown_user(self, oauth_provider, monkeypatch):
+        """Multi-user: unknown username is rejected."""
+        import open_brain.config as config_module
+        config_module._config = None
+        monkeypatch.setenv("USERS", "alice:alicepass")
+        success, redirect_url = oauth_provider.handle_login_submit(
+            username="mallory",
+            password="alicepass",
+            client_id="client1",
+            redirect_uri="http://localhost/callback",
+            code_challenge="challenge",
+            state="",
+            scopes_str="",
+        )
+        assert success is False
+        assert "error=access_denied" in redirect_url
+
+    def test_exchange_authorization_code_encodes_username_in_sub(self, oauth_provider):
+        """JWT sub claim contains the authenticated username."""
+        success, redirect_url = oauth_provider.handle_login_submit(
+            username="testuser",
+            password="testpassword123",
+            client_id="client1",
+            redirect_uri="http://localhost/callback",
+            code_challenge="challenge",
+            state="",
+            scopes_str="read",
+        )
+        assert success is True
+        code = redirect_url.split("code=")[1].split("&")[0]
+        tokens = oauth_provider.exchange_authorization_code("client1", code)
+        import jwt as pyjwt
+        payload = pyjwt.decode(tokens.access_token, options={"verify_signature": False})
+        assert payload["sub"] == "testuser"
+
+    def test_exchange_authorization_code_encodes_second_user_sub(self, oauth_provider, monkeypatch):
+        """JWT sub claim correctly reflects the second user's username."""
+        import open_brain.config as config_module
+        config_module._config = None
+        monkeypatch.setenv("USERS", "alice:alicepass,bob:bobpass")
+        success, redirect_url = oauth_provider.handle_login_submit(
+            username="alice",
+            password="alicepass",
+            client_id="client1",
+            redirect_uri="http://localhost/callback",
+            code_challenge="challenge",
+            state="",
+            scopes_str="read",
+        )
+        assert success is True
+        code = redirect_url.split("code=")[1].split("&")[0]
+        tokens = oauth_provider.exchange_authorization_code("client1", code)
+        import jwt as pyjwt
+        payload = pyjwt.decode(tokens.access_token, options={"verify_signature": False})
+        assert payload["sub"] == "alice"
+
+    def test_backward_compat_single_user(self, oauth_provider):
+        """Backward compat: existing AUTH_USER/AUTH_PASSWORD still works."""
+        success, redirect_url = oauth_provider.handle_login_submit(
+            username="testuser",
+            password="testpassword123",
+            client_id="client1",
+            redirect_uri="http://localhost/callback",
+            code_challenge="challenge",
+            state="",
+            scopes_str="",
+        )
+        assert success is True
