@@ -1010,37 +1010,59 @@ async def api_delete_memories(request: Request) -> JSONResponse:
 async def api_context(
     project: str | None = None,
     limit: int = 50,
+    format: str = "markdown",
 ) -> Response:
-    """Get recent memory context formatted as markdown for plugin injection."""
+    """Get recent memory context. format=json returns structured data, format=markdown returns legacy table."""
     dl = get_dl()
 
-    # Get recent observations
+    # Fetch session summaries (stored as memories with obs_type=session_summary)
+    sessions_result = await dl.search(
+        SearchParams(obs_type="session_summary", project=project, limit=3, order_by=None)
+    )
+
+    # Fetch recent non-session observations
     result = await dl.search(
         SearchParams(project=project, limit=limit, order_by=None)
     )
+    non_session = [m for m in result.results if m.type != "session_summary"]
 
-    # Get recent session summaries
-    context = await dl.get_context(limit=3, project=project)
+    if format == "json":
+        return JSONResponse({
+            "sessions": [
+                {
+                    "title": m.title,
+                    "narrative": m.narrative,
+                    "content": m.content,
+                    "created_at": str(m.created_at) if m.created_at else None,
+                }
+                for m in sessions_result.results
+            ],
+            "observations": [
+                {
+                    "type": m.type,
+                    "title": m.title,
+                    "narrative": m.narrative,
+                    "created_at": str(m.created_at) if m.created_at else None,
+                }
+                for m in non_session[:20]
+            ],
+        })
 
-    # Format as markdown
+    # Legacy markdown format
     lines = []
-
-    # Session summaries first
-    sessions = context.get("sessions", [])
-    if sessions:
+    if sessions_result.results:
         lines.append("## Recent Sessions\n")
-        for s in sessions[:3]:
-            title = s.get("title", "Session")
-            content = s.get("content", "")[:200]
-            lines.append(f"- **{title}**: {content}")
+        for s in sessions_result.results[:3]:
+            title = s.title or "Session"
+            body = s.narrative or (s.content or "")[:200]
+            lines.append(f"- **{title}**: {body}")
         lines.append("")
 
-    # Recent observations as table
-    if result.results:
+    if non_session:
         lines.append("## Recent Observations\n")
         lines.append("| Type | Title | When |")
         lines.append("|------|-------|------|")
-        for m in result.results[:30]:
+        for m in non_session[:30]:
             type_label = m.type or "observation"
             title = (m.title or m.content[:60])[:60]
             when = m.created_at[:10] if m.created_at else "?"
