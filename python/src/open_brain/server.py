@@ -1031,19 +1031,37 @@ async def api_delete_memories(request: Request) -> JSONResponse:
 async def api_context(
     project: str | None = None,
     limit: int = 50,
+    since: str | None = None,
     format: str = "markdown",
 ) -> Response:
-    """Get recent memory context. format=json returns structured data, format=markdown returns legacy table."""
+    """Get recent memory context.
+
+    since: ISO date/datetime or Unix epoch — only return memories created after this point.
+    format=json returns structured data, format=markdown returns legacy table.
+    """
     dl = get_dl()
+
+    # Normalize since parameter (accept epoch or ISO)
+    date_start = None
+    if since:
+        try:
+            # If it looks like a Unix epoch (all digits), convert to ISO
+            if since.strip().isdigit():
+                from datetime import datetime, timezone
+                date_start = datetime.fromtimestamp(int(since), tz=timezone.utc).isoformat()
+            else:
+                date_start = since
+        except Exception:
+            date_start = since  # Pass through, let DB handle validation
 
     # Fetch session summaries (stored as memories with obs_type=session_summary)
     sessions_result = await dl.search(
-        SearchParams(obs_type="session_summary", project=project, limit=3, order_by=None)
+        SearchParams(obs_type="session_summary", project=project, limit=3, order_by=None, date_start=date_start)
     )
 
     # Fetch recent non-session observations
     result = await dl.search(
-        SearchParams(project=project, limit=limit, order_by=None)
+        SearchParams(project=project, limit=limit, order_by=None, date_start=date_start)
     )
     non_session = [m for m in result.results if m.type != "session_summary"]
 
