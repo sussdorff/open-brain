@@ -82,8 +82,9 @@ async def _extract_entities(text: str) -> dict:
             model="claude-haiku-4-5-20251001",
         )
         parsed = _parse_llm_json(response)
-        # Only return non-empty entity types; if everything empty, return {}
-        entities = {k: v for k, v in parsed.items() if isinstance(v, list) and v}
+        # Filter to expected keys only and non-empty lists (prevents hallucinated keys)
+        ENTITY_KEYS = {"people", "orgs", "tech", "locations", "dates"}
+        entities = {k: v for k, v in parsed.items() if k in ENTITY_KEYS and isinstance(v, list) and v}
         return entities
     except Exception:
         logger.warning("Entity extraction failed — continuing without entities", exc_info=True)
@@ -287,7 +288,7 @@ async def save_memory(
             ),
         )
         if entities:
-            enriched_metadata = {**(metadata or {}), "entities": entities}
+            enriched_metadata = {"entities": entities}
             await dl.update_memory(
                 UpdateMemoryParams(id=result.id, metadata=enriched_metadata)
             )
