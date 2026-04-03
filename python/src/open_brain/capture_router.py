@@ -67,7 +67,7 @@ async def classify_and_extract(
         Returns existing_metadata unchanged if bypass conditions are met.
     """
     # Bypass condition 1: capture_template already set by caller
-    if existing_metadata and "capture_template" in existing_metadata:
+    if existing_metadata is not None and "capture_template" in existing_metadata:
         return existing_metadata
 
     # Bypass condition 2: session_summary type

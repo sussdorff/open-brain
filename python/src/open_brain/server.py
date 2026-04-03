@@ -210,18 +210,12 @@ async def save_memory(
     dl = get_dl()
     user_id = _current_user_id.get()
 
-    # Determine if classification should be bypassed
-    should_classify = not (
-        (metadata and "capture_template" in metadata)
-        or type == "session_summary"
+    # Start classification concurrently with save (AK5: <200ms added latency).
+    # classify_and_extract handles all bypass conditions internally (returns
+    # existing_metadata unchanged when capture_template already set, or on session_summary).
+    classify_task: asyncio.Task = asyncio.create_task(
+        classify_and_extract(text, existing_metadata=metadata, memory_type=type)
     )
-
-    # Start classification concurrently with save (AK5: <200ms added latency)
-    classify_task: asyncio.Task | None = None
-    if should_classify:
-        classify_task = asyncio.create_task(
-            classify_and_extract(text, existing_metadata=metadata, memory_type=type)
-        )
 
     result = await dl.save_memory(
         SaveMemoryParams(
@@ -238,18 +232,17 @@ async def save_memory(
     )
 
     # Await classification result and merge into saved memory metadata
-    if classify_task is not None:
-        try:
-            classification = await classify_task
-            merged_metadata = {**(metadata or {}), **classification}
-            await dl.update_memory(
-                UpdateMemoryParams(
-                    id=result.id,
-                    metadata=merged_metadata,
-                )
+    try:
+        classification = await classify_task
+        merged_metadata = {**(metadata or {}), **classification}
+        await dl.update_memory(
+            UpdateMemoryParams(
+                id=result.id,
+                metadata=merged_metadata,
             )
-        except Exception:
-            logger.exception("save_memory: capture_router metadata update failed, memory saved without capture_template")
+        )
+    except Exception:
+        logger.exception("save_memory: capture_router metadata update failed, memory saved without capture_template")
 
     return json.dumps({"id": result.id, "message": result.message})
 
