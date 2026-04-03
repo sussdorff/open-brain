@@ -274,7 +274,6 @@ async def save_memory(
     dl = get_dl()
     user_id = _current_user_id.get()
 
-    # Run capture routing and entity extraction concurrently with save_memory.
     # classify_and_extract handles bypass conditions internally (returns existing_metadata
     # unchanged when capture_template already set or type=session_summary).
     # Entity extraction is skipped when "entities" key already present in metadata.
@@ -292,21 +291,20 @@ async def save_memory(
         user_id=user_id,
     )
 
-    classify_coro = classify_and_extract(text, existing_metadata=metadata, memory_type=type)
-    save_coro = dl.save_memory(save_params)
+    # Save first — must know if duplicate before firing expensive LLM calls.
+    result = await dl.save_memory(save_params)
 
-    if not has_entities:
-        entities_coro = _extract_entities(text)
-        entities_result, classification, result = await asyncio.gather(
-            entities_coro, classify_coro, save_coro,
-        )
-    else:
-        classification, result = await asyncio.gather(classify_coro, save_coro)
-        entities_result = {}
-
-    # Merge classification + entity extraction into a single update_memory call
-    # Skip entirely for duplicates — no LLM enrichment should be persisted for them.
+    # Skip LLM enrichment entirely for duplicates — no wasted API calls, no update_memory.
     if result.duplicate_of is None:
+        # Run classification and entity extraction concurrently (non-duplicate path only).
+        classify_coro = classify_and_extract(text, existing_metadata=metadata, memory_type=type)
+        if not has_entities:
+            entities_coro = _extract_entities(text)
+            entities_result, classification = await asyncio.gather(entities_coro, classify_coro)
+        else:
+            classification = await classify_coro
+            entities_result = {}
+
         post_save_metadata: dict[str, Any] = {}
 
         # Add classification metadata (guard: skip if bypass returned metadata unchanged,

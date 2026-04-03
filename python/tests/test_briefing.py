@@ -261,6 +261,32 @@ async def test_cross_project_connections_use_index_id():
     assert projects["20"] == 1
 
 
+@pytest.mark.asyncio
+async def test_cross_project_excludes_none_index_id():
+    """Memories with index_id=None are excluded from cross-project grouping."""
+    import dataclasses
+    from open_brain.digest import generate_weekly_briefing
+
+    base = _make_memory(mid=1, metadata={})
+    memories = [
+        dataclasses.replace(base, index_id=10),
+        dataclasses.replace(base, index_id=None),  # type: ignore[arg-type]  # runtime None despite int hint
+    ]
+
+    dl = AsyncMock()
+    dl.search.side_effect = [
+        SearchResult(results=memories, total=2),
+        SearchResult(results=[], total=0),
+        SearchResult(results=memories, total=2),
+    ]
+
+    result = await generate_weekly_briefing(dl, weeks_back=1)
+
+    # Only index_id=10 should appear — None is excluded
+    assert len(result.cross_project_connections) == 1
+    assert result.cross_project_connections[0]["project"] == "10"
+
+
 # ─── Validation ───────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
