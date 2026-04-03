@@ -7,6 +7,7 @@ periodic learnings extraction ran, enabling 4h rate-limiting.
 from __future__ import annotations
 
 import json
+import warnings
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -25,7 +26,8 @@ def load_state(path: Path | str) -> dict:
         return {}
     try:
         return json.loads(p.read_text())
-    except Exception:
+    except Exception as e:
+        warnings.warn(f"Failed to load learnings state from {p}: {e}", stacklevel=2)
         return {}
 
 
@@ -38,7 +40,7 @@ def save_state(path: Path | str, state: dict) -> None:
     """
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = Path(str(p) + ".tmp")
+    tmp = p.with_name(p.name + ".tmp")
     tmp.write_text(json.dumps(state, indent=2))
     tmp.rename(p)
 
@@ -61,6 +63,8 @@ def is_extraction_due(state: dict, interval_hours: float = 4.0) -> bool:
         delta = datetime.now(timezone.utc) - last_run
         return delta.total_seconds() >= interval_hours * 3600
     except Exception:
+        if last_run_str:
+            warnings.warn(f"Malformed last_learnings_run timestamp: {last_run_str!r}", stacklevel=2)
         return True
 
 
