@@ -92,6 +92,7 @@ Memories flow through a defined lifecycle from creation to long-term storage:
   ─────►  ┌──────────┐  ─────►  ┌──────────┐  ◄─────  queries
           │  memory   │         │ embedding │
           │  + meta   │         │ + links   │
+          │ +entities │         │ + entities│
           └──────────┘         └──────────┘
                                      │
                     ┌────────────────┘
@@ -121,7 +122,7 @@ Memories flow through a defined lifecycle from creation to long-term storage:
 
 | Stage | Tool | Mode | Description |
 |-------|------|------|-------------|
-| **Save** | `save_memory` | Auto/Manual | Store observation with metadata. Auto-embeds async. |
+| **Save** | `save_memory` | Auto/Manual | Store observation with metadata. Auto-extract entities (people, orgs, tech, locations, dates) and auto-embed async. |
 | **Embed** | (internal) | Automatic | Voyage-4 embedding + auto-link to similar memories (cosine > 0.65). |
 | **Search** | `search`, `timeline`, `get_observations` | On demand | 3-step funnel: search → context → details. Minimizes token usage. |
 | **Refine** | `refine_memories` | Automatic | LLM finds duplicates, merges similar, adjusts priority. Rule-based. |
@@ -262,7 +263,7 @@ Requires a running Postgres instance with pgvector.
 | `content` | text | Primary searchable body (embedded + searched) |
 | `narrative` | text | Supplementary reasoning / context |
 | `embedding` | vector(1024) | Voyage-4 embedding |
-| `metadata` | jsonb | Arbitrary structured data (file paths, status, etc.) |
+| `metadata` | jsonb | Arbitrary structured data — includes auto-extracted `entities` (people, orgs, tech, locations, dates), capture templates, custom fields |
 | `priority` | real | Decays based on usage; affects ranking |
 | `stability` | text | `tentative` → `stable` → `canonical` |
 | `type` | text | Memory type vocabulary (discovery, learning, session_summary, ...) |
