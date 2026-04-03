@@ -3,26 +3,41 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Miscellaneous
+
+- Bump version to 2026.04.8
+
+## [2026.04.8] - 2026-04-03
+
 ### Bug Fixes
 
+- *(open-brain-q9y)* Address review findings iteration 1
+- *(open-brain-q9y)* Address review findings iteration 2
+- *(open-brain-q9y)* Validation, dry_run comments, protected rename, test call_args
+- *(open-brain-q9y)* Boost_threshold validation, recent_memories docstring, params validation test
 - *(open-brain-dxd)* Address review findings iteration 1
 - *(open-brain-dxd)* Address review findings iteration 2
 - *(open-brain-dxd)* Address cmux review panel findings iteration 1
 
 ### Documentation
 
+- Update feature documentation for open-brain-q9y
 - Update feature documentation for open-brain-dxd
 
 ### Features
 
+- *(open-brain-q9y)* Green — memory decay AK1-AK5 all passing
+- *(open-brain-q9y)* Integrate decay_memories into run_lifecycle_pipeline
 - *(open-brain-dxd)* Green — evolution engagement tracking + behavior proposals
 
 ### Miscellaneous
 
 - Bump version to 2026.04.7
+- Update changelog
 
 ### Testing
 
+- *(open-brain-q9y)* Red — memory decay AK1-AK5 failing tests
 - *(open-brain-dxd)* Red — evolution engagement tracking + behavior proposals
 
 ## [2026.04.7] - 2026-04-03
