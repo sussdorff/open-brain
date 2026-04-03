@@ -11,11 +11,8 @@ and here. Keep both in sync when changing the interval or key name.
 from __future__ import annotations
 
 import json
-import logging
 import warnings
-from datetime import datetime, timezone, timedelta
-
-logger = logging.getLogger(__name__)
+from datetime import datetime, timezone
 from pathlib import Path
 
 
