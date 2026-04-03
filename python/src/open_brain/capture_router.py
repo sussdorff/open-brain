@@ -15,11 +15,11 @@ Capture templates:
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
 from open_brain.data_layer.llm import LlmMessage, llm_complete
+from open_brain.utils import parse_llm_json
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +55,9 @@ async def classify_and_extract(
 ) -> dict[str, Any]:
     """Classify text and extract structured fields for the matching capture template.
 
+    Assumes text is trusted user input. Not suitable for multi-tenant use
+    without prompt sanitization.
+
     Args:
         text: The memory text to classify.
         existing_metadata: Existing metadata dict. If it contains 'capture_template',
@@ -85,7 +88,7 @@ async def classify_and_extract(
             model="claude-haiku-4-5-20251001",
             max_tokens=512,
         )
-        result = _parse_json(response)
+        result = parse_llm_json(response)
         if not isinstance(result, dict) or "capture_template" not in result:
             logger.warning("capture_router: LLM returned unexpected structure, falling back to observation")
             return {"capture_template": "observation"}
@@ -95,10 +98,3 @@ async def classify_and_extract(
         return {"capture_template": "observation"}
 
 
-def _parse_json(text: str) -> Any:
-    """Parse JSON from LLM response, stripping markdown fences if present."""
-    text = text.strip()
-    if text.startswith("```"):
-        text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-        text = text.rsplit("```", 1)[0]
-    return json.loads(text)

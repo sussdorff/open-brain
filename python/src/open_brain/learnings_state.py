@@ -64,6 +64,8 @@ def is_extraction_due(state: dict, interval_hours: float = 4.0) -> bool:
         return True
     try:
         last_run = datetime.fromisoformat(last_run_str)
+        if last_run.tzinfo is None:
+            last_run = last_run.replace(tzinfo=timezone.utc)
         delta = datetime.now(timezone.utc) - last_run
         return delta.total_seconds() >= interval_hours * 3600
     except Exception:

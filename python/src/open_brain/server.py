@@ -34,6 +34,7 @@ from open_brain.data_layer.interface import (
 )
 from open_brain.capture_router import classify_and_extract
 from open_brain.data_layer.llm import LlmMessage, llm_complete
+from open_brain.utils import parse_llm_json
 from open_brain.data_layer.postgres import PostgresDataLayer, close_pool
 
 logger = logging.getLogger(__name__)
@@ -42,13 +43,6 @@ logger = logging.getLogger(__name__)
 _current_user_id: ContextVar[str | None] = ContextVar("current_user_id", default=None)
 
 
-def _parse_llm_json(text: str) -> dict:
-    """Parse JSON from LLM response, stripping markdown fences if present."""
-    text = text.strip()
-    if text.startswith("```"):
-        text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-        text = text.rsplit("```", 1)[0]
-    return json.loads(text)
 
 
 _ENTITY_EXTRACTION_PROMPT = """\
@@ -85,7 +79,7 @@ async def _extract_entities(text: str) -> dict:
             messages=[LlmMessage(role="user", content=_ENTITY_EXTRACTION_PROMPT + text)],
             model="claude-haiku-4-5-20251001",
         )
-        parsed = _parse_llm_json(response)
+        parsed = parse_llm_json(response)
         # Filter to expected keys only; strip non-string items from lists (prevents hallucinated keys/values)
         entities = {}
         for k, v in parsed.items():
@@ -286,38 +280,36 @@ async def save_memory(
         user_id=user_id,
     )
 
-    tasks: list = [
-        classify_and_extract(text, existing_metadata=metadata, memory_type=type),
-        dl.save_memory(save_params),
-    ]
+    classify_coro = classify_and_extract(text, existing_metadata=metadata, memory_type=type)
+    save_coro = dl.save_memory(save_params)
+
     if not has_entities:
-        tasks.insert(0, _extract_entities(text))
-        entities_result, classification, result = await asyncio.gather(*tasks)
+        entities_coro = _extract_entities(text)
+        entities_result, classification, result = await asyncio.gather(
+            entities_coro, classify_coro, save_coro,
+        )
     else:
-        classification, result = await asyncio.gather(*tasks)
+        classification, result = await asyncio.gather(classify_coro, save_coro)
         entities_result = {}
 
-    # Apply classification metadata update (guard: skip if bypass returned metadata unchanged)
-    try:
-        if classification != (metadata or {}):
-            merged_metadata = {**(metadata or {}), **classification}
-            await dl.update_memory(
-                UpdateMemoryParams(
-                    id=result.id,
-                    metadata=merged_metadata,
-                )
-            )
-    except Exception:
-        logger.exception("save_memory: capture_router metadata update failed, memory saved without capture_template")
+    # Merge classification + entity extraction into a single update_memory call
+    post_save_metadata: dict[str, Any] = {}
 
-    # Apply entity extraction results
+    # Add classification metadata (guard: skip if bypass returned metadata unchanged)
+    if classification != (metadata or {}):
+        post_save_metadata = {**(metadata or {}), **classification}
+
+    # Add entity extraction results
     if entities_result:
+        post_save_metadata["entities"] = entities_result
+
+    if post_save_metadata:
         try:
             await dl.update_memory(
-                UpdateMemoryParams(id=result.id, metadata={"entities": entities_result})
+                UpdateMemoryParams(id=result.id, metadata=post_save_metadata)
             )
         except Exception:
-            logger.warning("save_memory: entity extraction metadata update failed", exc_info=True)
+            logger.exception("save_memory: post-save metadata update failed (classification/entities)")
 
     payload: dict = {"id": result.id, "message": result.message}
     if result.duplicate_of is not None:
@@ -894,7 +886,7 @@ Respond with ONLY valid JSON, no markdown fences."""
             model="claude-haiku-4-5-20251001",
             max_tokens=512,
         )
-        result = _parse_llm_json(response)
+        result = parse_llm_json(response)
 
         if result.get("skip"):
             return None
@@ -972,7 +964,7 @@ Respond with ONLY valid JSON, no markdown fences."""
             model="claude-haiku-4-5-20251001",
             max_tokens=512,
         )
-        summary = _parse_llm_json(response)
+        summary = parse_llm_json(response)
 
         await dl.save_memory(
             SaveMemoryParams(
@@ -1064,7 +1056,7 @@ If nothing worth remembering happened, return: {{"observations": [], "session_su
             model="claude-haiku-4-5-20251001",
             max_tokens=1024,
         )
-        result = _parse_llm_json(response)
+        result = parse_llm_json(response)
 
         dl = get_dl()
 

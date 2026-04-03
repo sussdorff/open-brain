@@ -118,7 +118,7 @@ class TestPreProvidedEntitiesNotOverwritten:
         # or when called with pre-structured metadata — here it should also not update
         with patch("open_brain.server.get_dl", return_value=mock_dl), \
              patch("open_brain.server.llm_complete") as mock_llm, \
-             patch("open_brain.server.classify_and_extract", return_value=pre_set_metadata):
+             patch("open_brain.server.classify_and_extract", new=AsyncMock(return_value=pre_set_metadata)):
             await save_memory(
                 text="Some text with Sarah from Acme Corp.",
                 metadata=pre_set_metadata,
