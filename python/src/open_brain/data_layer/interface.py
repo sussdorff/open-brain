@@ -353,14 +353,24 @@ class DecayParams:
     boost_factor: float = 1.1     # priority *= boost_factor for frequently accessed
     dry_run: bool = False
 
+    def __post_init__(self) -> None:
+        if not (0 < self.decay_factor < 1):
+            raise ValueError(f"decay_factor must be in (0, 1), got {self.decay_factor}")
+        if self.boost_factor < 1.0:
+            raise ValueError(f"boost_factor must be >= 1.0, got {self.boost_factor}")
+        if self.stale_days <= 0:
+            raise ValueError(f"stale_days must be > 0, got {self.stale_days}")
+        if self.boost_days <= 0:
+            raise ValueError(f"boost_days must be > 0, got {self.boost_days}")
+
 
 @dataclass
 class DecayResult:
     """Result of a decay_memories operation."""
 
-    decayed: int    # count of memories whose priority was reduced
-    boosted: int    # count of memories whose priority was boosted
-    protected: int  # count of recent memories left unchanged (informational)
+    decayed: int         # count of memories whose priority was reduced
+    boosted: int         # count of memories whose priority was boosted
+    recent_memories: int  # count of recent memories (< boost_days old), regardless of access pattern (informational)
     summary: str
 
 

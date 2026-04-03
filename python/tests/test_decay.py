@@ -78,13 +78,21 @@ async def test_decay_unaccessed():
     params = DecayParams(stale_days=30, decay_factor=0.9, dry_run=True)
 
     conn = AsyncMock()
-    conn.fetchval.side_effect = [1, 0, 0]  # decayed=1, boosted=0, protected=0
+    conn.fetchval.side_effect = [1, 0, 0]  # decayed=1, boosted=0, recent_memories=0
     pool = _make_pool(conn)
 
     with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
         result = await dl.decay_memories(params)
 
     assert result.decayed > 0, "Expected at least one memory to be decayed"
+
+    # Verify correct parameters passed to DB (dry_run path — first fetchval is the decay count query)
+    # The decay count query uses str(stale_days) as $1 parameter
+    first_call = conn.fetchval.call_args_list[0]
+    assert "last_accessed_at" in first_call.args[0], (
+        "First fetchval should be the stale-memory count query"
+    )
+    assert first_call.args[1] == "30", f"stale_days=30 should be passed as string '30', got {first_call.args[1]!r}"
 
 
 # ─── AK2: Frequently accessed memory gets priority boosted ────────────────────
@@ -99,13 +107,21 @@ async def test_decay_boost():
     params = DecayParams(boost_threshold=10, boost_factor=1.1, dry_run=True)
 
     conn = AsyncMock()
-    conn.fetchval.side_effect = [0, 1, 0]  # decayed=0, boosted=1, protected=0
+    conn.fetchval.side_effect = [0, 1, 0]  # decayed=0, boosted=1, recent_memories=0
     pool = _make_pool(conn)
 
     with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
         result = await dl.decay_memories(params)
 
     assert result.boosted > 0, "Expected at least one memory to be boosted"
+
+    # Verify correct parameters passed to DB (dry_run path — second fetchval is the boost count query)
+    # The boost count query uses params.boost_threshold (int) as $1 parameter
+    second_call = conn.fetchval.call_args_list[1]
+    assert "access_count" in second_call.args[0], (
+        "Second fetchval should be the boost count query (access_count >= threshold)"
+    )
+    assert second_call.args[1] == 10, f"boost_threshold=10 should be passed as int 10, got {second_call.args[1]!r}"
 
 
 # ─── AK3: Recent memories are protected from decay ────────────────────────────
@@ -120,14 +136,14 @@ async def test_decay_recent_protected():
     params = DecayParams(stale_days=30, boost_days=7, dry_run=True)
 
     conn = AsyncMock()
-    conn.fetchval.side_effect = [0, 0, 1]  # decayed=0, boosted=0, protected=1
+    conn.fetchval.side_effect = [0, 0, 1]  # decayed=0, boosted=0, recent_memories=1
     pool = _make_pool(conn)
 
     with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
         result = await dl.decay_memories(params)
 
     assert result.decayed == 0, "Recent memory must not be decayed"
-    assert result.protected > 0, "Recent memory should appear in protected count"
+    assert result.recent_memories > 0, "Recent memory should appear in recent_memories count"
 
 
 # ─── AK4: Decaying memories appear in weekly briefing ────────────────────────
@@ -150,6 +166,9 @@ async def test_decay_in_briefing():
         title="Old Decision",
         created_at=NOW - timedelta(days=60),
         last_accessed_at=NOW - timedelta(days=40),
+        # access_count=1 is intentional: _find_decay_warnings() uses max_access_count=2 threshold,
+        # so access_count=1 still qualifies as a low-access stale memory and appears in decay warnings.
+        # access_count=0 would also work, but 1 validates the threshold boundary more precisely.
         access_count=1,
     )
     recent_memory = _make_memory(

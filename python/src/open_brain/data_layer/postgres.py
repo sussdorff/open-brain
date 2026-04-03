@@ -690,7 +690,11 @@ class PostgresDataLayer:
         async with pool.acquire() as conn:
             if params.dry_run:
                 # Count only — no writes
-                # This WHERE clause mirrors decay_unused_priorities() in DB migrations. If the DB function changes, update this query too.
+                # dry_run: count candidates without executing. This WHERE clause must mirror
+                # decay_unused_priorities(stale_days, factor) DB function.
+                # Verified criteria: last_accessed_at < NOW() - stale_days OR
+                # (last_accessed_at IS NULL AND created_at < NOW() - stale_days)
+                # If the DB function changes, update this query too.
                 decayed = await conn.fetchval(
                     """SELECT COUNT(*) FROM memories
                        WHERE (last_accessed_at IS NULL OR last_accessed_at < NOW() - ($1 || ' days')::interval)
@@ -702,7 +706,7 @@ class PostgresDataLayer:
                        WHERE access_count >= $1""",
                     params.boost_threshold,
                 )
-                protected = await conn.fetchval(
+                recent_memories = await conn.fetchval(
                     """SELECT COUNT(*) FROM memories
                        WHERE created_at >= NOW() - ($1 || ' days')::interval""",
                     str(params.boost_days),
@@ -732,7 +736,7 @@ class PostgresDataLayer:
                     params.boost_factor,
                     params.boost_threshold,
                 )
-                protected = await conn.fetchval(
+                recent_memories = await conn.fetchval(
                     """SELECT COUNT(*) FROM memories
                        WHERE created_at >= NOW() - ($1 || ' days')::interval""",
                     str(params.boost_days),
@@ -740,13 +744,13 @@ class PostgresDataLayer:
 
         decayed = int(decayed or 0)
         boosted = int(boosted or 0)
-        protected = int(protected or 0)
+        recent_memories = int(recent_memories or 0)
         summary = (
             f"Decay run complete: {decayed} memories decayed, "
-            f"{boosted} memories boosted, {protected} recent memories protected."
+            f"{boosted} memories boosted, {recent_memories} recent memories (< {params.boost_days} days)."
             + (" (dry_run)" if params.dry_run else "")
         )
-        return DecayResult(decayed=decayed, boosted=boosted, protected=protected, summary=summary)
+        return DecayResult(decayed=decayed, boosted=boosted, recent_memories=recent_memories, summary=summary)
 
     async def _embed_and_link(self, memory_id: int, text: str) -> None:
         """Background task: embed a memory and auto-link similar ones."""
