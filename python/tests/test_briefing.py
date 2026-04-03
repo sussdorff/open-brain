@@ -223,6 +223,46 @@ async def test_briefing_empty():
     assert result.top_entities == {}
     assert result.theme_trends["emerging"] == []
     assert result.theme_trends["declining"] == []
+
+
+# ─── AK7: Cross-project connections use index_id ─────────────────────────────
+
+@pytest.mark.asyncio
+async def test_cross_project_connections_use_index_id():
+    """Cross-project grouping uses mem.index_id, not metadata['project']."""
+    from open_brain.digest import generate_weekly_briefing
+
+    # Two memories from index_id=1, one from index_id=2; no 'project' in metadata
+    memories = [
+        _make_memory(mid=1, metadata={"entities": {"tech": ["Python"]}}),   # index_id=1 (mid=1)
+        _make_memory(mid=1, metadata={"entities": {"tech": ["Python"]}}),   # index_id=1 again
+        _make_memory(mid=2, metadata={}),                                    # index_id=2
+    ]
+    # Override index_id to be distinct (mid is used as index_id in _make_memory)
+    memories[0] = memories[0].__class__(
+        **{**memories[0].__dict__, "index_id": 10}
+    )
+    memories[1] = memories[1].__class__(
+        **{**memories[1].__dict__, "index_id": 10}
+    )
+    memories[2] = memories[2].__class__(
+        **{**memories[2].__dict__, "index_id": 20}
+    )
+
+    dl = AsyncMock()
+    dl.search.side_effect = [
+        SearchResult(results=memories, total=3),
+        SearchResult(results=[], total=0),
+        SearchResult(results=memories, total=3),
+    ]
+
+    result = await generate_weekly_briefing(dl, weeks_back=1)
+
+    # Should produce 2 cross-project groups: index_id=10 (2 memories) and index_id=20 (1 memory)
+    assert len(result.cross_project_connections) == 2
+    projects = {c["project"]: c["memory_count"] for c in result.cross_project_connections}
+    assert projects["10"] == 2
+    assert projects["20"] == 1
     assert result.open_loops == []
     assert result.cross_project_connections == []
     assert result.decay_warnings == []
