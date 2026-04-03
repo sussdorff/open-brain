@@ -9,14 +9,26 @@ AK5: Decay is reversible (accessing restores priority)
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from open_brain.data_layer.interface import DecayParams, DecayResult, Memory, SearchResult
 
 NOW = datetime(2026, 4, 3, 12, 0, 0, tzinfo=UTC)
+
+
+def _make_pool(conn: AsyncMock) -> MagicMock:
+    """Build a properly structured asyncpg pool mock."""
+    @asynccontextmanager
+    async def fake_acquire():
+        yield conn
+
+    pool = MagicMock()
+    pool.acquire = fake_acquire
+    return pool
 
 
 def _make_memory(
@@ -63,19 +75,11 @@ async def test_decay_unaccessed():
     dl = PostgresDataLayer()
     params = DecayParams(stale_days=30, decay_factor=0.9, dry_run=True)
 
-    mock_pool = AsyncMock()
-    mock_conn = AsyncMock()
-    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+    conn = AsyncMock()
+    conn.fetchval.side_effect = [1, 0, 0]  # decayed=1, boosted=0, protected=0
+    pool = _make_pool(conn)
 
-    # decay query returns 1 row (1 memory decayed)
-    mock_conn.fetchval.side_effect = [
-        1,   # decay count
-        0,   # boost count
-        0,   # protected count
-    ]
-
-    with patch("open_brain.data_layer.postgres.get_pool", return_value=mock_pool):
+    with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
         result = await dl.decay_memories(params)
 
     assert result.decayed > 0, "Expected at least one memory to be decayed"
@@ -92,19 +96,11 @@ async def test_decay_boost():
     dl = PostgresDataLayer()
     params = DecayParams(boost_threshold=10, boost_factor=1.1, dry_run=True)
 
-    mock_pool = AsyncMock()
-    mock_conn = AsyncMock()
-    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+    conn = AsyncMock()
+    conn.fetchval.side_effect = [0, 1, 0]  # decayed=0, boosted=1, protected=0
+    pool = _make_pool(conn)
 
-    # decay=0, boost=1 (one frequently accessed memory)
-    mock_conn.fetchval.side_effect = [
-        0,   # decay count
-        1,   # boost count
-        0,   # protected count
-    ]
-
-    with patch("open_brain.data_layer.postgres.get_pool", return_value=mock_pool):
+    with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
         result = await dl.decay_memories(params)
 
     assert result.boosted > 0, "Expected at least one memory to be boosted"
@@ -121,19 +117,11 @@ async def test_decay_recent_protected():
     dl = PostgresDataLayer()
     params = DecayParams(stale_days=30, boost_days=7, dry_run=True)
 
-    mock_pool = AsyncMock()
-    mock_conn = AsyncMock()
-    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+    conn = AsyncMock()
+    conn.fetchval.side_effect = [0, 0, 1]  # decayed=0, boosted=0, protected=1
+    pool = _make_pool(conn)
 
-    # decay=0, boost=0, protected=1 (one recent memory)
-    mock_conn.fetchval.side_effect = [
-        0,   # decay count
-        0,   # boost count
-        1,   # protected count (recent memories)
-    ]
-
-    with patch("open_brain.data_layer.postgres.get_pool", return_value=mock_pool):
+    with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
         result = await dl.decay_memories(params)
 
     assert result.decayed == 0, "Recent memory must not be decayed"
@@ -183,24 +171,22 @@ async def test_decay_reversible():
     from open_brain.data_layer.postgres import PostgresDataLayer
 
     dl = PostgresDataLayer()
-
-    mock_pool = AsyncMock()
-    mock_conn = AsyncMock()
-    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
-
-    # First call: decay run — 1 decayed, 0 boosted
-    # Second call: boost run — 0 decayed, 1 boosted
-    mock_conn.fetchval.side_effect = [
-        1, 0, 0,  # decay pass: decayed=1, boosted=0, protected=0
-        0, 1, 0,  # boost pass: decayed=0, boosted=1, protected=0
-    ]
-
     decay_params = DecayParams(stale_days=30, decay_factor=0.9, boost_threshold=10, boost_factor=1.1, dry_run=True)
 
-    with patch("open_brain.data_layer.postgres.get_pool", return_value=mock_pool):
+    # First run: 1 decayed, 0 boosted
+    conn1 = AsyncMock()
+    conn1.fetchval.side_effect = [1, 0, 0]
+    pool1 = _make_pool(conn1)
+
+    with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool1):
         decay_result = await dl.decay_memories(decay_params)
-        # Simulate memory gets accessed (access_count increases), then run boost
+
+    # Second run: memory now has high access_count → 0 decayed, 1 boosted
+    conn2 = AsyncMock()
+    conn2.fetchval.side_effect = [0, 1, 0]
+    pool2 = _make_pool(conn2)
+
+    with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool2):
         boost_result = await dl.decay_memories(decay_params)
 
     assert decay_result.decayed == 1

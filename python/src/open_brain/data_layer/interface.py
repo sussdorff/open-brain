@@ -342,6 +342,28 @@ class MaterializeResult:
     summary: str
 
 
+@dataclass
+class DecayParams:
+    """Parameters for memory decay/boost operation."""
+
+    stale_days: int = 30          # memories not accessed in N days get decayed
+    boost_days: int = 7           # recent memories (< N days) are protected
+    decay_factor: float = 0.9     # priority *= decay_factor for stale memories
+    boost_threshold: int = 10     # access_count >= N triggers priority boost
+    boost_factor: float = 1.1     # priority *= boost_factor for frequently accessed
+    dry_run: bool = False
+
+
+@dataclass
+class DecayResult:
+    """Result of a decay_memories operation."""
+
+    decayed: int    # count of memories whose priority was reduced
+    boosted: int    # count of memories whose priority was boosted
+    protected: int  # count of recent memories left unchanged (informational)
+    summary: str
+
+
 class DataLayer(Protocol):
     """Protocol defining the data layer interface."""
 
@@ -372,3 +394,5 @@ class DataLayer(Protocol):
     async def triage_memories(self, params: TriageParams) -> TriageResult: ...
 
     async def materialize_memories(self, params: MaterializeParams) -> MaterializeResult: ...
+
+    async def decay_memories(self, params: DecayParams) -> DecayResult: ...
