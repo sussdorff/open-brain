@@ -3,8 +3,17 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Miscellaneous
+
+- Bump version to 2026.04.5
+
+## [2026.04.5] - 2026-04-03
+
 ### Bug Fixes
 
+- *(open-brain-3u2)* Address review findings iteration 1
+- *(open-brain-3u2)* Address review findings iteration 2
+- *(open-brain-3u2)* Address cmux review findings — rename TestCaptureRouterSkillFormat, error-branch test, remove dead blank-line check, document Markdown parsing approach
 - *(open-brain-17x)* Address review findings iteration 1
 - *(open-brain-17x)* Rename type→memory_type in validate_domain_metadata signature
 - *(open-brain-17x)* Update docs to reflect memory_type rename in validate_domain_metadata
@@ -12,18 +21,22 @@ All notable changes to this project will be documented in this file.
 ### Documentation
 
 - Add periodic learnings extraction feature documentation
+- Update feature documentation for open-brain-3u2
 - Update feature documentation for open-brain-17x
 
 ### Features
 
+- *(open-brain-3u2)* Green — ob-migrate skill with interactive+batch+idempotency
 - *(open-brain-17x)* Green — domain TypedDicts, validate_domain_metadata, save_memory warnings
 
 ### Miscellaneous
 
 - Bump version to 2026.04.4
+- Update changelog
 
 ### Testing
 
+- *(open-brain-3u2)* Red — ob-migrate skill format, batch mode parsing, and idempotency
 - *(open-brain-17x)* Red — domain schema validation and TypedDict tests
 
 ## [2026.04.4] - 2026-04-03
