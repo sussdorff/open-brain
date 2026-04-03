@@ -172,7 +172,7 @@ def _find_cross_project_connections(memories: list[Memory]) -> list[dict[str, An
     for mem in memories:
         project_key = str(mem.index_id)
         if project_key not in projects:
-            projects[project_key] = {"index_id": mem.index_id, "memory_count": 0, "entity_counter": Counter()}
+            projects[project_key] = {"memory_count": 0, "entity_counter": Counter()}
         projects[project_key]["memory_count"] += 1
         entities = mem.metadata.get("entities", {})
         for names in entities.values():

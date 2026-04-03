@@ -223,6 +223,9 @@ async def test_briefing_empty():
     assert result.top_entities == {}
     assert result.theme_trends["emerging"] == []
     assert result.theme_trends["declining"] == []
+    assert result.open_loops == []
+    assert result.cross_project_connections == []
+    assert result.decay_warnings == []
 
 
 # ─── AK7: Cross-project connections use index_id ─────────────────────────────
