@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from dataclasses import asdict
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from pathlib import Path
@@ -36,6 +37,7 @@ from open_brain.capture_router import classify_and_extract
 from open_brain.data_layer.llm import LlmMessage, llm_complete
 from open_brain.utils import parse_llm_json
 from open_brain.data_layer.postgres import PostgresDataLayer, close_pool
+from open_brain.digest import generate_weekly_briefing
 
 logger = logging.getLogger(__name__)
 
@@ -1094,6 +1096,25 @@ If nothing worth remembering happened, return: {{"observations": [], "session_su
         )
     except Exception:
         logger.exception("Failed to process session capture")
+
+
+@mcp.tool(
+    description="Generate weekly briefing: memory counts, top entities, theme trends (emerging/declining), "
+    "open loops (unresolved action items), cross-project connections, and decay warnings (stale memories). "
+    "Params: weeks_back (default 1), project (optional filter)"
+)
+async def weekly_briefing(
+    weeks_back: int = 1,
+    project: str | None = None,
+) -> str:
+    """Generate a structured weekly briefing with cross-type time-bridged insights."""
+    try:
+        dl = get_dl()
+        result = await generate_weekly_briefing(dl, weeks_back=weeks_back, project=project)
+        return json.dumps(asdict(result), default=str)
+    except Exception:
+        logger.exception("weekly_briefing failed")
+        raise
 
 
 @app.delete("/api/memories")
