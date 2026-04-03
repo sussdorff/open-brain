@@ -3,9 +3,35 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Bug Fixes
+
+- *(open-brain-17x)* Address review findings iteration 1
+- *(open-brain-17x)* Rename type→memory_type in validate_domain_metadata signature
+- *(open-brain-17x)* Update docs to reflect memory_type rename in validate_domain_metadata
+
+### Documentation
+
+- Add periodic learnings extraction feature documentation
+- Update feature documentation for open-brain-17x
+
+### Features
+
+- *(open-brain-17x)* Green — domain TypedDicts, validate_domain_metadata, save_memory warnings
+
+### Miscellaneous
+
+- Bump version to 2026.04.4
+
+### Testing
+
+- *(open-brain-17x)* Red — domain schema validation and TypedDict tests
+
+## [2026.04.4] - 2026-04-03
+
 ### Miscellaneous
 
 - Bump version to 2026.04.3
+- Update changelog
 
 ## [2026.04.2] - 2026-04-03
 
