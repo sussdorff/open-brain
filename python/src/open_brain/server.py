@@ -38,6 +38,12 @@ from open_brain.data_layer.llm import LlmMessage, llm_complete
 from open_brain.utils import parse_llm_json
 from open_brain.data_layer.postgres import PostgresDataLayer, close_pool
 from open_brain.digest import generate_weekly_briefing
+from open_brain.evolution import (
+    analyze_engagement,
+    generate_suggestion,
+    log_evolution_approval as _log_evolution_approval,
+    query_evolution_history,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1114,6 +1120,104 @@ async def weekly_briefing(
         return json.dumps(asdict(result), default=str)
     except Exception:
         logger.exception("weekly_briefing failed")
+        raise
+
+
+@mcp.tool(description="Analyze briefing engagement: response rates by type over last N days. Returns EngagementReport.")
+async def analyze_briefing_engagement(
+    days_back: int = 7,
+    project: str | None = None,
+) -> str:
+    """Analyze briefing engagement: response rates by type over last N days."""
+    dl = get_dl()
+    try:
+        report = await analyze_engagement(dl, days_back=days_back, project=project)
+        return json.dumps({
+            "period_days": report.period_days,
+            "total_briefings": report.total_briefings,
+            "has_sufficient_data": report.has_sufficient_data,
+            "by_type": [
+                {
+                    "briefing_type": e.briefing_type,
+                    "total_count": e.total_count,
+                    "responded_count": e.responded_count,
+                    "response_rate": e.response_rate,
+                }
+                for e in report.by_type
+            ],
+        })
+    except Exception:
+        logger.exception("analyze_briefing_engagement failed")
+        raise
+
+
+@mcp.tool(description="Generate ONE self-improvement suggestion based on engagement (rate-limited to 1 per 7 days). Returns suggestion or null.")
+async def generate_evolution_suggestion(
+    days_back: int = 7,
+    project: str | None = None,
+) -> str:
+    """Generate one self-improvement suggestion based on briefing engagement."""
+    dl = get_dl()
+    try:
+        report = await analyze_engagement(dl, days_back=days_back, project=project)
+        suggestion = await generate_suggestion(report, dl, project=project)
+        if suggestion is None:
+            return json.dumps({"suggestion": None})
+        return json.dumps({
+            "suggestion": {
+                "id": suggestion.id,
+                "action": suggestion.action,
+                "briefing_type": suggestion.briefing_type,
+                "reason": suggestion.reason,
+                "response_rate": suggestion.response_rate,
+            }
+        })
+    except Exception:
+        logger.exception("generate_evolution_suggestion failed")
+        raise
+
+
+@mcp.tool(description="Log approval/rejection of an evolution suggestion. Approved changes saved as type=evolution. briefing_type, if provided, enables 30-day rejection suppression so the same briefing type is not re-proposed within 30 days.")
+async def log_evolution_approval(
+    suggestion_id: int,
+    approved: bool,
+    project: str | None = None,
+    briefing_type: str | None = None,
+) -> str:
+    """Log approval or rejection of an evolution suggestion."""
+    dl = get_dl()
+    try:
+        await _log_evolution_approval(dl, suggestion_id=suggestion_id, approved=approved, project=project, briefing_type=briefing_type)
+        action_label = "approved" if approved else "rejected"
+        return json.dumps({"status": "logged", "suggestion_id": suggestion_id, "action": action_label})
+    except Exception:
+        logger.exception("log_evolution_approval failed")
+        raise
+
+
+@mcp.tool(description="Query evolution history: past suggestions and approvals.")
+async def query_evolution_history_tool(
+    limit: int = 20,
+    project: str | None = None,
+) -> str:
+    """Query evolution history: past suggestions and approvals."""
+    dl = get_dl()
+    try:
+        memories = await query_evolution_history(dl, limit=limit, project=project)
+        return json.dumps({
+            "count": len(memories),
+            "history": [
+                {
+                    "id": m.id,
+                    "title": m.title,
+                    "metadata": m.metadata,
+                    "created_at": m.created_at,
+                }
+                for m in memories
+            ],
+        })
+    except Exception:
+        logger.exception("query_evolution_history_tool failed")
         raise
 
 

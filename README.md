@@ -134,9 +134,20 @@ search(query)          →  compact index with IDs (~50-100 tokens/result)
 | `triage_memories` | Human-in-the-loop classification into lifecycle actions. |
 | `materialize_memories` | Execute triage actions (promote to docs, create issues, archive). |
 
+### Self-Improvement Loop
+
+| Tool | Description |
+|---|---|
+| `analyze_briefing_engagement` | Compute response rates by briefing type over the last N days. Shows which briefing types users engage with most. |
+| `generate_evolution_suggestion` | Propose ONE behavior change per 7 days: remove low-engagement briefing types or expand high-engagement ones. Rate-limited and respects 30-day rejection suppression. |
+| `log_evolution_approval` | Record user approval or rejection of a suggestion. Logged rejections suppress re-proposals for 30 days. |
+| `query_evolution_history` | Retrieve past evolution suggestions and approvals — track which briefing types have been adjusted over time. |
+
+See [docs/features/self-improvement-loop.md](docs/features/self-improvement-loop.md) for the full workflow and examples.
+
 ### Memory Types
 
-`discovery`, `change`, `feature`, `decision`, `bugfix`, `refactor`, `session_summary`, `learning`
+`discovery`, `change`, `feature`, `decision`, `bugfix`, `refactor`, `session_summary`, `learning`, `briefing`, `evolution`
 
 New types are allowed when none fit. Check `stats()` to see existing vocabulary.
 
