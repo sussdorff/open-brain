@@ -362,6 +362,8 @@ class DecayParams:
             raise ValueError(f"stale_days must be > 0, got {self.stale_days}")
         if self.boost_days <= 0:
             raise ValueError(f"boost_days must be > 0, got {self.boost_days}")
+        if self.boost_threshold < 1:
+            raise ValueError(f"boost_threshold must be >= 1, got {self.boost_threshold}")
 
 
 @dataclass
@@ -370,7 +372,7 @@ class DecayResult:
 
     decayed: int         # count of memories whose priority was reduced
     boosted: int         # count of memories whose priority was boosted
-    recent_memories: int  # count of recent memories (< boost_days old), regardless of access pattern (informational)
+    recent_memories: int  # count of recent memories (< boost_days old); protected from decay but may still be boosted
     summary: str
 
 

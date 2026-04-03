@@ -66,6 +66,23 @@ def _make_memory(
     )
 
 
+# ─── DecayParams validation ──────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("kwargs,match", [
+    ({"decay_factor": 0}, "decay_factor"),
+    ({"decay_factor": 1.5}, "decay_factor"),
+    ({"boost_factor": 0.5}, "boost_factor"),
+    ({"stale_days": -1}, "stale_days"),
+    ({"boost_days": 0}, "boost_days"),
+    ({"boost_threshold": 0}, "boost_threshold"),
+])
+def test_decay_params_validation(kwargs: dict, match: str) -> None:
+    """DecayParams rejects invalid inputs with ValueError."""
+    with pytest.raises(ValueError, match=match):
+        DecayParams(**kwargs)
+
+
 # ─── AK1: Unaccessed memory gets priority reduced ─────────────────────────────
 
 
