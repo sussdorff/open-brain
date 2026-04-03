@@ -91,7 +91,9 @@ Memories flow through a defined lifecycle from creation to long-term storage:
   Save                    Embed                    Search
   ─────►  ┌──────────┐  ─────►  ┌──────────┐  ◄─────  queries
           │  memory   │         │ embedding │
-          │  + meta   │         │ + links   │
+          │ + capture │         │ + links   │
+          │ + meta    │         │ + entities│
+          │ +entities │         │           │
           └──────────┘         └──────────┘
                                      │
                     ┌────────────────┘
@@ -121,12 +123,47 @@ Memories flow through a defined lifecycle from creation to long-term storage:
 
 | Stage | Tool | Mode | Description |
 |-------|------|------|-------------|
-| **Save** | `save_memory` | Auto/Manual | Store observation with metadata. Auto-embeds async. |
+| **Save** | `save_memory` | Auto/Manual | Store observation with metadata. Auto-embeds async. **Capture Router** applies templates concurrently. Auto-extracts entities (people, orgs, tech, locations, dates). |
 | **Embed** | (internal) | Automatic | Voyage-4 embedding + auto-link to similar memories (cosine > 0.65). |
 | **Search** | `search`, `timeline`, `get_observations` | On demand | 3-step funnel: search → context → details. Minimizes token usage. |
 | **Refine** | `refine_memories` | Automatic | LLM finds duplicates, merges similar, adjusts priority. Rule-based. |
 | **Triage** | `triage_memories` | Human-in-loop | LLM classifies memories; user approves each action. |
 | **Materialize** | `materialize_memories` | Semi-auto | Writes approved triage actions to their targets (files, issues, etc.). |
+
+## Capture Router
+
+The **Capture Router** is an LLM-based classification layer that runs during the **Save** stage. It classifies incoming memory text into domain-specific templates and automatically extracts structured fields—all transparently to the caller.
+
+### How It Works
+
+When `save_memory` is called:
+
+1. **Classify concurrently**: An async LLM task classifies the raw text while the memory is being saved and embedded
+2. **Apply template**: Based on the classification, specific structured fields are extracted (e.g., decision fields, meeting attendees)
+3. **Merge metadata**: Extracted fields are merged into the memory's metadata and persisted
+
+The classification happens concurrently with save/embed, adding <200ms latency overhead in typical cases.
+
+### Capture Templates
+
+| Template | Trigger | Extracted Fields |
+|----------|---------|------------------|
+| **decision** | Decision language ("decided", "chosen", "select") | what, context, owner, alternatives, rationale |
+| **meeting** | Attendee/meeting keywords | attendees, topic, key_points, action_items |
+| **person_context** | References to specific people | person, relationship, detail |
+| **insight** | Realization or learning discovery | realization, trigger, domain |
+| **event** | Date or event-based entries | what, when, who, where, recurrence |
+| **learning** | Feedback or skill-related entries | feedback_type, scope, affected_skills |
+| **observation** | Default fallback | (no special fields) |
+
+### Bypass Conditions
+
+Classification is **skipped** (template not applied) when:
+
+- Caller provides `metadata.capture_template` explicitly (pre-structured data is preserved)
+- Memory type is `session_summary` (treated as observation)
+
+This ensures that pre-structured metadata and session summaries are not overwritten.
 
 ## Authentication Flow
 
@@ -262,7 +299,7 @@ Requires a running Postgres instance with pgvector.
 | `content` | text | Primary searchable body (embedded + searched) |
 | `narrative` | text | Supplementary reasoning / context |
 | `embedding` | vector(1024) | Voyage-4 embedding |
-| `metadata` | jsonb | Arbitrary structured data (file paths, status, etc.) |
+| `metadata` | jsonb | Arbitrary structured data — includes auto-extracted `entities` (people, orgs, tech, locations, dates), capture templates, custom fields |
 | `priority` | real | Decays based on usage; affects ranking |
 | `stability` | text | `tentative` → `stable` → `canonical` |
 | `type` | text | Memory type vocabulary (discovery, learning, session_summary, ...) |

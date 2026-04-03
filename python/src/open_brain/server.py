@@ -31,6 +31,7 @@ from open_brain.data_layer.interface import (
     TriageParams,
     UpdateMemoryParams,
 )
+from open_brain.capture_router import classify_and_extract
 from open_brain.data_layer.llm import LlmMessage, llm_complete
 from open_brain.data_layer.postgres import PostgresDataLayer, close_pool
 
@@ -47,6 +48,55 @@ def _parse_llm_json(text: str) -> dict:
         text = text.split("\n", 1)[1] if "\n" in text else text[3:]
         text = text.rsplit("```", 1)[0]
     return json.loads(text)
+
+
+_ENTITY_EXTRACTION_PROMPT = """\
+Extract named entities from the following text and return ONLY valid JSON (no markdown fences):
+{"people": [...], "orgs": [...], "tech": [...], "locations": [...], "dates": [...]}
+
+Rules:
+- people: named individuals only
+- orgs: companies, organizations, institutions
+- tech: programming languages, frameworks, tools, platforms, services
+- locations: geographic places, cities, countries, regions
+- dates: time references, periods, years
+- Use empty arrays if no entities of that type found
+
+Text: """
+
+_ENTITY_KEYS = {"people", "orgs", "tech", "locations", "dates"}
+
+
+async def _extract_entities(text: str) -> dict:
+    """Extract named entities from text using Haiku.
+
+    Args:
+        text: The text to extract entities from.
+
+    Returns:
+        Dict with keys people, orgs, tech, locations, dates (lists of strings).
+        Returns empty dict on failure or empty text.
+    """
+    if not text or not text.strip():
+        return {}
+    try:
+        response = await llm_complete(
+            messages=[LlmMessage(role="user", content=_ENTITY_EXTRACTION_PROMPT + text)],
+            model="claude-haiku-4-5-20251001",
+        )
+        parsed = _parse_llm_json(response)
+        # Filter to expected keys only; strip non-string items from lists (prevents hallucinated keys/values)
+        entities = {}
+        for k, v in parsed.items():
+            if k in _ENTITY_KEYS and isinstance(v, list):
+                filtered = [item for item in v if isinstance(item, str)]
+                if filtered:
+                    entities[k] = filtered
+        return entities
+    except Exception:
+        logger.warning("Entity extraction failed — continuing without entities", exc_info=True)
+        return {}
+
 
 # MCP server (FastMCP high-level API)
 _config = get_config()
@@ -208,19 +258,58 @@ async def save_memory(
         return json.dumps({"id": -1, "message": "Test artifact — not persisted"})
     dl = get_dl()
     user_id = _current_user_id.get()
-    result = await dl.save_memory(
-        SaveMemoryParams(
-            text=text,
-            type=type,
-            project=project,
-            title=title,
-            subtitle=subtitle,
-            narrative=narrative,
-            session_ref=session_ref,
-            metadata=metadata,
-            user_id=user_id,
-        )
+
+    # Run capture routing and entity extraction concurrently with save_memory.
+    # classify_and_extract handles bypass conditions internally (returns existing_metadata
+    # unchanged when capture_template already set or type=session_summary).
+    # Entity extraction is skipped when "entities" key already present in metadata.
+    has_entities = isinstance(metadata, dict) and "entities" in metadata
+
+    save_params = SaveMemoryParams(
+        text=text,
+        type=type,
+        project=project,
+        title=title,
+        subtitle=subtitle,
+        narrative=narrative,
+        session_ref=session_ref,
+        metadata=metadata,
+        user_id=user_id,
     )
+
+    tasks: list = [
+        classify_and_extract(text, existing_metadata=metadata, memory_type=type),
+        dl.save_memory(save_params),
+    ]
+    if not has_entities:
+        tasks.insert(0, _extract_entities(text))
+        entities_result, classification, result = await asyncio.gather(*tasks)
+    else:
+        classification, result = await asyncio.gather(*tasks)
+        entities_result = {}
+
+    # Apply classification metadata update (guard: skip if bypass returned metadata unchanged)
+    try:
+        if classification != (metadata or {}):
+            merged_metadata = {**(metadata or {}), **classification}
+            await dl.update_memory(
+                UpdateMemoryParams(
+                    id=result.id,
+                    metadata=merged_metadata,
+                )
+            )
+    except Exception:
+        logger.exception("save_memory: capture_router metadata update failed, memory saved without capture_template")
+
+    # Apply entity extraction results
+    if entities_result:
+        try:
+            await dl.update_memory(
+                UpdateMemoryParams(id=result.id, metadata={"entities": entities_result})
+            )
+        except Exception:
+            logger.warning("save_memory: entity extraction metadata update failed", exc_info=True)
+
     payload: dict = {"id": result.id, "message": result.message}
     if result.duplicate_of is not None:
         payload["duplicate_of"] = result.duplicate_of
