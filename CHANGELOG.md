@@ -3,9 +3,28 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Bug Fixes
+
+- *(open-brain-9h1)* Green — duplicate save skips enrichment + cross-project uses index_id
+- *(open-brain-9h1)* Trust boundary docstring, parameterized dedup SQL, remove redundant import
+- *(open-brain-9h1)* Address review findings iteration 1
+- *(open-brain-9h1)* Save-first then LLM, None guard for index_id, assert no LLM on duplicate
+
+### Miscellaneous
+
+- Bump version to 2026.04.9
+- Update changelog
+
+### Testing
+
+- *(open-brain-9h1)* Red — duplicate save skips enrichment + cross-project uses index_id
+
+## [2026.04.9] - 2026-04-03
+
 ### Miscellaneous
 
 - Bump version to 2026.04.8
+- Update changelog
 
 ## [2026.04.8] - 2026-04-03
 
