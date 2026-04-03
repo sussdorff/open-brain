@@ -690,7 +690,7 @@ class PostgresDataLayer:
         async with pool.acquire() as conn:
             if params.dry_run:
                 # Count only — no writes
-                # Note: this mirrors the WHERE clause in decay_unused_priorities() DB function — keep in sync
+                # This WHERE clause mirrors decay_unused_priorities() in DB migrations. If the DB function changes, update this query too.
                 decayed = await conn.fetchval(
                     """SELECT COUNT(*) FROM memories
                        WHERE (last_accessed_at IS NULL OR last_accessed_at < NOW() - ($1 || ' days')::interval)

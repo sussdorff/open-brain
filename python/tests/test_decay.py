@@ -5,6 +5,8 @@ AK2: Frequently accessed memory gets priority boosted
 AK3: Decay does not affect recent memories (<7 days)
 AK4: Decaying memories appear in weekly briefing
 AK5: Decay is reversible (accessing restores priority)
+
+Unit tests for decay_memories() orchestration logic. These tests mock the database and verify result assembly. SQL correctness is covered by integration tests against a live database.
 """
 
 from __future__ import annotations
@@ -140,6 +142,7 @@ async def test_decay_in_briefing():
     this bead. This test verifies the existing integration still works correctly — it is
     NOT testing new code introduced by this bead.
     """
+    # This test verifies AK4: pre-existing _find_decay_warnings() in digest.py uses the same 30-day stale threshold. If that function moves, update this test's import path.
     from open_brain.digest import _find_decay_warnings
 
     stale_memory = _make_memory(
