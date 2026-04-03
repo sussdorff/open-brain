@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(open-brain-dxd)* Address review findings iteration 1
+- *(open-brain-dxd)* Address review findings iteration 2
+- *(open-brain-dxd)* Address cmux review panel findings iteration 1
+
+### Documentation
+
+- Update feature documentation for open-brain-dxd
+
+### Features
+
+- *(open-brain-dxd)* Green — evolution engagement tracking + behavior proposals
+
+### Miscellaneous
+
+- Bump version to 2026.04.7
+
+### Testing
+
+- *(open-brain-dxd)* Red — evolution engagement tracking + behavior proposals
+
+## [2026.04.7] - 2026-04-03
+
+### Bug Fixes
+
 - *(open-brain-jrq)* Address review findings iteration 1
 - *(open-brain-jrq)* Address cmux review panel findings iteration 1
 
@@ -16,6 +40,11 @@ All notable changes to this project will be documented in this file.
 
 - Bump version to 2026.04.6
 - *(open-brain-jrq)* Remove unused field import
+- Update changelog
+
+### Refactoring
+
+- Address 7 code review findings from wave 2-3 review
 
 ### Testing
 
