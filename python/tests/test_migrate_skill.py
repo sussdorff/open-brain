@@ -14,8 +14,6 @@ import pytest
 
 SKILL_PATH = Path(__file__).parent.parent.parent / "plugin" / "skills" / "ob-migrate" / "SKILL.md"
 
-REPO_ROOT = Path(__file__).parent.parent.parent
-
 
 # ---------------------------------------------------------------------------
 # AK1: Skill triggers on /ob-migrate
@@ -50,12 +48,18 @@ class TestSkillFileExists:
         assert "ob-migrate" in content or "ob migrate" in content.lower()
 
     def test_frontmatter_closes(self):
-        """Frontmatter must have closing --- marker."""
+        """Frontmatter must have closing --- marker within first 15 lines."""
         content = SKILL_PATH.read_text()
         lines = content.split("\n")
-        # First line is ---, find the second ---
-        closing = any(line.strip() == "---" for line in lines[1:])
-        assert closing, "Frontmatter must have closing --- marker"
+        # Find the index of the closing --- in lines[1:] and assert it's within first 15 lines
+        closing_index = next(
+            (i for i, line in enumerate(lines[1:]) if line.strip() == "---"),
+            None,
+        )
+        assert closing_index is not None, "Frontmatter must have closing --- marker"
+        assert closing_index < 15, (
+            f"Frontmatter closing --- found at line {closing_index + 2}, expected within first 15 lines"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -77,10 +81,16 @@ class TestInteractiveMode:
         assert "save_memory" in content, "Must reference save_memory MCP tool"
 
     def test_interactive_mode_extract_facts(self):
-        """Interactive mode must describe extracting facts/knowledge from prior context."""
-        content = SKILL_PATH.read_text().lower()
-        assert any(word in content for word in ["extract", "fact", "knowledge", "prior context", "conversation"]), \
-            "Interactive mode must describe extracting facts from prior context"
+        """Interactive mode must have the Mode 1 section heading."""
+        content = SKILL_PATH.read_text()
+        assert "## Mode 1: Interactive Mode" in content, \
+            "Interactive mode must have '## Mode 1: Interactive Mode' section heading"
+
+    def test_interactive_mode_user_confirmation(self):
+        """Interactive mode must describe user confirmation before saving."""
+        content = SKILL_PATH.read_text()
+        assert "Proceed with migration" in content, \
+            "Interactive mode must include 'Proceed with migration' confirmation prompt"
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +136,90 @@ class TestBatchMode:
 
 
 # ---------------------------------------------------------------------------
+# AK3 integ: Batch parsing end-to-end with realistic data
+# ---------------------------------------------------------------------------
+
+
+class TestBatchModeInteg:
+    """AK3 integ: End-to-end batch parsing with realistic JSONL content."""
+
+    FIXTURE = "\n".join([
+        '{"text": "Use asyncpg for all DB access.", "type": "learning", "project": "open-brain"}',
+        '{"text": "Deploy drops MCP connection.", "type": "observation", "project": "open-brain"}',
+        '{"text": "Voyage-4 gives 14% better retrieval.", "type": "decision"}',
+        '{bad json — malformed line}',
+        '{"text": "Always run tests with -m not integration.", "type": "learning"}',
+        '{"type": "observation", "project": "open-brain"}',  # missing text — error
+        '{"text": "pgvector cosine + tsvector FTS via RRF.", "type": "observation"}',
+        '{"text": "Use uv run python for all commands.", "type": "learning", "project": "open-brain"}',
+        '',  # blank line — silently skipped
+        '{"text": "Redeploy with deploy.sh after any change.", "type": "observation"}',
+        '{"text": "pgvector cosine + tsvector FTS via RRF.", "type": "observation"}',  # duplicate of line 7
+    ])
+
+    def _simulate_migration(self, items: list[dict], duplicate_texts: set[str]) -> tuple[int, int, int]:
+        """Simulate save_memory orchestration for a list of parsed items.
+
+        For each item:
+        - If text is in duplicate_texts → simulate save_memory returning duplicate_of
+        - Otherwise → simulate save_memory returning a new id
+
+        Returns (migrated, skipped, errors).
+        """
+        migrated = 0
+        skipped = 0
+        errors = 0
+        for item in items:
+            text = item.get("text", "")
+            if text in duplicate_texts:
+                response = {"id": 1, "message": "Duplicate detected", "duplicate_of": 0}
+            else:
+                response = {"id": 1}
+
+            if "duplicate_of" in response:
+                skipped += 1
+            elif "id" in response:
+                migrated += 1
+            else:
+                errors += 1
+        return migrated, skipped, errors
+
+    def test_realistic_fixture_parse_counts(self):
+        """Realistic 10-line JSONL fixture yields expected valid items and errors."""
+        items, errors = parse_jsonl_batch(self.FIXTURE)
+        # Lines: 8 valid (including the duplicate text), 2 errors (bad json + missing text), 1 blank skipped
+        assert errors == 2, f"Expected 2 parse errors, got {errors}"
+        assert len(items) == 8, f"Expected 8 valid items, got {len(items)}"
+
+    def test_migration_with_duplicates(self):
+        """Simulate migration where a text appears twice; both match the duplicate set → 2 skipped."""
+        items, _errors = parse_jsonl_batch(self.FIXTURE)
+        # The text from line 7 appears again on line 11; the duplicate_texts set represents
+        # what save_memory already has on disk. Both occurrences are returned as duplicate_of.
+        duplicate_text = "pgvector cosine + tsvector FTS via RRF."
+        duplicate_texts = {duplicate_text}
+
+        migrated, skipped, errors = self._simulate_migration(items, duplicate_texts)
+
+        # 8 items total: the duplicate text appears twice, both marked as skipped → 6 migrated, 2 skipped
+        assert migrated == 6
+        assert skipped == 2
+        assert errors == 0
+
+    def test_malformed_lines_counted_as_errors(self):
+        """Malformed JSONL lines are counted in parse errors, not silently dropped."""
+        items, errors = parse_jsonl_batch(self.FIXTURE)
+        assert errors >= 1, "At least one malformed line must be counted as error"
+
+    def test_blank_lines_not_counted_as_errors(self):
+        """Blank lines are silently skipped, not counted as errors."""
+        content = '{"text": "Item A."}\n\n{"text": "Item B."}\n\n'
+        items, errors = parse_jsonl_batch(content)
+        assert errors == 0
+        assert len(items) == 2
+
+
+# ---------------------------------------------------------------------------
 # AK4: Capture router integration (via save_memory)
 # ---------------------------------------------------------------------------
 
@@ -138,10 +232,34 @@ class TestCaptureRouterIntegration:
         content = SKILL_PATH.read_text()
         assert "save_memory" in content
 
-    def test_type_and_project_passed(self):
-        """SKILL.md must describe passing type and project to save_memory."""
+    def test_capture_router_mentioned(self):
+        """SKILL.md must reference the capture router."""
+        content = SKILL_PATH.read_text().lower()
+        assert "capture router" in content, "Must mention 'capture router'"
+
+    def test_save_memory_call_pattern_in_skill(self):
+        """SKILL.md must show a save_memory call with type and project parameters."""
         content = SKILL_PATH.read_text()
-        assert "type" in content and "project" in content
+        assert 'save_memory(' in content, "Must show save_memory call pattern"
+        assert 'type=' in content, "save_memory call must include type= parameter"
+        assert 'project=' in content, "save_memory call must include project= parameter"
+
+    def test_parse_jsonl_preserves_type_and_project(self):
+        """parse_jsonl_batch preserves type and project fields for capture routing."""
+        line = '{"text": "Use asyncpg.", "type": "learning", "project": "open-brain"}'
+        items, errors = parse_jsonl_batch(line)
+        assert errors == 0
+        assert len(items) == 1
+        assert items[0]["type"] == "learning"
+        assert items[0]["project"] == "open-brain"
+
+    def test_parse_jsonl_type_none_when_absent(self):
+        """Items without explicit type have no type key (None when accessed via .get)."""
+        line = '{"text": "Some fact with no type."}'
+        items, errors = parse_jsonl_batch(line)
+        assert errors == 0
+        assert len(items) == 1
+        assert items[0].get("type") is None, "type must be absent (None) so capture router auto-classifies"
 
 
 # ---------------------------------------------------------------------------
@@ -283,6 +401,12 @@ class TestJsonlParsingLogic:
         assert len(items) == 2
         assert errors == 0
 
+    def test_empty_file_returns_zero_counts(self):
+        """Empty file content yields no items and no errors."""
+        items, errors = parse_jsonl_batch("")
+        assert items == []
+        assert errors == 0
+
 
 class TestDuplicateOfIdempotency:
     """Unit tests for idempotency via duplicate_of detection (AK6)."""
@@ -324,11 +448,11 @@ class TestDuplicateOfIdempotency:
         assert statuses.count("error") == 0
 
     def test_summary_format(self):
-        """Summary string format matches expected output."""
+        """Summary string format matches expected output (always plural 'errors')."""
         migrated = 2
         skipped = 3
-        errors = 1
+        errors = 2
         summary = f"Migration complete: {migrated} migrated, {skipped} skipped (duplicates), {errors} errors"
         assert "2 migrated" in summary
         assert "3 skipped (duplicates)" in summary
-        assert "1 errors" in summary
+        assert "2 errors" in summary
