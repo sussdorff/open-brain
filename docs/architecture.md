@@ -202,6 +202,45 @@ Clients can also authenticate via API key (`x-api-key` header) for plugin/automa
 
 Dynamic client registration is supported via the `/register` endpoint (RFC 7591).
 
+## Learnings Extraction
+
+open-brain extracts learnings (structured feedback patterns) from conversation histories in two modes:
+
+### Session-Close Extraction
+
+Triggered at the end of a Claude Code session:
+- Analyzes current session conversation only
+- Blocks session close until extraction completes
+- Saves to open-brain with session-specific metadata
+
+### Periodic Extraction (Every 4 Hours)
+
+Triggered automatically during work hours via the `memory-heartbeat` skill:
+- Runs on 4-hour interval (Mon–Fri, 6 AM–5 PM)
+- Processes all projects asynchronously (non-blocking)
+- Rate-limited via `~/.claude/learnings/processing-state.json`
+
+```
+┌──────────────────────────────────┐
+│   memory-heartbeat (work hours)  │
+│                                  │
+│  1. Run lifecycle pipeline        │
+│  2. Check: is 4h extraction due? │
+│     └─ Load last_learnings_run   │
+│     └─ Compute elapsed time      │
+│  3. If due:                      │
+│     └─ Spawn learning-extractor  │
+│        (scope=all-projects)      │
+│     └─ Update last_learnings_run │
+└──────────────────────────────────┘
+```
+
+### Deduplication
+
+Both extraction modes use **content-hash deduplication** (SHA-256 of normalized content) to prevent duplicate learnings. When a duplicate is detected, the response surfaces `duplicate_of: <id>` to indicate the canonical learning.
+
+See [Periodic Learnings Extraction](./features/periodic-learnings-extraction.md) for detailed documentation.
+
 ## Plugin Architecture
 
 The Claude Code plugin provides automatic memory capture without manual MCP tool calls:
@@ -218,6 +257,7 @@ The Claude Code plugin provides automatic memory capture without manual MCP tool
 │    Generates session summary from       │
 │    recent observations, saves to        │
 │    open-brain                           │
+│    └─ Session-close learnings extraction│
 └─────────────────────────────────────────┘
 ```
 
