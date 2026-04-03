@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from open_brain.data_layer.interface import DataLayer, SearchParams
+from open_brain.data_layer.interface import DataLayer, Memory, SearchParams
 
 
 # ─── Domain dataclasses ────────────────────────────────────────────────────────
@@ -42,7 +43,7 @@ def _parse_dt(value: str | None) -> datetime | None:
         return None
 
 
-def _aggregate_entities(memories: list) -> dict[str, Counter]:
+def _aggregate_entities(memories: list[Memory]) -> dict[str, Counter]:
     """Aggregate entity frequencies from memory metadata."""
     counters: dict[str, Counter] = {}
     for mem in memories:
@@ -92,8 +93,12 @@ def _compute_trends(
     return {"emerging": emerging, "declining": declining}
 
 
-def _find_open_loops(memories: list, now: datetime, top_n: int = 10) -> list[dict[str, Any]]:
-    """Find memories with action_items that may have open follow-ups."""
+def _find_open_loops(memories: list[Memory], now: datetime, top_n: int = 10) -> list[dict[str, Any]]:
+    """Find memories with action_items that may have open follow-ups.
+
+    Note: This treats ALL action_items as open (no completion tracking).
+    A memory with action_items is always considered an open loop regardless of age.
+    """
     loops: list[dict[str, Any]] = []
     for mem in memories:
         action_items = mem.metadata.get("action_items", [])
@@ -119,7 +124,7 @@ def _find_open_loops(memories: list, now: datetime, top_n: int = 10) -> list[dic
 
 
 def _find_decay_warnings(
-    memories: list,
+    memories: list[Memory],
     now: datetime,
     stale_days: int = 30,
     max_access_count: int = 2,
@@ -149,7 +154,7 @@ def _find_decay_warnings(
     return warnings
 
 
-def _count_by_type(memories: list) -> dict[str, int]:
+def _count_by_type(memories: list[Memory]) -> dict[str, int]:
     """Count memories grouped by type."""
     counts: dict[str, int] = {}
     for mem in memories:
@@ -157,7 +162,7 @@ def _count_by_type(memories: list) -> dict[str, int]:
     return counts
 
 
-def _find_cross_project_connections(memories: list) -> list[dict[str, Any]]:
+def _find_cross_project_connections(memories: list[Memory]) -> list[dict[str, Any]]:
     """Group memories by project if project metadata is available."""
     projects: dict[str, dict[str, Any]] = {}
     for mem in memories:
@@ -190,40 +195,47 @@ async def generate_weekly_briefing(
     dl: DataLayer,
     weeks_back: int = 1,
     project: str | None = None,
+    max_memories: int = 200,
 ) -> WeeklyBriefing:
     """Generate a weekly briefing with cross-type time-bridged insights.
 
     Args:
         dl: DataLayer protocol instance.
-        weeks_back: How many weeks back to include in the current period.
+        weeks_back: How many weeks back to include in the current period. Must be >= 1.
         project: Optional project filter.
+        max_memories: Maximum memories to fetch per search call (default 200).
 
     Returns:
         WeeklyBriefing with all 6 sections populated.
+
+    Raises:
+        ValueError: If weeks_back < 1.
     """
+    if weeks_back < 1:
+        raise ValueError("weeks_back must be >= 1")
+
     now = datetime.now(tz=UTC)
     period_start = now - timedelta(weeks=weeks_back)
     prev_period_start = now - timedelta(weeks=weeks_back * 2)
 
-    # ── Fetch current and previous period memories ─────────────────────────────
-    current_result = await dl.search(SearchParams(
-        date_start=period_start.isoformat(),
-        date_end=now.isoformat(),
-        project=project,
-        limit=200,
-    ))
+    # ── Fetch current period, previous period, and full DB in parallel ─────────
+    current_result, previous_result, decay_result = await asyncio.gather(
+        dl.search(SearchParams(
+            date_start=period_start.isoformat(),
+            date_end=now.isoformat(),
+            project=project,
+            limit=max_memories,
+        )),
+        dl.search(SearchParams(
+            date_start=prev_period_start.isoformat(),
+            date_end=period_start.isoformat(),
+            project=project,
+            limit=max_memories,
+        )),
+        dl.search(SearchParams(project=project, limit=max_memories)),
+    )
     current_memories = current_result.results
-
-    previous_result = await dl.search(SearchParams(
-        date_start=prev_period_start.isoformat(),
-        date_end=period_start.isoformat(),
-        project=project,
-        limit=200,
-    ))
     previous_memories = previous_result.results
-
-    # ── Decay: fetch full database ─────────────────────────────────────────────
-    decay_result = await dl.search(SearchParams(project=project, limit=200))
     all_memories = decay_result.results
 
     # ── Memory counts ─────────────────────────────────────────────────────────
