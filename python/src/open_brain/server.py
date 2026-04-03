@@ -80,6 +80,9 @@ async def _extract_entities(text: str) -> dict:
     Returns:
         Dict with keys people, orgs, tech, locations, dates (lists of strings).
         Returns empty dict on failure or empty text.
+
+    Trust boundary: text is assumed to be user-controlled input.
+    Not suitable for multi-tenant use without content isolation.
     """
     if not text or not text.strip():
         return {}
