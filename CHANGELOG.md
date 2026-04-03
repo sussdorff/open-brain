@@ -5,19 +5,35 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(open-brain-z8p)* Update test mock for dedup fetchrow sequence
+
+## [2026.04.0] - 2026-04-03
+
+### Bug Fixes
+
+- *(open-brain-z8p)* Address review findings iteration 1
+- *(open-brain-z8p)* Add @pytest.mark.asyncio to integration test
+- *(open-brain-z8p)* Address review findings iteration 1
+- *(open-brain-z8p)* Remove unused HASH_B constant
+- *(open-brain-3qa)* Register JSONB codec + robust metadata parsing in _row_to_memory
 - *(open-brain-3qa)* Register JSONB codec + robust metadata parsing in _row_to_memory
 - *(open-brain-3qa)* Remove unused import json in test_metadata_from_json_string
 
 ### Features
 
 - *(api)* /api/context since parameter für Session-Delta Filtering
+- *(open-brain-z8p)* Green — content-hash dedup on save_memory
 
 ### Miscellaneous
 
 - *(changelog)* Update for v2026.03.26
+- *(changelog)* Update for v2026.04.03
+- Bump version to 2026.04.0
 
 ### Testing
 
+- *(open-brain-z8p)* Red — TestContentHashDedup (7 tests for content hash dedup)
+- *(open-brain-3qa)* Red — metadata_from_json_string fails for str input
 - *(open-brain-3qa)* Red — metadata_from_json_string fails for str input
 
 ## [2026.03.26] - 2026-03-12
