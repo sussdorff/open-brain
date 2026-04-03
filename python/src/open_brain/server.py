@@ -261,42 +261,28 @@ async def save_memory(
     # Skip entity extraction if entities already provided in metadata
     has_entities = isinstance(metadata, dict) and "entities" in metadata
 
+    save_params = SaveMemoryParams(
+        text=text,
+        type=type,
+        project=project,
+        title=title,
+        subtitle=subtitle,
+        narrative=narrative,
+        session_ref=session_ref,
+        metadata=metadata,
+        user_id=user_id,
+    )
     if has_entities:
-        result = await dl.save_memory(
-            SaveMemoryParams(
-                text=text,
-                type=type,
-                project=project,
-                title=title,
-                subtitle=subtitle,
-                narrative=narrative,
-                session_ref=session_ref,
-                metadata=metadata,
-                user_id=user_id,
-            )
-        )
+        result = await dl.save_memory(save_params)
     else:
         # Run entity extraction and save_memory in parallel
         entities, result = await asyncio.gather(
             _extract_entities(text),
-            dl.save_memory(
-                SaveMemoryParams(
-                    text=text,
-                    type=type,
-                    project=project,
-                    title=title,
-                    subtitle=subtitle,
-                    narrative=narrative,
-                    session_ref=session_ref,
-                    metadata=metadata,
-                    user_id=user_id,
-                )
-            ),
+            dl.save_memory(save_params),
         )
         if entities:
-            enriched_metadata = {"entities": entities}
             await dl.update_memory(
-                UpdateMemoryParams(id=result.id, metadata=enriched_metadata)
+                UpdateMemoryParams(id=result.id, metadata={"entities": entities})
             )
 
     return json.dumps({"id": result.id, "message": result.message})
