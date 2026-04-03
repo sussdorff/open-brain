@@ -690,7 +690,6 @@ class TestSearchMetadataFilter:
 
 
 HASH_A = hashlib.sha256("Python prefers explicit over implicit".encode()).hexdigest()
-HASH_B = hashlib.sha256("Python prefers simple over complex".encode()).hexdigest()
 
 
 class TestContentHashDedup:
