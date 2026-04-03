@@ -1,7 +1,108 @@
 """DataLayer interface: dataclasses + Protocol."""
 
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from datetime import datetime
+from typing import Any, Protocol, TypedDict
+
+
+# ─── Domain metadata schemas ──────────────────────────────────────────────────
+
+
+class EventMetadata(TypedDict, total=False):
+    """Structured metadata for type='event' memories."""
+
+    when: str  # ISO datetime (required for events)
+    who: list[str]
+    where: str
+    recurrence: str
+
+
+class PersonMetadata(TypedDict, total=False):
+    """Structured metadata for type='person' memories."""
+
+    name: str
+    org: str
+    role: str
+    relationship: str
+    last_contact: str  # ISO datetime
+
+
+class HouseholdMetadata(TypedDict, total=False):
+    """Structured metadata for type='household' memories."""
+
+    category: str
+    item: str
+    location: str
+    details: str
+    warranty_expiry: str  # ISO datetime
+
+
+class DecisionMetadata(TypedDict, total=False):
+    """Structured metadata for type='decision' memories."""
+
+    what: str
+    context: str
+    owner: str
+    alternatives: list[str]
+    rationale: str
+
+
+class MeetingMetadata(TypedDict, total=False):
+    """Structured metadata for type='meeting' memories."""
+
+    attendees: list[str]
+    topic: str
+    key_points: list[str]
+    action_items: list[str]
+    date: str  # ISO datetime
+
+
+def _is_iso_datetime(value: str) -> bool:
+    """Check if a string is a valid ISO 8601 datetime."""
+    try:
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return True
+    except ValueError:
+        return False
+
+
+def validate_domain_metadata(memory_type: str | None, metadata: dict[str, Any] | None) -> list[str]:
+    """Validate domain-specific metadata fields.
+
+    Returns a list of human-readable warning strings.
+    Unknown types and None type return no warnings (AK4).
+    Does not raise exceptions — all validation results are returned as warnings.
+    """
+    if memory_type is None:
+        return []
+
+    md = metadata or {}
+    warnings: list[str] = []
+
+    if memory_type == "event":
+        when = md.get("when")
+        if when is None:
+            warnings.append("event metadata missing required field 'when' (expected ISO datetime, e.g. '2026-04-15T10:00:00')")
+        elif not _is_iso_datetime(str(when)):
+            warnings.append(f"event metadata field 'when' is not a valid ISO datetime: {when!r}")
+
+    elif memory_type == "person":
+        last_contact = md.get("last_contact")
+        if last_contact is not None and not _is_iso_datetime(str(last_contact)):
+            warnings.append(f"person metadata field 'last_contact' is not a valid ISO datetime: {last_contact!r}")
+
+    elif memory_type == "meeting":
+        date = md.get("date")
+        if date is not None and not _is_iso_datetime(str(date)):
+            warnings.append(f"meeting metadata field 'date' is not a valid ISO datetime: {date!r}")
+
+    elif memory_type == "household":
+        warranty_expiry = md.get("warranty_expiry")
+        if warranty_expiry is not None and not _is_iso_datetime(str(warranty_expiry)):
+            warnings.append(f"household metadata field 'warranty_expiry' is not a valid ISO datetime: {warranty_expiry!r}")
+
+    # All other types pass through without validation
+    return warnings
 
 
 @dataclass
