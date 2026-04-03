@@ -7,10 +7,11 @@ These are unit tests that verify:
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
+
+from open_brain.migrate import parse_jsonl_batch, parse_jsonl_line
 
 SKILL_PATH = Path(__file__).parent.parent.parent / "plugin" / "skills" / "ob-migrate" / "SKILL.md"
 
@@ -320,35 +321,6 @@ class TestIdempotency:
 # ---------------------------------------------------------------------------
 # Helper: JSONL parsing logic (unit test with pure Python)
 # ---------------------------------------------------------------------------
-
-
-def parse_jsonl_line(line: str) -> dict | None:
-    """Parse a single JSONL line. Returns None for malformed lines."""
-    line = line.strip()
-    if not line:
-        return None
-    try:
-        data = json.loads(line)
-        if not isinstance(data, dict) or "text" not in data:
-            return None
-        return data
-    except json.JSONDecodeError:
-        return None
-
-
-def parse_jsonl_batch(content: str) -> tuple[list[dict], int]:
-    """Parse JSONL content. Returns (valid_items, error_count)."""
-    items = []
-    errors = 0
-    for line in content.splitlines():
-        if not line.strip():
-            continue
-        result = parse_jsonl_line(line)
-        if result is None:
-            errors += 1
-        else:
-            items.append(result)
-    return items, errors
 
 
 class TestJsonlParsingLogic:
