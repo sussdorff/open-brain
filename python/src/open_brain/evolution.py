@@ -116,7 +116,12 @@ async def analyze_engagement(
     # Sort by briefing_type for deterministic ordering
     by_type.sort(key=lambda x: x.briefing_type)
 
-    has_sufficient_data = days_back >= 7 and total > 0
+    # Require at least 3 distinct briefings across at least 2 different days
+    if days_back >= 7 and total >= 3:
+        distinct_days = len({mem.created_at[:10] for mem in briefings})
+        has_sufficient_data = distinct_days >= 2
+    else:
+        has_sufficient_data = False
 
     return EngagementReport(
         period_days=days_back,
@@ -161,11 +166,33 @@ async def generate_suggestion(
     if recent_result.results:
         return None  # Rate limit: already suggested within 7 days
 
+    # Check 30-day rejection suppression: exclude briefing types rejected in the last 30 days
+    since_30 = now - timedelta(days=30)
+    rejected_result = await dl.search(SearchParams(
+        type="evolution",
+        metadata_filter={"evolution_type": "approval", "approved": "false"},
+        date_start=since_30.isoformat(),
+        date_end=now.isoformat(),
+        project=project,
+        limit=100,
+    ))
+    rejected_types: set[str] = {
+        mem.metadata.get("briefing_type", "")
+        for mem in rejected_result.results
+        if mem.metadata.get("briefing_type")
+    }
+
     if not report.by_type:
         return None
 
-    # Find the lowest-engagement type
-    lowest = min(report.by_type, key=lambda e: e.response_rate)
+    # Filter out briefing types suppressed by 30-day rejection window
+    eligible = [e for e in report.by_type if e.briefing_type not in rejected_types]
+
+    if not eligible:
+        return None
+
+    # Find the lowest-engagement type among eligible types
+    lowest = min(eligible, key=lambda e: e.response_rate)
 
     if lowest.response_rate < 0.30:
         suggestion = EvolutionSuggestion(
@@ -179,13 +206,9 @@ async def generate_suggestion(
             response_rate=lowest.response_rate,
         )
     else:
-        # All types have >= 30%; check if all are >= 50%
-        all_good = all(e.response_rate >= 0.50 for e in report.by_type)
-        if not all_good:
-            return None  # Some moderate engagement, no clear action
-
-        # Propose expanding the top-performing type
-        highest = max(report.by_type, key=lambda e: e.response_rate)
+        # All eligible types have >= 30% (some may be 30-50%, some >= 50%).
+        # In all cases, propose expanding the top-performing type.
+        highest = max(eligible, key=lambda e: e.response_rate)
         suggestion = EvolutionSuggestion(
             action="expand",
             briefing_type=highest.briefing_type,
@@ -197,7 +220,7 @@ async def generate_suggestion(
             response_rate=highest.response_rate,
         )
 
-    # Log the suggestion as a memory
+    # NOTE: saves suggestion to DB as side-effect
     await dl.save_memory(SaveMemoryParams(
         text=suggestion.reason,
         type="evolution",
@@ -207,7 +230,7 @@ async def generate_suggestion(
             "evolution_type": "suggestion",
             "action": suggestion.action,
             "briefing_type": suggestion.briefing_type,
-            "response_rate": suggestion.response_rate,
+            "response_rate": str(suggestion.response_rate),
         },
     ))
 
@@ -219,22 +242,27 @@ async def log_evolution_approval(
     suggestion_id: int,
     approved: bool,
     project: str | None = None,
+    briefing_type: str | None = None,
 ) -> None:
     """Log approval/rejection of an evolution suggestion.
 
     Saves a memory with type='evolution', metadata.evolution_type='approval'.
+    briefing_type, if provided, enables 30-day rejection suppression in generate_suggestion.
     """
     action_label = "approved" if approved else "rejected"
+    metadata: dict[str, str] = {
+        "evolution_type": "approval",
+        "suggestion_id": str(suggestion_id),
+        "approved": str(approved).lower(),
+    }
+    if briefing_type is not None:
+        metadata["briefing_type"] = briefing_type
     await dl.save_memory(SaveMemoryParams(
         text=f"Evolution suggestion #{suggestion_id} was {action_label}.",
         type="evolution",
         project=project,
         title=f"Evolution {action_label}: suggestion #{suggestion_id}",
-        metadata={
-            "evolution_type": "approval",
-            "suggestion_id": suggestion_id,
-            "approved": approved,
-        },
+        metadata=metadata,
     ))
 
 
@@ -251,6 +279,6 @@ async def query_evolution_history(
         type="evolution",
         project=project,
         limit=limit,
-        order_by=None,
+        order_by="newest",
     ))
     return result.results

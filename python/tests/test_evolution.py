@@ -300,8 +300,8 @@ async def test_evolution_approval():
     assert params.type == "evolution"
     assert params.metadata is not None
     assert params.metadata["evolution_type"] == "approval"
-    assert params.metadata["suggestion_id"] == 99
-    assert params.metadata["approved"] is True
+    assert params.metadata["suggestion_id"] == "99"
+    assert params.metadata["approved"] == "true"
 
 
 @pytest.mark.asyncio
@@ -316,7 +316,7 @@ async def test_evolution_rejection():
 
     params: SaveMemoryParams = dl.save_memory.call_args[0][0]
     assert params.type == "evolution"
-    assert params.metadata["approved"] is False
+    assert params.metadata["approved"] == "false"
 
 
 @pytest.mark.asyncio
@@ -338,7 +338,13 @@ async def test_evolution_approval_with_project():
 
 @pytest.mark.asyncio
 async def test_evolution_search():
-    """AK6: Evolution history queryable via search (type=evolution filter)."""
+    """AK6: Evolution history queryable — verify exact SearchParams passed to data layer.
+
+    This test verifies the integration between query_evolution_history and the
+    DataLayer interface contract: type=evolution filter, correct limit, and
+    descending order (newest first) must all be set.
+    """
+    from open_brain.data_layer.interface import SearchParams
     from open_brain.evolution import query_evolution_history
 
     evolution_memories = [
@@ -353,7 +359,7 @@ async def test_evolution_search():
             11,
             type="evolution",
             created_at=NOW - timedelta(days=1),
-            metadata={"evolution_type": "approval", "suggestion_id": 10, "approved": True},
+            metadata={"evolution_type": "approval", "suggestion_id": "10", "approved": "true"},
             title="Evolution approval",
         ),
     ]
@@ -367,10 +373,12 @@ async def test_evolution_search():
     assert history[0].id == 10
     assert history[1].id == 11
 
-    # Verify search was called with type=evolution
-    call_params = dl.search.call_args[0][0]
-    assert call_params.type == "evolution"
-    assert call_params.limit == 20
+    # Verify exact SearchParams passed to the data layer
+    assert dl.search.called
+    call_params: SearchParams = dl.search.call_args[0][0]
+    assert call_params.type == "evolution", "Must filter by type=evolution"
+    assert call_params.limit == 20, "Must pass limit to data layer"
+    assert call_params.order_by == "newest", "Must order by newest first (DESC created_at)"
 
 
 @pytest.mark.asyncio
@@ -386,3 +394,183 @@ async def test_evolution_search_project_filter():
     call_params = dl.search.call_args[0][0]
     assert call_params.project == "open-brain"
     assert call_params.type == "evolution"
+
+
+# ─── AK3: 30-day rejection suppression ───────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_evolution_rejection_suppression():
+    """AK3: Rejected briefing_type is not re-proposed for 30 days."""
+    from open_brain.evolution import BriefingEngagement, EngagementReport, generate_suggestion
+
+    # daily_summary has very low engagement (should normally be removed)
+    report = EngagementReport(
+        period_days=7,
+        by_type=[
+            BriefingEngagement("weekly_digest", total_count=10, responded_count=8, response_rate=0.8),
+            BriefingEngagement("daily_summary", total_count=10, responded_count=1, response_rate=0.1),
+        ],
+        total_briefings=20,
+        has_sufficient_data=True,
+    )
+
+    dl = AsyncMock()
+
+    # First call: rate-limit check (no recent suggestion)
+    # Second call: rejection suppression check (daily_summary was rejected 10 days ago)
+    rejected_memory = _make_memory(
+        55,
+        type="evolution",
+        created_at=NOW - timedelta(days=10),
+        metadata={"evolution_type": "approval", "approved": "false", "briefing_type": "daily_summary"},
+    )
+    dl.search.side_effect = [
+        SearchResult(results=[], total=0),           # 7-day rate limit: no recent suggestion
+        SearchResult(results=[rejected_memory], total=1),  # 30-day rejection check
+    ]
+    dl.save_memory.return_value = SaveMemoryResult(id=99, message="saved")
+
+    suggestion = await generate_suggestion(report, dl)
+
+    # daily_summary is suppressed; weekly_digest has 80% response rate → expand
+    assert suggestion is not None
+    assert suggestion.briefing_type != "daily_summary", "Rejected type must not be re-proposed within 30 days"
+
+
+@pytest.mark.asyncio
+async def test_evolution_rejection_suppression_all_types_rejected():
+    """AK3: If all types are rejected within 30 days, return None."""
+    from open_brain.evolution import BriefingEngagement, EngagementReport, generate_suggestion
+
+    report = EngagementReport(
+        period_days=7,
+        by_type=[
+            BriefingEngagement("daily_summary", total_count=10, responded_count=1, response_rate=0.1),
+        ],
+        total_briefings=10,
+        has_sufficient_data=True,
+    )
+
+    dl = AsyncMock()
+    rejected_memory = _make_memory(
+        56,
+        type="evolution",
+        created_at=NOW - timedelta(days=5),
+        metadata={"evolution_type": "approval", "approved": "false", "briefing_type": "daily_summary"},
+    )
+    dl.search.side_effect = [
+        SearchResult(results=[], total=0),           # 7-day rate limit: no recent suggestion
+        SearchResult(results=[rejected_memory], total=1),  # 30-day rejection check
+    ]
+
+    suggestion = await generate_suggestion(report, dl)
+
+    assert suggestion is None, "All types suppressed → no suggestion"
+
+
+# ─── Advisory: sufficient data heuristic ─────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_evolution_sufficient_data_requires_multiple_days():
+    """Advisory 4: has_sufficient_data requires >= 3 briefings across >= 2 different days."""
+    from open_brain.evolution import analyze_engagement
+
+    # All briefings on the same day — not sufficient even if count >= 3
+    same_day = NOW - timedelta(days=3)
+    briefings = [
+        _make_memory(i, created_at=same_day, metadata={"briefing_type": "daily_summary", "user_responded": True})
+        for i in range(1, 6)
+    ]
+
+    dl = AsyncMock()
+    dl.search.return_value = SearchResult(results=briefings, total=len(briefings))
+
+    report = await analyze_engagement(dl, days_back=7)
+
+    assert not report.has_sufficient_data, "Single day of briefings must not be sufficient"
+
+
+@pytest.mark.asyncio
+async def test_evolution_sufficient_data_two_days():
+    """Advisory 4: 3 briefings across 2 days is sufficient."""
+    from open_brain.evolution import analyze_engagement
+
+    day1 = NOW - timedelta(days=5)
+    day2 = NOW - timedelta(days=2)
+    briefings = [
+        _make_memory(1, created_at=day1, metadata={"briefing_type": "daily_summary", "user_responded": True}),
+        _make_memory(2, created_at=day1, metadata={"briefing_type": "daily_summary", "user_responded": False}),
+        _make_memory(3, created_at=day2, metadata={"briefing_type": "daily_summary", "user_responded": True}),
+    ]
+
+    dl = AsyncMock()
+    dl.search.return_value = SearchResult(results=briefings, total=len(briefings))
+
+    report = await analyze_engagement(dl, days_back=7)
+
+    assert report.has_sufficient_data, "3 briefings across 2 days should be sufficient"
+
+
+# ─── Advisory: 30-50% dead zone → expand suggestion ──────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_evolution_moderate_engagement_generates_expand():
+    """Advisory 5: When some types are 30-50%, still suggest expand for the top type."""
+    from open_brain.evolution import BriefingEngagement, EngagementReport, generate_suggestion
+
+    report = EngagementReport(
+        period_days=7,
+        by_type=[
+            BriefingEngagement("weekly_digest", total_count=10, responded_count=7, response_rate=0.7),
+            BriefingEngagement("daily_summary", total_count=10, responded_count=4, response_rate=0.4),
+        ],
+        total_briefings=20,
+        has_sufficient_data=True,
+    )
+
+    dl = AsyncMock()
+    dl.search.return_value = SearchResult(results=[], total=0)
+    dl.save_memory.return_value = SaveMemoryResult(id=99, message="saved")
+
+    suggestion = await generate_suggestion(report, dl)
+
+    assert suggestion is not None, "Should generate suggestion even when some types are 30-50%"
+    assert suggestion.action == "expand"
+    assert suggestion.briefing_type == "weekly_digest"  # highest engagement
+
+
+# ─── Advisory: scenario test ─────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_evolution_scenario_realistic():
+    """Advisory 3: Realistic scenario — midday_check_in has 14% response rate → removal proposed."""
+    from open_brain.evolution import BriefingEngagement, EngagementReport, generate_suggestion
+
+    # 20 morning briefings (18 responded) = 90%
+    # 14 midday check-ins (2 responded) = 14.3% → below 30% threshold
+    # 10 pre-meeting preps (10 responded) = 100%
+    report = EngagementReport(
+        period_days=7,
+        by_type=[
+            BriefingEngagement("morning_briefing", total_count=20, responded_count=18, response_rate=18 / 20),
+            BriefingEngagement("midday_check_in", total_count=14, responded_count=2, response_rate=2 / 14),
+            BriefingEngagement("pre_meeting_prep", total_count=10, responded_count=10, response_rate=1.0),
+        ],
+        total_briefings=44,
+        has_sufficient_data=True,
+    )
+
+    dl = AsyncMock()
+    dl.search.return_value = SearchResult(results=[], total=0)
+    dl.save_memory.return_value = SaveMemoryResult(id=99, message="saved")
+
+    suggestion = await generate_suggestion(report, dl)
+
+    assert suggestion is not None
+    assert suggestion.action == "remove"
+    assert suggestion.briefing_type == "midday_check_in"
+    assert suggestion.response_rate == pytest.approx(2 / 14, rel=1e-3)
