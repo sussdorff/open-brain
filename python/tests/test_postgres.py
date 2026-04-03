@@ -87,6 +87,7 @@ class TestPostgresSaveMemory:
             None,          # _resolve_index_id: no existing index
             {"id": 1},     # _resolve_index_id: INSERT new index
             None,          # upsert check: no existing session_summary with this session_ref
+            None,          # dedup check: no duplicate content
             inserted_row,  # INSERT INTO memories ... RETURNING id
         ]
         pool = _make_pool(conn)
@@ -166,6 +167,7 @@ class TestPostgresSaveMemory:
         conn.fetchrow.side_effect = [
             None,          # _resolve_index_id: no existing index
             {"id": 1},     # _resolve_index_id: INSERT
+            None,          # dedup check: no duplicate content
             inserted_row,  # INSERT INTO memories
         ]
         pool = _make_pool(conn)
@@ -476,6 +478,7 @@ class TestSaveMemoryWithMetadata:
         conn.fetchrow.side_effect = [
             None,          # _resolve_index_id: no existing index
             {"id": 1},     # _resolve_index_id: INSERT new index
+            None,          # dedup check: no duplicate content
             inserted_row,  # INSERT INTO memories ... RETURNING id
         ]
         pool = _make_pool(conn)
@@ -508,6 +511,7 @@ class TestSaveMemoryWithMetadata:
         parsed = json.loads(metadata_arg)
         assert parsed["status"] == "open"
         assert parsed["source"] == "bot"
+        assert "content_hash" in parsed
 
     @pytest.mark.asyncio
     async def test_save_memory_without_metadata_defaults_to_empty(self, dl):
@@ -519,6 +523,7 @@ class TestSaveMemoryWithMetadata:
         conn.fetchrow.side_effect = [
             None,
             {"id": 1},
+            None,          # dedup check: no duplicate content
             inserted_row,
         ]
         pool = _make_pool(conn)
@@ -533,8 +538,14 @@ class TestSaveMemoryWithMetadata:
         assert result.id == 10
         insert_call = conn.fetchrow.call_args_list[-1]
         insert_args = insert_call[0]
-        # The empty metadata JSON '{}' should be among the args
-        assert "{}" in insert_args
+        # Metadata should now always contain content_hash (never bare '{}')
+        import json
+        metadata_arg = next(
+            (a for a in insert_args if isinstance(a, str) and "content_hash" in a), None
+        )
+        assert metadata_arg is not None
+        parsed = json.loads(metadata_arg)
+        assert "content_hash" in parsed
 
 
 class TestUpdateMemoryMetadataMerge:

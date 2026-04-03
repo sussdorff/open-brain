@@ -161,6 +161,7 @@ class SaveMemoryResult:
 
     id: int
     message: str
+    duplicate_of: int | None = None
 
 
 @dataclass

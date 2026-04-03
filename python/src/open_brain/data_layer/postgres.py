@@ -63,6 +63,11 @@ async def get_pool() -> asyncpg.Pool:
                 "ALTER TABLE memories ADD COLUMN IF NOT EXISTS user_id TEXT;"
             )
             await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_memories_content_hash
+                ON memories ((metadata->>'content_hash'))
+                WHERE metadata->>'content_hash' IS NOT NULL;
+            """)
+            await conn.execute("""
                 CREATE OR REPLACE FUNCTION public.hybrid_search(
                     query_text text,
                     query_embedding vector,
@@ -517,9 +522,30 @@ class PostgresDataLayer:
                     asyncio.create_task(self._embed_and_link(existing_id, text_to_embed))
                     return SaveMemoryResult(id=existing_id, message="Memory updated (upsert)")
 
+            # ── Content hash dedup ──
+            import hashlib as _hashlib
+            content_hash = _hashlib.sha256(params.text.encode()).hexdigest()
+            dup_row = await conn.fetchrow(
+                """SELECT id FROM memories
+                   WHERE metadata->>'content_hash' = $1
+                     AND created_at > NOW() - INTERVAL '30 days'
+                     AND (index_id IS NOT DISTINCT FROM $2)
+                   LIMIT 1""",
+                content_hash,
+                index_id,
+            )
+            if dup_row:
+                return SaveMemoryResult(
+                    id=dup_row["id"],
+                    message="Duplicate content detected",
+                    duplicate_of=dup_row["id"],
+                )
+
             # ── Normal insert path ──
             import json as _json
-            metadata_json = _json.dumps(params.metadata) if params.metadata else "{}"
+            base_metadata = dict(params.metadata) if params.metadata else {}
+            base_metadata["content_hash"] = content_hash
+            metadata_json = _json.dumps(base_metadata)
             row = await conn.fetchrow(
                 """INSERT INTO memories (index_id, type, title, subtitle, narrative, content, session_ref, metadata, user_id)
                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
