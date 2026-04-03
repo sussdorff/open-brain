@@ -72,7 +72,6 @@ class TestRowToMemory:
 
     def test_metadata_from_json_string(self):
         """Test that JSON string metadata (as returned by asyncpg without codec) is parsed."""
-        import json
         row = _make_row({"metadata": '{"agent_type": "foo", "status": "open"}'})
         memory = _row_to_memory(row)
         assert memory.metadata == {"agent_type": "foo", "status": "open"}
