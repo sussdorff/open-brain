@@ -241,6 +241,25 @@ class TestSaveMemoryTool:
             assert "not persisted" in data["message"]
             mock_dl.save_memory.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_save_memory_duplicate_skips_enrichment(self, mock_dl):
+        """When save_memory returns duplicate_of, no LLM calls are made and update_memory is NOT called."""
+        mock_dl.save_memory.return_value = SaveMemoryResult(
+            id=7, message="Duplicate content detected", duplicate_of=7
+        )
+        with (
+            patch("open_brain.server.get_dl", return_value=mock_dl),
+            patch("open_brain.server.classify_and_extract", return_value={"capture_template": "X"}) as mock_classify,
+            patch("open_brain.server._extract_entities", return_value={"people": ["Alice"]}) as mock_entities,
+        ):
+            from open_brain.server import save_memory
+            result = await save_memory(text="Duplicate text")
+            data = json.loads(result)
+            assert data["duplicate_of"] == 7
+            mock_dl.update_memory.assert_not_called()
+            mock_classify.assert_not_called()
+            mock_entities.assert_not_called()
+
 
 # ─── SearchByConcept tool ─────────────────────────────────────────────────────
 

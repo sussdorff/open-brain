@@ -163,25 +163,29 @@ def _count_by_type(memories: list[Memory]) -> dict[str, int]:
 
 
 def _find_cross_project_connections(memories: list[Memory]) -> list[dict[str, Any]]:
-    """Group memories by project if project metadata is available."""
+    """Group memories by index_id (project identifier).
+
+    Uses mem.index_id as the grouping key — the project field is NOT stored in
+    metadata but is the index_id integer on the Memory dataclass itself.
+    """
     projects: dict[str, dict[str, Any]] = {}
     for mem in memories:
-        project = mem.metadata.get("project")
-        if project is None:
+        if mem.index_id is None:
             continue
-        if project not in projects:
-            projects[project] = {"memory_count": 0, "entity_counter": Counter()}
-        projects[project]["memory_count"] += 1
+        project_key = str(mem.index_id)
+        if project_key not in projects:
+            projects[project_key] = {"memory_count": 0, "entity_counter": Counter()}
+        projects[project_key]["memory_count"] += 1
         entities = mem.metadata.get("entities", {})
         for names in entities.values():
             for name in names:
-                projects[project]["entity_counter"][name] += 1
+                projects[project_key]["entity_counter"][name] += 1
 
     result: list[dict[str, Any]] = []
-    for project, data in sorted(projects.items(), key=lambda x: x[1]["memory_count"], reverse=True):
+    for project_key, data in sorted(projects.items(), key=lambda x: x[1]["memory_count"], reverse=True):
         common_entities = [name for name, _ in data["entity_counter"].most_common(5)]
         result.append({
-            "project": project,
+            "project": project_key,
             "memory_count": data["memory_count"],
             "common_entities": common_entities,
         })

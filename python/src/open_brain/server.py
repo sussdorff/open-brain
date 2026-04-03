@@ -80,6 +80,9 @@ async def _extract_entities(text: str) -> dict:
     Returns:
         Dict with keys people, orgs, tech, locations, dates (lists of strings).
         Returns empty dict on failure or empty text.
+
+    Trust boundary: text is assumed to be user-controlled input.
+    Not suitable for multi-tenant use without content isolation.
     """
     if not text or not text.strip():
         return {}
@@ -271,7 +274,6 @@ async def save_memory(
     dl = get_dl()
     user_id = _current_user_id.get()
 
-    # Run capture routing and entity extraction concurrently with save_memory.
     # classify_and_extract handles bypass conditions internally (returns existing_metadata
     # unchanged when capture_template already set or type=session_summary).
     # Entity extraction is skipped when "entities" key already present in metadata.
@@ -289,36 +291,38 @@ async def save_memory(
         user_id=user_id,
     )
 
-    classify_coro = classify_and_extract(text, existing_metadata=metadata, memory_type=type)
-    save_coro = dl.save_memory(save_params)
+    # Save first — must know if duplicate before firing expensive LLM calls.
+    result = await dl.save_memory(save_params)
 
-    if not has_entities:
-        entities_coro = _extract_entities(text)
-        entities_result, classification, result = await asyncio.gather(
-            entities_coro, classify_coro, save_coro,
-        )
-    else:
-        classification, result = await asyncio.gather(classify_coro, save_coro)
-        entities_result = {}
+    # Skip LLM enrichment entirely for duplicates — no wasted API calls, no update_memory.
+    if result.duplicate_of is None:
+        # Run classification and entity extraction concurrently (non-duplicate path only).
+        classify_coro = classify_and_extract(text, existing_metadata=metadata, memory_type=type)
+        if not has_entities:
+            entities_coro = _extract_entities(text)
+            entities_result, classification = await asyncio.gather(entities_coro, classify_coro)
+        else:
+            classification = await classify_coro
+            entities_result = {}
 
-    # Merge classification + entity extraction into a single update_memory call
-    post_save_metadata: dict[str, Any] = {}
+        post_save_metadata: dict[str, Any] = {}
 
-    # Add classification metadata (guard: skip if bypass returned metadata unchanged)
-    if classification != (metadata or {}):
-        post_save_metadata = {**(metadata or {}), **classification}
+        # Add classification metadata (guard: skip if bypass returned metadata unchanged,
+        # and only send keys that differ from the original metadata to avoid redundant writes)
+        if classification != (metadata or {}):
+            post_save_metadata = {k: v for k, v in classification.items() if (metadata or {}).get(k) != v}
 
-    # Add entity extraction results
-    if entities_result:
-        post_save_metadata["entities"] = entities_result
+        # Add entity extraction results
+        if entities_result:
+            post_save_metadata["entities"] = entities_result
 
-    if post_save_metadata:
-        try:
-            await dl.update_memory(
-                UpdateMemoryParams(id=result.id, metadata=post_save_metadata)
-            )
-        except Exception:
-            logger.exception("save_memory: post-save metadata update failed (classification/entities)")
+        if post_save_metadata:
+            try:
+                await dl.update_memory(
+                    UpdateMemoryParams(id=result.id, metadata=post_save_metadata)
+                )
+            except Exception:
+                logger.exception("save_memory: post-save metadata update failed (classification/entities)")
 
     payload: dict = {"id": result.id, "message": result.message}
     if result.duplicate_of is not None:

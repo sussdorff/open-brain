@@ -555,13 +555,14 @@ class PostgresDataLayer:
             # ── Content hash dedup ──
             content_hash = hashlib.sha256(params.text.encode()).hexdigest()
             dup_row = await conn.fetchrow(
-                f"""SELECT id FROM memories
+                """SELECT id FROM memories
                    WHERE metadata->>'content_hash' = $1
-                     AND created_at > NOW() - INTERVAL '{DEDUP_WINDOW_DAYS} days'
+                     AND created_at > NOW() - ($3 * INTERVAL '1 day')
                      AND (index_id IS NOT DISTINCT FROM $2)
                    LIMIT 1""",
                 content_hash,
                 index_id,
+                DEDUP_WINDOW_DAYS,
             )
             if dup_row:
                 return SaveMemoryResult(
@@ -634,7 +635,6 @@ class PostgresDataLayer:
                 return SaveMemoryResult(id=params.id, message="No fields to update")
 
             # Build parameterized query
-            import json as _json
             set_parts = []
             values: list[Any] = []
             param_idx = 1
