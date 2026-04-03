@@ -58,22 +58,7 @@ class MeetingMetadata(TypedDict, total=False):
 
 
 def _is_iso_datetime(value: str) -> bool:
-    """Return True if value is a valid ISO 8601 datetime string."""
-    for fmt in (
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%dT%H:%M:%S.%f",
-        "%Y-%m-%dT%H:%M:%SZ",
-        "%Y-%m-%dT%H:%M:%S.%fZ",
-        "%Y-%m-%dT%H:%M:%S%z",
-        "%Y-%m-%dT%H:%M:%S.%f%z",
-        "%Y-%m-%d",
-    ):
-        try:
-            datetime.strptime(value.rstrip("Z") if value.endswith("Z") and "+" not in value else value, fmt.rstrip("Z") if fmt.endswith("Z") else fmt)
-            return True
-        except ValueError:
-            continue
-    # Also try fromisoformat (Python 3.7+)
+    """Check if a string is a valid ISO 8601 datetime."""
     try:
         datetime.fromisoformat(value.replace("Z", "+00:00"))
         return True

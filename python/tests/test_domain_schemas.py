@@ -350,6 +350,38 @@ class TestValidateDomainMetadata:
         warnings = validate_domain_metadata(None, {"foo": "bar"})
         assert warnings == []
 
+    def test_validate_household_with_valid_warranty_expiry_returns_no_warnings(self):
+        """validate_domain_metadata returns [] for household with valid warranty_expiry."""
+        from open_brain.data_layer.interface import validate_domain_metadata
+        warnings = validate_domain_metadata("household", {"item": "Washing machine", "warranty_expiry": "2028-06-01T00:00:00"})
+        assert warnings == []
+
+    def test_validate_household_with_invalid_warranty_expiry_returns_warning(self):
+        """validate_domain_metadata returns warning for household with non-ISO warranty_expiry."""
+        from open_brain.data_layer.interface import validate_domain_metadata
+        warnings = validate_domain_metadata("household", {"item": "Dishwasher", "warranty_expiry": "next year"})
+        assert len(warnings) == 1
+        assert "warranty_expiry" in warnings[0].lower()
+
+    def test_validate_household_without_warranty_expiry_returns_no_warnings(self):
+        """validate_domain_metadata returns [] for household with no warranty_expiry (optional field)."""
+        from open_brain.data_layer.interface import validate_domain_metadata
+        warnings = validate_domain_metadata("household", {"item": "Chair"})
+        assert warnings == []
+
+    def test_validate_meeting_with_valid_date_returns_no_warnings(self):
+        """validate_domain_metadata returns [] for meeting with valid ISO date."""
+        from open_brain.data_layer.interface import validate_domain_metadata
+        warnings = validate_domain_metadata("meeting", {"date": "2026-04-10T09:00:00", "topic": "Quarterly review"})
+        assert warnings == []
+
+    def test_validate_meeting_with_invalid_date_returns_warning(self):
+        """validate_domain_metadata returns warning for meeting with non-ISO date."""
+        from open_brain.data_layer.interface import validate_domain_metadata
+        warnings = validate_domain_metadata("meeting", {"date": "tomorrow morning"})
+        assert len(warnings) == 1
+        assert "date" in warnings[0].lower()
+
     def test_domain_typed_dicts_importable(self):
         """EventMetadata, PersonMetadata etc. are importable from interface."""
         from open_brain.data_layer.interface import (
