@@ -5,7 +5,35 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(open-brain-qt9)* Address review findings iteration 1
+- *(open-brain-qt9)* Address review findings iteration 2 — explicit None check + remove duplicate bypass logic
+- *(open-brain-qt9)* Address review findings iteration 3 — bypass guard, text truncation, return type, realistic test mocks, new edge case tests
+
+### Documentation
+
+- Update feature documentation for open-brain-qt9 capture router
+
+### Features
+
+- *(open-brain-qt9)* Green — capture router with LLM classification + concurrent save integration
+
+### Miscellaneous
+
+- Bump version to 2026.04.1
+
+### Testing
+
+- *(open-brain-qt9)* Red — capture router classification + server integration tests
+
+## [2026.04.1] - 2026-04-03
+
+### Bug Fixes
+
 - *(open-brain-z8p)* Update test mock for dedup fetchrow sequence
+
+### Miscellaneous
+
+- Update changelog
 
 ## [2026.04.0] - 2026-04-03
 
