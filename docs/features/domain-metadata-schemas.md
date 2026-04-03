@@ -93,7 +93,7 @@ class DecisionMetadata(TypedDict, total=False):
 When `save_memory(type=..., metadata=...)` is called:
 
 1. **Save proceeds immediately** — no blocking even if metadata is invalid
-2. **Type and metadata checked** — call `validate_domain_metadata(type, metadata)`
+2. **Type and metadata checked** — call `validate_domain_metadata(memory_type, metadata)`
 3. **Validation returns warnings** — a list of human-readable warning strings
 4. **Warnings appended to response** — if list is non-empty, `response.warning` contains "; "-joined messages
 5. **Memory persists unchanged** — validation is advisory only
@@ -289,26 +289,26 @@ await save_memory(type="event", metadata={"when": ""})
 Located in `python/src/open_brain/data_layer/interface.py` and `python/src/open_brain/server.py`:
 
 - **TypedDict definitions** — `EventMetadata`, `PersonMetadata`, etc. in `interface.py`
-- **Validator function** — `validate_domain_metadata(type: str | None, metadata: dict) -> list[str]`
+- **Validator function** — `validate_domain_metadata(memory_type: str | None, metadata: dict) -> list[str]`
 - **ISO datetime checker** — `_is_iso_datetime(value: str) -> bool` using `datetime.fromisoformat()`
 - **Integration point** — `save_memory()` MCP tool calls validator and appends warnings to response
 
 ### Validator Logic
 
 ```python
-def validate_domain_metadata(type: str | None, metadata: dict | None) -> list[str]:
+def validate_domain_metadata(memory_type: str | None, metadata: dict | None) -> list[str]:
     """Validate domain-specific metadata fields.
     
     Returns list of human-readable warning strings.
     Unknown types and None type return empty list (no warnings).
     """
-    if type is None:
+    if memory_type is None:
         return []
     
     md = metadata or {}
     warnings = []
     
-    if type == "event":
+    if memory_type == "event":
         when = md.get("when")
         if when is None:
             warnings.append("event metadata missing required field 'when'...")
