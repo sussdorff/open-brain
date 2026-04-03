@@ -1,0 +1,388 @@
+"""Tests for evolution.py — Self-Improvement Loop: engagement tracking + weekly behavior proposals.
+
+TDD Red-Green cycle per acceptance criterion.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, call
+
+import pytest
+
+from open_brain.data_layer.interface import Memory, SaveMemoryParams, SaveMemoryResult, SearchResult
+
+NOW = datetime(2026, 4, 3, 12, 0, 0, tzinfo=UTC)
+
+
+def _make_memory(
+    mid: int = 1,
+    *,
+    type: str = "briefing",
+    created_at: datetime | None = None,
+    metadata: dict | None = None,
+    content: str = "Briefing content",
+    title: str | None = "Test Briefing",
+) -> Memory:
+    """Create a Memory for testing."""
+    if created_at is None:
+        created_at = NOW - timedelta(days=3)
+    return Memory(
+        id=mid,
+        index_id=mid,
+        session_id=None,
+        type=type,
+        title=title,
+        subtitle=None,
+        narrative=None,
+        content=content,
+        metadata=metadata or {},
+        priority=0.5,
+        stability="stable",
+        access_count=0,
+        last_accessed_at=None,
+        created_at=created_at.isoformat(),
+        updated_at=created_at.isoformat(),
+    )
+
+
+# ─── AK1: Briefing saved with user_responded metadata ─────────────────────────
+
+
+def test_evolution_briefing_log():
+    """AK1: When a briefing is saved, metadata must include briefing_type and user_responded."""
+    # This test documents/validates the expected metadata shape for briefing memories.
+    # The convention: any memory with type="briefing" MUST have these metadata keys.
+    from open_brain.evolution import BRIEFING_METADATA_REQUIRED_KEYS
+
+    required = BRIEFING_METADATA_REQUIRED_KEYS
+    assert "briefing_type" in required
+    assert "user_responded" in required
+
+
+def test_evolution_briefing_metadata_shape():
+    """AK1: Validate that a sample briefing metadata has the required keys."""
+    from open_brain.evolution import validate_briefing_metadata
+
+    valid_metadata = {"briefing_type": "weekly_digest", "user_responded": True}
+    errors = validate_briefing_metadata(valid_metadata)
+    assert errors == []
+
+    missing_metadata = {"briefing_type": "weekly_digest"}
+    errors = validate_briefing_metadata(missing_metadata)
+    assert len(errors) > 0
+    assert any("user_responded" in e for e in errors)
+
+    empty_metadata: dict = {}
+    errors = validate_briefing_metadata(empty_metadata)
+    assert len(errors) == 2  # both keys missing
+
+
+# ─── AK2: Weekly analysis counts response rates by type ───────────────────────
+
+
+@pytest.mark.asyncio
+async def test_evolution_weekly_analysis():
+    """AK2: Response rates calculated correctly per briefing type."""
+    from open_brain.evolution import EngagementReport, analyze_engagement
+
+    briefings = [
+        # weekly_digest: 2 responded, 1 not → 66.7%
+        _make_memory(1, metadata={"briefing_type": "weekly_digest", "user_responded": True}),
+        _make_memory(2, metadata={"briefing_type": "weekly_digest", "user_responded": True}),
+        _make_memory(3, metadata={"briefing_type": "weekly_digest", "user_responded": False}),
+        # daily_summary: 0 responded, 3 not → 0%
+        _make_memory(4, metadata={"briefing_type": "daily_summary", "user_responded": False}),
+        _make_memory(5, metadata={"briefing_type": "daily_summary", "user_responded": False}),
+        _make_memory(6, metadata={"briefing_type": "daily_summary", "user_responded": False}),
+    ]
+
+    dl = AsyncMock()
+    dl.search.return_value = SearchResult(results=briefings, total=len(briefings))
+
+    report = await analyze_engagement(dl, days_back=7)
+
+    assert isinstance(report, EngagementReport)
+    assert report.total_briefings == 6
+    assert report.period_days == 7
+
+    by_type = {e.briefing_type: e for e in report.by_type}
+    assert "weekly_digest" in by_type
+    assert "daily_summary" in by_type
+
+    wd = by_type["weekly_digest"]
+    assert wd.total_count == 3
+    assert wd.responded_count == 2
+    assert abs(wd.response_rate - 2 / 3) < 0.001
+
+    ds = by_type["daily_summary"]
+    assert ds.total_count == 3
+    assert ds.responded_count == 0
+    assert ds.response_rate == 0.0
+
+
+@pytest.mark.asyncio
+async def test_evolution_weekly_analysis_project_filter():
+    """AK2: analyze_engagement passes project filter to search."""
+    from open_brain.evolution import analyze_engagement
+
+    dl = AsyncMock()
+    dl.search.return_value = SearchResult(results=[], total=0)
+
+    await analyze_engagement(dl, days_back=7, project="my-project")
+
+    # Verify search was called with project filter
+    assert dl.search.called
+    call_params = dl.search.call_args[0][0]
+    assert call_params.project == "my-project"
+    assert call_params.type == "briefing"
+
+
+# ─── AK3: Low engagement identified and removal proposed ──────────────────────
+
+
+@pytest.mark.asyncio
+async def test_evolution_removal_proposal():
+    """AK3: Type with < 30% response rate → removal proposed."""
+    from open_brain.evolution import EngagementReport, EvolutionSuggestion, generate_suggestion
+    from open_brain.evolution import BriefingEngagement
+
+    # daily_summary has 10% response rate (well below 30%)
+    report = EngagementReport(
+        period_days=7,
+        by_type=[
+            BriefingEngagement("weekly_digest", total_count=10, responded_count=8, response_rate=0.8),
+            BriefingEngagement("daily_summary", total_count=10, responded_count=1, response_rate=0.1),
+        ],
+        total_briefings=20,
+        has_sufficient_data=True,
+    )
+
+    dl = AsyncMock()
+    # No recent evolution suggestion
+    dl.search.return_value = SearchResult(results=[], total=0)
+    dl.save_memory.return_value = SaveMemoryResult(id=99, message="saved")
+
+    suggestion = await generate_suggestion(report, dl)
+
+    assert suggestion is not None
+    assert isinstance(suggestion, EvolutionSuggestion)
+    assert suggestion.action == "remove"
+    assert suggestion.briefing_type == "daily_summary"
+    assert suggestion.response_rate == 0.1
+    assert "low" in suggestion.reason.lower() or "engagement" in suggestion.reason.lower()
+
+
+@pytest.mark.asyncio
+async def test_evolution_expansion_proposal():
+    """AK3: All types >= 50% → expand top type."""
+    from open_brain.evolution import EngagementReport, EvolutionSuggestion, generate_suggestion
+    from open_brain.evolution import BriefingEngagement
+
+    report = EngagementReport(
+        period_days=7,
+        by_type=[
+            BriefingEngagement("weekly_digest", total_count=10, responded_count=9, response_rate=0.9),
+            BriefingEngagement("daily_summary", total_count=10, responded_count=6, response_rate=0.6),
+        ],
+        total_briefings=20,
+        has_sufficient_data=True,
+    )
+
+    dl = AsyncMock()
+    dl.search.return_value = SearchResult(results=[], total=0)
+    dl.save_memory.return_value = SaveMemoryResult(id=99, message="saved")
+
+    suggestion = await generate_suggestion(report, dl)
+
+    assert suggestion is not None
+    assert suggestion.action == "expand"
+    assert suggestion.briefing_type == "weekly_digest"  # highest engagement
+
+
+# ─── AK4: Only ONE suggestion per 7 days ──────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_evolution_rate_limit():
+    """AK4: No second suggestion within 7 days."""
+    from open_brain.evolution import EngagementReport, generate_suggestion
+    from open_brain.evolution import BriefingEngagement
+
+    report = EngagementReport(
+        period_days=7,
+        by_type=[
+            BriefingEngagement("daily_summary", total_count=10, responded_count=0, response_rate=0.0),
+        ],
+        total_briefings=10,
+        has_sufficient_data=True,
+    )
+
+    dl = AsyncMock()
+    # Simulate: a suggestion was already made 3 days ago
+    recent_suggestion = _make_memory(
+        50,
+        type="evolution",
+        created_at=NOW - timedelta(days=3),
+        metadata={"evolution_type": "suggestion"},
+    )
+    dl.search.return_value = SearchResult(results=[recent_suggestion], total=1)
+
+    suggestion = await generate_suggestion(report, dl)
+
+    assert suggestion is None, "Should return None when a suggestion was already made within 7 days"
+
+
+@pytest.mark.asyncio
+async def test_evolution_rate_limit_respects_7_day_window():
+    """AK4: Suggestion older than 7 days → new suggestion allowed."""
+    from open_brain.evolution import EngagementReport, generate_suggestion
+    from open_brain.evolution import BriefingEngagement
+
+    report = EngagementReport(
+        period_days=7,
+        by_type=[
+            BriefingEngagement("daily_summary", total_count=10, responded_count=0, response_rate=0.0),
+        ],
+        total_briefings=10,
+        has_sufficient_data=True,
+    )
+
+    dl = AsyncMock()
+    # Old suggestion (8 days ago) — outside 7-day window
+    # search for recent suggestions returns empty
+    dl.search.return_value = SearchResult(results=[], total=0)
+    dl.save_memory.return_value = SaveMemoryResult(id=100, message="saved")
+
+    suggestion = await generate_suggestion(report, dl)
+
+    assert suggestion is not None, "Should allow new suggestion when last one was > 7 days ago"
+
+
+@pytest.mark.asyncio
+async def test_evolution_no_suggestion_insufficient_data():
+    """AK4: Insufficient data (< 7 days of briefings) → None returned."""
+    from open_brain.evolution import EngagementReport, generate_suggestion
+    from open_brain.evolution import BriefingEngagement
+
+    report = EngagementReport(
+        period_days=3,
+        by_type=[
+            BriefingEngagement("daily_summary", total_count=2, responded_count=0, response_rate=0.0),
+        ],
+        total_briefings=2,
+        has_sufficient_data=False,
+    )
+
+    dl = AsyncMock()
+    dl.search.return_value = SearchResult(results=[], total=0)
+
+    suggestion = await generate_suggestion(report, dl)
+
+    assert suggestion is None, "Should return None when insufficient data"
+
+
+# ─── AK5: Approved changes logged as type=evolution ──────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_evolution_approval():
+    """AK5: Approval logged as type=evolution with correct metadata."""
+    from open_brain.evolution import log_evolution_approval
+
+    dl = AsyncMock()
+    dl.save_memory.return_value = SaveMemoryResult(id=42, message="saved")
+
+    await log_evolution_approval(dl, suggestion_id=99, approved=True)
+
+    assert dl.save_memory.called
+    params: SaveMemoryParams = dl.save_memory.call_args[0][0]
+    assert params.type == "evolution"
+    assert params.metadata is not None
+    assert params.metadata["evolution_type"] == "approval"
+    assert params.metadata["suggestion_id"] == 99
+    assert params.metadata["approved"] is True
+
+
+@pytest.mark.asyncio
+async def test_evolution_rejection():
+    """AK5: Rejection also logged as type=evolution with approved=False."""
+    from open_brain.evolution import log_evolution_approval
+
+    dl = AsyncMock()
+    dl.save_memory.return_value = SaveMemoryResult(id=43, message="saved")
+
+    await log_evolution_approval(dl, suggestion_id=99, approved=False)
+
+    params: SaveMemoryParams = dl.save_memory.call_args[0][0]
+    assert params.type == "evolution"
+    assert params.metadata["approved"] is False
+
+
+@pytest.mark.asyncio
+async def test_evolution_approval_with_project():
+    """AK5: project is passed through to save_memory."""
+    from open_brain.evolution import log_evolution_approval
+
+    dl = AsyncMock()
+    dl.save_memory.return_value = SaveMemoryResult(id=44, message="saved")
+
+    await log_evolution_approval(dl, suggestion_id=99, approved=True, project="open-brain")
+
+    params: SaveMemoryParams = dl.save_memory.call_args[0][0]
+    assert params.project == "open-brain"
+
+
+# ─── AK6: Evolution history queryable ────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_evolution_search():
+    """AK6: Evolution history queryable via search (type=evolution filter)."""
+    from open_brain.evolution import query_evolution_history
+
+    evolution_memories = [
+        _make_memory(
+            10,
+            type="evolution",
+            created_at=NOW - timedelta(days=1),
+            metadata={"evolution_type": "suggestion", "action": "remove", "briefing_type": "daily_summary"},
+            title="Evolution suggestion",
+        ),
+        _make_memory(
+            11,
+            type="evolution",
+            created_at=NOW - timedelta(days=1),
+            metadata={"evolution_type": "approval", "suggestion_id": 10, "approved": True},
+            title="Evolution approval",
+        ),
+    ]
+
+    dl = AsyncMock()
+    dl.search.return_value = SearchResult(results=evolution_memories, total=2)
+
+    history = await query_evolution_history(dl, limit=20)
+
+    assert len(history) == 2
+    assert history[0].id == 10
+    assert history[1].id == 11
+
+    # Verify search was called with type=evolution
+    call_params = dl.search.call_args[0][0]
+    assert call_params.type == "evolution"
+    assert call_params.limit == 20
+
+
+@pytest.mark.asyncio
+async def test_evolution_search_project_filter():
+    """AK6: Evolution history supports project filter."""
+    from open_brain.evolution import query_evolution_history
+
+    dl = AsyncMock()
+    dl.search.return_value = SearchResult(results=[], total=0)
+
+    await query_evolution_history(dl, limit=10, project="open-brain")
+
+    call_params = dl.search.call_args[0][0]
+    assert call_params.project == "open-brain"
+    assert call_params.type == "evolution"
