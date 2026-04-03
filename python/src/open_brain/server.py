@@ -211,14 +211,14 @@ async def save_memory(
     user_id = _current_user_id.get()
 
     # Determine if classification should be bypassed
-    _should_classify = not (
+    should_classify = not (
         (metadata and "capture_template" in metadata)
         or type == "session_summary"
     )
 
     # Start classification concurrently with save (AK5: <200ms added latency)
     classify_task: asyncio.Task | None = None
-    if _should_classify:
+    if should_classify:
         classify_task = asyncio.create_task(
             classify_and_extract(text, existing_metadata=metadata, memory_type=type)
         )
@@ -249,7 +249,7 @@ async def save_memory(
                 )
             )
         except Exception:
-            logger.exception("save_memory: classification update failed, memory saved without capture_template")
+            logger.exception("save_memory: capture_router metadata update failed, memory saved without capture_template")
 
     return json.dumps({"id": result.id, "message": result.message})
 
