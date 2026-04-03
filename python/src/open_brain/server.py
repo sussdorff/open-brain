@@ -231,16 +231,19 @@ async def save_memory(
         )
     )
 
-    # Await classification result and merge into saved memory metadata
+    # Await classification result and merge into saved memory metadata.
+    # Guard: skip update_memory when bypass returned the original metadata unchanged
+    # (avoids redundant DB write when capture_template was already set or session_summary).
     try:
         classification = await classify_task
-        merged_metadata = {**(metadata or {}), **classification}
-        await dl.update_memory(
-            UpdateMemoryParams(
-                id=result.id,
-                metadata=merged_metadata,
+        if classification != (metadata or {}):
+            merged_metadata = {**(metadata or {}), **classification}
+            await dl.update_memory(
+                UpdateMemoryParams(
+                    id=result.id,
+                    metadata=merged_metadata,
+                )
             )
-        )
     except Exception:
         logger.exception("save_memory: capture_router metadata update failed, memory saved without capture_template")
 

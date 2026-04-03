@@ -195,7 +195,7 @@ class TestBypassConditions:
 
     @pytest.mark.asyncio
     async def test_bypass_for_session_summary_type(self):
-        """type=session_summary → skip classification, return observation."""
+        """type=session_summary → skip classification, return existing_metadata unchanged."""
         with patch(
             "open_brain.capture_router.llm_complete",
             new=AsyncMock(side_effect=AssertionError("must not be called")),
@@ -204,7 +204,23 @@ class TestBypassConditions:
                 "Session summary: worked on feature X today",
                 memory_type="session_summary",
             )
-        assert result["capture_template"] == "observation"
+        # Returns empty dict (no existing_metadata) — no capture_template added
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_bypass_session_summary_preserves_existing_metadata(self):
+        """type=session_summary preserves any existing metadata fields unchanged."""
+        existing = {"project": "open-brain", "session_ref": "bead-qt9"}
+        with patch(
+            "open_brain.capture_router.llm_complete",
+            new=AsyncMock(side_effect=AssertionError("must not be called")),
+        ):
+            result = await classify_and_extract(
+                "Session summary: worked on feature X today",
+                existing_metadata=existing,
+                memory_type="session_summary",
+            )
+        assert result == existing
 
     @pytest.mark.asyncio
     async def test_empty_metadata_without_capture_template_triggers_classification(self):
@@ -253,6 +269,37 @@ class TestObservationFallback:
             result = await classify_and_extract("Some text that causes LLM failure")
         assert result["capture_template"] == "observation"
 
+    @pytest.mark.asyncio
+    async def test_empty_minimal_text_classifies_as_observation(self):
+        """Empty or single-word input falls back to observation without error."""
+        llm_response = {"capture_template": "observation"}
+        for minimal in ("", " ", "ok"):
+            with _mock_llm(llm_response):
+                result = await classify_and_extract(minimal)
+            assert result["capture_template"] == "observation", f"failed for input: {minimal!r}"
+
+    @pytest.mark.asyncio
+    async def test_mixed_signals_returns_valid_template(self):
+        """Text with markers for multiple templates picks one valid classification."""
+        # Text has both decision language and meeting attendees
+        mixed_text = (
+            "Meeting with Alice and Bob where we decided to adopt PostgreSQL. "
+            "Alternatives were MySQL and SQLite. Bob made the final call."
+        )
+        # Either decision or meeting is acceptable — both are valid dominant templates
+        llm_response = {
+            "capture_template": "decision",
+            "what": "Adopt PostgreSQL",
+            "owner": "Bob",
+            "alternatives": ["MySQL", "SQLite"],
+            "rationale": None,
+            "context": "Discussed in meeting with Alice and Bob",
+        }
+        with _mock_llm(llm_response):
+            result = await classify_and_extract(mixed_text)
+        assert result["capture_template"] in ("decision", "meeting", "observation")
+        assert "capture_template" in result
+
 
 # ─── AK5: Concurrency integration test ────────────────────────────────────────
 
@@ -299,35 +346,37 @@ class TestServerIntegration:
 
     @pytest.mark.asyncio
     async def test_save_memory_bypasses_when_metadata_template_set(self):
-        """save_memory skips classification when metadata.capture_template already set."""
+        """save_memory skips update_memory when classify_and_extract returns metadata unchanged."""
         from open_brain.data_layer.interface import SaveMemoryResult
+
+        existing_metadata = {"capture_template": "decision", "what": "pre-set"}
 
         mock_dl = AsyncMock()
         mock_dl.save_memory.return_value = SaveMemoryResult(id=55, message="saved")
-        # update_memory should NOT be called since we bypass classification
         mock_dl.update_memory.return_value = SaveMemoryResult(id=55, message="updated")
 
         with (
             patch("open_brain.server.get_dl", return_value=mock_dl),
             patch(
                 "open_brain.server.classify_and_extract",
-                new=AsyncMock(side_effect=AssertionError("must not be called")),
+                # Bypass: returns the original metadata dict unchanged
+                new=AsyncMock(return_value=existing_metadata),
             ),
         ):
             from open_brain.server import save_memory
             result_json = await save_memory(
                 text="A decision was made",
-                metadata={"capture_template": "decision", "what": "pre-set"},
+                metadata=existing_metadata,
             )
 
         result = json.loads(result_json)
         assert result["id"] == 55
-        # No update_memory call needed since metadata was already set
+        # Guard skips update_memory: classification == metadata (unchanged)
         mock_dl.update_memory.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_save_memory_bypasses_session_summary_type(self):
-        """save_memory skips classification for type=session_summary."""
+        """save_memory skips update_memory for type=session_summary (classification returns {})."""
         from open_brain.data_layer.interface import SaveMemoryResult
 
         mock_dl = AsyncMock()
@@ -337,7 +386,8 @@ class TestServerIntegration:
             patch("open_brain.server.get_dl", return_value=mock_dl),
             patch(
                 "open_brain.server.classify_and_extract",
-                new=AsyncMock(side_effect=AssertionError("must not be called")),
+                # session_summary bypass: returns empty dict (no metadata provided)
+                new=AsyncMock(return_value={}),
             ),
         ):
             from open_brain.server import save_memory
@@ -346,6 +396,7 @@ class TestServerIntegration:
                 type="session_summary",
             )
 
+        # Guard skips update_memory: classification ({}) == (metadata or {}) ({})
         mock_dl.update_memory.assert_not_called()
 
     @pytest.mark.asyncio

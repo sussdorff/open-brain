@@ -70,9 +70,12 @@ async def classify_and_extract(
     if existing_metadata is not None and "capture_template" in existing_metadata:
         return existing_metadata
 
-    # Bypass condition 2: session_summary type
+    # Bypass condition 2: session_summary type — return metadata unchanged (no classification)
     if memory_type == "session_summary":
-        return {"capture_template": "observation"}
+        return existing_metadata or {}
+
+    # Truncate to prevent context overflow on large inputs
+    text = text[:4000]
 
     prompt = _CLASSIFICATION_PROMPT_TEMPLATE + text
 
@@ -92,7 +95,7 @@ async def classify_and_extract(
         return {"capture_template": "observation"}
 
 
-def _parse_json(text: str) -> dict[str, Any]:
+def _parse_json(text: str) -> Any:
     """Parse JSON from LLM response, stripping markdown fences if present."""
     text = text.strip()
     if text.startswith("```"):
