@@ -23,6 +23,7 @@ from open_brain.auth.provider import get_provider
 from open_brain.auth.tokens import verify_token
 from open_brain.config import get_config
 from open_brain.data_layer.interface import (
+    DecayParams,
     DeleteParams,
     MaterializeParams,
     RefineParams,
@@ -496,8 +497,11 @@ async def run_lifecycle_pipeline(
     scope: str | None = None,
     dry_run: bool = False,
 ) -> str:
-    """Chain triage_memories → materialize_memories into one pipeline run."""
+    """Chain decay_memories → triage_memories → materialize_memories into one pipeline run."""
     dl = get_dl()
+
+    # Step 0: Decay — reduce priority of stale memories, boost frequently accessed ones
+    decay_result = await dl.decay_memories(DecayParams(dry_run=dry_run))
 
     # Step 1: Triage
     triage_result = await dl.triage_memories(
@@ -507,6 +511,7 @@ async def run_lifecycle_pipeline(
     if not triage_result.actions:
         return json.dumps(
             {
+                "decay_summary": decay_result.summary,
                 "triage_summary": triage_result.summary,
                 "materialization_summary": "No actions to materialize",
                 "actions_taken": [],
@@ -528,6 +533,7 @@ async def run_lifecycle_pipeline(
 
     return json.dumps(
         {
+            "decay_summary": decay_result.summary,
             "triage_summary": triage_result.summary,
             "triage_action_counts": action_counts,
             "materialization_summary": mat_result.summary,

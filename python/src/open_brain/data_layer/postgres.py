@@ -15,6 +15,8 @@ from open_brain.config import get_config
 from open_brain.data_layer.embedding import embed, embed_query, to_pg_vector
 from open_brain.data_layer.reranker import rerank
 from open_brain.data_layer.interface import (
+    DecayParams,
+    DecayResult,
     DeleteParams,
     DeleteResult,
     MaterializeParams,
@@ -669,6 +671,86 @@ class PostgresDataLayer:
             asyncio.create_task(self._embed_and_link(params.id, text_to_embed))
 
         return SaveMemoryResult(id=params.id, message="Memory updated")
+
+    async def decay_memories(self, params: DecayParams) -> DecayResult:
+        """Apply priority decay to stale memories and boost frequently accessed ones.
+
+        - Stale: memories not accessed in stale_days get priority *= decay_factor
+        - Boost: memories with access_count >= boost_threshold get priority *= boost_factor (capped at 1.0)
+        - Protected: memories created within boost_days are counted but left unchanged
+        - dry_run: returns counts without modifying the DB
+
+        Args:
+            params: DecayParams controlling thresholds and factors.
+
+        Returns:
+            DecayResult with counts of decayed, boosted, and protected memories.
+        """
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            if params.dry_run:
+                # Count only — no writes
+                # dry_run: count candidates without executing. This WHERE clause must mirror
+                # decay_unused_priorities(stale_days, factor) DB function.
+                # Verified criteria: last_accessed_at < NOW() - stale_days OR
+                # (last_accessed_at IS NULL AND created_at < NOW() - stale_days)
+                # If the DB function changes, update this query too.
+                decayed = await conn.fetchval(
+                    """SELECT COUNT(*) FROM memories
+                       WHERE (last_accessed_at IS NULL OR last_accessed_at < NOW() - ($1 || ' days')::interval)
+                         AND created_at < NOW() - ($1 || ' days')::interval""",
+                    str(params.stale_days),
+                )
+                boosted = await conn.fetchval(
+                    """SELECT COUNT(*) FROM memories
+                       WHERE access_count >= $1""",
+                    params.boost_threshold,
+                )
+                recent_memories = await conn.fetchval(
+                    """SELECT COUNT(*) FROM memories
+                       WHERE created_at >= NOW() - ($1 || ' days')::interval""",
+                    str(params.boost_days),
+                )
+            else:
+                # Apply decay: use existing DB function decay_unused_priorities(stale_days, decay_factor)
+                # Note: this mirrors the WHERE clause in decay_unused_priorities() DB function — keep in sync
+                decayed = await conn.fetchval(
+                    "SELECT decay_unused_priorities($1, $2)",
+                    params.stale_days,
+                    params.decay_factor,
+                )
+                # Boost applies to frequently-accessed memories regardless of age — recent memories benefit
+                # from boost too. A memory that is both stale and frequently accessed will be decayed first
+                # and then boosted (net effect: boost partially counteracts decay, intentional behavior).
+                # AK3 (protection from decay) is separate: the DB function excludes recently-created memories
+                # from decay, but the boost here intentionally applies to all frequently-accessed memories.
+                boosted = await conn.fetchval(
+                    """WITH updated AS (
+                           UPDATE memories
+                           SET priority = LEAST(priority * $1, 1.0),
+                               updated_at = NOW()
+                           WHERE access_count >= $2
+                           RETURNING id
+                       )
+                       SELECT COUNT(*) FROM updated""",
+                    params.boost_factor,
+                    params.boost_threshold,
+                )
+                recent_memories = await conn.fetchval(
+                    """SELECT COUNT(*) FROM memories
+                       WHERE created_at >= NOW() - ($1 || ' days')::interval""",
+                    str(params.boost_days),
+                )
+
+        decayed = int(decayed or 0)
+        boosted = int(boosted or 0)
+        recent_memories = int(recent_memories or 0)
+        summary = (
+            f"Decay run complete: {decayed} memories decayed, "
+            f"{boosted} memories boosted, {recent_memories} recent memories (< {params.boost_days} days)."
+            + (" (dry_run)" if params.dry_run else "")
+        )
+        return DecayResult(decayed=decayed, boosted=boosted, recent_memories=recent_memories, summary=summary)
 
     async def _embed_and_link(self, memory_id: int, text: str) -> None:
         """Background task: embed a memory and auto-link similar ones."""

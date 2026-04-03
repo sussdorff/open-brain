@@ -105,6 +105,13 @@ Memories flow through a defined lifecycle from creation to long-term storage:
               └──────────┘
                     │
                     ▼
+              ┌──────────┐     Priority adjustment based on access patterns
+   Decay ───►│ reduce    │     (unaccessed memories decay,
+              │ priorities│     frequently accessed get boosted)
+              │ boost     │
+              └──────────┘
+                    │
+                    ▼
               ┌──────────┐     Human-in-the-loop review
   Triage ───►│ classify  │     (keep, merge, promote,
               │ recommend │      scaffold, archive)
@@ -127,6 +134,7 @@ Memories flow through a defined lifecycle from creation to long-term storage:
 | **Embed** | (internal) | Automatic | Voyage-4 embedding + auto-link to similar memories (cosine > 0.65). |
 | **Search** | `search`, `timeline`, `get_observations` | On demand | 3-step funnel: search → context → details. Minimizes token usage. |
 | **Refine** | `refine_memories` | Automatic | LLM finds duplicates, merges similar, adjusts priority. Rule-based. |
+| **Decay** | `run_lifecycle_pipeline` (Step 0) | Automatic | Reduce priority of stale (30+ days unaccessed) memories, boost frequently accessed ones. Recent memories protected. |
 | **Triage** | `triage_memories` | Human-in-loop | LLM classifies memories; user approves each action. |
 | **Materialize** | `materialize_memories` | Semi-auto | Writes approved triage actions to their targets (files, issues, etc.). |
 
