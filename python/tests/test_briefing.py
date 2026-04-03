@@ -13,7 +13,7 @@ NOW = datetime(2026, 4, 3, 12, 0, 0, tzinfo=UTC)
 
 
 def _make_memory(
-    id: int = 1,
+    mid: int = 1,
     *,
     type: str = "observation",
     created_at: datetime | None = None,
@@ -27,8 +27,8 @@ def _make_memory(
     if created_at is None:
         created_at = NOW - timedelta(days=3)
     return Memory(
-        id=id,
-        index_id=id,
+        id=mid,
+        index_id=mid,
         session_id=None,
         type=type,
         title=title,
@@ -78,9 +78,9 @@ class TestBriefingEntities:
         from open_brain.digest import generate_weekly_briefing
 
         memories = [
-            _make_memory(id=1, metadata={"entities": {"people": ["Alice", "Bob"], "tech": ["Python"]}}),
-            _make_memory(id=2, metadata={"entities": {"people": ["Alice"], "tech": ["Python", "asyncpg"]}}),
-            _make_memory(id=3, metadata={"entities": {"people": ["Charlie"]}}),
+            _make_memory(mid=1, metadata={"entities": {"people": ["Alice", "Bob"], "tech": ["Python"]}}),
+            _make_memory(mid=2, metadata={"entities": {"people": ["Alice"], "tech": ["Python", "asyncpg"]}}),
+            _make_memory(mid=3, metadata={"entities": {"people": ["Charlie"]}}),
         ]
 
         dl = AsyncMock()
@@ -112,11 +112,11 @@ class TestBriefingTrends:
         from open_brain.digest import generate_weekly_briefing
 
         current_memories = [
-            _make_memory(id=1, metadata={"entities": {"tech": ["Rust", "Python"]}}),
-            _make_memory(id=2, metadata={"entities": {"tech": ["Rust"]}}),
+            _make_memory(mid=1, metadata={"entities": {"tech": ["Rust", "Python"]}}),
+            _make_memory(mid=2, metadata={"entities": {"tech": ["Rust"]}}),
         ]
         previous_memories = [
-            _make_memory(id=3, metadata={"entities": {"tech": ["Python", "Java"]}}),
+            _make_memory(mid=3, metadata={"entities": {"tech": ["Python", "Java"]}}),
         ]
 
         dl = AsyncMock()
@@ -146,12 +146,12 @@ class TestBriefingOpenLoops:
         from open_brain.digest import generate_weekly_briefing
 
         meeting = _make_memory(
-            id=5,
+            mid=5,
             type="meeting",
             title="Sprint Planning",
             metadata={"action_items": ["Fix bug #123", "Deploy to prod"]},
         )
-        obs = _make_memory(id=6, type="observation", metadata={})
+        obs = _make_memory(mid=6, type="observation", metadata={})
 
         dl = AsyncMock()
         dl.search.side_effect = [
@@ -179,14 +179,14 @@ class TestBriefingDecay:
         from open_brain.digest import generate_weekly_briefing
 
         stale_memory = _make_memory(
-            id=10,
+            mid=10,
             title="Old Decision",
             created_at=NOW - timedelta(days=60),
             last_accessed_at=NOW - timedelta(days=40),
             access_count=1,
         )
         recent_memory = _make_memory(
-            id=11,
+            mid=11,
             title="Fresh Note",
             created_at=NOW - timedelta(days=2),
             last_accessed_at=NOW - timedelta(days=1),
@@ -232,3 +232,175 @@ class TestBriefingEmpty:
         assert result.open_loops == []
         assert result.cross_project_connections == []
         assert result.decay_warnings == []
+
+
+# ─── Scenario: Full mixed-type, multi-week DB ─────────────────────────────────
+
+class TestBriefingFullScenario:
+    @pytest.mark.asyncio
+    async def test_briefing_full_scenario(self):
+        """Scenario: 20+ memories of mixed types spanning 2+ weeks — briefing has non-zero counts."""
+        from open_brain.digest import generate_weekly_briefing
+
+        # 5 meetings with attendees and action_items
+        meetings = [
+            _make_memory(
+                mid=i,
+                type="meeting",
+                title=f"Meeting {i}",
+                created_at=NOW - timedelta(days=i * 2),
+                metadata={
+                    "entities": {"people": [f"Person{i}", "Alice"]},
+                    "action_items": [f"Action {i}"],
+                },
+            )
+            for i in range(1, 6)
+        ]
+        # 3 decisions
+        decisions = [
+            _make_memory(
+                mid=10 + i,
+                type="decision",
+                title=f"Decision {i}",
+                created_at=NOW - timedelta(days=i * 3),
+                metadata={"entities": {"tech": ["Python", f"Tech{i}"]}},
+            )
+            for i in range(1, 4)
+        ]
+        # 4 persons
+        persons = [
+            _make_memory(
+                mid=20 + i,
+                type="person",
+                title=f"Person Record {i}",
+                created_at=NOW - timedelta(days=i + 5),
+                metadata={"entities": {"people": [f"Person{i}", "Bob"]}},
+            )
+            for i in range(1, 5)
+        ]
+        # 3 events
+        events = [
+            _make_memory(
+                mid=30 + i,
+                type="event",
+                title=f"Event {i}",
+                created_at=NOW - timedelta(days=i + 10),
+                metadata={"entities": {"places": [f"Place{i}"]}},
+            )
+            for i in range(1, 4)
+        ]
+        # 5 observations (older, ~2 weeks back)
+        observations = [
+            _make_memory(
+                mid=40 + i,
+                type="observation",
+                title=f"Observation {i}",
+                created_at=NOW - timedelta(days=14 + i),
+                metadata={"entities": {"tech": ["Python"]}},
+            )
+            for i in range(1, 6)
+        ]
+
+        all_mems = meetings + decisions + persons + events + observations
+        assert len(all_mems) >= 20
+
+        dl = AsyncMock()
+        dl.search.side_effect = [
+            SearchResult(results=all_mems, total=len(all_mems)),   # current
+            SearchResult(results=[], total=0),                      # previous
+            SearchResult(results=all_mems, total=len(all_mems)),   # decay
+        ]
+
+        result = await generate_weekly_briefing(dl, weeks_back=2)
+
+        # Non-zero entity counts
+        assert result.memory_counts["current"] == len(all_mems)
+        assert len(result.top_entities) > 0
+        people = {e["name"]: e["freq"] for e in result.top_entities.get("people", [])}
+        assert people.get("Alice", 0) > 0
+
+        # Open loops from meetings
+        loop_ids = [ol["memory_id"] for ol in result.open_loops]
+        assert any(mid in loop_ids for mid in range(1, 6))
+
+        # Memory counts by type include meetings
+        assert result.memory_counts["by_type"].get("meeting", 0) == 5
+
+
+# ─── Scenario: Single-type DB still produces output ──────────────────────────
+
+class TestBriefingSingleType:
+    @pytest.mark.asyncio
+    async def test_briefing_single_type(self):
+        """Scenario: 5 memories all of type 'observation' → valid briefing structure."""
+        from open_brain.digest import generate_weekly_briefing
+
+        memories = [
+            _make_memory(
+                mid=i,
+                type="observation",
+                title=f"Observation {i}",
+                metadata={"entities": {"tech": ["Python"]}},
+            )
+            for i in range(1, 6)
+        ]
+
+        dl = AsyncMock()
+        dl.search.side_effect = [
+            SearchResult(results=memories, total=5),   # current
+            SearchResult(results=[], total=0),          # previous
+            SearchResult(results=memories, total=5),   # decay
+        ]
+
+        result = await generate_weekly_briefing(dl, weeks_back=1)
+
+        assert result.memory_counts["current"] == 5
+        assert result.memory_counts["by_type"] == {"observation": 5}
+        assert len(result.top_entities) > 0
+        assert result.theme_trends["emerging"] is not None
+        assert result.theme_trends["declining"] is not None
+        assert result.open_loops == []
+        assert result.decay_warnings == []
+
+
+# ─── Scenario: Cross-project aggregation ─────────────────────────────────────
+
+class TestBriefingCrossProject:
+    @pytest.mark.asyncio
+    async def test_briefing_cross_project(self):
+        """Scenario: Memories from different projects → cross_project_connections aggregated."""
+        from open_brain.digest import generate_weekly_briefing
+
+        project_a = [
+            _make_memory(
+                mid=i,
+                title=f"Alpha Memory {i}",
+                metadata={"project": "alpha", "entities": {"tech": ["Rust"]}},
+            )
+            for i in range(1, 5)
+        ]
+        project_b = [
+            _make_memory(
+                mid=10 + i,
+                title=f"Beta Memory {i}",
+                metadata={"project": "beta", "entities": {"tech": ["Go", "Python"]}},
+            )
+            for i in range(1, 4)
+        ]
+        all_mems = project_a + project_b
+
+        dl = AsyncMock()
+        dl.search.side_effect = [
+            SearchResult(results=all_mems, total=len(all_mems)),   # current
+            SearchResult(results=[], total=0),                      # previous
+            SearchResult(results=all_mems, total=len(all_mems)),   # decay
+        ]
+
+        result = await generate_weekly_briefing(dl, weeks_back=1)
+
+        projects = {c["project"]: c for c in result.cross_project_connections}
+        assert "alpha" in projects
+        assert "beta" in projects
+        assert projects["alpha"]["memory_count"] == 4
+        assert projects["beta"]["memory_count"] == 3
+        assert "Rust" in projects["alpha"]["common_entities"]

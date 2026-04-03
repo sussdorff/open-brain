@@ -247,10 +247,10 @@ async def generate_weekly_briefing(
     theme_trends = _compute_trends(current_counters, previous_counters)
 
     # ── Open loops ────────────────────────────────────────────────────────────
-    open_loops = _find_open_loops(current_memories, now)
+    open_loops = _find_open_loops(all_memories, now)
 
     # ── Cross-project connections ─────────────────────────────────────────────
-    cross_project_connections = _find_cross_project_connections(current_memories)
+    cross_project_connections = _find_cross_project_connections(all_memories)
 
     # ── Decay warnings ────────────────────────────────────────────────────────
     decay_warnings = _find_decay_warnings(all_memories, now)

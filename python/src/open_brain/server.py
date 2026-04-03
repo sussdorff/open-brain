@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from dataclasses import asdict
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from pathlib import Path
@@ -1114,8 +1115,6 @@ async def weekly_briefing(
     project: str | None = None,
 ) -> str:
     """Generate a structured weekly briefing with cross-type time-bridged insights."""
-    from dataclasses import asdict
-
     from open_brain.digest import generate_weekly_briefing
 
     dl = get_dl()
