@@ -66,37 +66,37 @@ def _is_iso_datetime(value: str) -> bool:
         return False
 
 
-def validate_domain_metadata(type: str | None, metadata: dict[str, Any] | None) -> list[str]:
+def validate_domain_metadata(memory_type: str | None, metadata: dict[str, Any] | None) -> list[str]:
     """Validate domain-specific metadata fields.
 
     Returns a list of human-readable warning strings.
     Unknown types and None type return no warnings (AK4).
     Does not raise exceptions — all validation results are returned as warnings.
     """
-    if type is None:
+    if memory_type is None:
         return []
 
     md = metadata or {}
     warnings: list[str] = []
 
-    if type == "event":
+    if memory_type == "event":
         when = md.get("when")
         if when is None:
             warnings.append("event metadata missing required field 'when' (expected ISO datetime, e.g. '2026-04-15T10:00:00')")
         elif not _is_iso_datetime(str(when)):
             warnings.append(f"event metadata field 'when' is not a valid ISO datetime: {when!r}")
 
-    elif type == "person":
+    elif memory_type == "person":
         last_contact = md.get("last_contact")
         if last_contact is not None and not _is_iso_datetime(str(last_contact)):
             warnings.append(f"person metadata field 'last_contact' is not a valid ISO datetime: {last_contact!r}")
 
-    elif type == "meeting":
+    elif memory_type == "meeting":
         date = md.get("date")
         if date is not None and not _is_iso_datetime(str(date)):
             warnings.append(f"meeting metadata field 'date' is not a valid ISO datetime: {date!r}")
 
-    elif type == "household":
+    elif memory_type == "household":
         warranty_expiry = md.get("warranty_expiry")
         if warranty_expiry is not None and not _is_iso_datetime(str(warranty_expiry)):
             warnings.append(f"household metadata field 'warranty_expiry' is not a valid ISO datetime: {warranty_expiry!r}")
