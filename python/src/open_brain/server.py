@@ -31,6 +31,7 @@ from open_brain.data_layer.interface import (
     TriageParams,
     UpdateMemoryParams,
 )
+from open_brain.capture_router import classify_and_extract
 from open_brain.data_layer.llm import LlmMessage, llm_complete
 from open_brain.data_layer.postgres import PostgresDataLayer, close_pool
 
@@ -208,6 +209,20 @@ async def save_memory(
         return json.dumps({"id": -1, "message": "Test artifact — not persisted"})
     dl = get_dl()
     user_id = _current_user_id.get()
+
+    # Determine if classification should be bypassed
+    _should_classify = not (
+        (metadata and "capture_template" in metadata)
+        or type == "session_summary"
+    )
+
+    # Start classification concurrently with save (AK5: <200ms added latency)
+    classify_task: asyncio.Task | None = None
+    if _should_classify:
+        classify_task = asyncio.create_task(
+            classify_and_extract(text, existing_metadata=metadata, memory_type=type)
+        )
+
     result = await dl.save_memory(
         SaveMemoryParams(
             text=text,
@@ -221,6 +236,21 @@ async def save_memory(
             user_id=user_id,
         )
     )
+
+    # Await classification result and merge into saved memory metadata
+    if classify_task is not None:
+        try:
+            classification = await classify_task
+            merged_metadata = {**(metadata or {}), **classification}
+            await dl.update_memory(
+                UpdateMemoryParams(
+                    id=result.id,
+                    metadata=merged_metadata,
+                )
+            )
+        except Exception:
+            logger.exception("save_memory: classification update failed, memory saved without capture_template")
+
     return json.dumps({"id": result.id, "message": result.message})
 
 
