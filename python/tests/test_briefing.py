@@ -1,0 +1,234 @@
+"""Tests for WeeklyBriefing digest — TDD Red-Green cycle."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock
+
+import pytest
+
+from open_brain.data_layer.interface import Memory, SearchResult
+
+NOW = datetime(2026, 4, 3, 12, 0, 0, tzinfo=UTC)
+
+
+def _make_memory(
+    id: int = 1,
+    *,
+    type: str = "observation",
+    created_at: datetime | None = None,
+    last_accessed_at: datetime | None = None,
+    access_count: int = 0,
+    metadata: dict | None = None,
+    content: str = "Test content",
+    title: str | None = "Test Memory",
+) -> Memory:
+    """Create a Memory for testing."""
+    if created_at is None:
+        created_at = NOW - timedelta(days=3)
+    return Memory(
+        id=id,
+        index_id=id,
+        session_id=None,
+        type=type,
+        title=title,
+        subtitle=None,
+        narrative=None,
+        content=content,
+        metadata=metadata or {},
+        priority=0.5,
+        stability="stable",
+        access_count=access_count,
+        last_accessed_at=last_accessed_at.isoformat() if last_accessed_at else None,
+        created_at=created_at.isoformat(),
+        updated_at=created_at.isoformat(),
+    )
+
+
+# ─── AK1: All 6 sections present ─────────────────────────────────────────────
+
+class TestBriefingSections:
+    @pytest.mark.asyncio
+    async def test_briefing_sections(self):
+        """AK1: Result has all 6 required top-level keys."""
+        from open_brain.digest import generate_weekly_briefing
+
+        dl = AsyncMock()
+        dl.search.return_value = SearchResult(results=[], total=0)
+
+        result = await generate_weekly_briefing(dl, weeks_back=1)
+        from dataclasses import asdict
+        data = asdict(result)
+
+        assert "period" in data
+        assert "memory_counts" in data
+        assert "top_entities" in data
+        assert "theme_trends" in data
+        assert "open_loops" in data
+        assert "cross_project_connections" in data
+        assert "decay_warnings" in data
+
+
+# ─── AK2: Entity frequency aggregation ───────────────────────────────────────
+
+class TestBriefingEntities:
+    @pytest.mark.asyncio
+    async def test_briefing_entities(self):
+        """AK2: Entity counts aggregated correctly from metadata."""
+        from open_brain.digest import generate_weekly_briefing
+
+        memories = [
+            _make_memory(id=1, metadata={"entities": {"people": ["Alice", "Bob"], "tech": ["Python"]}}),
+            _make_memory(id=2, metadata={"entities": {"people": ["Alice"], "tech": ["Python", "asyncpg"]}}),
+            _make_memory(id=3, metadata={"entities": {"people": ["Charlie"]}}),
+        ]
+
+        dl = AsyncMock()
+        # current period search, previous period search, decay search
+        dl.search.side_effect = [
+            SearchResult(results=memories, total=3),  # current
+            SearchResult(results=[], total=0),         # previous
+            SearchResult(results=memories, total=3),   # decay
+        ]
+
+        result = await generate_weekly_briefing(dl, weeks_back=1)
+
+        people = {e["name"]: e["freq"] for e in result.top_entities["people"]}
+        assert people["Alice"] == 2
+        assert people["Bob"] == 1
+        assert people["Charlie"] == 1
+
+        tech = {e["name"]: e["freq"] for e in result.top_entities["tech"]}
+        assert tech["Python"] == 2
+        assert tech["asyncpg"] == 1
+
+
+# ─── AK3: Theme trends ────────────────────────────────────────────────────────
+
+class TestBriefingTrends:
+    @pytest.mark.asyncio
+    async def test_briefing_trends(self):
+        """AK3: Entity in current but not previous → emerging; in previous not current → declining."""
+        from open_brain.digest import generate_weekly_briefing
+
+        current_memories = [
+            _make_memory(id=1, metadata={"entities": {"tech": ["Rust", "Python"]}}),
+            _make_memory(id=2, metadata={"entities": {"tech": ["Rust"]}}),
+        ]
+        previous_memories = [
+            _make_memory(id=3, metadata={"entities": {"tech": ["Python", "Java"]}}),
+        ]
+
+        dl = AsyncMock()
+        dl.search.side_effect = [
+            SearchResult(results=current_memories, total=2),  # current
+            SearchResult(results=previous_memories, total=1),  # previous
+            SearchResult(results=current_memories, total=2),   # decay
+        ]
+
+        result = await generate_weekly_briefing(dl, weeks_back=1)
+
+        emerging_names = [e["name"] for e in result.theme_trends["emerging"]]
+        declining_names = [e["name"] for e in result.theme_trends["declining"]]
+
+        # Rust: appears 2x in current, 0x in previous → emerging
+        assert "Rust" in emerging_names
+        # Java: in previous not in current → declining
+        assert "Java" in declining_names
+
+
+# ─── AK4: Open loops ─────────────────────────────────────────────────────────
+
+class TestBriefingOpenLoops:
+    @pytest.mark.asyncio
+    async def test_briefing_open_loops(self):
+        """AK4: Meeting with action_items appears in open_loops."""
+        from open_brain.digest import generate_weekly_briefing
+
+        meeting = _make_memory(
+            id=5,
+            type="meeting",
+            title="Sprint Planning",
+            metadata={"action_items": ["Fix bug #123", "Deploy to prod"]},
+        )
+        obs = _make_memory(id=6, type="observation", metadata={})
+
+        dl = AsyncMock()
+        dl.search.side_effect = [
+            SearchResult(results=[meeting, obs], total=2),  # current
+            SearchResult(results=[], total=0),               # previous
+            SearchResult(results=[meeting, obs], total=2),   # decay
+        ]
+
+        result = await generate_weekly_briefing(dl, weeks_back=1)
+
+        loop_ids = [ol["memory_id"] for ol in result.open_loops]
+        assert 5 in loop_ids
+
+        loop = next(ol for ol in result.open_loops if ol["memory_id"] == 5)
+        assert "Fix bug #123" in loop["action_items"]
+        assert loop["title"] == "Sprint Planning"
+
+
+# ─── AK5: Decay warnings ─────────────────────────────────────────────────────
+
+class TestBriefingDecay:
+    @pytest.mark.asyncio
+    async def test_briefing_decay(self):
+        """AK5: Memory accessed 40 days ago with access_count=1 → decay warning; recent memory does not."""
+        from open_brain.digest import generate_weekly_briefing
+
+        stale_memory = _make_memory(
+            id=10,
+            title="Old Decision",
+            created_at=NOW - timedelta(days=60),
+            last_accessed_at=NOW - timedelta(days=40),
+            access_count=1,
+        )
+        recent_memory = _make_memory(
+            id=11,
+            title="Fresh Note",
+            created_at=NOW - timedelta(days=2),
+            last_accessed_at=NOW - timedelta(days=1),
+            access_count=5,
+        )
+
+        dl = AsyncMock()
+        dl.search.side_effect = [
+            SearchResult(results=[stale_memory, recent_memory], total=2),  # current
+            SearchResult(results=[], total=0),                               # previous
+            SearchResult(results=[stale_memory, recent_memory], total=2),   # decay
+        ]
+
+        result = await generate_weekly_briefing(dl, weeks_back=1)
+
+        decay_ids = [w["memory_id"] for w in result.decay_warnings]
+        assert 10 in decay_ids
+        assert 11 not in decay_ids
+
+        warning = next(w for w in result.decay_warnings if w["memory_id"] == 10)
+        assert warning["days_unaccessed"] >= 30
+        assert warning["access_count"] == 1
+
+
+# ─── AK6: Empty database ─────────────────────────────────────────────────────
+
+class TestBriefingEmpty:
+    @pytest.mark.asyncio
+    async def test_briefing_empty(self):
+        """AK6: Empty search results → valid briefing with zero counts and empty lists."""
+        from open_brain.digest import generate_weekly_briefing
+
+        dl = AsyncMock()
+        dl.search.return_value = SearchResult(results=[], total=0)
+
+        result = await generate_weekly_briefing(dl, weeks_back=1)
+
+        assert result.memory_counts["current"] == 0
+        assert result.memory_counts["previous"] == 0
+        assert result.top_entities == {}
+        assert result.theme_trends["emerging"] == []
+        assert result.theme_trends["declining"] == []
+        assert result.open_loops == []
+        assert result.cross_project_connections == []
+        assert result.decay_warnings == []
