@@ -63,6 +63,8 @@ Rules:
 
 Text: """
 
+_ENTITY_KEYS = {"people", "orgs", "tech", "locations", "dates"}
+
 
 async def _extract_entities(text: str) -> dict:
     """Extract named entities from text using Haiku.
@@ -82,9 +84,12 @@ async def _extract_entities(text: str) -> dict:
             model="claude-haiku-4-5-20251001",
         )
         parsed = _parse_llm_json(response)
-        # Filter to expected keys only and non-empty lists (prevents hallucinated keys)
-        ENTITY_KEYS = {"people", "orgs", "tech", "locations", "dates"}
-        entities = {k: v for k, v in parsed.items() if k in ENTITY_KEYS and isinstance(v, list) and v}
+        # Filter to expected keys only; strip non-string items from lists (prevents hallucinated keys/values)
+        entities = {
+            k: [item for item in v if isinstance(item, str)]
+            for k, v in parsed.items()
+            if k in _ENTITY_KEYS and isinstance(v, list) and any(isinstance(i, str) for i in v)
+        }
         return entities
     except Exception:
         logger.warning("Entity extraction failed — continuing without entities", exc_info=True)
