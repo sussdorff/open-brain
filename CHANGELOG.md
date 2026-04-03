@@ -3,9 +3,30 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Bug Fixes
+
+- *(open-brain-jrq)* Address review findings iteration 1
+- *(open-brain-jrq)* Address cmux review panel findings iteration 1
+
+### Features
+
+- *(open-brain-jrq)* Green — weekly briefing digest with all 6 AK
+
+### Miscellaneous
+
+- Bump version to 2026.04.6
+- *(open-brain-jrq)* Remove unused field import
+
+### Testing
+
+- *(open-brain-jrq)* Red — weekly briefing all 6 acceptance criteria
+
+## [2026.04.6] - 2026-04-03
+
 ### Miscellaneous
 
 - Bump version to 2026.04.5
+- Update changelog
 
 ## [2026.04.5] - 2026-04-03
 
