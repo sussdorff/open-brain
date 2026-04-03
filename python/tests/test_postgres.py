@@ -673,3 +673,262 @@ class TestSearchMetadataFilter:
         fetch_sql = fetch_call[0][0]
         # Two metadata conditions — metadata->> appears twice
         assert fetch_sql.count("metadata->>") == 2
+
+
+import hashlib as _hashlib
+
+HASH_A = _hashlib.sha256("Python prefers explicit over implicit".encode()).hexdigest()
+HASH_B = _hashlib.sha256("Python prefers simple over complex".encode()).hexdigest()
+
+
+class TestContentHashDedup:
+    """Content-hash dedup tests for save_memory."""
+
+    @pytest.fixture
+    def dl(self):
+        return PostgresDataLayer()
+
+    @pytest.mark.asyncio
+    async def test_dedup_identical_returns_duplicate_of(self, dl):
+        """Saving identical text returns duplicate_of with original ID; no INSERT called."""
+        dup_row = MagicMock()
+        dup_row.__getitem__ = lambda self, key: 42 if key == "id" else None
+
+        conn = AsyncMock()
+        # No project → _resolve_index_id skipped; next call is dedup check → dup found
+        conn.fetchrow.side_effect = [
+            dup_row,  # dedup check: existing row found
+        ]
+        pool = _make_pool(conn)
+
+        with (
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
+        ):
+            mock_asyncio.create_task = MagicMock()
+            result = await dl.save_memory(
+                SaveMemoryParams(text="Python prefers explicit over implicit", type="observation")
+            )
+
+        assert result.id == 42
+        assert result.duplicate_of == 42
+        assert "Duplicate" in result.message
+        # INSERT should NOT have been called
+        assert conn.fetchrow.call_count == 1  # only dedup check
+
+    @pytest.mark.asyncio
+    async def test_dedup_different_text_inserts(self, dl):
+        """When dedup check returns None, INSERT proceeds normally."""
+        inserted_row = MagicMock()
+        inserted_row.__getitem__ = lambda self, key: 99 if key == "id" else None
+
+        conn = AsyncMock()
+        conn.fetchrow.side_effect = [
+            None,          # dedup check: no dup
+            inserted_row,  # INSERT INTO memories ... RETURNING id
+        ]
+        pool = _make_pool(conn)
+
+        with (
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
+        ):
+            mock_asyncio.create_task = MagicMock()
+            result = await dl.save_memory(
+                SaveMemoryParams(text="Python prefers simple over complex", type="observation")
+            )
+
+        assert result.id == 99
+        assert result.duplicate_of is None
+        assert result.message == "Memory saved"
+
+    @pytest.mark.asyncio
+    async def test_dedup_hash_stored_in_metadata(self, dl):
+        """INSERT receives metadata JSON containing 'content_hash' key with correct SHA-256."""
+        inserted_row = MagicMock()
+        inserted_row.__getitem__ = lambda self, key: 7 if key == "id" else None
+
+        conn = AsyncMock()
+        conn.fetchrow.side_effect = [
+            None,          # dedup check: no dup
+            inserted_row,  # INSERT
+        ]
+        pool = _make_pool(conn)
+
+        with (
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
+        ):
+            mock_asyncio.create_task = MagicMock()
+            await dl.save_memory(
+                SaveMemoryParams(text="Python prefers explicit over implicit", type="observation")
+            )
+
+        import json
+        insert_call = conn.fetchrow.call_args_list[-1]
+        insert_args = insert_call[0]
+        metadata_arg = next(
+            (a for a in insert_args if isinstance(a, str) and "content_hash" in a), None
+        )
+        assert metadata_arg is not None
+        parsed = json.loads(metadata_arg)
+        assert parsed["content_hash"] == HASH_A
+
+    @pytest.mark.asyncio
+    async def test_dedup_metadata_merged_not_replaced(self, dl):
+        """Save with metadata={'source': 'test'} — INSERT gets metadata with both keys."""
+        inserted_row = MagicMock()
+        inserted_row.__getitem__ = lambda self, key: 8 if key == "id" else None
+
+        conn = AsyncMock()
+        conn.fetchrow.side_effect = [
+            None,          # dedup check: no dup
+            inserted_row,  # INSERT
+        ]
+        pool = _make_pool(conn)
+
+        with (
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
+        ):
+            mock_asyncio.create_task = MagicMock()
+            await dl.save_memory(
+                SaveMemoryParams(
+                    text="Python prefers explicit over implicit",
+                    type="observation",
+                    metadata={"source": "test"},
+                )
+            )
+
+        import json
+        insert_call = conn.fetchrow.call_args_list[-1]
+        insert_args = insert_call[0]
+        metadata_arg = next(
+            (a for a in insert_args if isinstance(a, str) and "content_hash" in a), None
+        )
+        assert metadata_arg is not None
+        parsed = json.loads(metadata_arg)
+        assert parsed["source"] == "test"
+        assert parsed["content_hash"] == HASH_A
+
+    @pytest.mark.asyncio
+    async def test_dedup_metadata_none_becomes_hash_only(self, dl):
+        """Save with metadata=None — INSERT gets metadata={'content_hash': '<sha>'}."""
+        inserted_row = MagicMock()
+        inserted_row.__getitem__ = lambda self, key: 9 if key == "id" else None
+
+        conn = AsyncMock()
+        conn.fetchrow.side_effect = [
+            None,          # dedup check: no dup
+            inserted_row,  # INSERT
+        ]
+        pool = _make_pool(conn)
+
+        with (
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
+        ):
+            mock_asyncio.create_task = MagicMock()
+            await dl.save_memory(
+                SaveMemoryParams(text="Python prefers explicit over implicit", type="observation")
+            )
+
+        import json
+        insert_call = conn.fetchrow.call_args_list[-1]
+        insert_args = insert_call[0]
+        metadata_arg = next(
+            (a for a in insert_args if isinstance(a, str) and "content_hash" in a), None
+        )
+        assert metadata_arg is not None
+        parsed = json.loads(metadata_arg)
+        assert list(parsed.keys()) == ["content_hash"]
+        assert parsed["content_hash"] == HASH_A
+
+    @pytest.mark.asyncio
+    async def test_dedup_session_summary_upsert_bypasses_dedup(self, dl):
+        """session_summary + existing session_ref returns upsert result; dedup never queried."""
+        existing_row = MagicMock()
+        existing_row.__getitem__ = lambda self, key: {"id": 55, "content": "Original"}[key]
+
+        conn = AsyncMock()
+        # No project → _resolve_index_id skipped; then session_summary upsert check
+        conn.fetchrow.side_effect = [
+            existing_row,  # upsert check: existing row found → upsert, early return
+        ]
+        pool = _make_pool(conn)
+
+        with (
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
+        ):
+            mock_asyncio.create_task = MagicMock()
+            result = await dl.save_memory(
+                SaveMemoryParams(
+                    text="New content",
+                    type="session_summary",
+                    session_ref="open-brain-42",
+                )
+            )
+
+        assert result.id == 55
+        assert result.message == "Memory updated (upsert)"
+        assert result.duplicate_of is None
+        # Only 1 fetchrow call: the session_summary check (dedup never reached)
+        assert conn.fetchrow.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_dedup_scoped_to_index_id(self, dl):
+        """Same content under different index_ids both insert (dedup uses index_id scoping)."""
+        inserted_row_1 = MagicMock()
+        inserted_row_1.__getitem__ = lambda self, key: 10 if key == "id" else None
+        inserted_row_2 = MagicMock()
+        inserted_row_2.__getitem__ = lambda self, key: 11 if key == "id" else None
+
+        # First save: project "proj-a" → _resolve_index_id → returns index 1
+        conn1 = AsyncMock()
+        conn1.fetchrow.side_effect = [
+            {"id": 1},     # _resolve_index_id: existing index found
+            None,          # dedup check: no dup for index_id=1
+            inserted_row_1,  # INSERT
+        ]
+        pool1 = _make_pool(conn1)
+
+        with (
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool1),
+            patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
+        ):
+            mock_asyncio.create_task = MagicMock()
+            result1 = await dl.save_memory(
+                SaveMemoryParams(
+                    text="Python prefers explicit over implicit",
+                    type="observation",
+                    project="proj-a",
+                )
+            )
+
+        # Second save: project "proj-b" → _resolve_index_id → returns index 2
+        conn2 = AsyncMock()
+        conn2.fetchrow.side_effect = [
+            {"id": 2},     # _resolve_index_id: different index
+            None,          # dedup check: no dup for index_id=2
+            inserted_row_2,  # INSERT
+        ]
+        pool2 = _make_pool(conn2)
+
+        with (
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool2),
+            patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
+        ):
+            mock_asyncio.create_task = MagicMock()
+            result2 = await dl.save_memory(
+                SaveMemoryParams(
+                    text="Python prefers explicit over implicit",
+                    type="observation",
+                    project="proj-b",
+                )
+            )
+
+        assert result1.id == 10
+        assert result1.duplicate_of is None
+        assert result2.id == 11
+        assert result2.duplicate_of is None
