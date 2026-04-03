@@ -63,6 +63,7 @@ class EvolutionSuggestion:
     briefing_type: str
     reason: str
     response_rate: float
+    id: int | None = None  # persisted memory ID, set after save_memory
 
 
 # ─── Core functions ────────────────────────────────────────────────────────────
@@ -99,7 +100,7 @@ async def analyze_engagement(
     for mem in briefings:
         btype = mem.metadata.get("briefing_type", "unknown")
         counts[btype] = counts.get(btype, 0) + 1
-        if mem.metadata.get("user_responded") is True:
+        if str(mem.metadata.get("user_responded", "")).lower() == "true":
             responded[btype] = responded.get(btype, 0) + 1
 
     by_type: list[BriefingEngagement] = []
@@ -145,7 +146,7 @@ async def generate_suggestion(
 
     Strategy:
     - If any type has < 30% response rate → propose removal of the worst offender
-    - If all types have >= 50% response rate → propose expansion of the top type
+    - If all types have >= 30% response rate → propose expansion of the top type
 
     Persists the suggestion as a type='evolution' memory when a suggestion is generated.
     """
@@ -222,7 +223,7 @@ async def generate_suggestion(
             response_rate=highest.response_rate,
         )
 
-    await dl.save_memory(SaveMemoryParams(
+    save_result = await dl.save_memory(SaveMemoryParams(
         text=suggestion.reason,
         type="evolution",
         project=project,
@@ -234,6 +235,7 @@ async def generate_suggestion(
             "response_rate": str(suggestion.response_rate),
         },
     ))
+    suggestion.id = save_result.id
 
     return suggestion
 

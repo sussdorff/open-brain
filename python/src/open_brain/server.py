@@ -1165,6 +1165,7 @@ async def generate_evolution_suggestion(
             return json.dumps({"suggestion": None})
         return json.dumps({
             "suggestion": {
+                "id": suggestion.id,
                 "action": suggestion.action,
                 "briefing_type": suggestion.briefing_type,
                 "reason": suggestion.reason,

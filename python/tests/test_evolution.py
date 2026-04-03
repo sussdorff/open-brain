@@ -175,7 +175,7 @@ async def test_evolution_removal_proposal():
 
 @pytest.mark.asyncio
 async def test_evolution_expansion_proposal():
-    """AK3: All types >= 50% → expand top type."""
+    """AK3: All types >= 30% → expand top type."""
     from open_brain.evolution import EngagementReport, EvolutionSuggestion, generate_suggestion
     from open_brain.evolution import BriefingEngagement
 
