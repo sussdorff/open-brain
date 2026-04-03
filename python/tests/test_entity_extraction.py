@@ -114,8 +114,11 @@ class TestPreProvidedEntitiesNotOverwritten:
         existing_entities = {"people": ["Alice"], "orgs": ["Wonderland Inc"], "tech": [], "locations": [], "dates": []}
         pre_set_metadata = {"entities": existing_entities}
 
+        # classify_and_extract returns existing_metadata unchanged when capture_template is set
+        # or when called with pre-structured metadata — here it should also not update
         with patch("open_brain.server.get_dl", return_value=mock_dl), \
-             patch("open_brain.server.llm_complete") as mock_llm:
+             patch("open_brain.server.llm_complete") as mock_llm, \
+             patch("open_brain.server.classify_and_extract", return_value=pre_set_metadata):
             await save_memory(
                 text="Some text with Sarah from Acme Corp.",
                 metadata=pre_set_metadata,
@@ -147,7 +150,8 @@ class TestEmptyTextProducesEmptyDict:
         })
 
         with patch("open_brain.server.get_dl", return_value=mock_dl), \
-             patch("open_brain.server.llm_complete", return_value=llm_response):
+             patch("open_brain.server.llm_complete", return_value=llm_response), \
+             patch("open_brain.server.classify_and_extract", return_value={}):
             # Should not raise any error
             result = await save_memory(text="")
 
@@ -172,7 +176,8 @@ class TestEmptyTextProducesEmptyDict:
         })
 
         with patch("open_brain.server.get_dl", return_value=mock_dl), \
-             patch("open_brain.server.llm_complete", return_value=llm_response):
+             patch("open_brain.server.llm_complete", return_value=llm_response), \
+             patch("open_brain.server.classify_and_extract", return_value={}):
             await save_memory(text="Nothing specific here.")
 
         mock_dl.update_memory.assert_not_called()
@@ -191,7 +196,8 @@ class TestLlmFailureGracefulDegradation:
             raise RuntimeError("LLM API error")
 
         with patch("open_brain.server.get_dl", return_value=mock_dl), \
-             patch("open_brain.server.llm_complete", side_effect=failing_llm):
+             patch("open_brain.server.llm_complete", side_effect=failing_llm), \
+             patch("open_brain.server.classify_and_extract", return_value={}):
             result = await save_memory(text="Sarah from Acme Corp visited Berlin.")
 
         # Memory should still be saved despite LLM failure

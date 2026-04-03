@@ -128,7 +128,7 @@ search(query)          →  compact index with IDs (~50-100 tokens/result)
 
 | Tool | Description |
 |---|---|
-| `save_memory` | Store an observation. `text` + `project` required. Auto-embeds async. |
+| `save_memory` | Store an observation. `text` + `project` required. Auto-embeds async. **Capture Router** applies domain templates and extracts structured fields concurrently. |
 | `update_memory` | Update fields on an existing memory. Re-embeds if content changes. |
 | `refine_memories` | Automatic consolidation: dedup, merge, priority adjustment. |
 | `triage_memories` | Human-in-the-loop classification into lifecycle actions. |
@@ -139,6 +139,42 @@ search(query)          →  compact index with IDs (~50-100 tokens/result)
 `discovery`, `change`, `feature`, `decision`, `bugfix`, `refactor`, `session_summary`, `learning`
 
 New types are allowed when none fit. Check `stats()` to see existing vocabulary.
+
+## Structured Memory: Capture Router
+
+**Capture Router** automatically classifies and structures incoming memories into domain-specific templates. When you call `save_memory`, an LLM concurrently:
+
+1. Classifies the text (decision, meeting, person context, etc.)
+2. Extracts structured fields (attendees, action items, owner, rationale, etc.)
+3. Merges fields into memory metadata
+
+No changes to your code — it works transparently:
+
+```python
+# Caller: just save raw text
+await save_memory(
+    text="Decided to use async for better scalability",
+    type="decision"
+)
+
+# Result in database:
+# metadata = {
+#   "capture_template": "decision",
+#   "what": "Use async",
+#   "context": "Scalability requirements",
+#   "owner": "...",
+#   "alternatives": ["...", "..."],
+#   "rationale": "Better I/O throughput"
+# }
+```
+
+This enables:
+- **Automatic structure** without caller effort
+- **Downstream processing** — triage, refine, and materialize can rely on structured data
+- **Better retrieval** — action items, decisions, and learnings are queryable
+- **Agent workflows** — One agent captures; another retrieves and acts on structured fields
+
+See [docs/features/capture-router.md](docs/features/capture-router.md) for template reference and examples.
 
 ## Multi-User
 

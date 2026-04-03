@@ -31,6 +31,7 @@ from open_brain.data_layer.interface import (
     TriageParams,
     UpdateMemoryParams,
 )
+from open_brain.capture_router import classify_and_extract
 from open_brain.data_layer.llm import LlmMessage, llm_complete
 from open_brain.data_layer.postgres import PostgresDataLayer, close_pool
 
@@ -258,7 +259,10 @@ async def save_memory(
     dl = get_dl()
     user_id = _current_user_id.get()
 
-    # Skip entity extraction if entities already provided in metadata
+    # Run capture routing and entity extraction concurrently with save_memory.
+    # classify_and_extract handles bypass conditions internally (returns existing_metadata
+    # unchanged when capture_template already set or type=session_summary).
+    # Entity extraction is skipped when "entities" key already present in metadata.
     has_entities = isinstance(metadata, dict) and "entities" in metadata
 
     save_params = SaveMemoryParams(
@@ -272,18 +276,39 @@ async def save_memory(
         metadata=metadata,
         user_id=user_id,
     )
-    if has_entities:
-        result = await dl.save_memory(save_params)
+
+    tasks: list = [
+        classify_and_extract(text, existing_metadata=metadata, memory_type=type),
+        dl.save_memory(save_params),
+    ]
+    if not has_entities:
+        tasks.insert(0, _extract_entities(text))
+        entities_result, classification, result = await asyncio.gather(*tasks)
     else:
-        # Run entity extraction and save_memory in parallel
-        entities, result = await asyncio.gather(
-            _extract_entities(text),
-            dl.save_memory(save_params),
-        )
-        if entities:
+        classification, result = await asyncio.gather(*tasks)
+        entities_result = {}
+
+    # Apply classification metadata update (guard: skip if bypass returned metadata unchanged)
+    try:
+        if classification != (metadata or {}):
+            merged_metadata = {**(metadata or {}), **classification}
             await dl.update_memory(
-                UpdateMemoryParams(id=result.id, metadata={"entities": entities})
+                UpdateMemoryParams(
+                    id=result.id,
+                    metadata=merged_metadata,
+                )
             )
+    except Exception:
+        logger.exception("save_memory: capture_router metadata update failed, memory saved without capture_template")
+
+    # Apply entity extraction results
+    if entities_result:
+        try:
+            await dl.update_memory(
+                UpdateMemoryParams(id=result.id, metadata={"entities": entities_result})
+            )
+        except Exception:
+            logger.warning("save_memory: entity extraction metadata update failed", exc_info=True)
 
     return json.dumps({"id": result.id, "message": result.message})
 

@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(open-brain-qt9)* Address review findings iteration 1
+- *(open-brain-qt9)* Address review findings iteration 2 — explicit None check + remove duplicate bypass logic
+- *(open-brain-qt9)* Address review findings iteration 3 — bypass guard, text truncation, return type, realistic test mocks, new edge case tests
 - *(open-brain-90p)* Address review findings iteration 1
 - *(open-brain-90p)* Address review findings iteration 2
 - *(open-brain-90p)* Address review panel findings iteration 1
@@ -12,10 +15,12 @@ All notable changes to this project will be documented in this file.
 
 ### Documentation
 
+- Update feature documentation for open-brain-qt9 capture router
 - Update feature documentation for open-brain-90p entity extraction
 
 ### Features
 
+- *(open-brain-qt9)* Green — capture router with LLM classification + concurrent save integration
 - *(open-brain-90p)* Green — entity extraction on save_memory via Haiku
 
 ### Miscellaneous
@@ -24,6 +29,7 @@ All notable changes to this project will be documented in this file.
 
 ### Testing
 
+- *(open-brain-qt9)* Red — capture router classification + server integration tests
 - *(open-brain-90p)* Red — entity extraction tests for all 6 acceptance criteria
 
 ## [2026.04.1] - 2026-04-03
