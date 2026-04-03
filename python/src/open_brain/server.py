@@ -310,7 +310,10 @@ async def save_memory(
         except Exception:
             logger.warning("save_memory: entity extraction metadata update failed", exc_info=True)
 
-    return json.dumps({"id": result.id, "message": result.message})
+    payload: dict = {"id": result.id, "message": result.message}
+    if result.duplicate_of is not None:
+        payload["duplicate_of"] = result.duplicate_of
+    return json.dumps(payload)
 
 
 @mcp.tool(

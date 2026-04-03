@@ -3,8 +3,17 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Miscellaneous
+
+- Bump version to 2026.04.3
+
+## [2026.04.2] - 2026-04-03
+
 ### Bug Fixes
 
+- *(open-brain-dg9)* Address review findings iteration 1
+- *(open-brain-dg9)* Address cmux review findings — remove redundant guard, add cross-ref comments, document deferred integ tests
+- *(open-brain-dg9)* Remove unused imports (logging, timedelta, logger)
 - *(open-brain-qt9)* Address review findings iteration 1
 - *(open-brain-qt9)* Address review findings iteration 2 — explicit None check + remove duplicate bypass logic
 - *(open-brain-qt9)* Address review findings iteration 3 — bypass guard, text truncation, return type, realistic test mocks, new edge case tests
@@ -20,15 +29,20 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- *(open-brain-dg9)* Green — learnings state helper and periodic dedup tests
 - *(open-brain-qt9)* Green — capture router with LLM classification + concurrent save integration
 - *(open-brain-90p)* Green — entity extraction on save_memory via Haiku
 
 ### Miscellaneous
 
 - Bump version to 2026.04.1
+- Update changelog
+- Update changelog
+- Bump version to 2026.04.2
 
 ### Testing
 
+- *(open-brain-dg9)* Red — periodic learnings state and dedup tests
 - *(open-brain-qt9)* Red — capture router classification + server integration tests
 - *(open-brain-90p)* Red — entity extraction tests for all 6 acceptance criteria
 
