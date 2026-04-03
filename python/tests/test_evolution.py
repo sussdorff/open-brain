@@ -337,6 +337,7 @@ async def test_evolution_approval_with_project():
 
 
 @pytest.mark.asyncio
+# Integration MoC: verifies the exact DataLayer query contract for evolution history retrieval
 async def test_evolution_search():
     """AK6: Evolution history queryable — verify exact SearchParams passed to data layer.
 
@@ -543,6 +544,33 @@ async def test_evolution_moderate_engagement_generates_expand():
 
 
 # ─── Advisory: scenario test ─────────────────────────────────────────────────
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_evolution_search_integ():
+    """AK6 Integration: verifies evolution history queryable via real DataLayer.
+
+    Requires DATABASE_URL env var pointing to a real Postgres instance.
+    Skipped automatically when running with '-m not integration'.
+    """
+    import os
+    import asyncpg
+    from open_brain.data_layer.postgres import PostgresDataLayer
+
+    database_url = os.environ.get("DATABASE_URL", "")
+    if not database_url or database_url.startswith("postgresql://test:test@"):
+        pytest.skip("Requires real DATABASE_URL (not test placeholder)")
+
+    pool = await asyncpg.create_pool(database_url)
+    try:
+        dl = PostgresDataLayer(pool=pool)
+        from open_brain.evolution import query_evolution_history
+        history = await query_evolution_history(dl, limit=5)
+        # Only assert the return type — history may be empty in a fresh DB
+        assert isinstance(history, list)
+    finally:
+        await pool.close()
 
 
 @pytest.mark.asyncio

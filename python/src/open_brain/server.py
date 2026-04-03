@@ -1176,16 +1176,17 @@ async def generate_evolution_suggestion(
         raise
 
 
-@mcp.tool(description="Log approval/rejection of an evolution suggestion. Approved changes saved as type=evolution.")
+@mcp.tool(description="Log approval/rejection of an evolution suggestion. Approved changes saved as type=evolution. briefing_type, if provided, enables 30-day rejection suppression so the same briefing type is not re-proposed within 30 days.")
 async def log_evolution_approval(
     suggestion_id: int,
     approved: bool,
     project: str | None = None,
+    briefing_type: str | None = None,
 ) -> str:
     """Log approval or rejection of an evolution suggestion."""
     dl = get_dl()
     try:
-        await _log_evolution_approval(dl, suggestion_id=suggestion_id, approved=approved, project=project)
+        await _log_evolution_approval(dl, suggestion_id=suggestion_id, approved=approved, project=project, briefing_type=briefing_type)
         action_label = "approved" if approved else "rejected"
         return json.dumps({"status": "logged", "suggestion_id": suggestion_id, "action": action_label})
     except Exception:

@@ -146,6 +146,8 @@ async def generate_suggestion(
     Strategy:
     - If any type has < 30% response rate → propose removal of the worst offender
     - If all types have >= 50% response rate → propose expansion of the top type
+
+    Persists the suggestion as a type='evolution' memory when a suggestion is generated.
     """
     if not report.has_sufficient_data:
         return None
@@ -220,7 +222,6 @@ async def generate_suggestion(
             response_rate=highest.response_rate,
         )
 
-    # NOTE: saves suggestion to DB as side-effect
     await dl.save_memory(SaveMemoryParams(
         text=suggestion.reason,
         type="evolution",
