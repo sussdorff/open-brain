@@ -241,8 +241,9 @@ class TestPostgresDataLayerSaveMemory:
     async def test_save_memory_returns_id_and_message(self, dl):
         mock_conn = AsyncMock()
         # When project=None, _resolve_index_id returns early (no fetchrow call)
-        # So the first fetchrow call goes to the INSERT RETURNING id
-        mock_conn.fetchrow.return_value = {"id": 99}
+        # Dedup check (1st fetchrow) returns None (no duplicate found),
+        # INSERT RETURNING id (2nd fetchrow) returns {"id": 99}
+        mock_conn.fetchrow.side_effect = [None, {"id": 99}]
         mock_pool = _make_mock_pool(mock_conn)
 
         with (
