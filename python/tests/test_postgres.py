@@ -1010,6 +1010,7 @@ class TestContentHashDedupIndex:
         return PostgresDataLayer()
 
     @pytest.mark.integration
+    @pytest.mark.asyncio
     async def test_dedup_latency_index_created(self, dl):
         """AK4: Dedup query is fast because of an expression index on metadata->>'content_hash'.
 
