@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 from datetime import datetime
 from typing import Any
@@ -523,8 +524,7 @@ class PostgresDataLayer:
                     return SaveMemoryResult(id=existing_id, message="Memory updated (upsert)")
 
             # ── Content hash dedup ──
-            import hashlib as _hashlib
-            content_hash = _hashlib.sha256(params.text.encode()).hexdigest()
+            content_hash = hashlib.sha256(params.text.encode()).hexdigest()
             dup_row = await conn.fetchrow(
                 """SELECT id FROM memories
                    WHERE metadata->>'content_hash' = $1

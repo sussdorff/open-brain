@@ -943,3 +943,84 @@ class TestContentHashDedup:
         assert result1.duplicate_of is None
         assert result2.id == 11
         assert result2.duplicate_of is None
+
+    @pytest.mark.asyncio
+    async def test_dedup_whitespace_is_significant(self, dl):
+        """Scenario v3: Trailing whitespace creates a different hash — no dedup."""
+        import hashlib
+        text_a = "Python prefers explicit over implicit"
+        text_b = "Python prefers explicit over implicit "  # trailing space
+        # These should have different hashes
+        assert hashlib.sha256(text_a.encode()).hexdigest() != hashlib.sha256(text_b.encode()).hexdigest()
+
+        inserted_row = MagicMock()
+        inserted_row.__getitem__ = lambda self, key: 21 if key == "id" else None
+
+        conn = AsyncMock()
+        conn.fetchrow.side_effect = [
+            None,         # dedup check: no duplicate found (different hash from text_a)
+            inserted_row, # INSERT INTO memories
+        ]
+        pool = _make_pool(conn)
+
+        with (
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
+        ):
+            mock_asyncio.create_task = MagicMock()
+            result = await dl.save_memory(
+                SaveMemoryParams(text=text_b)  # text with trailing space
+            )
+
+        assert result.duplicate_of is None
+        assert result.message == "Memory saved"
+
+    @pytest.mark.asyncio
+    async def test_dedup_aged_out_duplicate_inserts_new(self, dl):
+        """Scenario v7: When dedup query returns None (content older than 30 days), INSERT proceeds."""
+        inserted_row = MagicMock()
+        inserted_row.__getitem__ = lambda self, key: 22 if key == "id" else None
+
+        conn = AsyncMock()
+        conn.fetchrow.side_effect = [
+            None,         # dedup check returns None — simulates 30-day window expired
+            inserted_row, # INSERT INTO memories
+        ]
+        pool = _make_pool(conn)
+
+        with (
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
+        ):
+            mock_asyncio.create_task = MagicMock()
+            result = await dl.save_memory(
+                SaveMemoryParams(text="Python prefers explicit over implicit")
+            )
+
+        assert result.duplicate_of is None
+        assert result.id == 22
+        assert result.message == "Memory saved"
+
+
+class TestContentHashDedupIndex:
+    """Verify the migration SQL includes the content_hash index (AK4 MoC: integ)."""
+
+    @pytest.fixture
+    def dl(self):
+        return PostgresDataLayer()
+
+    @pytest.mark.integration
+    async def test_dedup_latency_index_created(self, dl):
+        """AK4: Dedup query is fast because of an expression index on metadata->>'content_hash'.
+
+        In unit tests (no real DB), this verifies the migration SQL string contains the
+        index creation statement. Full latency is tested in integration mode against a
+        real DB.
+        """
+        # Verify the get_pool source contains the index migration
+        import inspect
+        from open_brain.data_layer import postgres as pg_module
+        source = inspect.getsource(pg_module.get_pool)
+        assert "idx_memories_content_hash" in source, (
+            "get_pool must create idx_memories_content_hash index for dedup performance"
+        )
