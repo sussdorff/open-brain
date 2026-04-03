@@ -230,24 +230,17 @@ async def test_briefing_empty():
 @pytest.mark.asyncio
 async def test_cross_project_connections_use_index_id():
     """Cross-project grouping uses mem.index_id, not metadata['project']."""
+    import dataclasses
     from open_brain.digest import generate_weekly_briefing
 
-    # Two memories from index_id=1, one from index_id=2; no 'project' in metadata
+    # Two memories from index_id=10, one from index_id=20; no 'project' in metadata
+    base_a = _make_memory(mid=1, metadata={"entities": {"tech": ["Python"]}})
+    base_b = _make_memory(mid=2, metadata={})
     memories = [
-        _make_memory(mid=1, metadata={"entities": {"tech": ["Python"]}}),   # index_id=1 (mid=1)
-        _make_memory(mid=1, metadata={"entities": {"tech": ["Python"]}}),   # index_id=1 again
-        _make_memory(mid=2, metadata={}),                                    # index_id=2
+        dataclasses.replace(base_a, index_id=10),
+        dataclasses.replace(base_a, index_id=10),
+        dataclasses.replace(base_b, index_id=20),
     ]
-    # Override index_id to be distinct (mid is used as index_id in _make_memory)
-    memories[0] = memories[0].__class__(
-        **{**memories[0].__dict__, "index_id": 10}
-    )
-    memories[1] = memories[1].__class__(
-        **{**memories[1].__dict__, "index_id": 10}
-    )
-    memories[2] = memories[2].__class__(
-        **{**memories[2].__dict__, "index_id": 20}
-    )
 
     dl = AsyncMock()
     dl.search.side_effect = [
@@ -263,9 +256,6 @@ async def test_cross_project_connections_use_index_id():
     projects = {c["project"]: c["memory_count"] for c in result.cross_project_connections}
     assert projects["10"] == 2
     assert projects["20"] == 1
-    assert result.open_loops == []
-    assert result.cross_project_connections == []
-    assert result.decay_warnings == []
 
 
 # ─── Validation ───────────────────────────────────────────────────────────────
@@ -408,22 +398,33 @@ async def test_briefing_single_type():
 
 @pytest.mark.asyncio
 async def test_briefing_cross_project():
-    """Scenario: Memories from different projects → cross_project_connections aggregated."""
+    """Scenario: Memories from different projects → cross_project_connections aggregated.
+
+    Grouping is by index_id (the project identifier on the Memory dataclass).
+    All alpha memories share index_id=1, all beta memories share index_id=2.
+    """
+    import dataclasses
     from open_brain.digest import generate_weekly_briefing
 
     project_a = [
-        _make_memory(
-            mid=i,
-            title=f"Alpha Memory {i}",
-            metadata={"project": "alpha", "entities": {"tech": ["Rust"]}},
+        dataclasses.replace(
+            _make_memory(
+                mid=i,
+                title=f"Alpha Memory {i}",
+                metadata={"entities": {"tech": ["Rust"]}},
+            ),
+            index_id=1,
         )
         for i in range(1, 5)
     ]
     project_b = [
-        _make_memory(
-            mid=10 + i,
-            title=f"Beta Memory {i}",
-            metadata={"project": "beta", "entities": {"tech": ["Go", "Python"]}},
+        dataclasses.replace(
+            _make_memory(
+                mid=10 + i,
+                title=f"Beta Memory {i}",
+                metadata={"entities": {"tech": ["Go", "Python"]}},
+            ),
+            index_id=2,
         )
         for i in range(1, 4)
     ]
@@ -439,8 +440,8 @@ async def test_briefing_cross_project():
     result = await generate_weekly_briefing(dl, weeks_back=1)
 
     projects = {c["project"]: c for c in result.cross_project_connections}
-    assert "alpha" in projects
-    assert "beta" in projects
-    assert projects["alpha"]["memory_count"] == 4
-    assert projects["beta"]["memory_count"] == 3
-    assert "Rust" in projects["alpha"]["common_entities"]
+    assert "1" in projects
+    assert "2" in projects
+    assert projects["1"]["memory_count"] == 4
+    assert projects["2"]["memory_count"] == 3
+    assert "Rust" in projects["1"]["common_entities"]

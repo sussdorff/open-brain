@@ -302,23 +302,26 @@ async def save_memory(
         entities_result = {}
 
     # Merge classification + entity extraction into a single update_memory call
-    post_save_metadata: dict[str, Any] = {}
+    # Skip entirely for duplicates — no LLM enrichment should be persisted for them.
+    if result.duplicate_of is None:
+        post_save_metadata: dict[str, Any] = {}
 
-    # Add classification metadata (guard: skip if bypass returned metadata unchanged)
-    if classification != (metadata or {}):
-        post_save_metadata = {**(metadata or {}), **classification}
+        # Add classification metadata (guard: skip if bypass returned metadata unchanged,
+        # and only send keys that differ from the original metadata to avoid redundant writes)
+        if classification != (metadata or {}):
+            post_save_metadata = {k: v for k, v in classification.items() if (metadata or {}).get(k) != v}
 
-    # Add entity extraction results
-    if entities_result:
-        post_save_metadata["entities"] = entities_result
+        # Add entity extraction results
+        if entities_result:
+            post_save_metadata["entities"] = entities_result
 
-    if post_save_metadata:
-        try:
-            await dl.update_memory(
-                UpdateMemoryParams(id=result.id, metadata=post_save_metadata)
-            )
-        except Exception:
-            logger.exception("save_memory: post-save metadata update failed (classification/entities)")
+        if post_save_metadata:
+            try:
+                await dl.update_memory(
+                    UpdateMemoryParams(id=result.id, metadata=post_save_metadata)
+                )
+            except Exception:
+                logger.exception("save_memory: post-save metadata update failed (classification/entities)")
 
     payload: dict = {"id": result.id, "message": result.message}
     if result.duplicate_of is not None:
