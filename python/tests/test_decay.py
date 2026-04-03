@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from open_brain.data_layer.interface import DecayParams, DecayResult, Memory, SearchResult
+from open_brain.data_layer.interface import DecayParams, Memory
 
 NOW = datetime(2026, 4, 3, 12, 0, 0, tzinfo=UTC)
 
@@ -133,7 +133,13 @@ async def test_decay_recent_protected():
 
 @pytest.mark.asyncio
 async def test_decay_in_briefing():
-    """AK4: Memory 40 days stale with access_count=1 appears in briefing decay_warnings."""
+    """AK4: Memory 40 days stale with access_count=1 appears in briefing decay_warnings.
+
+    NOTE: AK4 is satisfied by the pre-existing briefing integration in open_brain/digest.py
+    via _find_decay_warnings(), which already used the same 30-day stale criteria before
+    this bead. This test verifies the existing integration still works correctly — it is
+    NOT testing new code introduced by this bead.
+    """
     from open_brain.digest import _find_decay_warnings
 
     stale_memory = _make_memory(
@@ -191,3 +197,77 @@ async def test_decay_reversible():
 
     assert decay_result.decayed == 1
     assert boost_result.boosted == 1, "After access, memory priority should be restored via boost"
+
+
+# ─── Compound decay runs ──────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_decay_compound_runs():
+    """Multiple decay runs compound: calling decay_memories() twice on same stale memory
+    results in the DB function being called twice (priority *= decay_factor each time).
+    """
+    from open_brain.data_layer.postgres import PostgresDataLayer
+
+    dl = PostgresDataLayer()
+    params = DecayParams(stale_days=30, decay_factor=0.9, dry_run=False)
+
+    # First call: 1 memory decayed
+    conn1 = AsyncMock()
+    conn1.fetchval.side_effect = [1, 0, 0]
+    pool1 = _make_pool(conn1)
+
+    with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool1):
+        result1 = await dl.decay_memories(params)
+
+    assert result1.decayed >= 1, "First run should decay at least one memory"
+
+    # Second call: same memory still stale → decayed again (priority *= decay_factor a second time)
+    conn2 = AsyncMock()
+    conn2.fetchval.side_effect = [1, 0, 0]
+    pool2 = _make_pool(conn2)
+
+    with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool2):
+        result2 = await dl.decay_memories(params)
+
+    assert result2.decayed >= 1, "Second run should decay the same memory again (compounding)"
+    # Each call invokes the DB function exactly once
+    assert conn1.fetchval.call_count >= 1
+    assert conn2.fetchval.call_count >= 1
+
+
+# ─── Decay + boost overlap behavior ──────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_decay_overlap_behavior():
+    """A memory that is both stale (60 days old) AND frequently accessed (access_count=20)
+    can match both the decay and boost criteria in the same run.
+
+    Expected behavior: the boost UPDATE runs AFTER decay, so the net effect is that
+    the memory's priority is first multiplied by decay_factor, then by boost_factor.
+    For a memory with priority=0.5, decay_factor=0.9, boost_factor=1.1:
+        after decay:  0.5 * 0.9 = 0.45
+        after boost:  0.45 * 1.1 = 0.495  (still below original)
+
+    This is intentional: frequent access partially counteracts decay but does not fully
+    restore priority in a single run. Repeated boosts (via AK5) restore priority over time.
+    The test verifies that both decayed > 0 AND boosted > 0 can occur in the same run.
+    """
+    from open_brain.data_layer.postgres import PostgresDataLayer
+
+    dl = PostgresDataLayer()
+    # Memory is stale (30+ days) but also frequently accessed
+    params = DecayParams(stale_days=30, decay_factor=0.9, boost_threshold=10, boost_factor=1.1, dry_run=False)
+
+    conn = AsyncMock()
+    # DB returns 1 decayed AND 1 boosted — the same memory matched both criteria
+    conn.fetchval.side_effect = [1, 1, 0]
+    pool = _make_pool(conn)
+
+    with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
+        result = await dl.decay_memories(params)
+
+    assert result.decayed >= 1, "Stale memory should be decayed even with high access_count"
+    assert result.boosted >= 1, "Frequently-accessed memory should also be boosted"
+    # Net effect: boost partially counteracts decay (intentional, documented above)

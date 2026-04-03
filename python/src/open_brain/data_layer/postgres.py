@@ -690,6 +690,7 @@ class PostgresDataLayer:
         async with pool.acquire() as conn:
             if params.dry_run:
                 # Count only — no writes
+                # Note: this mirrors the WHERE clause in decay_unused_priorities() DB function — keep in sync
                 decayed = await conn.fetchval(
                     """SELECT COUNT(*) FROM memories
                        WHERE (last_accessed_at IS NULL OR last_accessed_at < NOW() - ($1 || ' days')::interval)
@@ -708,12 +709,17 @@ class PostgresDataLayer:
                 )
             else:
                 # Apply decay: use existing DB function decay_unused_priorities(stale_days, decay_factor)
+                # Note: this mirrors the WHERE clause in decay_unused_priorities() DB function — keep in sync
                 decayed = await conn.fetchval(
                     "SELECT decay_unused_priorities($1, $2)",
                     params.stale_days,
                     params.decay_factor,
                 )
-                # Apply boost: frequently accessed memories get priority boosted (capped at 1.0)
+                # Boost applies to frequently-accessed memories regardless of age — recent memories benefit
+                # from boost too. A memory that is both stale and frequently accessed will be decayed first
+                # and then boosted (net effect: boost partially counteracts decay, intentional behavior).
+                # AK3 (protection from decay) is separate: the DB function excludes recently-created memories
+                # from decay, but the boost here intentionally applies to all frequently-accessed memories.
                 boosted = await conn.fetchval(
                     """WITH updated AS (
                            UPDATE memories
