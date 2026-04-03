@@ -30,6 +30,7 @@ from open_brain.data_layer.interface import (
     TimelineParams,
     TriageParams,
     UpdateMemoryParams,
+    validate_domain_metadata,
 )
 from open_brain.capture_router import classify_and_extract
 from open_brain.data_layer.llm import LlmMessage, llm_complete
@@ -240,7 +241,15 @@ async def get_observations(ids: list[int]) -> str:
     "session_ref: optional stable identifier (e.g. bead ID or 'session-YYYY-MM-DD'). When type='session_summary' "
     "and session_ref is set, re-calling with the same session_ref updates the existing memory instead of inserting a duplicate. "
     "is_test: set to true to skip persistence (returns mock response, useful for integration tests). "
-    "Params: text (required), type, project, title, subtitle, narrative, session_ref, is_test"
+    "DOMAIN SCHEMAS — structured metadata by type: "
+    "event: {when (ISO datetime, required), who: [str], where: str, recurrence: str}. "
+    "person: {name: str, org: str, role: str, relationship: str, last_contact: ISO datetime}. "
+    "meeting: {attendees: [str], topic: str, key_points: [str], action_items: [str], date: ISO datetime}. "
+    "decision: {what: str, context: str, owner: str, alternatives: [str], rationale: str}. "
+    "household: {category: str, item: str, location: str, details: str, warranty_expiry: ISO datetime}. "
+    "ISO datetime format: 'YYYY-MM-DDTHH:MM:SS' (e.g. '2026-04-15T10:00:00'). "
+    "Invalid or missing required datetime fields produce a warning in the response but still save the memory. "
+    "Params: text (required), type, project, title, subtitle, narrative, session_ref, is_test, metadata"
 )
 async def save_memory(
     text: str,
@@ -313,6 +322,12 @@ async def save_memory(
     payload: dict = {"id": result.id, "message": result.message}
     if result.duplicate_of is not None:
         payload["duplicate_of"] = result.duplicate_of
+
+    # Domain metadata validation (warns but never blocks save)
+    domain_warnings = validate_domain_metadata(type, metadata)
+    if domain_warnings:
+        payload["warning"] = "; ".join(domain_warnings)
+
     return json.dumps(payload)
 
 
