@@ -1104,6 +1104,25 @@ If nothing worth remembering happened, return: {{"observations": [], "session_su
         logger.exception("Failed to process session capture")
 
 
+@mcp.tool(
+    description="Generate weekly briefing: memory counts, top entities, theme trends (emerging/declining), "
+    "open loops (unresolved action items), cross-project connections, and decay warnings (stale memories). "
+    "Params: weeks_back (default 1), project (optional filter)"
+)
+async def weekly_briefing(
+    weeks_back: int = 1,
+    project: str | None = None,
+) -> str:
+    """Generate a structured weekly briefing with cross-type time-bridged insights."""
+    from dataclasses import asdict
+
+    from open_brain.digest import generate_weekly_briefing
+
+    dl = get_dl()
+    result = await generate_weekly_briefing(dl, weeks_back=weeks_back, project=project)
+    return json.dumps(asdict(result), default=str)
+
+
 @app.delete("/api/memories")
 async def api_delete_memories(request: Request) -> JSONResponse:
     """Delete memories by IDs or by filter (project + type + before).
