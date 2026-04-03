@@ -2,13 +2,20 @@
 
 Manages the processing-state.json file that tracks when the last
 periodic learnings extraction ran, enabling 4h rate-limiting.
+
+NOTE: The rate-limit check logic (4h interval, last_learnings_run key) is
+intentionally duplicated in memory-heartbeat/SKILL.md (inline Python snippet)
+and here. Keep both in sync when changing the interval or key name.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import warnings
 from datetime import datetime, timezone, timedelta
+
+logger = logging.getLogger(__name__)
 from pathlib import Path
 
 
@@ -63,8 +70,8 @@ def is_extraction_due(state: dict, interval_hours: float = 4.0) -> bool:
         delta = datetime.now(timezone.utc) - last_run
         return delta.total_seconds() >= interval_hours * 3600
     except Exception:
-        if last_run_str:
-            warnings.warn(f"Malformed last_learnings_run timestamp: {last_run_str!r}", stacklevel=2)
+        # Reaching here means last_run_str was non-empty but unparseable
+        warnings.warn(f"Malformed last_learnings_run timestamp: {last_run_str!r}", stacklevel=2)
         return True
 
 

@@ -1,4 +1,17 @@
-"""Tests for periodic learnings state helper (AK2 + AK3)."""
+"""Tests for periodic learnings state helper (AK2 + AK3).
+
+Unit tests cover:
+  AK2 — dedup prevents duplicate learnings (content_hash matching via save_memory)
+  AK3 — processing-state.json updated with last_learnings_run timestamp
+
+Deferred integration tests (require running open-brain server + JSONL fixtures):
+  # TODO(integ): AK1 — verify un-closed session learnings appear in open-brain after
+  #              periodic extraction; needs live server + seed JSONL files (see bead notes)
+  # TODO(integ): AK4 — run periodic extraction then session-close on same JSONL; verify
+  #              no duplicate learning entries in DB (content_hash dedup)
+  # TODO(integ): AK5 — seed 3 project dirs, run scope=all-projects, verify per-project
+  #              learning counts; needs live server + multi-project JSONL fixtures
+"""
 
 from __future__ import annotations
 
