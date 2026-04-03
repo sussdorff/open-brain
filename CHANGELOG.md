@@ -3,6 +3,25 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Bug Fixes
+
+- *(open-brain-3qa)* Register JSONB codec + robust metadata parsing in _row_to_memory
+- *(open-brain-3qa)* Remove unused import json in test_metadata_from_json_string
+
+### Features
+
+- *(api)* /api/context since parameter für Session-Delta Filtering
+
+### Miscellaneous
+
+- *(changelog)* Update for v2026.03.26
+
+### Testing
+
+- *(open-brain-3qa)* Red — metadata_from_json_string fails for str input
+
+## [2026.03.26] - 2026-03-12
+
 ### Features
 
 - *(cli)* Add ob CLI wrapper for open-brain MCP tools

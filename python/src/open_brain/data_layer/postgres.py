@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
+import json as _json
 import logging
 from datetime import datetime
 from typing import Any
@@ -42,6 +42,16 @@ DEDUP_WINDOW_DAYS = 30  # How far back the content-hash dedup check looks
 _pool: asyncpg.Pool | None = None
 
 
+async def _init_conn(conn: asyncpg.Connection) -> None:
+    """Register JSONB codec so asyncpg returns dicts instead of raw JSON strings."""
+    await conn.set_type_codec(
+        'jsonb',
+        encoder=_json.dumps,
+        decoder=_json.loads,
+        schema='pg_catalog',
+    )
+
+
 def _parse_date(value: str | None) -> datetime | None:
     """Parse ISO date string to datetime. Accepts 'YYYY-MM-DD' or full ISO datetime."""
     if not value:
@@ -57,7 +67,9 @@ async def get_pool() -> asyncpg.Pool:
     global _pool
     if _pool is None:
         config = get_config()
-        _pool = await asyncpg.create_pool(config.DATABASE_URL, min_size=2, max_size=10)
+        _pool = await asyncpg.create_pool(
+            config.DATABASE_URL, min_size=2, max_size=10, init=_init_conn
+        )
         # Idempotent migrations
         async with _pool.acquire() as conn:
             await conn.execute(
@@ -134,6 +146,18 @@ async def close_pool() -> None:
 
 def _row_to_memory(row: asyncpg.Record) -> Memory:
     """Convert an asyncpg Record to a Memory dataclass."""
+    raw_metadata = row.get("metadata")
+    if isinstance(raw_metadata, dict):
+        metadata = raw_metadata
+    elif isinstance(raw_metadata, str):
+        try:
+            parsed = _json.loads(raw_metadata)
+            metadata = parsed if isinstance(parsed, dict) else {}
+        except (ValueError, TypeError):
+            metadata = {}
+    else:
+        metadata = {}
+
     return Memory(
         id=row["id"],
         index_id=row["index_id"],
@@ -143,7 +167,7 @@ def _row_to_memory(row: asyncpg.Record) -> Memory:
         subtitle=row.get("subtitle"),
         narrative=row.get("narrative"),
         content=row["content"],
-        metadata=row["metadata"] if isinstance(row.get("metadata"), dict) else {},
+        metadata=metadata,
         priority=float(row["priority"]),
         stability=row["stability"],
         access_count=row["access_count"],
@@ -547,7 +571,7 @@ class PostgresDataLayer:
             # ── Normal insert path ──
             base_metadata = dict(params.metadata) if params.metadata else {}
             base_metadata["content_hash"] = content_hash
-            metadata_json = json.dumps(base_metadata)
+            metadata_json = _json.dumps(base_metadata)
             row = await conn.fetchrow(
                 """INSERT INTO memories (index_id, type, title, subtitle, narrative, content, session_ref, metadata, user_id)
                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
