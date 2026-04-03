@@ -5,7 +5,14 @@ All notable changes to this project will be documented in this file.
 
 ### Miscellaneous
 
+- Bump version to 2026.04.9
+
+## [2026.04.9] - 2026-04-03
+
+### Miscellaneous
+
 - Bump version to 2026.04.8
+- Update changelog
 
 ## [2026.04.8] - 2026-04-03
 
