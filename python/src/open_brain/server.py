@@ -85,11 +85,12 @@ async def _extract_entities(text: str) -> dict:
         )
         parsed = _parse_llm_json(response)
         # Filter to expected keys only; strip non-string items from lists (prevents hallucinated keys/values)
-        entities = {
-            k: [item for item in v if isinstance(item, str)]
-            for k, v in parsed.items()
-            if k in _ENTITY_KEYS and isinstance(v, list) and any(isinstance(i, str) for i in v)
-        }
+        entities = {}
+        for k, v in parsed.items():
+            if k in _ENTITY_KEYS and isinstance(v, list):
+                filtered = [item for item in v if isinstance(item, str)]
+                if filtered:
+                    entities[k] = filtered
         return entities
     except Exception:
         logger.warning("Entity extraction failed — continuing without entities", exc_info=True)

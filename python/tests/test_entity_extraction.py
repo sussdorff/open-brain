@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from open_brain.data_layer.interface import SaveMemoryResult
+from open_brain.server import save_memory
 
 
 # ─── AK1: People and orgs extraction ─────────────────────────────────────────
@@ -30,7 +31,6 @@ class TestPeopleAndOrgsExtraction:
 
         with patch("open_brain.server.get_dl", return_value=mock_dl), \
              patch("open_brain.server.llm_complete", return_value=llm_response):
-            from open_brain.server import save_memory
             await save_memory(text="Sarah from Acme Corp visited us today.")
 
         update_call = mock_dl.update_memory.call_args
@@ -61,7 +61,6 @@ class TestTechExtraction:
 
         with patch("open_brain.server.get_dl", return_value=mock_dl), \
              patch("open_brain.server.llm_complete", return_value=llm_response):
-            from open_brain.server import save_memory
             await save_memory(text="We deployed our Python app using Docker and Kubernetes.")
 
         update_call = mock_dl.update_memory.call_args
@@ -93,7 +92,6 @@ class TestLocationExtraction:
 
         with patch("open_brain.server.get_dl", return_value=mock_dl), \
              patch("open_brain.server.llm_complete", return_value=llm_response):
-            from open_brain.server import save_memory
             await save_memory(text="The meeting is at the Berlin office.")
 
         update_call = mock_dl.update_memory.call_args
@@ -118,7 +116,6 @@ class TestPreProvidedEntitiesNotOverwritten:
 
         with patch("open_brain.server.get_dl", return_value=mock_dl), \
              patch("open_brain.server.llm_complete") as mock_llm:
-            from open_brain.server import save_memory
             await save_memory(
                 text="Some text with Sarah from Acme Corp.",
                 metadata=pre_set_metadata,
@@ -151,7 +148,6 @@ class TestEmptyTextProducesEmptyDict:
 
         with patch("open_brain.server.get_dl", return_value=mock_dl), \
              patch("open_brain.server.llm_complete", return_value=llm_response):
-            from open_brain.server import save_memory
             # Should not raise any error
             result = await save_memory(text="")
 
@@ -177,7 +173,6 @@ class TestEmptyTextProducesEmptyDict:
 
         with patch("open_brain.server.get_dl", return_value=mock_dl), \
              patch("open_brain.server.llm_complete", return_value=llm_response):
-            from open_brain.server import save_memory
             await save_memory(text="Nothing specific here.")
 
         mock_dl.update_memory.assert_not_called()
@@ -197,7 +192,6 @@ class TestLlmFailureGracefulDegradation:
 
         with patch("open_brain.server.get_dl", return_value=mock_dl), \
              patch("open_brain.server.llm_complete", side_effect=failing_llm):
-            from open_brain.server import save_memory
             result = await save_memory(text="Sarah from Acme Corp visited Berlin.")
 
         # Memory should still be saved despite LLM failure

@@ -25,7 +25,7 @@ class TestParallelExecution:
             await asyncio.sleep(delay)
             return SaveMemoryResult(id=7, message="saved")
 
-        async def slow_llm(messages, model=None, max_tokens=1024):
+        async def slow_llm(*args, **kwargs):
             await asyncio.sleep(delay)
             return json.dumps({"people": ["Alice"], "orgs": [], "tech": [], "locations": [], "dates": []})
 
