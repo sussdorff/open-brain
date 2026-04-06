@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 
 ### Documentation
 
+- Add url-based token auth feature documentation
+
+### Features
+
+- *(scripts)* Add Claude Code memory migration script
+
+### Miscellaneous
+
+- Bump version to 2026.04.16
+
+## [2026.04.16] - 2026-04-06
+
+### Documentation
+
 - Rewrite installation guide for pre-built image + URL token auth
 - *(deploy)* Update compose comment to reflect CI image workflow
 
@@ -13,6 +27,7 @@ All notable changes to this project will be documented in this file.
 - Bump version to 2026.04.15
 - *(deploy)* Switch from op run to plain .env file for secrets
 - *(deploy)* Pull pre-built image from GHCR instead of building on server
+- Update changelog
 
 ### Security
 
