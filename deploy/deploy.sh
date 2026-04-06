@@ -13,8 +13,11 @@ git pull --ff-only
 echo "Disabling old systemd unit (if present)..."
 systemctl disable --now open-brain 2>/dev/null || true
 
-echo "Building and starting Docker container..."
-docker compose -f docker-compose.service.yml up --build -d
+echo "Pulling latest image from GHCR..."
+docker compose -f docker-compose.service.yml pull
+
+echo "Starting Docker container..."
+docker compose -f docker-compose.service.yml up -d
 
 echo "Waiting for startup..."
 sleep 5
