@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Miscellaneous
+
+- Bump version to 2026.04.20
+
+### Refactoring
+
+- *(triage)* Rewrite triage_ccmem.py v2 with two-phase LLM classification
+
+## [2026.04.20] - 2026-04-06
+
 ### Bug Fixes
 
 - *(open-brain-0rd)* Address review findings iteration 1
@@ -17,6 +27,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous
 
 - Bump version to 2026.04.19
+- Update changelog
 
 ## [2026.04.19] - 2026-04-06
 
