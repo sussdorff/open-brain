@@ -412,17 +412,14 @@ async def stats() -> str:
     return json.dumps(result, default=str)
 
 
-@mcp.tool(description="Run diagnostic health check: DB latency, Voyage API status, memory stats, uptime")
-async def doctor() -> str:
-    """Return a structured diagnostic report for operational health monitoring.
+# ── Shared health-check helpers ───────────────────────────────────────────────
+
+async def _check_db_status() -> dict:
+    """Check DB connectivity and return status dict.
 
     Returns:
-        JSON string with db_latency_ms, db_status, voyage_api_status,
-        memory_count, last_ingestion_at, server_version, uptime_seconds.
+        Dict with keys: db_status, db_latency_ms, memory_count, last_ingestion_at.
     """
-    config = get_config()
-
-    # ── DB diagnostics ────────────────────────────────────────────────────────
     db_status = "unreachable"
     db_latency_ms: float | None = None
     memory_count = 0
@@ -439,19 +436,44 @@ async def doctor() -> str:
             if last_row and last_row["max"] is not None:
                 last_ingestion_at = last_row["max"].isoformat()
     except Exception:
-        logger.warning("Doctor: DB unreachable", exc_info=True)
+        logger.warning("Health check: DB unreachable", exc_info=True)
+    return {
+        "db_status": db_status,
+        "db_latency_ms": db_latency_ms,
+        "memory_count": memory_count,
+        "last_ingestion_at": last_ingestion_at,
+    }
 
-    # ── Voyage API diagnostics ────────────────────────────────────────────────
-    voyage_api_status = "unreachable"
+
+async def _check_voyage_api_status() -> str:
+    """Check Voyage API reachability.
+
+    Returns:
+        One of "ok", "degraded", "unreachable".
+    """
+    config = get_config()
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
             resp = await client.get(
                 "https://api.voyageai.com/v1/models",
                 headers={"Authorization": f"Bearer {config.VOYAGE_API_KEY}"},
             )
-        voyage_api_status = "ok" if resp.status_code == 200 else "degraded"
+        return "ok" if resp.status_code == 200 else "degraded"
     except Exception:
-        logger.debug("Doctor: Voyage API unreachable")
+        logger.debug("Health check: Voyage API unreachable")
+        return "unreachable"
+
+
+@mcp.tool(description="Run diagnostic health check: DB latency, Voyage API status, memory stats, uptime")
+async def doctor() -> str:
+    """Return a structured diagnostic report for operational health monitoring.
+
+    Returns:
+        JSON string with db_latency_ms, db_status, voyage_api_status,
+        memory_count, last_ingestion_at, server_version, uptime_seconds.
+    """
+    db_info = await _check_db_status()
+    voyage_api_status = await _check_voyage_api_status()
 
     # ── Server metadata ───────────────────────────────────────────────────────
     try:
@@ -463,11 +485,11 @@ async def doctor() -> str:
 
     return json.dumps(
         {
-            "db_latency_ms": db_latency_ms,
-            "db_status": db_status,
+            "db_latency_ms": db_info["db_latency_ms"],
+            "db_status": db_info["db_status"],
             "voyage_api_status": voyage_api_status,
-            "memory_count": memory_count,
-            "last_ingestion_at": last_ingestion_at,
+            "memory_count": db_info["memory_count"],
+            "last_ingestion_at": db_info["last_ingestion_at"],
             "server_version": server_version,
             "uptime_seconds": round(uptime_seconds, 3),
         }
@@ -884,31 +906,17 @@ async def health() -> JSONResponse:
 
     Returns HTTP 200 if DB is reachable, HTTP 503 if DB is down.
     Voyage API failure is non-critical (degraded, not unhealthy).
+    Short-circuits Voyage API check when DB is down to avoid unnecessary delay.
     """
-    config = get_config()
+    db_info = await _check_db_status()
+    db_status = db_info["db_status"]
+    memory_count = db_info["memory_count"]
 
-    # ── DB check ──────────────────────────────────────────────────────────────
-    db_status = "unreachable"
-    memory_count = 0
-    try:
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            memory_count = await conn.fetchval("SELECT COUNT(*)::int FROM memories") or 0
-        db_status = "ok"
-    except Exception:
-        logger.warning("Health check: DB unreachable", exc_info=True)
-
-    # ── Voyage API check (non-critical) ───────────────────────────────────────
-    embedding_api_status = "unreachable"
-    try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get(
-                "https://api.voyageai.com/v1/models",
-                headers={"Authorization": f"Bearer {config.VOYAGE_API_KEY}"},
-            )
-        embedding_api_status = "ok" if resp.status_code == 200 else "degraded"
-    except Exception:
-        logger.debug("Health check: Voyage API unreachable")
+    # ── Voyage API check (non-critical) — skipped when DB is down ─────────────
+    if db_status == "unreachable":
+        embedding_api_status = "unknown"
+    else:
+        embedding_api_status = await _check_voyage_api_status()
 
     status = "ok" if db_status == "ok" else "unhealthy"
     http_status = 200 if db_status == "ok" else 503
@@ -916,6 +924,7 @@ async def health() -> JSONResponse:
         {
             "status": status,
             "service": "open-brain",
+            "runtime": "python",
             "db": db_status,
             "embedding_api": embedding_api_status,
             "memory_count": memory_count,

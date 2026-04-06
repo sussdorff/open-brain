@@ -1,4 +1,4 @@
-"""Unit tests: doctor() MCP tool returns structured diagnostic report."""
+"""AK 2: Unit tests for doctor() MCP tool (mocked DataLayer + httpx)."""
 
 from __future__ import annotations
 
@@ -136,3 +136,47 @@ class TestDoctorTool:
             data = json.loads(result)
 
         assert data["voyage_api_status"] == "unreachable"
+
+    @pytest.mark.asyncio
+    async def test_doctor_empty_database_memory_count_zero(self):
+        """doctor() with memory_count=0 and last_ingestion_at=null (empty database)."""
+        mock_pool = _make_mock_pool(memory_count=0, last_ingestion=None)
+        mock_http_client = _make_mock_http_client()
+
+        async def _get_pool():
+            return mock_pool
+
+        with (
+            patch("open_brain.server.get_pool", side_effect=_get_pool),
+            patch("open_brain.server.httpx") as mock_httpx,
+        ):
+            mock_httpx.AsyncClient.return_value = mock_http_client
+            from open_brain.server import doctor
+            result = await doctor()
+            data = json.loads(result)
+
+        assert data["memory_count"] == 0
+        assert data["last_ingestion_at"] is None
+        assert data["db_status"] == "ok"
+
+    @pytest.mark.asyncio
+    async def test_doctor_empty_database_last_ingestion_null(self):
+        """doctor() last_ingestion_at must be null (not raise) when no memories exist."""
+        mock_pool = _make_mock_pool(memory_count=0, last_ingestion=None)
+        mock_http_client = _make_mock_http_client()
+
+        async def _get_pool():
+            return mock_pool
+
+        with (
+            patch("open_brain.server.get_pool", side_effect=_get_pool),
+            patch("open_brain.server.httpx") as mock_httpx,
+        ):
+            mock_httpx.AsyncClient.return_value = mock_http_client
+            from open_brain.server import doctor
+            result = await doctor()
+            data = json.loads(result)
+
+        # null is valid JSON for None; ensure it round-trips correctly
+        assert "last_ingestion_at" in data
+        assert data["last_ingestion_at"] is None
