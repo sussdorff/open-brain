@@ -16,6 +16,11 @@ fi
 
 echo "Installing pre-commit hook..."
 
+if [ -f "$HOOKS_DIR/pre-commit" ] && ! grep -q "pytest" "$HOOKS_DIR/pre-commit"; then
+    cp "$HOOKS_DIR/pre-commit" "$HOOKS_DIR/pre-commit.backup"
+    echo "Backed up existing pre-commit hook to pre-commit.backup"
+fi
+
 cat > "$HOOKS_DIR/pre-commit" << 'EOF'
 #!/bin/bash
 # pre-commit hook: run fast test suite before every commit

@@ -17,11 +17,9 @@ echo "[$TIMESTAMP] Starting nightly test run..."
 
 cd "$REPO_ROOT/python"
 
-# Load OP service account token if available (server stores it in /etc/op-service-account-token)
-if [ -f /etc/op-service-account-token ]; then
-  OP_SERVICE_ACCOUNT_TOKEN=$(cat /etc/op-service-account-token)
-  export OP_SERVICE_ACCOUNT_TOKEN
-fi
+# Caller must set required env vars before running this script:
+#   DATABASE_URL  — Postgres connection string
+#   VOYAGE_API_KEY — Voyage AI API key for embedding integration tests
 
 # Run full test suite (including integration tests)
 EXIT_CODE=0

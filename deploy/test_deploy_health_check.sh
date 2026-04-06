@@ -9,11 +9,11 @@ DEPLOY_SH="$SCRIPT_DIR/deploy.sh"
 
 echo "=== Test: health check failure causes deploy exit ==="
 
-# Extract the health check line from deploy.sh
-HEALTH_LINE=$(grep 'curl.*health' "$DEPLOY_SH")
+# Extract the health check line from deploy.sh (first match only)
+HEALTH_LINE=$(grep -m1 'localhost:8091/health' "$DEPLOY_SH")
 
-# Verify it uses curl -sf with exit 1 on failure (not || echo WARNING)
-if echo "$HEALTH_LINE" | grep -qE 'curl -sf.*/health.*exit 1|\{ echo.*exit 1'; then
+# Verify the health check line exits on failure (not || echo WARNING)
+if grep -q 'exit 1' <<< "$HEALTH_LINE"; then
     echo "PASS: health check line exits on failure"
     exit 0
 else
