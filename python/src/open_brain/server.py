@@ -56,7 +56,20 @@ logger = logging.getLogger(__name__)
 # ContextVar to track the authenticated user ID for the current request
 _current_user_id: ContextVar[str | None] = ContextVar("current_user_id", default=None)
 
+# ContextVar to track the OAuth scopes for the current request (Bearer token auth only)
+_current_scopes: ContextVar[list[str]] = ContextVar("current_scopes", default=[])
 
+# Evolution tools require the `evolution` OAuth scope
+_EVOLUTION_TOOLS: frozenset[str] = frozenset({
+    "weekly_briefing",
+    "analyze_briefing_engagement",
+    "generate_evolution_suggestion",
+    "log_evolution_approval",
+    "query_evolution_history_tool",
+})
+
+# Admin tools require the `admin` OAuth scope (none defined yet)
+_ADMIN_TOOLS: frozenset[str] = frozenset()
 
 
 _ENTITY_EXTRACTION_PROMPT = """\
@@ -110,10 +123,47 @@ async def _extract_entities(text: str) -> dict:
         return {}
 
 
-# MCP server (FastMCP high-level API)
+def _require_scope(scope: str) -> None:
+    """Raise PermissionError if the current caller lacks the required OAuth scope.
+
+    Args:
+        scope: The scope name that must be present in _current_scopes.
+
+    Raises:
+        PermissionError: If the required scope is not in the current request's scopes.
+    """
+    if scope not in _current_scopes.get():
+        raise PermissionError(
+            f"Scope '{scope}' required. Current scopes: {_current_scopes.get()}"
+        )
+
+
+class ScopedFastMCP(FastMCP):
+    """FastMCP subclass that filters tool list based on OAuth scopes in current context.
+
+    Tools in _EVOLUTION_TOOLS are only listed when the caller has the 'evolution' scope.
+    Tools in _ADMIN_TOOLS are only listed when the caller has the 'admin' scope.
+    All other tools are always listed (authentication is enforced by BearerAuthMiddleware).
+    """
+
+    async def list_tools(self):
+        """Return tools filtered by the current request's OAuth scopes."""
+        all_tools = await super().list_tools()
+        scopes = _current_scopes.get()
+        filtered = []
+        for tool in all_tools:
+            if tool.name in _EVOLUTION_TOOLS and "evolution" not in scopes:
+                continue
+            if tool.name in _ADMIN_TOOLS and "admin" not in scopes:
+                continue
+            filtered.append(tool)
+        return filtered
+
+
+# MCP server (ScopedFastMCP for scope-gated tool listing)
 _config = get_config()
 _host = _config.MCP_SERVER_URL.replace("https://", "").replace("http://", "").rstrip("/")
-mcp = FastMCP(
+mcp = ScopedFastMCP(
     "open-brain",
     transport_security=TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
@@ -690,6 +740,7 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
             provider = get_provider()
             provider.verify_access_token(token)
             user_token = _current_user_id.set(verified.sub)
+            scopes_token = _current_scopes.set(verified.scopes)
         except Exception:
             return JSONResponse(
                 {"error": "unauthorized", "error_description": "Invalid or expired token"},
@@ -701,6 +752,7 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         finally:
             _current_user_id.reset(user_token)
+            _current_scopes.reset(scopes_token)
 
 
 @asynccontextmanager
@@ -1245,6 +1297,7 @@ async def weekly_briefing(
     project: str | None = None,
 ) -> str:
     """Generate a structured weekly briefing with cross-type time-bridged insights."""
+    _require_scope("evolution")
     try:
         dl = get_dl()
         result = await generate_weekly_briefing(dl, weeks_back=weeks_back, project=project)
@@ -1260,6 +1313,7 @@ async def analyze_briefing_engagement(
     project: str | None = None,
 ) -> str:
     """Analyze briefing engagement: response rates by type over last N days."""
+    _require_scope("evolution")
     dl = get_dl()
     try:
         report = await analyze_engagement(dl, days_back=days_back, project=project)
@@ -1288,6 +1342,7 @@ async def generate_evolution_suggestion(
     project: str | None = None,
 ) -> str:
     """Generate one self-improvement suggestion based on briefing engagement."""
+    _require_scope("evolution")
     dl = get_dl()
     try:
         report = await analyze_engagement(dl, days_back=days_back, project=project)
@@ -1316,6 +1371,7 @@ async def log_evolution_approval(
     briefing_type: str | None = None,
 ) -> str:
     """Log approval or rejection of an evolution suggestion."""
+    _require_scope("evolution")
     dl = get_dl()
     try:
         await _log_evolution_approval(dl, suggestion_id=suggestion_id, approved=approved, project=project, briefing_type=briefing_type)
@@ -1332,6 +1388,7 @@ async def query_evolution_history_tool(
     project: str | None = None,
 ) -> str:
     """Query evolution history: past suggestions and approvals."""
+    _require_scope("evolution")
     dl = get_dl()
     try:
         memories = await query_evolution_history(dl, limit=limit, project=project)
