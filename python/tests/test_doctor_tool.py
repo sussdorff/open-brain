@@ -162,7 +162,7 @@ class TestDoctorTool:
         assert data["last_ingestion_at"] is None
 
 
-class TestDoctorToolIntegration:
+class TestDoctorToolContract:
     @pytest.mark.asyncio
     async def test_doctor_via_server_routing(self):
         """doctor tool must be reachable through the actual FastAPI app routing layer."""

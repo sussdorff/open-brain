@@ -127,7 +127,7 @@ Both endpoints use a pair of helper functions:
 1. **Empty database** — memory_count=0, last_ingestion_at=null (not an error)
 2. **DB down but API up** — /health returns 503; doctor() returns db_status="unreachable" but still probes Voyage API
 3. **Multiple pool.acquire() failures** — All caught; db_status stays "unreachable", no exception propagated
-4. **Voyage API timeout** — Treated as "unreachable" (same as 5xx response), logged at debug level
+4. **Voyage API timeout** — Treated as "unreachable" (same as 5xx response), logged at warning level
 5. **Package installed but version missing** — server_version="unknown" (rare edge case; shouldn't happen in production)
 6. **Uptime precision** — Rounded to 3 decimal places (millisecond precision)
 

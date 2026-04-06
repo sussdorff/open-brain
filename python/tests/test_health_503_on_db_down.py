@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from .test_helpers import make_mock_http_client as _make_mock_http_client
+from .test_helpers import make_mock_pool as _make_mock_pool
 
 
 class TestHealth503OnDbDown:
@@ -42,14 +43,7 @@ class TestHealth503OnDbDown:
     @pytest.mark.asyncio
     async def test_health_returns_200_when_db_ok(self):
         """When DB is reachable, health() returns 200 with status: ok and db: ok."""
-        mock_conn = AsyncMock()
-        mock_conn.fetchval = AsyncMock(return_value=42)
-        mock_conn.fetchrow = AsyncMock(return_value={"max": None})
-
-        mock_pool = MagicMock()
-        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
-
+        mock_pool = _make_mock_pool(memory_count=42)
         mock_http_client = _make_mock_http_client(status_code=200)
 
         async def _get_pool():
@@ -107,14 +101,7 @@ class TestHealth503OnDbDown:
     @pytest.mark.asyncio
     async def test_health_returns_200_with_degraded_embedding_api(self):
         """When DB is up but Voyage API is degraded, health() returns 200 with embedding_api: degraded."""
-        mock_conn = AsyncMock()
-        mock_conn.fetchval = AsyncMock(return_value=5)
-        mock_conn.fetchrow = AsyncMock(return_value={"max": None})
-
-        mock_pool = MagicMock()
-        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
-
+        mock_pool = _make_mock_pool(memory_count=5)
         # Voyage API returns non-200
         mock_http_client = _make_mock_http_client(status_code=503)
 
@@ -137,13 +124,7 @@ class TestHealth503OnDbDown:
     @pytest.mark.asyncio
     async def test_health_returns_200_with_unreachable_embedding_api(self):
         """When DB is up but Voyage API is unreachable, health() returns 200 with embedding_api: unreachable."""
-        mock_conn = AsyncMock()
-        mock_conn.fetchval = AsyncMock(return_value=3)
-        mock_conn.fetchrow = AsyncMock(return_value={"max": None})
-
-        mock_pool = MagicMock()
-        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+        mock_pool = _make_mock_pool(memory_count=3)
 
         # Voyage API raises network error
         mock_http_client = AsyncMock()
@@ -166,3 +147,29 @@ class TestHealth503OnDbDown:
             assert body["status"] == "ok"
             assert body["db"] == "ok"
             assert body["embedding_api"] == "unreachable"
+
+
+@pytest.mark.asyncio
+async def test_health_concurrent_requests():
+    """Scenario variant 6: concurrent requests return consistent results."""
+    import asyncio
+
+    from open_brain.server import health
+
+    mock_http_client = _make_mock_http_client(status_code=200)
+
+    async def _get_pool():
+        return _make_mock_pool(memory_count=10)
+
+    with (
+        patch("open_brain.server.get_pool", side_effect=_get_pool),
+        patch("open_brain.server.httpx") as mock_httpx,
+    ):
+        mock_httpx.AsyncClient.return_value = mock_http_client
+        responses = await asyncio.gather(*[health() for _ in range(5)])
+
+    for response in responses:
+        assert response.status_code == 200
+        body = json.loads(response.body)
+        assert body["status"] == "ok"
+        assert body["db"] == "ok"
