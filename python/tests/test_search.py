@@ -183,6 +183,7 @@ class TestPostgresDataLayerSearch:
         with (
             patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=mock_pool),
             patch("open_brain.data_layer.postgres.embed_query_with_usage", new_callable=AsyncMock) as mock_embed,
+            patch("asyncio.create_task"),
         ):
             mock_embed.return_value = ([0.1] * 1024, 10)
             await dl.search(SearchParams(query="test query"))
