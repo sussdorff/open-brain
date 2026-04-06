@@ -83,6 +83,9 @@ _EVOLUTION_TOOLS: frozenset[str] = frozenset({
 # Admin tools require the `admin` OAuth scope (none defined yet)
 _ADMIN_TOOLS: frozenset[str] = frozenset()
 
+# Valid scopes that can be granted to URL tokens
+_VALID_URL_TOKEN_SCOPES: frozenset[str] = frozenset({"memory", "evolution"})
+
 
 _ENTITY_EXTRACTION_PROMPT = """\
 Extract named entities from the following text and return ONLY valid JSON (no markdown fences):
@@ -808,7 +811,10 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
                 )
             except Exception:
                 logger.exception("URL token DB lookup failed")
-                row = None
+                return JSONResponse(
+                    {"error": "service_unavailable", "error_description": "Token verification temporarily unavailable"},
+                    status_code=503,
+                )
 
             if row is None:
                 return JSONResponse(
@@ -1041,6 +1047,14 @@ async def issue_url_token(request: Request) -> JSONResponse:
     # Strip admin scope — never grantable to URL tokens (AK6)
     safe_scopes = [s for s in requested_scopes if s != "admin"]
 
+    # Validate scope names against known valid scopes
+    for scope in safe_scopes:
+        if scope not in _VALID_URL_TOKEN_SCOPES:
+            return JSONResponse(
+                {"error": "invalid_request", "error_description": f"Unknown scope: {scope}"},
+                status_code=422,
+            )
+
     try:
         expires_in_days = int(body.get("expires_in_days", 365))
     except (ValueError, TypeError):
@@ -1050,6 +1064,11 @@ async def issue_url_token(request: Request) -> JSONResponse:
         )
     if expires_in_days <= 0:
         raise HTTPException(status_code=400, detail="expires_in_days must be positive")
+    if expires_in_days > 3650:
+        return JSONResponse(
+            {"error": "invalid_request", "error_description": "expires_in_days cannot exceed 3650 (10 years)"},
+            status_code=400,
+        )
 
     raw_token = secrets.token_hex(32)
     token_hash = hashlib.sha256(raw_token.encode()).hexdigest()

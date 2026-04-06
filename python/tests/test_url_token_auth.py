@@ -149,6 +149,21 @@ class TestUrlTokenQueryParamAuth:
         resp = await auth_client.get("/api/context")
         assert resp.status_code == 401
 
+    @pytest.mark.asyncio
+    async def test_url_token_db_error_returns_503(self, auth_client):
+        """A DB error during URL token lookup returns 503, not 401."""
+        raw_token = "some-valid-looking-token"
+
+        async def broken_get_pool():
+            raise Exception("DB connection pool exhausted")
+
+        with patch("open_brain.server.get_pool", side_effect=broken_get_pool):
+            resp = await auth_client.get(f"/api/context?token={raw_token}")
+
+        assert resp.status_code == 503
+        data = resp.json()
+        assert data.get("error") == "service_unavailable"
+
 
 # ─── AK5: Log redaction ───────────────────────────────────────────────────────
 
@@ -469,6 +484,49 @@ class TestIssueUrlToken:
             },
         )
         assert resp.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_issue_url_token_expires_in_days_max(self, auth_client, admin_headers):
+        """POST /token/url with expires_in_days=9999 returns 400 (exceeds 3650 limit)."""
+        mock_pool, mock_conn = _make_mock_pool_with_url_token(None)
+        mock_conn.execute = AsyncMock(return_value="INSERT 0 1")
+
+        with patch("open_brain.server.get_pool", new_callable=AsyncMock, return_value=mock_pool):
+            resp = await auth_client.post(
+                "/token/url",
+                json={
+                    "name": "long-lived-token",
+                    "scopes": ["memory"],
+                    "expires_in_days": 9999,
+                },
+                headers=admin_headers,
+            )
+
+        assert resp.status_code == 400
+        data = resp.json()
+        assert data.get("error") == "invalid_request"
+
+    @pytest.mark.asyncio
+    async def test_issue_url_token_invalid_scope_rejected(self, auth_client, admin_headers):
+        """POST /token/url with an unknown scope returns 422."""
+        mock_pool, mock_conn = _make_mock_pool_with_url_token(None)
+        mock_conn.execute = AsyncMock(return_value="INSERT 0 1")
+
+        with patch("open_brain.server.get_pool", new_callable=AsyncMock, return_value=mock_pool):
+            resp = await auth_client.post(
+                "/token/url",
+                json={
+                    "name": "bad-scope-token",
+                    "scopes": ["memory", "$$garbage"],
+                    "expires_in_days": 30,
+                },
+                headers=admin_headers,
+            )
+
+        assert resp.status_code == 422
+        data = resp.json()
+        assert data.get("error") == "invalid_request"
+        assert "$$garbage" in data.get("error_description", "")
 
 
 # ─── AK4: DELETE /token/url/{name} ───────────────────────────────────────────
