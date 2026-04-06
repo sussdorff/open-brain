@@ -8,24 +8,42 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
+def _make_mock_pool():
+    """Create a properly structured mock asyncpg pool."""
+    mock_conn = AsyncMock()
+    mock_conn.fetchval = AsyncMock(return_value=0)
+    mock_conn.fetchrow = AsyncMock(return_value={"max": None})
+
+    mock_pool = MagicMock()
+    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+    return mock_pool
+
+
+async def _failing_http_client():
+    """Mock httpx AsyncClient that fails on get()."""
+    mock = AsyncMock()
+    mock.get = AsyncMock(side_effect=Exception("no network"))
+    mock.__aenter__ = AsyncMock(return_value=mock)
+    mock.__aexit__ = AsyncMock(return_value=None)
+    return mock
+
+
 class TestDoctorIncludesVersion:
     @pytest.mark.asyncio
     async def test_doctor_includes_server_version(self):
         """doctor() must include server_version from importlib.metadata."""
-        mock_pool = AsyncMock()
-        mock_conn = AsyncMock()
-        mock_conn.fetchval = AsyncMock(return_value=1)
-        mock_conn.fetchrow = AsyncMock(return_value={"count": 0, "max": None})
-        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
-
+        mock_pool = _make_mock_pool()
         mock_http_client = AsyncMock()
         mock_http_client.get = AsyncMock(side_effect=Exception("no network"))
         mock_http_client.__aenter__ = AsyncMock(return_value=mock_http_client)
         mock_http_client.__aexit__ = AsyncMock(return_value=None)
 
+        async def _get_pool():
+            return mock_pool
+
         with (
-            patch("open_brain.server.get_pool", return_value=mock_pool),
+            patch("open_brain.server.get_pool", side_effect=_get_pool),
             patch("open_brain.server.httpx") as mock_httpx,
         ):
             mock_httpx.AsyncClient.return_value = mock_http_client
@@ -39,21 +57,18 @@ class TestDoctorIncludesVersion:
 
     @pytest.mark.asyncio
     async def test_doctor_includes_uptime_seconds_positive(self):
-        """doctor() must include uptime_seconds > 0 after server start."""
-        mock_pool = AsyncMock()
-        mock_conn = AsyncMock()
-        mock_conn.fetchval = AsyncMock(return_value=1)
-        mock_conn.fetchrow = AsyncMock(return_value={"count": 0, "max": None})
-        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
-
+        """doctor() must include uptime_seconds >= 0 after server start."""
+        mock_pool = _make_mock_pool()
         mock_http_client = AsyncMock()
         mock_http_client.get = AsyncMock(side_effect=Exception("no network"))
         mock_http_client.__aenter__ = AsyncMock(return_value=mock_http_client)
         mock_http_client.__aexit__ = AsyncMock(return_value=None)
 
+        async def _get_pool():
+            return mock_pool
+
         with (
-            patch("open_brain.server.get_pool", return_value=mock_pool),
+            patch("open_brain.server.get_pool", side_effect=_get_pool),
             patch("open_brain.server.httpx") as mock_httpx,
         ):
             mock_httpx.AsyncClient.return_value = mock_http_client
@@ -70,20 +85,17 @@ class TestDoctorIncludesVersion:
         """doctor() server_version must match importlib.metadata.version('open-brain')."""
         import importlib.metadata
 
-        mock_pool = AsyncMock()
-        mock_conn = AsyncMock()
-        mock_conn.fetchval = AsyncMock(return_value=1)
-        mock_conn.fetchrow = AsyncMock(return_value={"count": 0, "max": None})
-        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
-
+        mock_pool = _make_mock_pool()
         mock_http_client = AsyncMock()
         mock_http_client.get = AsyncMock(side_effect=Exception("no network"))
         mock_http_client.__aenter__ = AsyncMock(return_value=mock_http_client)
         mock_http_client.__aexit__ = AsyncMock(return_value=None)
 
+        async def _get_pool():
+            return mock_pool
+
         with (
-            patch("open_brain.server.get_pool", return_value=mock_pool),
+            patch("open_brain.server.get_pool", side_effect=_get_pool),
             patch("open_brain.server.httpx") as mock_httpx,
         ):
             mock_httpx.AsyncClient.return_value = mock_http_client

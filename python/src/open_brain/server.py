@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.metadata
 import json
 import logging
+import time
 from dataclasses import asdict
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+import httpx
 
 from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -37,7 +42,7 @@ from open_brain.data_layer.interface import (
 from open_brain.capture_router import classify_and_extract
 from open_brain.data_layer.llm import LlmMessage, llm_complete
 from open_brain.utils import parse_llm_json
-from open_brain.data_layer.postgres import PostgresDataLayer, close_pool
+from open_brain.data_layer.postgres import PostgresDataLayer, close_pool, get_pool
 from open_brain.digest import generate_weekly_briefing
 from open_brain.evolution import (
     analyze_engagement,
@@ -115,6 +120,9 @@ mcp = FastMCP(
         allowed_hosts=[_host, f"{_host}:443", "localhost:8091", "127.0.0.1:8091"],
     ),
 )
+
+# Server start time — set in lifespan, used for uptime calculation
+_server_start_time: datetime = datetime.now(UTC)
 
 # Shared data layer instance
 _dl: PostgresDataLayer | None = None
@@ -404,6 +412,68 @@ async def stats() -> str:
     return json.dumps(result, default=str)
 
 
+@mcp.tool(description="Run diagnostic health check: DB latency, Voyage API status, memory stats, uptime")
+async def doctor() -> str:
+    """Return a structured diagnostic report for operational health monitoring.
+
+    Returns:
+        JSON string with db_latency_ms, db_status, voyage_api_status,
+        memory_count, last_ingestion_at, server_version, uptime_seconds.
+    """
+    config = get_config()
+
+    # ── DB diagnostics ────────────────────────────────────────────────────────
+    db_status = "unreachable"
+    db_latency_ms: float | None = None
+    memory_count = 0
+    last_ingestion_at: str | None = None
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            t0 = time.monotonic()
+            await conn.fetchval("SELECT 1")
+            db_latency_ms = round((time.monotonic() - t0) * 1000, 2)
+            db_status = "ok"
+            memory_count = await conn.fetchval("SELECT COUNT(*)::int FROM memories") or 0
+            last_row = await conn.fetchrow("SELECT MAX(created_at) AS max FROM memories")
+            if last_row and last_row["max"] is not None:
+                last_ingestion_at = last_row["max"].isoformat()
+    except Exception:
+        logger.warning("Doctor: DB unreachable", exc_info=True)
+
+    # ── Voyage API diagnostics ────────────────────────────────────────────────
+    voyage_api_status = "unreachable"
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(
+                "https://api.voyageai.com/v1/models",
+                headers={"Authorization": f"Bearer {config.VOYAGE_API_KEY}"},
+            )
+        voyage_api_status = "ok" if resp.status_code == 200 else "degraded"
+    except Exception:
+        logger.debug("Doctor: Voyage API unreachable")
+
+    # ── Server metadata ───────────────────────────────────────────────────────
+    try:
+        server_version = importlib.metadata.version("open-brain")
+    except importlib.metadata.PackageNotFoundError:
+        server_version = "unknown"
+
+    uptime_seconds = (datetime.now(UTC) - _server_start_time).total_seconds()
+
+    return json.dumps(
+        {
+            "db_latency_ms": db_latency_ms,
+            "db_status": db_status,
+            "voyage_api_status": voyage_api_status,
+            "memory_count": memory_count,
+            "last_ingestion_at": last_ingestion_at,
+            "server_version": server_version,
+            "uptime_seconds": round(uptime_seconds, 3),
+        }
+    )
+
+
 @mcp.tool(
     description="Consolidate, deduplicate, and refine memories. "
     "Uses configured LLM for intelligent analysis. Params: scope, limit, dry_run"
@@ -621,7 +691,9 @@ async def lifespan(app: FastAPI):
       Format: [{"username": "alice", "password": "secret"}, ...]
       If absent, falls back to single-user AUTH_USER/AUTH_PASSWORD env vars.
     """
+    global _server_start_time
     config = get_config()
+    _server_start_time = datetime.now(UTC)
     logger.info("open-brain starting on port %d", config.PORT)
     async with mcp.session_manager.run():
         yield
@@ -807,9 +879,49 @@ async def oauth_protected_resource() -> JSONResponse:
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    """Health check endpoint."""
-    return {"status": "ok", "service": "open-brain", "runtime": "python"}
+async def health() -> JSONResponse:
+    """Health check endpoint with subsystem status.
+
+    Returns HTTP 200 if DB is reachable, HTTP 503 if DB is down.
+    Voyage API failure is non-critical (degraded, not unhealthy).
+    """
+    config = get_config()
+
+    # ── DB check ──────────────────────────────────────────────────────────────
+    db_status = "unreachable"
+    memory_count = 0
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            memory_count = await conn.fetchval("SELECT COUNT(*)::int FROM memories") or 0
+        db_status = "ok"
+    except Exception:
+        logger.warning("Health check: DB unreachable", exc_info=True)
+
+    # ── Voyage API check (non-critical) ───────────────────────────────────────
+    embedding_api_status = "unreachable"
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(
+                "https://api.voyageai.com/v1/models",
+                headers={"Authorization": f"Bearer {config.VOYAGE_API_KEY}"},
+            )
+        embedding_api_status = "ok" if resp.status_code == 200 else "degraded"
+    except Exception:
+        logger.debug("Health check: Voyage API unreachable")
+
+    status = "ok" if db_status == "ok" else "unhealthy"
+    http_status = 200 if db_status == "ok" else 503
+    return JSONResponse(
+        {
+            "status": status,
+            "service": "open-brain",
+            "db": db_status,
+            "embedding_api": embedding_api_status,
+            "memory_count": memory_count,
+        },
+        status_code=http_status,
+    )
 
 
 # ─── REST API Endpoints (Plugin Hooks) ────────────────────────────────────────

@@ -30,10 +30,10 @@ class TestHealth503OnDbDown:
     @pytest.mark.asyncio
     async def test_health_returns_200_when_db_ok(self):
         """When DB is reachable, health() returns 200 with status: ok and db: ok."""
-        mock_pool = AsyncMock()
         mock_conn = AsyncMock()
-        mock_conn.fetchval = AsyncMock(return_value=1)
-        mock_conn.fetchrow = AsyncMock(return_value={"count": 42})
+        mock_conn.fetchval = AsyncMock(return_value=42)
+
+        mock_pool = MagicMock()
         mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
 
@@ -44,8 +44,11 @@ class TestHealth503OnDbDown:
         mock_http_client.__aenter__ = AsyncMock(return_value=mock_http_client)
         mock_http_client.__aexit__ = AsyncMock(return_value=None)
 
+        async def _get_pool():
+            return mock_pool
+
         with (
-            patch("open_brain.server.get_pool", return_value=mock_pool),
+            patch("open_brain.server.get_pool", side_effect=_get_pool),
             patch("open_brain.server.httpx") as mock_httpx,
         ):
             mock_httpx.AsyncClient.return_value = mock_http_client
