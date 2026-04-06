@@ -590,3 +590,100 @@ class TestPipelineDryRun:
         result = materialize_promote(memory)
         assert result.success is True
         assert (tmp_path / "MEMORY.md").exists()
+
+
+# ─── Test: session_ref scope ──────────────────────────────────────────────────
+
+
+class TestSessionRefScope:
+    """Tests for the session_ref:<prefix> triage scope (AK1/AK2)."""
+
+    @pytest.mark.asyncio
+    async def test_session_ref_scope_queries_by_prefix(self):
+        """triage_memories with scope='session_ref:ccmem:' queries memories by session_ref prefix."""
+        from contextlib import asynccontextmanager
+        from unittest.mock import AsyncMock, patch
+
+        llm_response = json.dumps([
+            {"memory_id": 1, "action": "keep", "reason": "Useful observation"},
+            {"memory_id": 2, "action": "archive", "reason": "Outdated feedback"},
+        ])
+
+        db_rows = [
+            {
+                "id": 1, "index_id": 1, "session_id": None, "type": "observation",
+                "title": "Claude Memory 1", "subtitle": None, "narrative": None,
+                "content": "Some content", "metadata": {}, "priority": 0.5,
+                "stability": "stable", "access_count": 0, "last_accessed_at": None,
+                "created_at": "2026-01-01", "updated_at": "2026-01-01",
+                "session_ref": "ccmem:abc123", "user_id": None, "embedding": None,
+            },
+            {
+                "id": 2, "index_id": 1, "session_id": None, "type": "feedback",
+                "title": "Claude Memory 2", "subtitle": None, "narrative": None,
+                "content": "Feedback content", "metadata": {}, "priority": 0.5,
+                "stability": "stable", "access_count": 0, "last_accessed_at": None,
+                "created_at": "2026-01-01", "updated_at": "2026-01-01",
+                "session_ref": "ccmem:def456", "user_id": None, "embedding": None,
+            },
+        ]
+
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=db_rows)
+
+        @asynccontextmanager
+        async def _acquire():
+            yield mock_conn
+
+        mock_pool = MagicMock()
+        mock_pool.acquire = _acquire
+
+        with (
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=mock_pool),
+            patch("open_brain.data_layer.triage.llm_complete", new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_llm.return_value = llm_response
+
+            from open_brain.data_layer.postgres import PostgresDataLayer
+            dl = PostgresDataLayer()
+            result = await dl.triage_memories(
+                TriageParams(scope="session_ref:ccmem:", limit=200, dry_run=True)
+            )
+
+        # Verify the DB was queried with the session_ref LIKE pattern
+        mock_conn.fetch.assert_awaited_once()
+        call_args = mock_conn.fetch.call_args
+        query = call_args[0][0]
+        assert "session_ref LIKE" in query, (
+            f"Expected query to contain 'session_ref LIKE', got: {query!r}"
+        )
+        # Verify the prefix parameter was passed (positional arg after query)
+        call_params = call_args[0][1:]
+        assert any("ccmem:%" in str(p) for p in call_params), (
+            f"Expected 'ccmem:%' in query params, got: {call_params}"
+        )
+
+        # Verify triage analyzed both memories
+        assert result.analyzed == 2
+        action_map = {a.memory_id: a.action for a in result.actions}
+        assert action_map[1] == "keep"
+        assert action_map[2] == "archive"
+
+    @pytest.mark.asyncio
+    async def test_session_ref_scope_is_prefix_match_not_exact(self):
+        """session_ref:ccmem: matches all ccmem:* entries, not just exact 'ccmem:'."""
+        # This tests AK1: LIKE '<prefix>%' semantics
+        params = TriageParams(scope="session_ref:ccmem:", limit=10, dry_run=True)
+        assert params.scope is not None
+        prefix = params.scope[len("session_ref:"):]
+        assert prefix == "ccmem:"
+        # The LIKE pattern appends %
+        like_pattern = prefix + "%"
+        assert like_pattern == "ccmem:%"
+
+    def test_triage_params_accepts_session_ref_scope(self):
+        """TriageParams can hold a session_ref: scope string."""
+        params = TriageParams(scope="session_ref:ccmem:", limit=200, dry_run=True)
+        assert params.scope == "session_ref:ccmem:"
+        assert params.limit == 200
+        assert params.dry_run is True

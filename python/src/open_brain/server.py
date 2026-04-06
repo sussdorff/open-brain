@@ -635,7 +635,7 @@ async def refine_memories(
 @mcp.tool(
     description="Classify memories into lifecycle actions: keep | merge | promote | scaffold | archive. "
     "Uses LLM with type-aware logic: learning→promote, session_summary→archive, observation→keep/merge. "
-    "Params: scope (recent|project:<name>|type:<name>|low-priority), limit, dry_run"
+    "Params: scope (recent|project:<name>|type:<name>|low-priority|session_ref:<prefix>), limit, dry_run"
 )
 async def triage_memories(
     scope: str | None = None,
