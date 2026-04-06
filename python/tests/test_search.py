@@ -376,7 +376,7 @@ class TestMetadataFilterPreCondition:
         )
 
         # The outer WHERE clause must NOT contain metadata key/value conditions
-        assert "m.metadata->>" not in sql or "m.metadata @>" in sql, (
+        assert "m.metadata->>" not in sql, (
             "metadata_filter must not appear as a post-WHERE condition (m.metadata->>...)"
         )
 
