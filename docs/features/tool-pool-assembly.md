@@ -65,9 +65,9 @@ When a client calls `/tools/list`, only tools matching its scopes appear in the 
 **Runtime Enforcement:**
 ```python
 def _require_scope(scope: str) -> None:
-    """Raise PermissionError if the current caller lacks the required OAuth scope."""
+    """Raise ScopeDeniedError if the current caller lacks the required OAuth scope."""
     if scope not in _current_scopes.get():
-        raise PermissionError(f"Scope '{scope}' required")
+        raise ScopeDeniedError(f"Scope '{scope}' required")
 
 # In each evolution tool:
 @mcp.tool()
@@ -85,7 +85,7 @@ Even if a client somehow calls an evolution tool directly (e.g., via stored refe
 3. **MCP Connection** — Client connects to open-brain, sends Bearer token in MCP handshake
 4. **Middleware Processing** — `BearerAuthMiddleware` extracts scopes, calls `_current_scopes.set(("memory",))`
 5. **Tool Discovery** — Client calls `/tools/list` → returns only core memory tools
-6. **Evolution Attempt** — Client attempts to call `generate_evolution_suggestion` → **403 PermissionError**
+6. **Evolution Attempt** — Client attempts to call `generate_evolution_suggestion` → **ScopeDeniedError** (tool error)
 
 ### Workflow: Privileged Client
 
