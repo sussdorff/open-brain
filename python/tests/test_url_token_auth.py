@@ -164,8 +164,6 @@ class TestUrlTokenLogRedaction:
 
         captured_scope = {}
 
-        original_call_next = None
-
         async def capturing_call_next(request):
             captured_scope["query_string"] = request.scope.get("query_string", b"")
             # Return a minimal response
@@ -381,8 +379,8 @@ class TestUrlTokenVerification:
             resp = await auth_client.get(f"/api/context?token={raw_token}")
 
         # The hash passed to DB should be the SHA-256 of raw token
-        if lookup_hashes:
-            assert lookup_hashes[0] == expected_hash
+        assert len(lookup_hashes) == 1
+        assert lookup_hashes[0] == expected_hash
 
 
 # ─── AK3: POST /token/url endpoint ────────────────────────────────────────────

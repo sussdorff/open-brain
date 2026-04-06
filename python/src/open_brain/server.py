@@ -18,6 +18,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import asyncpg
+import asyncpg.exceptions
 import httpx
 
 from fastapi import FastAPI, Form, HTTPException, Request, Response
@@ -805,6 +807,7 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
                     token_hash,
                 )
             except Exception:
+                logger.exception("URL token DB lookup failed")
                 row = None
 
             if row is None:
@@ -1038,7 +1041,13 @@ async def issue_url_token(request: Request) -> JSONResponse:
     # Strip admin scope — never grantable to URL tokens (AK6)
     safe_scopes = [s for s in requested_scopes if s != "admin"]
 
-    expires_in_days = int(body.get("expires_in_days", 365))
+    try:
+        expires_in_days = int(body.get("expires_in_days", 365))
+    except (ValueError, TypeError):
+        return JSONResponse(
+            {"error": "invalid_request", "error_description": "expires_in_days must be a positive integer"},
+            status_code=400,
+        )
     if expires_in_days <= 0:
         raise HTTPException(status_code=400, detail="expires_in_days must be positive")
 
@@ -1047,16 +1056,22 @@ async def issue_url_token(request: Request) -> JSONResponse:
     expires_at = datetime.now(UTC) + timedelta(days=expires_in_days)
 
     pool = await get_pool()
-    await pool.execute(
-        """
-        INSERT INTO url_tokens (name, token_hash, scopes, expires_at)
-        VALUES ($1, $2, $3::jsonb, $4)
-        """,
-        name,
-        token_hash,
-        json.dumps(safe_scopes),
-        expires_at,
-    )
+    try:
+        await pool.execute(
+            """
+            INSERT INTO url_tokens (name, token_hash, scopes, expires_at)
+            VALUES ($1, $2, $3::jsonb, $4)
+            """,
+            name,
+            token_hash,
+            json.dumps(safe_scopes),
+            expires_at,
+        )
+    except asyncpg.exceptions.UniqueViolationError:
+        return JSONResponse(
+            {"error": "conflict", "error_description": "A URL token with this name already exists"},
+            status_code=409,
+        )
 
     return JSONResponse(
         {
