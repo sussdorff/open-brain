@@ -39,7 +39,7 @@ class TestScopeGatedToolList:
         """Evolution tools appear in list_tools() when caller has evolution scope."""
         from open_brain.server import mcp
 
-        token = _current_scopes.set(["memory", "evolution"])
+        token = _current_scopes.set(("memory", "evolution"))
         try:
             tools = await mcp.list_tools()
             tool_names = {t.name for t in tools}
@@ -56,7 +56,7 @@ class TestScopeGatedToolList:
         """Evolution tools are absent from list_tools() when caller lacks evolution scope."""
         from open_brain.server import mcp
 
-        token = _current_scopes.set(["memory"])
+        token = _current_scopes.set(("memory",))
         try:
             tools = await mcp.list_tools()
             tool_names = {t.name for t in tools}
@@ -74,7 +74,7 @@ class TestScopeGatedToolList:
         from open_brain.server import mcp
 
         # Without evolution scope
-        token = _current_scopes.set(["memory"])
+        token = _current_scopes.set(("memory",))
         try:
             tools_without = await mcp.list_tools()
             names_without = {t.name for t in tools_without}
@@ -82,7 +82,7 @@ class TestScopeGatedToolList:
             _current_scopes.reset(token)
 
         # With evolution scope
-        token = _current_scopes.set(["memory", "evolution"])
+        token = _current_scopes.set(("memory", "evolution"))
         try:
             tools_with = await mcp.list_tools()
             names_with = {t.name for t in tools_with}
@@ -100,14 +100,14 @@ class TestScopeGatedToolList:
 
         core_tools = {"search", "save_memory", "timeline", "get_observations"}
 
-        token = _current_scopes.set(["memory"])
+        token = _current_scopes.set(("memory",))
         try:
             tools = await mcp.list_tools()
             tool_names = {t.name for t in tools}
             for core in core_tools:
                 assert core in tool_names, (
                     f"Core tool '{core}' should always be visible, "
-                    f"but was absent with scopes=['memory']"
+                    f"but was absent with scopes=('memory',)"
                 )
         finally:
             _current_scopes.reset(token)
@@ -128,7 +128,7 @@ class TestUnauthenticatedToolList:
         """Evolution tools are absent when _current_scopes is empty list."""
         from open_brain.server import mcp
 
-        token = _current_scopes.set([])
+        token = _current_scopes.set(())
         try:
             tools = await mcp.list_tools()
             tool_names = {t.name for t in tools}
@@ -147,7 +147,7 @@ class TestUnauthenticatedToolList:
 
         core_tools = {"search", "save_memory", "timeline", "get_observations"}
 
-        token = _current_scopes.set([])
+        token = _current_scopes.set(())
         try:
             tools = await mcp.list_tools()
             tool_names = {t.name for t in tools}
@@ -171,9 +171,9 @@ class TestScopeRuntimeEnforcement:
         from open_brain.server import generate_evolution_suggestion
 
         with patch("open_brain.server.get_dl", return_value=mock_dl):
-            token = _current_scopes.set(["memory"])
+            token = _current_scopes.set(("memory",))
             try:
-                with pytest.raises((PermissionError, RuntimeError)) as exc_info:
+                with pytest.raises(PermissionError) as exc_info:
                     await generate_evolution_suggestion()
                 # Verify the error message references the 'evolution' scope
                 assert "evolution" in str(exc_info.value).lower(), (
@@ -200,7 +200,7 @@ class TestScopeRuntimeEnforcement:
             patch("open_brain.server.analyze_engagement", return_value=engagement_report),
             patch("open_brain.server.generate_suggestion", return_value=None),
         ):
-            token = _current_scopes.set(["memory", "evolution"])
+            token = _current_scopes.set(("memory", "evolution"))
             try:
                 result = await generate_evolution_suggestion()
                 import json
