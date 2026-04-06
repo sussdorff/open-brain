@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(scripts)* Address review findings in migrate_claude_memories.py
+
+## [2026.04.18] - 2026-04-06
+
+### Bug Fixes
+
 - *(open-brain-2jg)* Metadata_filter als Pre-Condition in hybrid_search SQL-Funktion
 - *(open-brain-2jg)* Tighten metadata_filter test assertion — remove tautological or-clause
 - *(open-brain-2jg)* Browse path metadata_filter uses @> containment like hybrid path
@@ -12,6 +18,8 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous
 
 - Bump version to 2026.04.17
+- Update changelog
+- Bump version to 2026.04.18
 
 ## [2026.04.17] - 2026-04-06
 
