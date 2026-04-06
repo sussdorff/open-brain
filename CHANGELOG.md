@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(open-brain-m4t)* Address review findings iteration 1
+- *(open-brain-m4t)* Address review findings iteration 2 — tuple types and precise exception in tests
+- *(open-brain-m4t)* Address review panel findings — ScopeDeniedError, API key comment, remove redundant test, scope check assertion, docs error surface
+- *(open-brain-m4t)* Address review panel findings iter 2 — ScopeDeniedError in docs code example
+
+### Documentation
+
+- Update feature documentation for open-brain-m4t — scope-gated tool pool
+
+### Features
+
+- *(open-brain-m4t)* Green — scope-gated MCP tool list via ScopedFastMCP + ContextVar
+
+### Testing
+
+- *(open-brain-m4t)* Red — scope-gated tool list and runtime enforcement
+
+## [2026.04.11] - 2026-04-06
+
+### Bug Fixes
+
 - *(open-brain-qba)* Address review findings iteration 1
 - *(open-brain-qba)* Address review findings iteration 2
 - *(open-brain-qba)* Address review panel findings — fetchval side_effect, server_start_time None-safe, log level consistency, docs GET/POST
@@ -21,6 +42,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous
 
 - Bump version to 2026.04.10
+- Update changelog
 
 ### Testing
 

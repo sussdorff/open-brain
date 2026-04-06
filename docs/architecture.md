@@ -210,6 +210,21 @@ Clients can also authenticate via API key (`x-api-key` header) for plugin/automa
 
 Dynamic client registration is supported via the `/register` endpoint (RFC 7591).
 
+### Scope-Gated Tool Access
+
+OAuth tokens include scopes that determine which MCP tools are available:
+
+- **`memory` scope** — Core memory operations (search, save, timeline, etc.)
+- **`evolution` scope** — Self-improvement loop tools (briefing analysis, suggestions, approvals)
+- **`admin` scope** — (Reserved for future admin/maintenance tools)
+
+The MCP server implements two-layer scope enforcement:
+
+1. **Tool List Filtering** — `/tools/list` returns only tools visible to the client's scopes
+2. **Runtime Guards** — Individual tools check scope at invocation time (defense-in-depth)
+
+Unauthenticated requests (no Bearer token) receive HTTP 401 before reaching MCP. See [Tool Pool Assembly](./features/tool-pool-assembly.md) for detailed scope-gating architecture.
+
 ## Learnings Extraction
 
 open-brain extracts learnings (structured feedback patterns) from conversation histories in two modes:
