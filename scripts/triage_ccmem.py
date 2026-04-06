@@ -127,7 +127,6 @@ async def fetch_ccmem_candidates(
 async def run_triage_pass(
     conn: asyncpg.Connection,
     limit: int,
-    dry_run: bool,
     anthropic_api_key: str,
 ) -> tuple[dict[str, int], list]:
     """
@@ -136,7 +135,7 @@ async def run_triage_pass(
     Returns (action_counts, actions) so the caller can reuse actions for
     materialization without triggering a second LLM classification call.
     """
-    from open_brain.data_layer.interface import Memory, TriageParams
+    from open_brain.data_layer.interface import Memory
     from open_brain.data_layer.triage import triage_with_llm
 
     rows = await fetch_ccmem_candidates(conn, limit)
@@ -231,7 +230,7 @@ async def main() -> None:
     try:
         # Single LLM pass — reuse actions for materialization to avoid classification drift
         dry_run_counts, triage_actions = await run_triage_pass(
-            conn, limit=200, dry_run=True, anthropic_api_key=anthropic_api_key
+            conn, limit=200, anthropic_api_key=anthropic_api_key
         )
 
         total = sum(dry_run_counts.values())
@@ -250,6 +249,7 @@ async def main() -> None:
 
         if EXECUTE and non_keep_count > 0:
             # Reuse the already-classified actions — no second LLM call
+            from open_brain.data_layer.interface import Memory
             from open_brain.data_layer.materialize import execute_triage_actions
 
             non_keep = [a for a in triage_actions if a.action != "keep"]
@@ -259,7 +259,6 @@ async def main() -> None:
             memories_by_id = {}
             for row in rows:
                 r = dict(row)
-                from open_brain.data_layer.interface import Memory
                 memories_by_id[r["id"]] = Memory(
                     id=r["id"], index_id=r["index_id"], session_id=r.get("session_id"),
                     type=r.get("type"), title=r.get("title"), subtitle=r.get("subtitle"),
