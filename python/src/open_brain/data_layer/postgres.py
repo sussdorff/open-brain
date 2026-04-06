@@ -392,10 +392,9 @@ class PostgresDataLayer:
                 values.append(params.file_path)
                 param_idx += 1
             if params.metadata_filter:
-                for key, val in params.metadata_filter.items():
-                    conditions.append(f"m.metadata->>${param_idx} = ${param_idx + 1}")
-                    values.extend([key, val])
-                    param_idx += 2
+                conditions.append(f"m.metadata @> ${param_idx}::jsonb")
+                values.append(_json.dumps(params.metadata_filter))
+                param_idx += 1
             if params.author:
                 conditions.append(f"m.user_id = ${param_idx}")
                 values.append(params.author)
