@@ -315,3 +315,99 @@ class TestSearchParams:
         # obs_type is an alias for type in the TS code
         params = SearchParams(obs_type="decision")
         assert params.obs_type == "decision"
+
+
+# ─── metadata_filter pre-condition tests ──────────────────────────────────────
+
+class TestMetadataFilterPreCondition:
+    """
+    Verify that metadata_filter is passed as a pre-condition parameter to
+    hybrid_search() and NOT applied as a post-WHERE clause after the function
+    returns its top-60 candidates.
+    """
+
+    @pytest.fixture
+    def dl(self):
+        from open_brain.data_layer.postgres import PostgresDataLayer
+        return PostgresDataLayer()
+
+    @pytest.mark.asyncio
+    async def test_metadata_filter_passed_to_hybrid_search_not_post_where(self, dl):
+        """
+        When metadata_filter is provided, the SQL call to hybrid_search() must
+        include the filter as a parameter ($6), and the outer WHERE clause must
+        NOT contain metadata conditions.
+        """
+        import json
+
+        mock_conn = AsyncMock()
+        mock_conn.fetch.return_value = []
+        mock_pool = _make_mock_pool(mock_conn)
+
+        with (
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=mock_pool),
+            patch("open_brain.data_layer.postgres.embed_query_with_usage", new_callable=AsyncMock) as mock_embed,
+            patch("asyncio.create_task"),
+        ):
+            mock_embed.return_value = ([0.1] * 1024, 10)
+            await dl.search(SearchParams(
+                query="test query",
+                metadata_filter={"source": "claude"},
+            ))
+
+        # Verify conn.fetch was called (hybrid search path)
+        mock_conn.fetch.assert_called_once()
+        call_args = mock_conn.fetch.call_args
+
+        # First argument is the SQL string
+        sql: str = call_args[0][0]
+        # Positional values passed after the SQL string
+        values: tuple = call_args[0][1:]
+
+        # The hybrid_search call must include a 6th argument ($6) for metadata filter
+        assert "hybrid_search($1, $2::vector, $3, 60, $4, $5, $6)" in sql, (
+            "metadata_filter must be passed as $6 to hybrid_search(), not applied as a post-filter"
+        )
+
+        # The metadata JSONB value must appear in the positional values (as the 6th value, index 5)
+        expected_jsonb = json.dumps({"source": "claude"})
+        assert values[5] == expected_jsonb, (
+            f"Expected metadata JSONB '{expected_jsonb}' as the 6th positional value, got: {values[5]!r}"
+        )
+
+        # The outer WHERE clause must NOT contain metadata key/value conditions
+        assert "m.metadata->>" not in sql or "m.metadata @>" in sql, (
+            "metadata_filter must not appear as a post-WHERE condition (m.metadata->>...)"
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_metadata_filter_uses_null_for_hybrid_search(self, dl):
+        """
+        When no metadata_filter is provided, hybrid_search() is still called with
+        NULL as the 6th argument (always pass the parameter for consistency).
+        """
+        mock_conn = AsyncMock()
+        mock_conn.fetch.return_value = []
+        mock_pool = _make_mock_pool(mock_conn)
+
+        with (
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=mock_pool),
+            patch("open_brain.data_layer.postgres.embed_query_with_usage", new_callable=AsyncMock) as mock_embed,
+            patch("asyncio.create_task"),
+        ):
+            mock_embed.return_value = ([0.1] * 1024, 10)
+            await dl.search(SearchParams(query="test query"))
+
+        mock_conn.fetch.assert_called_once()
+        call_args = mock_conn.fetch.call_args
+        sql: str = call_args[0][0]
+        values: tuple = call_args[0][1:]
+
+        # Must still pass $6 (NULL) for consistency
+        assert "hybrid_search($1, $2::vector, $3, 60, $4, $5, $6)" in sql, (
+            "hybrid_search() must always receive $6 (NULL when no metadata_filter)"
+        )
+        # The 6th value (index 5) should be None
+        assert values[5] is None, (
+            f"Expected None as 6th positional value when no metadata_filter, got: {values[5]!r}"
+        )

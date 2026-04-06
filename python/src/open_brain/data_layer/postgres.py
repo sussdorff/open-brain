@@ -121,7 +121,8 @@ async def get_pool() -> asyncpg.Pool:
                     match_limit integer DEFAULT 20,
                     rrf_k integer DEFAULT 60,
                     p_index_id integer DEFAULT NULL,
-                    p_user_id text DEFAULT NULL
+                    p_user_id text DEFAULT NULL,
+                    p_metadata_filter jsonb DEFAULT NULL
                 )
                 RETURNS TABLE(id integer, title text, subtitle text, type text, score real, created_at timestamp with time zone)
                 LANGUAGE sql
@@ -136,6 +137,7 @@ async def get_pool() -> asyncpg.Pool:
                     WHERE m.search_vector @@ websearch_to_tsquery('english', query_text)
                       AND (p_index_id IS NULL OR m.index_id = p_index_id)
                       AND (p_user_id IS NULL OR m.user_id = p_user_id)
+                      AND (p_metadata_filter IS NULL OR m.metadata @> p_metadata_filter)
                     ORDER BY ts_rank_cd(m.search_vector, websearch_to_tsquery('english', query_text)) DESC
                     LIMIT match_limit * 2
                   ),
@@ -146,6 +148,7 @@ async def get_pool() -> asyncpg.Pool:
                     WHERE m.embedding IS NOT NULL
                       AND (p_index_id IS NULL OR m.index_id = p_index_id)
                       AND (p_user_id IS NULL OR m.user_id = p_user_id)
+                      AND (p_metadata_filter IS NULL OR m.metadata @> p_metadata_filter)
                     ORDER BY m.embedding <=> query_embedding
                     LIMIT match_limit * 2
                   ),
@@ -294,11 +297,16 @@ class PostgresDataLayer:
 
                     # Use hybrid_search for scoring, join memories for full rows + filters
                     # author (p_user_id) is pre-constrained inside hybrid_search as $5
+                    # metadata_filter is pre-constrained inside hybrid_search as $6 (NULL if not set)
+                    metadata_jsonb = (
+                        _json.dumps(params.metadata_filter) if params.metadata_filter else None
+                    )
                     post_conditions: list[str] = []
                     post_values: list[Any] = [
                         query, to_pg_vector(query_embedding), fetch_limit * 3, index_id, params.author,
+                        metadata_jsonb,
                     ]
-                    param_idx = 6  # after the 5 hybrid_search params ($1–$5)
+                    param_idx = 7  # after the 6 hybrid_search params ($1–$6)
 
                     if type_value:
                         post_conditions.append(f"m.type = ${param_idx}")
@@ -316,18 +324,13 @@ class PostgresDataLayer:
                         post_conditions.append(f"m.metadata->>'filePath' = ${param_idx}")
                         post_values.append(params.file_path)
                         param_idx += 1
-                    if params.metadata_filter:
-                        for key, val in params.metadata_filter.items():
-                            post_conditions.append(f"m.metadata->>${param_idx} = ${param_idx + 1}")
-                            post_values.extend([key, val])
-                            param_idx += 2
-                    # author is now pre-constrained inside hybrid_search ($5), not a post-filter
+                    # metadata_filter is now pre-constrained inside hybrid_search ($6), not a post-filter
 
                     post_where = f"AND {' AND '.join(post_conditions)}" if post_conditions else ""
 
                     rows = await conn.fetch(
                         f"""WITH scored AS (
-                            SELECT id, score FROM hybrid_search($1, $2::vector, $3, 60, $4, $5)
+                            SELECT id, score FROM hybrid_search($1, $2::vector, $3, 60, $4, $5, $6)
                         )
                         SELECT m.id, m.index_id, m.session_id, m.type, m.title, m.subtitle,
                                m.narrative, m.content, m.metadata, m.priority, m.stability,
