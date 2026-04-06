@@ -129,11 +129,12 @@ async def run_triage_pass(
     limit: int,
     dry_run: bool,
     anthropic_api_key: str,
-) -> dict[str, int]:
+) -> tuple[dict[str, int], list]:
     """
     Run one triage pass over ccmem: memories.
 
-    Returns action counts dict.
+    Returns (action_counts, actions) so the caller can reuse actions for
+    materialization without triggering a second LLM classification call.
     """
     from open_brain.data_layer.interface import Memory, TriageParams
     from open_brain.data_layer.triage import triage_with_llm
@@ -141,7 +142,7 @@ async def run_triage_pass(
     rows = await fetch_ccmem_candidates(conn, limit)
     if not rows:
         print("No ccmem: memories found (all may already be processed).")
-        return {}
+        return {}, []
 
     candidates: list[Memory] = []
     for row in rows:
@@ -198,35 +199,7 @@ async def run_triage_pass(
     for act, count in sorted(action_counts.items(), key=lambda x: -x[1]):
         print(f"  {act:12s}: {count}")
 
-    if not dry_run:
-        # Materialize non-keep actions using the postgres module
-        from open_brain.data_layer.materialize import execute_triage_actions
-
-        non_keep = [a for a in actions if a.action != "keep"]
-        if non_keep:
-            print(f"\nMaterializing {len(non_keep)} non-keep actions...")
-            memories_by_id = {m.id: m for m in candidates}
-
-            async def _archive_fn(memory_id: int, priority: float) -> None:
-                await conn.execute(
-                    "UPDATE memories SET priority = $1, updated_at = now() WHERE id = $2",
-                    priority,
-                    memory_id,
-                )
-
-            results = await execute_triage_actions(
-                non_keep, memories_by_id, _archive_fn
-            )
-            succeeded = sum(1 for r in results if r.success)
-            failed = len(results) - succeeded
-            print(f"Materialized {succeeded}/{len(results)} actions" + (f" ({failed} failed)" if failed else ""))
-            for r in results:
-                if not r.success:
-                    print(f"  [FAIL] memory_id={r.memory_id} action={r.action}: {r.detail}")
-        else:
-            print("\nNo non-keep actions to materialize.")
-
-    return action_counts
+    return action_counts, actions
 
 
 # ---------------------------------------------------------------------------
@@ -256,30 +229,62 @@ async def main() -> None:
     conn = await asyncpg.connect(database_url)
     await _init_conn(conn)
     try:
-        dry_run_counts = await run_triage_pass(
+        # Single LLM pass — reuse actions for materialization to avoid classification drift
+        dry_run_counts, triage_actions = await run_triage_pass(
             conn, limit=200, dry_run=True, anthropic_api_key=anthropic_api_key
         )
 
         total = sum(dry_run_counts.values())
         keep = dry_run_counts.get("keep", 0)
-        non_keep = total - keep
+        non_keep_count = total - keep
 
         print(f"\n{'=' * 60}")
         print("DRY RUN SUMMARY")
         print("=" * 60)
         print(f"Total analyzed  : {total}")
         print(f"Would keep      : {keep}")
-        print(f"Non-keep actions: {non_keep}")
+        print(f"Non-keep actions: {non_keep_count}")
         for act, count in sorted(dry_run_counts.items(), key=lambda x: -x[1]):
             if act != "keep":
                 print(f"  {act:12s}: {count}")
 
-        if EXECUTE and non_keep > 0:
-            print(f"\nRe-running with --execute to materialize {non_keep} actions...")
-            await run_triage_pass(
-                conn, limit=200, dry_run=False, anthropic_api_key=anthropic_api_key
-            )
-        elif EXECUTE and non_keep == 0:
+        if EXECUTE and non_keep_count > 0:
+            # Reuse the already-classified actions — no second LLM call
+            from open_brain.data_layer.materialize import execute_triage_actions
+
+            non_keep = [a for a in triage_actions if a.action != "keep"]
+            print(f"\nMaterializing {len(non_keep)} non-keep actions (reusing dry-run classifications)...")
+
+            rows = await fetch_ccmem_candidates(conn, 200)
+            memories_by_id = {}
+            for row in rows:
+                r = dict(row)
+                from open_brain.data_layer.interface import Memory
+                memories_by_id[r["id"]] = Memory(
+                    id=r["id"], index_id=r["index_id"], session_id=r.get("session_id"),
+                    type=r.get("type"), title=r.get("title"), subtitle=r.get("subtitle"),
+                    narrative=r.get("narrative"), content=r.get("content") or "",
+                    metadata=r.get("metadata") or {}, priority=r.get("priority") or 0.5,
+                    stability=r.get("stability") or "stable", access_count=r.get("access_count") or 0,
+                    last_accessed_at=r.get("last_accessed_at"),
+                    created_at=str(r.get("created_at", "")), updated_at=str(r.get("updated_at", "")),
+                    user_id=r.get("user_id"),
+                )
+
+            async def _archive_fn(memory_id: int, priority: float) -> None:
+                await conn.execute(
+                    "UPDATE memories SET priority = $1, updated_at = now() WHERE id = $2",
+                    priority, memory_id,
+                )
+
+            results = await execute_triage_actions(non_keep, memories_by_id, _archive_fn)
+            succeeded = sum(1 for r in results if r.success)
+            failed = len(results) - succeeded
+            print(f"Materialized {succeeded}/{len(results)} actions" + (f" ({failed} failed)" if failed else ""))
+            for r in results:
+                if not r.success:
+                    print(f"  [FAIL] memory_id={r.memory_id} action={r.action}: {r.detail}")
+        elif EXECUTE and non_keep_count == 0:
             print("\nNothing to materialize (all actions are 'keep').")
         else:
             print("\nRun with --execute to materialize non-keep actions.")
