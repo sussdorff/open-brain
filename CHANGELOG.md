@@ -3,6 +3,18 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Bug Fixes
+
+- *(open-brain-2jg)* Metadata_filter als Pre-Condition in hybrid_search SQL-Funktion
+- *(open-brain-2jg)* Tighten metadata_filter test assertion — remove tautological or-clause
+- *(open-brain-2jg)* Browse path metadata_filter uses @> containment like hybrid path
+
+### Miscellaneous
+
+- Bump version to 2026.04.17
+
+## [2026.04.17] - 2026-04-06
+
 ### Documentation
 
 - Add url-based token auth feature documentation
@@ -14,6 +26,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous
 
 - Bump version to 2026.04.16
+- Update changelog
 
 ## [2026.04.16] - 2026-04-06
 
