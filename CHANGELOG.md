@@ -5,7 +5,28 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(open-brain-0rd)* Address review findings iteration 1
+- *(open-brain-0rd)* Address cmux review findings — server.py scope doc + no second LLM call in execute mode
+- *(open-brain-0rd)* Remove dead dry_run param, unused TriageParams import, move Memory import out of loop
+
+### Features
+
+- *(open-brain-0rd)* Green — add session_ref: scope to triage_memories
+- *(open-brain-0rd)* Add triage_ccmem.py script for session_ref:ccmem: triage
+
+### Miscellaneous
+
+- Bump version to 2026.04.19
+
+## [2026.04.19] - 2026-04-06
+
+### Bug Fixes
+
 - *(scripts)* Address review findings in migrate_claude_memories.py
+
+### Miscellaneous
+
+- Update changelog
 
 ## [2026.04.18] - 2026-04-06
 
