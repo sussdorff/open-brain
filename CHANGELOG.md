@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(open-brain-qba)* Address review findings iteration 1
+- *(open-brain-qba)* Address review findings iteration 2
+- *(open-brain-qba)* Address review panel findings — fetchval side_effect, server_start_time None-safe, log level consistency, docs GET/POST
+- *(open-brain-qba)* Address review panel findings iter 2 — docs log level, shared mock pool, rename test class, concurrency test
+
+### Documentation
+
+- Add health-and-diagnostics feature documentation for open-brain-qba
+
+### Features
+
+- *(open-brain-qba)* Green — enhanced /health + doctor MCP tool
+
+### Miscellaneous
+
+- Bump version to 2026.04.10
+
+### Testing
+
+- *(open-brain-qba)* Red — health 503, doctor tool, version/uptime tests
+
+## [2026.04.10] - 2026-04-03
+
+### Bug Fixes
+
 - *(open-brain-9h1)* Green — duplicate save skips enrichment + cross-project uses index_id
 - *(open-brain-9h1)* Trust boundary docstring, parameterized dedup SQL, remove redundant import
 - *(open-brain-9h1)* Address review findings iteration 1
@@ -13,6 +38,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous
 
 - Bump version to 2026.04.9
+- Update changelog
 - Update changelog
 
 ### Testing
