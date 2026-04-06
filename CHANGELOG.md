@@ -3,6 +3,23 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Documentation
+
+- Rewrite installation guide for pre-built image + URL token auth
+- *(deploy)* Update compose comment to reflect CI image workflow
+
+### Miscellaneous
+
+- Bump version to 2026.04.15
+- *(deploy)* Switch from op run to plain .env file for secrets
+- *(deploy)* Pull pre-built image from GHCR instead of building on server
+
+### Security
+
+- Harden codebase for public GHCR image
+
+## [2026.04.15] - 2026-04-06
+
 ### Bug Fixes
 
 - *(open-brain-pg4)* Address review findings iteration 1
@@ -13,6 +30,10 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - *(open-brain-pg4)* Green — URL-based token auth (AK1-AK7)
+
+### Miscellaneous
+
+- Update changelog
 
 ## [2026.04.14] - 2026-04-06
 
