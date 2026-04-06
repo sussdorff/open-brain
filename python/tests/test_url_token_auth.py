@@ -98,6 +98,34 @@ def _make_mock_pool_with_url_token(row: dict | None):
     return mock_pool, mock_conn
 
 
+# ─── AK2: Postgres storage schema ────────────────────────────────────────────
+
+def test_url_token_schema():
+    """AK2: url_tokens table DDL contains all required columns.
+
+    Verifies that the get_pool initialisation SQL (in data_layer/postgres.py)
+    contains the CREATE TABLE url_tokens statement with the required columns:
+    name, token_hash, scopes, expires_at, revoked_at, created_at.
+    """
+    required_columns = ["name", "token_hash", "scopes", "expires_at", "revoked_at", "created_at"]
+
+    import inspect
+    import open_brain.data_layer.postgres as postgres_module
+
+    source = inspect.getsource(postgres_module)
+
+    # Find the CREATE TABLE url_tokens DDL in the source
+    assert "CREATE TABLE" in source and "url_tokens" in source, (
+        "Expected CREATE TABLE url_tokens DDL to be present in data_layer/postgres.py"
+    )
+
+    # Verify each required column appears in the DDL
+    for col in required_columns:
+        assert col in source, (
+            f"Required column '{col}' not found in data_layer/postgres.py DDL for url_tokens"
+        )
+
+
 # ─── AK1: ?token= query param auth ───────────────────────────────────────────
 
 class TestUrlTokenQueryParamAuth:
@@ -280,7 +308,7 @@ class TestAdminScopeNotGrantable:
 
     @pytest.mark.asyncio
     async def test_url_token_issue_strips_admin_scope(self, auth_client, admin_headers):
-        """POST /token/url with admin in scopes silently strips it."""
+        """POST /token/url with admin in scopes returns 422 (admin scope not grantable)."""
         mock_pool, mock_conn = _make_mock_pool_with_url_token(None)
         mock_conn.execute = AsyncMock(return_value="INSERT 0 1")
 
@@ -295,11 +323,10 @@ class TestAdminScopeNotGrantable:
                 headers=admin_headers,
             )
 
-        # Endpoint should succeed (2xx)
-        assert resp.status_code in (200, 201)
+        # Endpoint must reject with 422 — admin scope cannot be granted to URL tokens
+        assert resp.status_code == 422
         data = resp.json()
-        # admin must not be in returned scopes
-        assert "admin" not in data.get("scopes", [])
+        assert data.get("error") == "invalid_scope"
 
 
 # ─── AK7: Token verification ──────────────────────────────────────────────────

@@ -801,7 +801,7 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
                 pool = await get_pool()
                 row = await pool.fetchrow(
                     """
-                    SELECT name, scopes, expires_at, revoked_at
+                    SELECT name, scopes, expires_at
                     FROM url_tokens
                     WHERE token_hash = $1
                       AND revoked_at IS NULL
@@ -1041,10 +1041,19 @@ async def issue_url_token(request: Request) -> JSONResponse:
     body = await request.json()
     name = str(body.get("name", "")).strip()
     if not name:
-        raise HTTPException(status_code=400, detail="name is required")
+        return JSONResponse(
+            {"error": "invalid_request", "error_description": "name is required"},
+            status_code=400,
+        )
 
     requested_scopes: list[str] = [s for s in body.get("scopes", []) if isinstance(s, str)]
-    # Strip admin scope — never grantable to URL tokens (AK6)
+    # Reject if admin scope is explicitly requested — never grantable to URL tokens (AK6)
+    if "admin" in requested_scopes:
+        return JSONResponse(
+            {"error": "invalid_scope", "error_description": "admin scope cannot be granted to URL tokens"},
+            status_code=422,
+        )
+    # Strip admin scope as defense-in-depth — never grantable to URL tokens (AK6)
     safe_scopes = [s for s in requested_scopes if s != "admin"]
 
     # Validate scope names against known valid scopes
@@ -1063,7 +1072,10 @@ async def issue_url_token(request: Request) -> JSONResponse:
             status_code=400,
         )
     if expires_in_days <= 0:
-        raise HTTPException(status_code=400, detail="expires_in_days must be positive")
+        return JSONResponse(
+            {"error": "invalid_request", "error_description": "expires_in_days must be positive"},
+            status_code=400,
+        )
     if expires_in_days > 3650:
         return JSONResponse(
             {"error": "invalid_request", "error_description": "expires_in_days cannot exceed 3650 (10 years)"},
