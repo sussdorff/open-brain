@@ -668,14 +668,14 @@ class TestSearchMetadataFilter:
             )
 
         assert len(result.results) == 1
-        # Verify the fetch call included a metadata filter condition
+        # Verify the fetch call used @> containment (not per-key ->> text equality)
         fetch_call = conn.fetch.call_args
         fetch_sql = fetch_call[0][0]
-        assert "metadata->>" in fetch_sql
-        # The key "status" and value "open" should appear in the args
+        assert "metadata @>" in fetch_sql
+        assert "metadata->>" not in fetch_sql
+        # The JSONB value should appear as a single serialized arg
         fetch_args = fetch_call[0]
-        assert "status" in fetch_args
-        assert "open" in fetch_args
+        assert any('"status"' in str(a) and '"open"' in str(a) for a in fetch_args)
 
     @pytest.mark.asyncio
     async def test_search_metadata_filter_multiple_keys(self, dl):
@@ -699,8 +699,14 @@ class TestSearchMetadataFilter:
 
         fetch_call = conn.fetch.call_args
         fetch_sql = fetch_call[0][0]
-        # Two metadata conditions — metadata->> appears twice
-        assert fetch_sql.count("metadata->>") == 2
+        # Single @> containment condition for all keys (not one ->> per key)
+        assert fetch_sql.count("metadata @>") == 1
+        assert "metadata->>" not in fetch_sql
+        # Both keys and values must be serialized into one JSONB arg
+        fetch_args = fetch_call[0]
+        assert any(
+            '"status"' in str(a) and '"source"' in str(a) for a in fetch_args
+        )
 
 
 HASH_A = hashlib.sha256("Python prefers explicit over implicit".encode()).hexdigest()
