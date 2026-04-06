@@ -22,7 +22,16 @@ op run --env-file=.env.tpl -- docker compose -f docker-compose.service.yml up --
 
 echo "Waiting for startup..."
 sleep 5
-curl -sf http://localhost:8091/health && echo "" || echo "WARNING: health check failed"
+curl -sf http://localhost:8091/health && echo "" || { echo "ERROR: health check failed — deploy aborted"; exit 1; }
+
+echo "Running post-deploy smoke checks..."
+# Verify OAuth metadata endpoint is reachable (unauthenticated, should return 200)
+curl -sf http://localhost:8091/.well-known/oauth-authorization-server > /dev/null || { echo "ERROR: smoke check failed — OAuth metadata endpoint unreachable"; exit 1; }
+echo "  OK: OAuth metadata endpoint"
+# Verify OAuth protected resource endpoint is reachable (unauthenticated, should return 200)
+curl -sf http://localhost:8091/.well-known/oauth-protected-resource > /dev/null || { echo "ERROR: smoke check failed — OAuth protected resource endpoint unreachable"; exit 1; }
+echo "  OK: OAuth protected resource endpoint"
+echo "All smoke checks passed."
 
 echo ""
 echo "Deploy complete."
