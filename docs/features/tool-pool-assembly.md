@@ -239,4 +239,4 @@ Each HTTP request gets its own `_current_scopes` context value (ContextVar isola
 **Known Limitations:**
 
 - Tools in `_EVOLUTION_TOOLS` frozenset are hardcoded; adding/removing scopes requires code change + deploy
-- No scope-aware error messages (401 vs. 403) — all auth failures return 401 from middleware
+- Two distinct error surfaces: unauthenticated requests return HTTP 401 from `BearerAuthMiddleware` (before MCP is reached); insufficient-scope calls return a `ScopeDeniedError` within the MCP tool layer (surfaced as a tool error, not an HTTP 403)

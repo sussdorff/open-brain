@@ -123,17 +123,25 @@ async def _extract_entities(text: str) -> dict:
         return {}
 
 
+class ScopeDeniedError(PermissionError):
+    """Raised when the current OAuth caller lacks a required scope.
+
+    Subclasses PermissionError for broad except compatibility, but carries
+    a clearer semantic than the stdlib PermissionError (which is filesystem-oriented).
+    """
+
+
 def _require_scope(scope: str) -> None:
-    """Raise PermissionError if the current caller lacks the required OAuth scope.
+    """Raise ScopeDeniedError if the current caller lacks the required OAuth scope.
 
     Args:
         scope: The scope name that must be present in _current_scopes.
 
     Raises:
-        PermissionError: If the required scope is not in the current request's scopes.
+        ScopeDeniedError: If the required scope is not in the current request's scopes.
     """
     if scope not in _current_scopes.get():
-        raise PermissionError(
+        raise ScopeDeniedError(
             f"Scope '{scope}' required"
         )
 
@@ -718,6 +726,9 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
         api_key = request.headers.get("x-api-key", "")
         if api_key:
             if api_key in self._get_api_keys():
+                # API keys are issued to internal plugin hooks (admin-equivalent).
+                # Grant all scopes so plugin callers can invoke any tool, including
+                # evolution tools, without needing an OAuth flow.
                 scopes_token = _current_scopes.set(("memory", "evolution", "admin"))
                 try:
                     return await call_next(request)
