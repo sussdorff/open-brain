@@ -9,8 +9,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from open_brain.data_layer.interface import TriageParams
-
 from open_brain.data_layer.interface import (
     MaterializeParams,
     Memory,

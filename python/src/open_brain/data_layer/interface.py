@@ -289,7 +289,7 @@ class DeleteResult:
 class TriageParams:
     """Parameters for memory triage."""
 
-    scope: str | None = None  # "recent" | "project:<name>" | "type:<name>" | None
+    scope: str | None = None  # "recent" | "project:<name>" | "type:<name>" | "session_ref:<prefix>" | None
     limit: int | None = None
     dry_run: bool = False
 

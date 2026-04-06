@@ -14,6 +14,7 @@ With --execute, it re-runs with dry_run=False to materialize non-keep actions.
 """
 
 import asyncio
+import json as _json
 import os
 import sys
 from pathlib import Path
@@ -83,43 +84,114 @@ if str(_PYTHON_SRC) not in sys.path:
 
 
 # ---------------------------------------------------------------------------
-# Main
+# DB helpers
+# ---------------------------------------------------------------------------
+
+_LIFECYCLE_FILTER = (
+    "AND (metadata->>'status' IS NULL "
+    "OR metadata->>'status' NOT IN ('materialized', 'discarded'))"
+)
+
+
+async def _init_conn(conn: asyncpg.Connection) -> None:
+    """Register JSONB codec so asyncpg returns dicts instead of raw JSON strings."""
+    await conn.set_type_codec(
+        "jsonb",
+        encoder=_json.dumps,
+        decoder=_json.loads,
+        schema="pg_catalog",
+    )
+
+
+def _row_to_dict(row: asyncpg.Record) -> dict:
+    """Convert asyncpg record to plain dict."""
+    return dict(row)
+
+
+async def fetch_ccmem_candidates(
+    conn: asyncpg.Connection, limit: int
+) -> list[asyncpg.Record]:
+    """Fetch all ccmem: memories not yet processed."""
+    return await conn.fetch(
+        f"SELECT * FROM memories WHERE session_ref LIKE $1 {_LIFECYCLE_FILTER} ORDER BY created_at DESC LIMIT $2",
+        "ccmem:%",
+        limit,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Triage + summarize
 # ---------------------------------------------------------------------------
 
 
-async def run_triage(database_url: str, dry_run: bool) -> dict[str, int]:
-    """Run triage over all ccmem: memories. Returns action count dict."""
-    # Patch the config so PostgresDataLayer connects to the production DB
-    os.environ["DATABASE_URL"] = database_url
+async def run_triage_pass(
+    conn: asyncpg.Connection,
+    limit: int,
+    dry_run: bool,
+    anthropic_api_key: str,
+) -> dict[str, int]:
+    """
+    Run one triage pass over ccmem: memories.
 
-    # Import after path setup and env patching
-    from open_brain.data_layer.postgres import PostgresDataLayer
-    from open_brain.data_layer.interface import TriageParams, MaterializeParams
-    from open_brain.data_layer import postgres as pg_mod
+    Returns action counts dict.
+    """
+    from open_brain.data_layer.interface import Memory, TriageParams
+    from open_brain.data_layer.triage import triage_with_llm
 
-    # Reset the shared pool so it picks up the new DATABASE_URL
-    pg_mod._pool = None
+    rows = await fetch_ccmem_candidates(conn, limit)
+    if not rows:
+        print("No ccmem: memories found (all may already be processed).")
+        return {}
 
-    dl = PostgresDataLayer()
-    params = TriageParams(scope="session_ref:ccmem:", limit=200, dry_run=dry_run)
+    candidates: list[Memory] = []
+    for row in rows:
+        r = dict(row)
+        candidates.append(
+            Memory(
+                id=r["id"],
+                index_id=r["index_id"],
+                session_id=r.get("session_id"),
+                type=r.get("type"),
+                title=r.get("title"),
+                subtitle=r.get("subtitle"),
+                narrative=r.get("narrative"),
+                content=r.get("content") or "",
+                metadata=r.get("metadata") or {},
+                priority=r.get("priority") or 0.5,
+                stability=r.get("stability") or "stable",
+                access_count=r.get("access_count") or 0,
+                last_accessed_at=r.get("last_accessed_at"),
+                created_at=str(r.get("created_at", "")),
+                updated_at=str(r.get("updated_at", "")),
+                user_id=r.get("user_id"),
+            )
+        )
 
-    print(f"\n{'=' * 60}")
-    if dry_run:
-        print("TRIAGE DRY RUN — no changes will be made")
-    else:
-        print("TRIAGE EXECUTE — materializing non-keep actions")
-    print("=" * 60)
-    print(f"Scope  : {params.scope}")
-    print(f"Limit  : {params.limit}")
-    print(f"Dry run: {dry_run}")
+    print(f"\nFetched {len(candidates)} ccmem: memories for triage")
 
-    result = await dl.triage_memories(params)
+    # Provide minimal env vars so Config validates (only ANTHROPIC_API_KEY matters for triage)
+    _dummy_env = {
+        "DATABASE_URL": os.environ.get("DATABASE_URL", "postgresql://localhost/dummy"),
+        "MCP_SERVER_URL": os.environ.get("MCP_SERVER_URL", "http://localhost:8091"),
+        "AUTH_USER": os.environ.get("AUTH_USER", "admin"),
+        "AUTH_PASSWORD": os.environ.get("AUTH_PASSWORD", "dummypassword123"),
+        "JWT_SECRET": os.environ.get("JWT_SECRET", "dummy-jwt-secret-that-is-long-enough-32chars"),
+        "VOYAGE_API_KEY": os.environ.get("VOYAGE_API_KEY", "dummy"),
+    }
+    for k, v in _dummy_env.items():
+        if k not in os.environ:
+            os.environ[k] = v
+    if anthropic_api_key:
+        os.environ["ANTHROPIC_API_KEY"] = anthropic_api_key
 
-    print(f"\nAnalyzed : {result.analyzed} memories")
-    print(f"Summary  : {result.summary}")
+    # Reset cached config so it picks up new env
+    import open_brain.config as _cfg_mod
+    _cfg_mod._config = None
+
+    actions = await triage_with_llm(candidates)
 
     action_counts: dict[str, int] = {}
-    for action in result.actions:
+    for action in actions:
         action_counts[action.action] = action_counts.get(action.action, 0) + 1
 
     print("\nAction breakdown:")
@@ -127,59 +199,93 @@ async def run_triage(database_url: str, dry_run: bool) -> dict[str, int]:
         print(f"  {act:12s}: {count}")
 
     if not dry_run:
-        non_keep = [a for a in result.actions if a.action != "keep"]
+        # Materialize non-keep actions using the postgres module
+        from open_brain.data_layer.materialize import execute_triage_actions
+
+        non_keep = [a for a in actions if a.action != "keep"]
         if non_keep:
             print(f"\nMaterializing {len(non_keep)} non-keep actions...")
-            mat_result = await dl.materialize_memories(
-                MaterializeParams(triage_actions=non_keep, dry_run=False)
+            memories_by_id = {m.id: m for m in candidates}
+
+            async def _archive_fn(memory_id: int, priority: float) -> None:
+                await conn.execute(
+                    "UPDATE memories SET priority = $1, updated_at = now() WHERE id = $2",
+                    priority,
+                    memory_id,
+                )
+
+            results = await execute_triage_actions(
+                non_keep, memories_by_id, _archive_fn
             )
-            print(f"Materialization: {mat_result.summary}")
-            for r in mat_result.results:
-                status = "OK" if r.success else "FAIL"
-                print(f"  [{status}] memory_id={r.memory_id} action={r.action}: {r.detail}")
+            succeeded = sum(1 for r in results if r.success)
+            failed = len(results) - succeeded
+            print(f"Materialized {succeeded}/{len(results)} actions" + (f" ({failed} failed)" if failed else ""))
+            for r in results:
+                if not r.success:
+                    print(f"  [FAIL] memory_id={r.memory_id} action={r.action}: {r.detail}")
         else:
             print("\nNo non-keep actions to materialize.")
 
-    # Close the pool
-    if pg_mod._pool is not None:
-        await pg_mod._pool.close()
-        pg_mod._pool = None
-
     return action_counts
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 
 async def main() -> None:
     _config = _load_config()
     database_url = _cfg(_config, "database.url", "DATABASE_URL")
+    anthropic_api_key = _cfg(_config, "anthropic.api_key", "ANTHROPIC_API_KEY")
 
     if not database_url:
         print("Error: DATABASE_URL must be set (via config or DATABASE_URL env var)")
         sys.exit(1)
 
-    # Always run dry-run first
-    dry_run_counts = await run_triage(database_url, dry_run=True)
-
-    total = sum(dry_run_counts.values())
-    keep = dry_run_counts.get("keep", 0)
-    non_keep = total - keep
-
     print(f"\n{'=' * 60}")
-    print("DRY RUN SUMMARY")
-    print("=" * 60)
-    print(f"Total analyzed : {total}")
-    print(f"Would keep     : {keep}")
-    print(f"Non-keep actions: {non_keep}")
-    for act, count in sorted(dry_run_counts.items(), key=lambda x: -x[1]):
-        if act != "keep":
-            print(f"  {act:12s}: {count}")
-
-    if EXECUTE and non_keep > 0:
-        print(f"\nRe-running with --execute to materialize {non_keep} actions...")
-        await run_triage(database_url, dry_run=False)
-    elif EXECUTE and non_keep == 0:
-        print("\nNothing to materialize (all actions are 'keep').")
+    if EXECUTE:
+        print("TRIAGE EXECUTE — will materialize non-keep actions after dry-run")
     else:
-        print("\nRun with --execute to materialize non-keep actions.")
+        print("TRIAGE DRY RUN — no changes will be made")
+    print("=" * 60)
+    print("Scope  : session_ref:ccmem:")
+    print("Limit  : 200")
+    print(f"Mode   : {'execute' if EXECUTE else 'dry-run'}")
+
+    conn = await asyncpg.connect(database_url)
+    await _init_conn(conn)
+    try:
+        dry_run_counts = await run_triage_pass(
+            conn, limit=200, dry_run=True, anthropic_api_key=anthropic_api_key
+        )
+
+        total = sum(dry_run_counts.values())
+        keep = dry_run_counts.get("keep", 0)
+        non_keep = total - keep
+
+        print(f"\n{'=' * 60}")
+        print("DRY RUN SUMMARY")
+        print("=" * 60)
+        print(f"Total analyzed  : {total}")
+        print(f"Would keep      : {keep}")
+        print(f"Non-keep actions: {non_keep}")
+        for act, count in sorted(dry_run_counts.items(), key=lambda x: -x[1]):
+            if act != "keep":
+                print(f"  {act:12s}: {count}")
+
+        if EXECUTE and non_keep > 0:
+            print(f"\nRe-running with --execute to materialize {non_keep} actions...")
+            await run_triage_pass(
+                conn, limit=200, dry_run=False, anthropic_api_key=anthropic_api_key
+            )
+        elif EXECUTE and non_keep == 0:
+            print("\nNothing to materialize (all actions are 'keep').")
+        else:
+            print("\nRun with --execute to materialize non-keep actions.")
+
+    finally:
+        await conn.close()
 
 
 if __name__ == "__main__":
