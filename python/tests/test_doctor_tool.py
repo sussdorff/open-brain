@@ -162,15 +162,10 @@ class TestDoctorTool:
         assert data["last_ingestion_at"] is None
 
 
-@pytest.mark.integration
 class TestDoctorToolIntegration:
     @pytest.mark.asyncio
     async def test_doctor_via_server_routing(self):
         """doctor tool must be reachable through the actual FastAPI app routing layer."""
-        import httpx
-
-        from open_brain.server import app
-
         mock_pool = _make_mock_pool(memory_count=5)
         mock_http_client = _make_mock_http_client(status_code=200)
 

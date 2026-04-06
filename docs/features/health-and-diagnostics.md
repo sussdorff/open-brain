@@ -142,7 +142,7 @@ Both endpoints use a pair of helper functions:
 
 ### Routes & MCP Tool
 
-- **HTTP endpoint**: POST /health (no authentication required; health checks bypass auth)
+- **HTTP endpoint**: GET /health (no authentication required; health checks bypass auth)
 - **MCP tool**: `doctor()` with no parameters; exported as `@mcp.tool()` to all MCP clients
 
 ### Relevant Code Locations

@@ -122,7 +122,7 @@ mcp = FastMCP(
 )
 
 # Server start time — set in lifespan, used for uptime calculation
-_server_start_time: datetime = datetime.now(UTC)
+_server_start_time: datetime | None = None
 
 # Shared data layer instance
 _dl: PostgresDataLayer | None = None
@@ -460,7 +460,7 @@ async def _check_voyage_api_status() -> str:
             )
         return "ok" if resp.status_code == 200 else "degraded"
     except Exception:
-        logger.debug("Health check: Voyage API unreachable")
+        logger.warning("Health check: Voyage API unreachable", exc_info=True)
         return "unreachable"
 
 
@@ -481,7 +481,7 @@ async def doctor() -> str:
     except importlib.metadata.PackageNotFoundError:
         server_version = "unknown"
 
-    uptime_seconds = (datetime.now(UTC) - _server_start_time).total_seconds()
+    uptime_seconds = (datetime.now(UTC) - _server_start_time).total_seconds() if _server_start_time else None
 
     return json.dumps(
         {
@@ -491,7 +491,7 @@ async def doctor() -> str:
             "memory_count": db_info["memory_count"],
             "last_ingestion_at": db_info["last_ingestion_at"],
             "server_version": server_version,
-            "uptime_seconds": round(uptime_seconds, 3),
+            "uptime_seconds": round(uptime_seconds, 3) if uptime_seconds is not None else None,
         }
     )
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -51,6 +52,7 @@ class TestDoctorIncludesVersion:
         with (
             patch("open_brain.server.get_pool", side_effect=_get_pool),
             patch("open_brain.server.httpx") as mock_httpx,
+            patch("open_brain.server._server_start_time", datetime.now(UTC)),
         ):
             mock_httpx.AsyncClient.return_value = mock_http_client
             from open_brain.server import doctor

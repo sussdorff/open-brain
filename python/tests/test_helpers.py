@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 def make_mock_pool(memory_count: int = 10, last_ingestion=None):
     """Create a properly structured mock asyncpg pool."""
     mock_conn = AsyncMock()
-    mock_conn.fetchval = AsyncMock(return_value=memory_count)
+    mock_conn.fetchval = AsyncMock(side_effect=[1, memory_count])
     mock_conn.fetchrow = AsyncMock(return_value={"max": last_ingestion})
 
     mock_pool = MagicMock()
