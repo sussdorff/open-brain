@@ -3,8 +3,17 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Miscellaneous
+
+- Bump version to 2026.04.12
+
+## [2026.04.12] - 2026-04-06
+
 ### Bug Fixes
 
+- *(open-brain-9o6)* Address review findings iteration 1
+- *(open-brain-9o6)* Address review findings iteration 2 — patch asyncio.create_task in test_search
+- *(open-brain-9o6)* Address review panel findings iter 1 — BIGSERIAL, logged_at index, rate-limit after guard, MAX=0 disables, race comment
 - *(open-brain-m4t)* Address review findings iteration 1
 - *(open-brain-m4t)* Address review findings iteration 2 — tuple types and precise exception in tests
 - *(open-brain-m4t)* Address review panel findings — ScopeDeniedError, API key comment, remove redundant test, scope check assertion, docs error surface
@@ -12,14 +21,21 @@ All notable changes to this project will be documented in this file.
 
 ### Documentation
 
+- Update feature documentation for open-brain-9o6
 - Update feature documentation for open-brain-m4t — scope-gated tool pool
 
 ### Features
 
+- *(open-brain-9o6)* Green — token budget: embed_with_usage, stats embedding metrics, daily guard, rate limit
 - *(open-brain-m4t)* Green — scope-gated MCP tool list via ScopedFastMCP + ContextVar
+
+### Miscellaneous
+
+- Update changelog
 
 ### Testing
 
+- *(open-brain-9o6)* Red — token budget: embed_with_usage, stats embedding metrics, daily guard, rate limit
 - *(open-brain-m4t)* Red — scope-gated tool list and runtime enforcement
 
 ## [2026.04.11] - 2026-04-06

@@ -182,9 +182,10 @@ class TestPostgresDataLayerSearch:
 
         with (
             patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=mock_pool),
-            patch("open_brain.data_layer.postgres.embed_query", new_callable=AsyncMock) as mock_embed,
+            patch("open_brain.data_layer.postgres.embed_query_with_usage", new_callable=AsyncMock) as mock_embed,
+            patch("asyncio.create_task"),
         ):
-            mock_embed.return_value = [0.1] * 1024
+            mock_embed.return_value = ([0.1] * 1024, 10)
             await dl.search(SearchParams(query="test query"))
             mock_embed.assert_called_once_with("test query")
 
@@ -197,7 +198,7 @@ class TestPostgresDataLayerSearch:
 
         with (
             patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=mock_pool),
-            patch("open_brain.data_layer.postgres.embed_query", side_effect=RuntimeError("API down")),
+            patch("open_brain.data_layer.postgres.embed_query_with_usage", side_effect=RuntimeError("API down")),
         ):
             # Should not raise; falls back to FTS
             result = await dl.search(SearchParams(query="test"))
@@ -218,6 +219,7 @@ class TestPostgresDataLayerStats:
             {"count": 5},     # sessions
             {"count": 100},   # relationships
             {"size": 10 * 1024 * 1024},  # db size 10MB
+            {"count": 0, "total_tokens": 0},  # embedding_token_log today
         ]
         mock_pool = _make_mock_pool(mock_conn)
 

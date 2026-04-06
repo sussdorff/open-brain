@@ -7,6 +7,7 @@ import importlib.metadata
 import json
 import logging
 import time
+from collections import deque
 from dataclasses import asdict
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
@@ -55,6 +56,12 @@ logger = logging.getLogger(__name__)
 
 # ContextVar to track the authenticated user ID for the current request
 _current_user_id: ContextVar[str | None] = ContextVar("current_user_id", default=None)
+
+# Rate limiter for save_memory: sliding window of timestamps (max 10 per 60 seconds)
+# Global rate limit — intentionally not per-user for simplicity. One throttle point for all users.
+_save_timestamps: deque[float] = deque()
+_RATE_LIMIT_MAX = 10
+_RATE_LIMIT_WINDOW = 60
 
 # ContextVar to track the OAuth scopes for the current request (Bearer token auth only)
 _current_scopes: ContextVar[tuple[str, ...]] = ContextVar("current_scopes", default=())
@@ -337,6 +344,39 @@ async def save_memory(
     """Save a new memory entry."""
     if is_test:
         return json.dumps({"id": -1, "message": "Test artifact — not persisted"})
+
+    # ── Rate limit check (sliding window, 10/60s) ──────────────────────────────
+    # Note: not atomic — concurrent coroutines may slightly exceed the limit. Acceptable for soft guardrail.
+    now = time.monotonic()
+    # Prune timestamps older than the window
+    while _save_timestamps and now - _save_timestamps[0] > _RATE_LIMIT_WINDOW:
+        _save_timestamps.popleft()
+    if len(_save_timestamps) >= _RATE_LIMIT_MAX:
+        oldest = _save_timestamps[0]
+        retry_in = int(_RATE_LIMIT_WINDOW - (now - oldest)) + 1
+        return json.dumps({
+            "error": "rate_limit_exceeded",
+            "message": f"Rate limit exceeded: {_RATE_LIMIT_MAX} saves/{_RATE_LIMIT_WINDOW}s. Try again in {retry_in} seconds.",
+        })
+
+    # ── Daily guard check ──────────────────────────────────────────────────────
+    config = get_config()
+    if config.MAX_MEMORIES_PER_DAY > 0:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            # DB query for accuracy across restarts and multi-instance deployments
+            today_count = await conn.fetchval(
+                "SELECT COUNT(*)::int FROM memories WHERE created_at >= CURRENT_DATE"
+            ) or 0
+        if today_count >= config.MAX_MEMORIES_PER_DAY:
+            return json.dumps({
+                "error": "daily_limit_exceeded",
+                "message": f"Daily memory limit of {config.MAX_MEMORIES_PER_DAY} exceeded. {today_count} memories saved today.",
+            })
+
+    # Rate-limit slot claimed only after all guards pass
+    _save_timestamps.append(now)
+
     dl = get_dl()
     user_id = _current_user_id.get()
 

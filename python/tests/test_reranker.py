@@ -169,8 +169,9 @@ class TestSearchWithReranking:
 
         with (
             patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=mock_pool),
-            patch("open_brain.data_layer.postgres.embed_query", new_callable=AsyncMock, return_value=[0.1] * 1024),
+            patch("open_brain.data_layer.postgres.embed_query_with_usage", new_callable=AsyncMock, return_value=([0.1] * 1024, 10)),
             patch("open_brain.data_layer.postgres.rerank", new_callable=AsyncMock) as mock_rerank,
+            patch("asyncio.create_task"),
         ):
             from open_brain.data_layer.postgres import PostgresDataLayer
             from open_brain.data_layer.interface import SearchParams
@@ -207,7 +208,7 @@ class TestSearchWithReranking:
 
         with (
             patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=mock_pool),
-            patch("open_brain.data_layer.postgres.embed_query", new_callable=AsyncMock, return_value=[0.1] * 1024),
+            patch("open_brain.data_layer.postgres.embed_query_with_usage", new_callable=AsyncMock, return_value=([0.1] * 1024, 10)),
             patch(
                 "open_brain.data_layer.postgres.rerank",
                 new_callable=AsyncMock,

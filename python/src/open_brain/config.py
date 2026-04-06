@@ -29,6 +29,9 @@ class Config(BaseSettings):
     # API key auth for plugin hooks (comma-separated list of valid keys)
     API_KEYS: str = ""
 
+    # Daily ingestion guard: reject save_memory calls beyond this threshold per day
+    MAX_MEMORIES_PER_DAY: int = 500
+
     # LLM for metadata extraction / refinement
     LLM_PROVIDER: Literal["anthropic", "openrouter"] = "anthropic"
     LLM_MODEL: str = "claude-haiku-4-5-20251001"
