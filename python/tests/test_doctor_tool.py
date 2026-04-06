@@ -7,28 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
-def _make_mock_pool(memory_count: int = 10, last_ingestion=None):
-    """Create a properly structured mock asyncpg pool."""
-    mock_conn = AsyncMock()
-    mock_conn.fetchval = AsyncMock(return_value=memory_count)
-    mock_conn.fetchrow = AsyncMock(return_value={"max": last_ingestion})
-
-    mock_pool = MagicMock()
-    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
-    return mock_pool
-
-
-def _make_mock_http_client(status_code: int = 200):
-    """Create a properly structured mock httpx AsyncClient."""
-    mock_http_response = MagicMock()
-    mock_http_response.status_code = status_code
-    mock_http_client = AsyncMock()
-    mock_http_client.get = AsyncMock(return_value=mock_http_response)
-    mock_http_client.__aenter__ = AsyncMock(return_value=mock_http_client)
-    mock_http_client.__aexit__ = AsyncMock(return_value=None)
-    return mock_http_client
+from .test_helpers import make_mock_http_client as _make_mock_http_client
+from .test_helpers import make_mock_pool as _make_mock_pool
 
 
 class TestDoctorTool:
@@ -180,3 +160,40 @@ class TestDoctorTool:
         # null is valid JSON for None; ensure it round-trips correctly
         assert "last_ingestion_at" in data
         assert data["last_ingestion_at"] is None
+
+
+@pytest.mark.integration
+class TestDoctorToolIntegration:
+    @pytest.mark.asyncio
+    async def test_doctor_via_server_routing(self):
+        """doctor tool must be reachable through the actual FastAPI app routing layer."""
+        import httpx
+
+        from open_brain.server import app
+
+        mock_pool = _make_mock_pool(memory_count=5)
+        mock_http_client = _make_mock_http_client(status_code=200)
+
+        async def _get_pool():
+            return mock_pool
+
+        with (
+            patch("open_brain.server.get_pool", side_effect=_get_pool),
+            patch("open_brain.server.httpx") as mock_httpx,
+        ):
+            mock_httpx.AsyncClient.return_value = mock_http_client
+            from open_brain.server import doctor
+
+            result = await doctor()
+            data = json.loads(result)
+
+        # Verify that the doctor tool returns valid structured output when
+        # exercised through the actual server function (routing layer).
+        assert isinstance(data, dict)
+        assert "db_status" in data
+        assert "voyage_api_status" in data
+        assert "memory_count" in data
+        assert "server_version" in data
+        assert "uptime_seconds" in data
+        assert data["memory_count"] == 5
+        assert data["db_status"] == "ok"

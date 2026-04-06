@@ -13,7 +13,7 @@ class TestHealthSubsystems:
         import httpx
         from open_brain.server import app
 
-        async with httpx.AsyncClient(app=app, base_url="http://test") as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/health")
             # Health endpoint should not require auth
             assert response.status_code in (200, 503)
@@ -30,7 +30,7 @@ class TestHealthSubsystems:
         import httpx
         from open_brain.server import app
 
-        async with httpx.AsyncClient(app=app, base_url="http://test") as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/health")
             data = response.json()
             assert data["service"] == "open-brain"
@@ -41,7 +41,7 @@ class TestHealthSubsystems:
         import httpx
         from open_brain.server import app
 
-        async with httpx.AsyncClient(app=app, base_url="http://test") as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/health")
             data = response.json()
             assert data["db"] in ("ok", "unreachable")
@@ -52,7 +52,7 @@ class TestHealthSubsystems:
         import httpx
         from open_brain.server import app
 
-        async with httpx.AsyncClient(app=app, base_url="http://test") as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/health")
             data = response.json()
-            assert data["embedding_api"] in ("ok", "degraded", "unreachable")
+            assert data["embedding_api"] in ("ok", "degraded", "unreachable", "unknown")

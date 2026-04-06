@@ -3,30 +3,11 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-
-def _make_mock_pool():
-    """Create a properly structured mock asyncpg pool."""
-    mock_conn = AsyncMock()
-    mock_conn.fetchval = AsyncMock(return_value=0)
-    mock_conn.fetchrow = AsyncMock(return_value={"max": None})
-
-    mock_pool = MagicMock()
-    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
-    return mock_pool
-
-
-async def _failing_http_client():
-    """Mock httpx AsyncClient that fails on get()."""
-    mock = AsyncMock()
-    mock.get = AsyncMock(side_effect=Exception("no network"))
-    mock.__aenter__ = AsyncMock(return_value=mock)
-    mock.__aexit__ = AsyncMock(return_value=None)
-    return mock
+from .test_helpers import make_mock_pool as _make_mock_pool
 
 
 class TestDoctorIncludesVersion:

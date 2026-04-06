@@ -7,16 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
-def _make_mock_http_client(status_code: int = 200):
-    """Create a properly structured mock httpx AsyncClient."""
-    mock_http_response = MagicMock()
-    mock_http_response.status_code = status_code
-    mock_http_client = AsyncMock()
-    mock_http_client.get = AsyncMock(return_value=mock_http_response)
-    mock_http_client.__aenter__ = AsyncMock(return_value=mock_http_client)
-    mock_http_client.__aexit__ = AsyncMock(return_value=None)
-    return mock_http_client
+from .test_helpers import make_mock_http_client as _make_mock_http_client
 
 
 class TestHealth503OnDbDown:
