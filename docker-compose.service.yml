@@ -1,15 +1,14 @@
 # open-brain — service-only compose file for embedding into existing stacks
 #
-# Usage: docker compose -f docker-compose.service.yml up --build -d
+# Image is built in CI (GitHub Actions) and pushed to ghcr.io/sussdorff/open-brain:latest.
+# Deploy: docker compose -f docker-compose.service.yml pull && docker compose -f docker-compose.service.yml up -d
 #
 # Connects to an existing external Docker network where your Postgres instance lives.
 # Configure the network name below to match your setup.
 
 services:
   open-brain:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/sussdorff/open-brain:latest
     env_file:
       - path: .env
         required: true
