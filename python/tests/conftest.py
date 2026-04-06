@@ -1,7 +1,7 @@
 """Shared test fixtures and configuration."""
 
 import os
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -13,6 +13,37 @@ os.environ.setdefault("JWT_SECRET", "this-is-a-test-secret-that-is-long-enough-3
 os.environ.setdefault("VOYAGE_API_KEY", "test-voyage-key")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost:5432/test")
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-anthropic-key")
+
+
+def _make_server_mock_pool():
+    """Build a mock pool for open_brain.server.get_pool that returns 0 for fetchval."""
+    mock_conn = AsyncMock()
+    mock_conn.fetchval = AsyncMock(return_value=0)  # safe default: 0 memories today
+    acquire_ctx = MagicMock()
+    acquire_ctx.__aenter__ = AsyncMock(return_value=mock_conn)
+    acquire_ctx.__aexit__ = AsyncMock(return_value=None)
+    mock_pool = MagicMock()
+    mock_pool.acquire = MagicMock(return_value=acquire_ctx)
+    return mock_pool
+
+
+@pytest.fixture(autouse=True)
+def mock_server_get_pool():
+    """Patch open_brain.server.get_pool so save_memory daily guard doesn't hit real DB.
+
+    Individual tests that need specific pool behavior can override this with their own patch.
+    """
+    with patch("open_brain.server.get_pool", new_callable=AsyncMock, return_value=_make_server_mock_pool()):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def reset_save_timestamps():
+    """Reset rate-limiter deque between tests to avoid cross-test interference."""
+    import open_brain.server as server_module
+    server_module._save_timestamps.clear()
+    yield
+    server_module._save_timestamps.clear()
 
 
 @pytest.fixture(autouse=True)

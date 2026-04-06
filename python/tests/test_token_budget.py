@@ -113,16 +113,24 @@ class TestEmbedWithUsage:
 
 # ─── AK2: stats() exposes embedding cost metrics ──────────────────────────────
 
+def _make_mock_pool(conn):
+    """Build a properly wired mock pool that supports `async with pool.acquire() as conn`."""
+    acquire_ctx = MagicMock()
+    acquire_ctx.__aenter__ = AsyncMock(return_value=conn)
+    acquire_ctx.__aexit__ = AsyncMock(return_value=None)
+    mock_pool = MagicMock()
+    mock_pool.acquire = MagicMock(return_value=acquire_ctx)
+    return mock_pool
+
+
 class TestStatsEmbeddingMetrics:
     """stats() includes embeddings_today, embedding_tokens_today, estimated_embedding_cost_today."""
 
     @pytest.mark.asyncio
     async def test_stats_includes_embeddings_today(self):
         """stats() result includes 'embeddings_today' key."""
-        mock_pool = AsyncMock()
         mock_conn = AsyncMock()
-        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+        mock_pool = _make_mock_pool(mock_conn)
 
         # Mock all fetchrow / fetch calls
         async def fetchrow_side_effect(query, *args):
@@ -142,15 +150,11 @@ class TestStatsEmbeddingMetrics:
         mock_conn.fetchrow = fetchrow_side_effect
 
         async def fetch_side_effect(query, *args):
-            if "type" in query and "COUNT" in query:
-                return []
-            if "user_id" in query and "COUNT" in query:
-                return []
             return []
 
         mock_conn.fetch = fetch_side_effect
 
-        with patch("open_brain.data_layer.postgres.get_pool", return_value=mock_pool):
+        with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=mock_pool):
             from open_brain.data_layer.postgres import PostgresDataLayer
             dl = PostgresDataLayer()
             result = await dl.stats()
@@ -164,10 +168,8 @@ class TestStatsEmbeddingMetrics:
     @pytest.mark.asyncio
     async def test_stats_embedding_cost_calculation(self):
         """estimated_embedding_cost_today = tokens * 0.00000012."""
-        mock_pool = AsyncMock()
         mock_conn = AsyncMock()
-        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+        mock_pool = _make_mock_pool(mock_conn)
 
         token_count = 1_000_000  # 1M tokens → $0.12
 
@@ -187,7 +189,7 @@ class TestStatsEmbeddingMetrics:
         mock_conn.fetchrow = fetchrow_side_effect
         mock_conn.fetch = AsyncMock(return_value=[])
 
-        with patch("open_brain.data_layer.postgres.get_pool", return_value=mock_pool):
+        with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=mock_pool):
             from open_brain.data_layer.postgres import PostgresDataLayer
             dl = PostgresDataLayer()
             result = await dl.stats()
@@ -205,18 +207,14 @@ class TestDailyMemoryGuard:
     @pytest.mark.asyncio
     async def test_save_memory_rejected_when_daily_limit_exceeded(self):
         """save_memory() returns error string when today's count >= MAX_MEMORIES_PER_DAY."""
-        mock_pool = AsyncMock()
         mock_conn = AsyncMock()
-        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
-
-        # Simulate daily count AT the limit
         mock_conn.fetchval = AsyncMock(return_value=500)  # exactly at MAX_MEMORIES_PER_DAY default
+        mock_pool = _make_mock_pool(mock_conn)
 
-        with patch("open_brain.server.get_pool", return_value=mock_pool):
-            import open_brain.server as server_module
-            # Reset rate limiter to avoid interference
-            server_module._save_timestamps.clear()
+        import open_brain.server as server_module
+        server_module._save_timestamps.clear()
+
+        with patch("open_brain.server.get_pool", new_callable=AsyncMock, return_value=mock_pool):
             result = await server_module.save_memory(
                 text="This should be rejected",
                 is_test=False,
@@ -231,27 +229,24 @@ class TestDailyMemoryGuard:
     @pytest.mark.asyncio
     async def test_save_memory_allowed_below_daily_limit(self):
         """save_memory() proceeds normally when today's count < MAX_MEMORIES_PER_DAY."""
-        mock_pool = AsyncMock()
         mock_conn = AsyncMock()
-        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
-
-        # Simulate daily count below limit
-        mock_conn.fetchval = AsyncMock(return_value=10)
+        mock_conn.fetchval = AsyncMock(return_value=10)  # below limit
+        mock_pool = _make_mock_pool(mock_conn)
 
         mock_dl = AsyncMock()
         from open_brain.data_layer.interface import SaveMemoryResult
         mock_dl.save_memory.return_value = SaveMemoryResult(id=99, message="Memory saved")
         mock_dl.update_memory.return_value = None
 
+        import open_brain.server as server_module
+        server_module._save_timestamps.clear()
+
         with (
-            patch("open_brain.server.get_pool", return_value=mock_pool),
+            patch("open_brain.server.get_pool", new_callable=AsyncMock, return_value=mock_pool),
             patch("open_brain.server.get_dl", return_value=mock_dl),
             patch("open_brain.server.classify_and_extract", new_callable=AsyncMock, return_value={}),
             patch("open_brain.server._extract_entities", new_callable=AsyncMock, return_value={}),
         ):
-            import open_brain.server as server_module
-            server_module._save_timestamps.clear()
             result = await server_module.save_memory(
                 text="This should be allowed",
                 is_test=False,
@@ -330,11 +325,9 @@ class TestSaveMemoryRateLimit:
         for _ in range(9):
             server_module._save_timestamps.append(now - 1.0)
 
-        mock_pool = AsyncMock()
         mock_conn = AsyncMock()
-        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
         mock_conn.fetchval = AsyncMock(return_value=0)  # 0 memories today
+        mock_pool = _make_mock_pool(mock_conn)
 
         mock_dl = AsyncMock()
         from open_brain.data_layer.interface import SaveMemoryResult
@@ -342,7 +335,7 @@ class TestSaveMemoryRateLimit:
         mock_dl.update_memory.return_value = None
 
         with (
-            patch("open_brain.server.get_pool", return_value=mock_pool),
+            patch("open_brain.server.get_pool", new_callable=AsyncMock, return_value=mock_pool),
             patch("open_brain.server.get_dl", return_value=mock_dl),
             patch("open_brain.server.classify_and_extract", new_callable=AsyncMock, return_value={}),
             patch("open_brain.server._extract_entities", new_callable=AsyncMock, return_value={}),
@@ -366,11 +359,9 @@ class TestSaveMemoryRateLimit:
         for _ in range(10):
             server_module._save_timestamps.append(old_time)
 
-        mock_pool = AsyncMock()
         mock_conn = AsyncMock()
-        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
         mock_conn.fetchval = AsyncMock(return_value=0)  # 0 memories today
+        mock_pool = _make_mock_pool(mock_conn)
 
         mock_dl = AsyncMock()
         from open_brain.data_layer.interface import SaveMemoryResult
@@ -378,7 +369,7 @@ class TestSaveMemoryRateLimit:
         mock_dl.update_memory.return_value = None
 
         with (
-            patch("open_brain.server.get_pool", return_value=mock_pool),
+            patch("open_brain.server.get_pool", new_callable=AsyncMock, return_value=mock_pool),
             patch("open_brain.server.get_dl", return_value=mock_dl),
             patch("open_brain.server.classify_and_extract", new_callable=AsyncMock, return_value={}),
             patch("open_brain.server._extract_entities", new_callable=AsyncMock, return_value={}),

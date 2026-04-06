@@ -12,7 +12,14 @@ from typing import Any
 import asyncpg
 
 from open_brain.config import get_config
-from open_brain.data_layer.embedding import embed, embed_query, to_pg_vector
+from open_brain.data_layer.embedding import (
+    embed,
+    embed_query,
+    embed_with_usage,
+    embed_query_with_usage,
+    embed_batch_with_usage,
+    to_pg_vector,
+)
 from open_brain.data_layer.reranker import rerank
 from open_brain.data_layer.interface import (
     DecayParams,
@@ -80,6 +87,14 @@ async def get_pool() -> asyncpg.Pool:
             await conn.execute(
                 "ALTER TABLE memories ADD COLUMN IF NOT EXISTS user_id TEXT;"
             )
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS embedding_token_log (
+                    id SERIAL PRIMARY KEY,
+                    operation TEXT NOT NULL,
+                    token_count INT NOT NULL,
+                    logged_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+            """)
             await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_memories_content_hash
                 ON memories ((metadata->>'content_hash'))
@@ -198,6 +213,26 @@ class PostgresDataLayer:
         )
         return row["id"]  # type: ignore[index]
 
+    async def _log_embedding_tokens(self, operation: str, token_count: int) -> None:
+        """Log embedding token usage to embedding_token_log table.
+
+        Args:
+            operation: Type of embedding operation ('document', 'query', 'batch')
+            token_count: Number of tokens used
+        """
+        if token_count <= 0:
+            return
+        try:
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "INSERT INTO embedding_token_log (operation, token_count) VALUES ($1, $2)",
+                    operation,
+                    token_count,
+                )
+        except Exception as err:
+            logger.warning("Failed to log embedding tokens: %s", err)
+
     async def _log_usage(
         self,
         conn: asyncpg.Connection,
@@ -237,7 +272,8 @@ class PostgresDataLayer:
             if query:
                 try:
                     config = get_config()
-                    query_embedding = await embed_query(query)
+                    query_embedding, query_tokens = await embed_query_with_usage(query)
+                    asyncio.create_task(self._log_embedding_tokens("query", query_tokens))
 
                     # Fetch 3x candidates for reranking (capped at 100)
                     fetch_limit = min(limit * 3, 100)
@@ -755,7 +791,8 @@ class PostgresDataLayer:
     async def _embed_and_link(self, memory_id: int, text: str) -> None:
         """Background task: embed a memory and auto-link similar ones."""
         try:
-            embedding = await embed(text)
+            embedding, token_count = await embed_with_usage(text)
+            asyncio.create_task(self._log_embedding_tokens("document", token_count))
             pg_vec = to_pg_vector(embedding)
 
             pool = await get_pool()
@@ -806,7 +843,8 @@ class PostgresDataLayer:
         pool = await get_pool()
         async with pool.acquire() as conn:
             index_id = await self._resolve_index_id(conn, project)
-            query_embedding = await embed_query(query)
+            query_embedding, query_tokens = await embed_query_with_usage(query)
+            asyncio.create_task(self._log_embedding_tokens("query", query_tokens))
             max_results = limit or 10
 
             # Fetch 3x candidates when reranking is enabled
@@ -900,8 +938,17 @@ class PostgresDataLayer:
             user_rows = await conn.fetch(
                 "SELECT user_id, COUNT(*)::int AS count FROM memories GROUP BY user_id ORDER BY count DESC"
             )
+            embedding_row = await conn.fetchrow(
+                """SELECT COUNT(*)::int AS count, COALESCE(SUM(token_count), 0)::bigint AS total_tokens
+                   FROM embedding_token_log
+                   WHERE logged_at >= CURRENT_DATE"""
+            )
 
         size_bytes = int(db_size_row["size"])
+        embeddings_today = int(embedding_row["count"]) if embedding_row else 0
+        embedding_tokens_today = int(embedding_row["total_tokens"]) if embedding_row else 0
+        # Voyage-4 pricing: $0.00000012 per token (= $0.12 per 1M tokens)
+        estimated_cost = round(embedding_tokens_today * 0.00000012, 6)
         return {
             "memories": memories_row["count"],
             "sessions": sessions_row["count"],
@@ -910,6 +957,9 @@ class PostgresDataLayer:
             "db_size_mb": round(size_bytes / 1024 / 1024, 2),
             "types": {row["type"]: row["count"] for row in type_rows},
             "by_user": {(row["user_id"] or "unknown"): row["count"] for row in user_rows},
+            "embeddings_today": embeddings_today,
+            "embedding_tokens_today": embedding_tokens_today,
+            "estimated_embedding_cost_today": estimated_cost,
         }
 
     async def refine_memories(self, params: RefineParams) -> RefineResult:
