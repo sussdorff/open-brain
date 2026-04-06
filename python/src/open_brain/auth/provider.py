@@ -294,13 +294,10 @@ class OAuthProvider:
 
 def _build_url(base_url: str, params: dict[str, str]) -> str:
     """Build URL with query parameters."""
-    from urllib.parse import urlencode, urlparse, urlunparse, parse_qs, urlencode as ue
+    from urllib.parse import urlencode, urlparse, urlunparse
 
     parsed = urlparse(base_url)
-    query_parts = []
-    for k, v in params.items():
-        query_parts.append(f"{k}={v}")
-    query = "&".join(query_parts)
+    query = urlencode(params)
     if parsed.query:
         query = parsed.query + "&" + query
     return urlunparse(parsed._replace(query=query))
@@ -308,8 +305,10 @@ def _build_url(base_url: str, params: dict[str, str]) -> str:
 
 def _append_param(url: str, key: str, value: str) -> str:
     """Append a single query parameter to a URL."""
+    from urllib.parse import urlencode
+
     separator = "&" if "?" in url else "?"
-    return f"{url}{separator}{key}={value}"
+    return f"{url}{separator}{urlencode({key: value})}"
 
 
 # Module-level singleton provider

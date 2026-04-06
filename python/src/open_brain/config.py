@@ -12,7 +12,7 @@ class Config(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     PORT: int = 8091
-    DATABASE_URL: str = "postgresql://open_brain:password@localhost:5432/open_brain"
+    DATABASE_URL: str
     MCP_SERVER_URL: str
     AUTH_USER: str
     AUTH_PASSWORD: str

@@ -38,10 +38,10 @@ def auth_client():
     return AsyncClient(transport=transport, base_url="http://testserver")
 
 
-# Admin client sends valid API key (grants admin scope through middleware)
+# Admin client sends valid API key (sets _is_api_key_auth=True, accepted by token management endpoints)
 @pytest.fixture
 def admin_headers():
-    """Headers that grant admin scope (via API key auth path)."""
+    """Headers for API key auth — accepted by token management endpoints."""
     return {"X-API-Key": "valid-key-abc"}
 
 

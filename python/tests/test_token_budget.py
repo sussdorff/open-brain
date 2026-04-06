@@ -239,7 +239,7 @@ class TestDailyMemoryGuard:
         mock_dl.update_memory.return_value = None
 
         import open_brain.server as server_module
-        server_module._save_timestamps.clear()
+        server_module._save_timestamps.clear()  # clear all per-user buckets
 
         with (
             patch("open_brain.server.get_pool", new_callable=AsyncMock, return_value=mock_pool),
@@ -294,13 +294,16 @@ class TestSaveMemoryRateLimit:
     @pytest.mark.asyncio
     async def test_rate_limit_rejected_after_10_calls(self):
         """11th save_memory call within 60s returns rate-limit error."""
+        from collections import deque
         import open_brain.server as server_module
 
-        # Pre-fill the deque with 10 recent timestamps (now - 1 second each)
+        # Pre-fill the anonymous bucket with 10 recent timestamps (now - 1 second each)
         server_module._save_timestamps.clear()
         now = time.monotonic()
+        bucket = deque()
         for _ in range(10):
-            server_module._save_timestamps.append(now - 1.0)  # 1s ago, within 60s window
+            bucket.append(now - 1.0)  # 1s ago, within 60s window
+        server_module._save_timestamps["__anonymous__"] = bucket
 
         result = await server_module.save_memory(
             text="This should be rate-limited",
@@ -317,13 +320,16 @@ class TestSaveMemoryRateLimit:
     @pytest.mark.asyncio
     async def test_rate_limit_not_triggered_below_threshold(self):
         """9 calls within 60s should not trigger rate limit."""
+        from collections import deque
         import open_brain.server as server_module
 
-        # Pre-fill with only 9 timestamps
+        # Pre-fill the anonymous bucket with only 9 timestamps
         server_module._save_timestamps.clear()
         now = time.monotonic()
+        bucket = deque()
         for _ in range(9):
-            server_module._save_timestamps.append(now - 1.0)
+            bucket.append(now - 1.0)
+        server_module._save_timestamps["__anonymous__"] = bucket
 
         mock_conn = AsyncMock()
         mock_conn.fetchval = AsyncMock(return_value=0)  # 0 memories today
@@ -353,11 +359,14 @@ class TestSaveMemoryRateLimit:
         """Calls older than 60s are pruned and do not count toward the limit."""
         import open_brain.server as server_module
 
-        # Fill with 10 OLD timestamps (61 seconds ago — outside window)
+        # Fill the anonymous bucket with 10 OLD timestamps (61 seconds ago — outside window)
+        from collections import deque
         server_module._save_timestamps.clear()
         old_time = time.monotonic() - 61.0
+        bucket = deque()
         for _ in range(10):
-            server_module._save_timestamps.append(old_time)
+            bucket.append(old_time)
+        server_module._save_timestamps["__anonymous__"] = bucket
 
         mock_conn = AsyncMock()
         mock_conn.fetchval = AsyncMock(return_value=0)  # 0 memories today
@@ -388,10 +397,11 @@ class TestSaveMemoryRateLimit:
         import open_brain.server as server_module
 
         # Even if 10 recent timestamps are present, is_test bypasses everything
+        from collections import deque
         server_module._save_timestamps.clear()
         now = time.monotonic()
-        for _ in range(10):
-            server_module._save_timestamps.append(now - 1.0)
+        bucket = deque(now - 1.0 for _ in range(10))
+        server_module._save_timestamps["__anonymous__"] = bucket
 
         result = await server_module.save_memory(
             text="Test artifact — rate limit bypassed",
@@ -405,10 +415,11 @@ class TestSaveMemoryRateLimit:
         """Rate limit error message includes a retry-after hint."""
         import open_brain.server as server_module
 
+        from collections import deque
         server_module._save_timestamps.clear()
         now = time.monotonic()
-        for _ in range(10):
-            server_module._save_timestamps.append(now - 5.0)  # 5s ago, oldest will expire in 55s
+        bucket = deque(now - 5.0 for _ in range(10))  # 5s ago, oldest will expire in 55s
+        server_module._save_timestamps["__anonymous__"] = bucket
 
         result = await server_module.save_memory(
             text="Rate limited — check hint",
@@ -420,11 +431,10 @@ class TestSaveMemoryRateLimit:
             f"Expected retry hint in: {result}"
         )
 
-    def test_save_timestamps_deque_exists_at_module_level(self):
-        """_save_timestamps deque must exist at module level in server.py."""
+    def test_save_timestamps_dict_exists_at_module_level(self):
+        """_save_timestamps dict must exist at module level in server.py."""
         import open_brain.server as server_module
         assert hasattr(server_module, "_save_timestamps"), (
-            "server.py must have _save_timestamps deque at module level"
+            "server.py must have _save_timestamps dict at module level"
         )
-        from collections import deque
-        assert isinstance(server_module._save_timestamps, deque)
+        assert isinstance(server_module._save_timestamps, dict)

@@ -62,14 +62,17 @@ logger = logging.getLogger(__name__)
 # ContextVar to track the authenticated user ID for the current request
 _current_user_id: ContextVar[str | None] = ContextVar("current_user_id", default=None)
 
-# Rate limiter for save_memory: sliding window of timestamps (max 10 per 60 seconds)
-# Global rate limit — intentionally not per-user for simplicity. One throttle point for all users.
-_save_timestamps: deque[float] = deque()
+# Rate limiter for save_memory: per-user sliding window of timestamps (max 10 per 60 seconds)
+_save_timestamps: dict[str, deque[float]] = {}
 _RATE_LIMIT_MAX = 10
 _RATE_LIMIT_WINDOW = 60
 
 # ContextVar to track the OAuth scopes for the current request (Bearer token auth only)
 _current_scopes: ContextVar[tuple[str, ...]] = ContextVar("current_scopes", default=())
+
+# ContextVar set to True when the request was authenticated via x-api-key header.
+# Token management endpoints accept either admin OAuth scope OR direct API key auth.
+_is_api_key_auth: ContextVar[bool] = ContextVar("is_api_key_auth", default=False)
 
 # Evolution tools require the `evolution` OAuth scope
 _EVOLUTION_TOOLS: frozenset[str] = frozenset({
@@ -190,7 +193,7 @@ mcp = ScopedFastMCP(
     "open-brain",
     transport_security=TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
-        allowed_hosts=[_host, f"{_host}:443", "localhost:8091", "127.0.0.1:8091"],
+        allowed_hosts=[_host, f"{_host}:443"],
     ),
 )
 
@@ -353,14 +356,18 @@ async def save_memory(
     if is_test:
         return json.dumps({"id": -1, "message": "Test artifact — not persisted"})
 
-    # ── Rate limit check (sliding window, 10/60s) ──────────────────────────────
+    # ── Rate limit check (per-user sliding window, 10/60s) ─────────────────────
     # Note: not atomic — concurrent coroutines may slightly exceed the limit. Acceptable for soft guardrail.
     now = time.monotonic()
+    user_key = _current_user_id.get() or "__anonymous__"
+    if user_key not in _save_timestamps:
+        _save_timestamps[user_key] = deque()
+    user_timestamps = _save_timestamps[user_key]
     # Prune timestamps older than the window
-    while _save_timestamps and now - _save_timestamps[0] > _RATE_LIMIT_WINDOW:
-        _save_timestamps.popleft()
-    if len(_save_timestamps) >= _RATE_LIMIT_MAX:
-        oldest = _save_timestamps[0]
+    while user_timestamps and now - user_timestamps[0] > _RATE_LIMIT_WINDOW:
+        user_timestamps.popleft()
+    if len(user_timestamps) >= _RATE_LIMIT_MAX:
+        oldest = user_timestamps[0]
         retry_in = int(_RATE_LIMIT_WINDOW - (now - oldest)) + 1
         return json.dumps({
             "error": "rate_limit_exceeded",
@@ -383,7 +390,7 @@ async def save_memory(
             })
 
     # Rate-limit slot claimed only after all guards pass
-    _save_timestamps.append(now)
+    user_timestamps.append(now)
 
     dl = get_dl()
     user_id = _current_user_id.get()
@@ -774,14 +781,17 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
         api_key = request.headers.get("x-api-key", "")
         if api_key:
             if api_key in self._get_api_keys():
-                # API keys are issued to internal plugin hooks (admin-equivalent).
-                # Grant all scopes so plugin callers can invoke any tool, including
-                # evolution tools, without needing an OAuth flow.
-                scopes_token = _current_scopes.set(("memory", "evolution", "admin"))
+                # API keys grant memory + evolution scopes for MCP tool access.
+                # Admin scope is intentionally excluded — admin is reserved for
+                # OAuth sessions. Token management endpoints accept _is_api_key_auth
+                # as an alternative to admin scope.
+                scopes_token = _current_scopes.set(("memory", "evolution"))
+                api_key_token = _is_api_key_auth.set(True)
                 try:
                     return await call_next(request)
                 finally:
                     _current_scopes.reset(scopes_token)
+                    _is_api_key_auth.reset(api_key_token)
             return JSONResponse(
                 {"error": "unauthorized", "error_description": "Invalid API key"},
                 status_code=401,
@@ -1036,7 +1046,8 @@ async def issue_url_token(request: Request) -> JSONResponse:
     The raw token is returned exactly once — it is never stored.
     Requesting admin scope returns 422 — admin is never grantable to URL tokens.
     """
-    _require_scope("admin")
+    if not _is_api_key_auth.get():
+        _require_scope("admin")
 
     body = await request.json()
     name = str(body.get("name", "")).strip()
@@ -1122,7 +1133,8 @@ async def revoke_url_token(name: str) -> JSONResponse:
     Sets revoked_at to NOW() for the named token.
     Returns 200 even if the token doesn't exist (idempotent).
     """
-    _require_scope("admin")
+    if not _is_api_key_auth.get():
+        _require_scope("admin")
 
     pool = await get_pool()
     await pool.execute(

@@ -5,14 +5,21 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-# Set required env vars before any imports that load config
-os.environ.setdefault("MCP_SERVER_URL", "http://localhost:8091")
-os.environ.setdefault("AUTH_USER", "testuser")
-os.environ.setdefault("AUTH_PASSWORD", "testpassword123")
-os.environ.setdefault("JWT_SECRET", "this-is-a-test-secret-that-is-long-enough-32chars")
-os.environ.setdefault("VOYAGE_API_KEY", "test-voyage-key")
-os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost:5432/test")
-os.environ.setdefault("ANTHROPIC_API_KEY", "test-anthropic-key")
+_TEST_ENV = {
+    "MCP_SERVER_URL": "http://localhost:8091",
+    "AUTH_USER": "testuser",
+    "AUTH_PASSWORD": "testpassword123",
+    "JWT_SECRET": "this-is-a-test-secret-that-is-long-enough-32chars",
+    "VOYAGE_API_KEY": "test-voyage-key",
+    "DATABASE_URL": "postgresql://test:test@localhost:5432/test",
+    "ANTHROPIC_API_KEY": "test-anthropic-key",
+}
+
+# Inject test env vars without polluting the real environment between test runs.
+# Uses setdefault so that values already set in the shell (e.g. a real key in CI)
+# take precedence, but tests that need isolation reset via reset_config_singleton.
+for _k, _v in _TEST_ENV.items():
+    os.environ.setdefault(_k, _v)
 
 
 def _make_server_mock_pool():
