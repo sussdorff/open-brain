@@ -345,7 +345,8 @@ class TestBearerAuthMiddleware:
     @pytest.mark.asyncio
     async def test_public_health_no_auth(self, auth_client):
         resp = await auth_client.get("/health")
-        assert resp.status_code == 200
+        # 200 (DB up) or 503 (DB down in test env) — both mean auth was not required
+        assert resp.status_code in (200, 503)
 
     @pytest.mark.asyncio
     async def test_public_oauth_metadata_no_auth(self, auth_client):
