@@ -19,13 +19,13 @@ cd "$REPO_ROOT/python"
 
 # Load OP service account token if available (server stores it in /etc/op-service-account-token)
 if [ -f /etc/op-service-account-token ]; then
-  export OP_SERVICE_ACCOUNT_TOKEN=$(cat /etc/op-service-account-token)
+  OP_SERVICE_ACCOUNT_TOKEN=$(cat /etc/op-service-account-token)
+  export OP_SERVICE_ACCOUNT_TOKEN
 fi
 
 # Run full test suite (including integration tests)
-uv run pytest --tb=short -q 2>&1
-
-EXIT_CODE=$?
+EXIT_CODE=0
+uv run pytest --tb=short -q 2>&1 || EXIT_CODE=$?
 TIMESTAMP_END="$(date '+%Y-%m-%d %H:%M:%S')"
 
 if [ $EXIT_CODE -eq 0 ]; then

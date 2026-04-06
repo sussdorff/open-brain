@@ -16,13 +16,13 @@ if ! grep -q 'smoke' "$DEPLOY_SH"; then
 fi
 echo "PASS: deploy.sh has smoke check section"
 
-echo "=== Test: smoke checks verify at least one API endpoint ==="
-# Should check more than just /health — look for additional endpoint check
-if ! grep -q 'smoke\|check.*endpoint\|verify\|/mcp\|/oauth\|/sse' "$DEPLOY_SH"; then
-    echo "FAIL: deploy.sh does not check any API endpoint in smoke tests"
+echo "=== Test: smoke checks verify at least one OAuth endpoint ==="
+# Should check the OAuth metadata endpoints that open-brain exposes
+if ! grep -q '\.well-known/oauth-authorization-server\|\.well-known/oauth-protected-resource' "$DEPLOY_SH"; then
+    echo "FAIL: deploy.sh does not check any OAuth well-known endpoint in smoke tests"
     exit 1
 fi
-echo "PASS: deploy.sh verifies API endpoints in smoke tests"
+echo "PASS: deploy.sh verifies OAuth well-known endpoints in smoke tests"
 
 echo "=== Test: smoke check failures cause deploy to abort ==="
 # The smoke section should use exit 1 or set -e behavior
