@@ -40,19 +40,36 @@ A pluggable MCP memory server that gives AI assistants long-term, searchable mem
 
 See [docs/architecture.md](docs/architecture.md) for detailed diagrams and technical deep-dives.
 
-## Quick Start
+## Installation
 
-### Docker Compose (recommended)
+### 1. Start the server
+
+You need a Postgres instance with the pgvector extension, and a [Voyage AI](https://www.voyageai.com/) API key.
+
+**Standalone (includes Postgres):**
 
 ```bash
-git clone https://github.com/sussdorff/open-brain.git
-cd open-brain
-
-# Create .env from template
+# Download the compose file and example config
+curl -O https://raw.githubusercontent.com/sussdorff/open-brain/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/sussdorff/open-brain/main/.env.example
 cp .env.example .env
-# Edit .env — fill in VOYAGE_API_KEY, AUTH_PASSWORD, JWT_SECRET, MCP_SERVER_URL
+```
 
-# Start the stack (Postgres + open-brain)
+Edit `.env` — the required fields are:
+
+| Variable | Description |
+|---|---|
+| `MCP_SERVER_URL` | Public HTTPS URL of this server (e.g. `https://brain.example.com`) |
+| `DATABASE_URL` | Postgres connection string |
+| `AUTH_USER` | Username for the OAuth login form |
+| `AUTH_PASSWORD` | Password (min 8 chars) |
+| `JWT_SECRET` | Random secret for signing JWTs — `openssl rand -hex 32` |
+| `VOYAGE_API_KEY` | [Voyage AI](https://www.voyageai.com/) API key |
+| `ANTHROPIC_API_KEY` | Anthropic API key (for memory refinement) |
+
+```bash
+# Pull the image and start
+docker compose pull
 docker compose up -d
 
 # Verify
@@ -60,25 +77,57 @@ curl http://localhost:8091/health
 # {"status":"ok","service":"open-brain","runtime":"python"}
 ```
 
-### Pre-built Image
+**Service-only (bring your own Postgres):**
 
 ```bash
-OPEN_BRAIN_IMAGE=ghcr.io/sussdorff/open-brain:latest docker compose up -d
+curl -O https://raw.githubusercontent.com/sussdorff/open-brain/main/docker-compose.service.yml
+curl -O https://raw.githubusercontent.com/sussdorff/open-brain/main/.env.example
+cp .env.example .env
+# Edit .env, then:
+docker compose -f docker-compose.service.yml pull
+docker compose -f docker-compose.service.yml up -d
 ```
 
-### Connect Claude Code
+### 2. Issue an access token
 
-Add to your Claude Code MCP config:
+Use your API key (from `API_KEYS` in `.env`) to issue a URL token for each client:
+
+```bash
+curl -X POST https://your-server.example.com/token/url \
+  -H "x-api-key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-client", "scopes": ["memory", "evolution"], "expires_in_days": 365}'
+# {"token": "abc123...", "name": "my-client", "scopes": [...], "expires_at": "..."}
+```
+
+Save the raw token — it is shown exactly once.
+
+### 3. Connect Claude Code
+
+```bash
+claude mcp add open-brain \
+  --transport http \
+  "https://your-server.example.com/mcp?token=TOKEN_FROM_STEP_2"
+```
+
+Or manually in `~/.claude/settings.json`:
 
 ```json
 {
   "mcpServers": {
     "open-brain": {
-      "type": "streamable-http",
-      "url": "https://your-server.example.com/mcp"
+      "type": "http",
+      "url": "https://your-server.example.com/mcp?token=TOKEN_FROM_STEP_2"
     }
   }
 }
+```
+
+To revoke a token later:
+
+```bash
+curl -X DELETE https://your-server.example.com/token/url/my-client \
+  -H "x-api-key: YOUR_API_KEY"
 ```
 
 ## Configuration
@@ -88,7 +137,7 @@ All configuration is via environment variables (`.env` file or injected by your 
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `MCP_SERVER_URL` | Yes | — | Public HTTPS URL of this server |
-| `DATABASE_URL` | Yes | `postgresql://...localhost` | Postgres connection string |
+| `DATABASE_URL` | Yes | — | Postgres connection string (pgvector required) |
 | `AUTH_USER` | Yes | — | Username for OAuth login |
 | `AUTH_PASSWORD` | Yes | — | Password (min 8 chars) |
 | `JWT_SECRET` | Yes | — | JWT signing secret (min 32 chars) |
@@ -98,9 +147,10 @@ All configuration is via environment variables (`.env` file or injected by your 
 | `LLM_MODEL` | No | `claude-haiku-4-5-20251001` | Model for refine/triage |
 | `ANTHROPIC_API_KEY` | Cond. | — | Required when `LLM_PROVIDER=anthropic` |
 | `OPENROUTER_API_KEY` | Cond. | — | Required when `LLM_PROVIDER=openrouter` |
+| `API_KEYS` | No | — | Comma-separated API keys for plugin/script access |
 | `PORT` | No | `8091` | Server port |
 | `CLIENTS_FILE` | No | `/app/clients.json` | OAuth client registry path |
-| `MAX_MEMORIES_PER_DAY` | No | `500` | Daily ingestion limit; `save_memory()` rejects if exceeded |
+| `MAX_MEMORIES_PER_DAY` | No | `500` | Daily ingestion limit (0 = disabled) |
 
 See `.env.example` for a complete template with comments.
 
@@ -244,19 +294,22 @@ uv run python -m open_brain
 
 ## Deployment
 
-```bash
-# Standalone (includes Postgres)
-docker compose up -d
+The Docker image is built in CI and published to `ghcr.io/sussdorff/open-brain:latest` on every push to `main`. No build step is required on the server.
 
-# Service-only (bring your own Postgres)
-docker compose -f docker-compose.service.yml up --build -d
+```bash
+# Pull latest image and restart
+docker compose pull && docker compose up -d
+
+# Or service-only
+docker compose -f docker-compose.service.yml pull
+docker compose -f docker-compose.service.yml up -d
 ```
 
-Secrets can be injected via `.env`, environment variables, or a secrets manager:
+Secrets are loaded from `.env` by docker compose. Generate strong values for `JWT_SECRET` and `AUTH_PASSWORD`:
 
 ```bash
-# 1Password example
-op run --env-file=.env.tpl -- docker compose up -d
+openssl rand -hex 32   # JWT_SECRET
+openssl rand -base64 16 | tr -d '=' # AUTH_PASSWORD
 ```
 
 ### OAuth Client Registration
