@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import importlib.metadata
 import json
 import logging
+import re
+import secrets
 import time
 from collections import deque
 from dataclasses import asdict
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -779,6 +782,52 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
                 status_code=401,
             )
 
+        # Check URL token (?token= query param) — third auth path
+        url_token_raw = request.query_params.get("token", "")
+        if url_token_raw:
+            # Redact token value in query_string BEFORE calling call_next (for access logs)
+            raw_qs = request.scope.get("query_string", b"")
+            request.scope["query_string"] = re.sub(
+                rb"(token=)[^&]+", rb"\1REDACTED", raw_qs
+            )
+
+            token_hash = hashlib.sha256(url_token_raw.encode()).hexdigest()
+            try:
+                pool = await get_pool()
+                row = await pool.fetchrow(
+                    """
+                    SELECT name, scopes, expires_at, revoked_at
+                    FROM url_tokens
+                    WHERE token_hash = $1
+                      AND revoked_at IS NULL
+                      AND expires_at > NOW()
+                    """,
+                    token_hash,
+                )
+            except Exception:
+                row = None
+
+            if row is None:
+                return JSONResponse(
+                    {"error": "unauthorized", "error_description": "Invalid, expired, or revoked URL token"},
+                    status_code=401,
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+
+            # Parse scopes from DB row; strip admin scope (never grantable)
+            raw_scopes = row["scopes"]
+            if isinstance(raw_scopes, str):
+                scopes_list = json.loads(raw_scopes)
+            else:
+                scopes_list = list(raw_scopes)
+            safe_scopes = tuple(s for s in scopes_list if s != "admin")
+
+            scopes_token = _current_scopes.set(safe_scopes)
+            try:
+                return await call_next(request)
+            finally:
+                _current_scopes.reset(scopes_token)
+
         # Fall back to Bearer token
         auth_header = request.headers.get("authorization", "")
         if not auth_header.startswith("Bearer "):
@@ -831,6 +880,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="open-brain MCP Server", version="0.1.0", lifespan=lifespan)
 app.add_middleware(BearerAuthMiddleware)
+
+
+@app.exception_handler(ScopeDeniedError)
+async def scope_denied_handler(request: Request, exc: ScopeDeniedError) -> JSONResponse:
+    """Return 403 Forbidden when a caller lacks the required OAuth scope."""
+    return JSONResponse(
+        {"error": "forbidden", "error_description": str(exc)},
+        status_code=403,
+    )
 
 
 # ─── OAuth 2.1 Routes ─────────────────────────────────────────────────────────
@@ -955,6 +1013,82 @@ async def register_client(request: Request) -> JSONResponse:
         },
         status_code=201,
     )
+
+
+# ─── URL Token Endpoints ──────────────────────────────────────────────────────
+
+@app.post("/token/url")
+async def issue_url_token(request: Request) -> JSONResponse:
+    """Issue a URL-based opaque token (requires admin scope).
+
+    Body: {"name": str, "scopes": [str], "expires_in_days": int}
+    Returns: {"token": str, "name": str, "scopes": [str], "expires_at": str}
+
+    The raw token is returned exactly once — it is never stored.
+    admin scope is always stripped even if requested.
+    """
+    _require_scope("admin")
+
+    body = await request.json()
+    name = str(body.get("name", "")).strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+
+    requested_scopes: list[str] = [s for s in body.get("scopes", []) if isinstance(s, str)]
+    # Strip admin scope — never grantable to URL tokens (AK6)
+    safe_scopes = [s for s in requested_scopes if s != "admin"]
+
+    expires_in_days = int(body.get("expires_in_days", 365))
+    if expires_in_days <= 0:
+        raise HTTPException(status_code=400, detail="expires_in_days must be positive")
+
+    raw_token = secrets.token_hex(32)
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    expires_at = datetime.now(UTC) + timedelta(days=expires_in_days)
+
+    pool = await get_pool()
+    await pool.execute(
+        """
+        INSERT INTO url_tokens (name, token_hash, scopes, expires_at)
+        VALUES ($1, $2, $3::jsonb, $4)
+        """,
+        name,
+        token_hash,
+        json.dumps(safe_scopes),
+        expires_at,
+    )
+
+    return JSONResponse(
+        {
+            "token": raw_token,
+            "name": name,
+            "scopes": safe_scopes,
+            "expires_at": expires_at.isoformat(),
+        },
+        status_code=201,
+    )
+
+
+@app.delete("/token/url/{name}")
+async def revoke_url_token(name: str) -> JSONResponse:
+    """Revoke a URL token by name (requires admin scope).
+
+    Sets revoked_at to NOW() for the named token.
+    Returns 200 even if the token doesn't exist (idempotent).
+    """
+    _require_scope("admin")
+
+    pool = await get_pool()
+    await pool.execute(
+        """
+        UPDATE url_tokens
+        SET revoked_at = NOW()
+        WHERE name = $1 AND revoked_at IS NULL
+        """,
+        name,
+    )
+
+    return JSONResponse({"revoked": name})
 
 
 @app.get("/.well-known/oauth-authorization-server")

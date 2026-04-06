@@ -104,6 +104,17 @@ async def get_pool() -> asyncpg.Pool:
                 WHERE metadata->>'content_hash' IS NOT NULL;
             """)
             await conn.execute("""
+                CREATE TABLE IF NOT EXISTS url_tokens (
+                    id SERIAL PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    token_hash TEXT NOT NULL UNIQUE,
+                    scopes JSONB NOT NULL DEFAULT '[]',
+                    expires_at TIMESTAMPTZ NOT NULL,
+                    revoked_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+            """)
+            await conn.execute("""
                 CREATE OR REPLACE FUNCTION public.hybrid_search(
                     query_text text,
                     query_embedding vector,
