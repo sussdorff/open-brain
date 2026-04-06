@@ -100,6 +100,7 @@ All configuration is via environment variables (`.env` file or injected by your 
 | `OPENROUTER_API_KEY` | Cond. | — | Required when `LLM_PROVIDER=openrouter` |
 | `PORT` | No | `8091` | Server port |
 | `CLIENTS_FILE` | No | `/app/clients.json` | OAuth client registry path |
+| `MAX_MEMORIES_PER_DAY` | No | `500` | Daily ingestion limit; `save_memory()` rejects if exceeded |
 
 See `.env.example` for a complete template with comments.
 
@@ -122,7 +123,7 @@ search(query)          →  compact index with IDs (~50-100 tokens/result)
 | `get_observations` | Fetch full details for a list of IDs. |
 | `search_by_concept` | Pure vector search — good for "what did I learn about X?" |
 | `get_context` | Recent session summaries — useful at conversation start. |
-| `stats` | Database statistics: memory count, type taxonomy, DB size. |
+| `stats` | Database statistics: memory count, type taxonomy, DB size, embedding token usage, estimated API cost. |
 
 ### Memory Writing
 
