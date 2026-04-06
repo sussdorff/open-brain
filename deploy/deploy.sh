@@ -22,7 +22,7 @@ op run --env-file=.env.tpl -- docker compose -f docker-compose.service.yml up --
 
 echo "Waiting for startup..."
 sleep 5
-curl -sf http://localhost:8091/health && echo "" || echo "WARNING: health check failed"
+curl -sf http://localhost:8091/health && echo "" || { echo "ERROR: health check failed — deploy aborted"; exit 1; }
 
 echo ""
 echo "Deploy complete."
