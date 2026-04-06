@@ -1130,6 +1130,13 @@ class PostgresDataLayer:
                     f"SELECT * FROM memories WHERE priority < 0.2 {_lifecycle_filter} ORDER BY priority ASC LIMIT $1",
                     limit,
                 )
+            elif scope.startswith("session_ref:"):
+                prefix = scope[len("session_ref:"):]
+                rows = await conn.fetch(
+                    f"SELECT * FROM memories WHERE session_ref LIKE $1 {_lifecycle_filter} ORDER BY created_at DESC LIMIT $2",
+                    prefix + "%",
+                    limit,
+                )
             else:
                 # "recent" — last N memories
                 rows = await conn.fetch(
