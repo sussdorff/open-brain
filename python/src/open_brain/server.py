@@ -1034,7 +1034,7 @@ async def issue_url_token(request: Request) -> JSONResponse:
     Returns: {"token": str, "name": str, "scopes": [str], "expires_at": str}
 
     The raw token is returned exactly once — it is never stored.
-    admin scope is always stripped even if requested.
+    Requesting admin scope returns 422 — admin is never grantable to URL tokens.
     """
     _require_scope("admin")
 
@@ -1053,7 +1053,7 @@ async def issue_url_token(request: Request) -> JSONResponse:
             {"error": "invalid_scope", "error_description": "admin scope cannot be granted to URL tokens"},
             status_code=422,
         )
-    # Strip admin scope as defense-in-depth — never grantable to URL tokens (AK6)
+    # no-op after 422 guard above; retained as belt-and-suspenders
     safe_scopes = [s for s in requested_scopes if s != "admin"]
 
     # Validate scope names against known valid scopes
