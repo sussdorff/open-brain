@@ -58,6 +58,7 @@ logger = logging.getLogger(__name__)
 _current_user_id: ContextVar[str | None] = ContextVar("current_user_id", default=None)
 
 # Rate limiter for save_memory: sliding window of timestamps (max 10 per 60 seconds)
+# Global rate limit — intentionally not per-user for simplicity. One throttle point for all users.
 _save_timestamps: deque[float] = deque()
 _RATE_LIMIT_MAX = 10
 _RATE_LIMIT_WINDOW = 60
@@ -304,6 +305,7 @@ async def save_memory(
     config = get_config()
     pool = await get_pool()
     async with pool.acquire() as conn:
+        # DB query for accuracy across restarts and multi-instance deployments
         today_count = await conn.fetchval(
             "SELECT COUNT(*)::int FROM memories WHERE created_at >= CURRENT_DATE"
         ) or 0

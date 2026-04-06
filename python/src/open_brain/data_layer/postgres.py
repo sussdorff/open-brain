@@ -17,7 +17,6 @@ from open_brain.data_layer.embedding import (
     embed_query,
     embed_with_usage,
     embed_query_with_usage,
-    embed_batch_with_usage,
     to_pg_vector,
 )
 from open_brain.data_layer.reranker import rerank
@@ -230,7 +229,7 @@ class PostgresDataLayer:
                     operation,
                     token_count,
                 )
-        except Exception as err:
+        except (asyncpg.PostgresError, OSError) as err:
             logger.warning("Failed to log embedding tokens: %s", err)
 
     async def _log_usage(
