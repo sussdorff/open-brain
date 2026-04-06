@@ -19,6 +19,7 @@ Idempotency: session_ref = 'ccmem:<sha256(original_path)[:12]>'
     To re-import a changed file, delete the old memory first.
 
 Config: reads ~/.config/open-brain/migrate.toml (XDG), falls back to env vars.
+  The config file may contain credentials; ensure it is chmod 600.
 
 Usage:
   python scripts/migrate_claude_memories.py --dry-run
@@ -37,6 +38,7 @@ import re
 import sys
 import time
 from datetime import datetime, timezone
+from enum import Enum, auto
 from pathlib import Path
 
 import asyncpg
@@ -69,6 +71,15 @@ def _load_config() -> dict[str, str]:
     config_path = CONFIG_PATH or _DEFAULT_CONFIG
     if not config_path.exists():
         return {}
+
+    # Warn if config file is readable by group/others (may contain credentials)
+    try:
+        mode = config_path.stat().st_mode
+        if mode & 0o077:
+            print(f"Warning: {config_path} is readable by others (mode {oct(mode)}). "
+                  f"Run: chmod 600 {config_path}")
+    except OSError:
+        pass
 
     config: dict[str, str] = {}
     try:
@@ -205,19 +216,27 @@ def session_ref_for_path(file_path: str) -> str:
     return f"ccmem:{h}"
 
 
-def map_memory_file(file_path: Path) -> dict | None:
-    """Parse a memory file and return mapped fields, or None to skip.
+class SkipReason(Enum):
+    """Why a memory file was skipped during mapping."""
+    EMPTY = auto()
+    MERGED = auto()
+    FILTERED = auto()
 
-    Returns None for: empty body, merged stubs, filtered-out projects.
+
+def map_memory_file(file_path: Path) -> dict | SkipReason:
+    """Parse a memory file and return mapped fields, or a SkipReason.
+
+    Returns SkipReason.EMPTY for empty body, SkipReason.MERGED for merged stubs,
+    SkipReason.FILTERED for project-filter mismatches.
     """
     text = file_path.read_text(encoding="utf-8")
     fm, body = parse_frontmatter(text)
 
     if not body.strip():
-        return None
+        return SkipReason.EMPTY
 
     if is_merged_stub(body):
-        return None
+        return SkipReason.MERGED
 
     # Derive project from folder name
     # Path: ~/.claude/projects/<folder>/memory/<file>.md
@@ -226,7 +245,7 @@ def map_memory_file(file_path: Path) -> dict | None:
 
     # Apply project filter
     if PROJECT_FILTER and project != PROJECT_FILTER:
-        return None
+        return SkipReason.FILTERED
 
     title = fm.get("name")
     subtitle = fm.get("description")
@@ -359,18 +378,12 @@ async def run() -> None:
     for f in files:
         try:
             result = map_memory_file(f)
-            if result is None:
-                # Classify skip reason without re-reading
-                try:
-                    text = f.read_text(encoding="utf-8")
-                    _, body = parse_frontmatter(text)
-                    if not body.strip():
-                        skipped_empty += 1
-                    elif is_merged_stub(body):
-                        skipped_merged += 1
-                    else:
-                        skipped_filter += 1
-                except Exception:
+            if isinstance(result, SkipReason):
+                if result is SkipReason.EMPTY:
+                    skipped_empty += 1
+                elif result is SkipReason.MERGED:
+                    skipped_merged += 1
+                elif result is SkipReason.FILTERED:
                     skipped_filter += 1
             else:
                 mapped.append(result)
@@ -443,45 +456,47 @@ async def run() -> None:
             memory_ids: list[int] = []
             memory_texts: list[str] = []
 
-            for m in to_import:
-                index_id = index_cache[m["project"]]
-                metadata_json = json.dumps(m["metadata"])
+            # Wrap insert+embed in a transaction so partial imports roll back
+            async with conn.transaction():
+                for m in to_import:
+                    index_id = index_cache[m["project"]]
+                    metadata_json = json.dumps(m["metadata"])
 
-                # Build the embed text from title + subtitle + content
-                embed_parts = [p for p in [m["title"], m["subtitle"], m["content"]] if p]
-                embed_text = ": ".join(embed_parts)
+                    # Build the embed text from title + subtitle + content
+                    embed_parts = [p for p in [m["title"], m["subtitle"], m["content"]] if p]
+                    embed_text = ": ".join(embed_parts)
 
-                row = await conn.fetchrow(
-                    """INSERT INTO memories
-                           (index_id, type, title, subtitle, content, session_ref, metadata)
-                       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
-                       RETURNING id""",
-                    index_id,
-                    m["type"],
-                    m["title"],
-                    m["subtitle"],
-                    m["content"],
-                    m["session_ref"],
-                    metadata_json,
-                )
-                memory_ids.append(row["id"])
-                memory_texts.append(embed_text or "(empty)")
-
-            print(f"Inserted {len(memory_ids)} memories")
-
-            # Embed if API key available
-            if VOYAGE_API_KEY:
-                print(f"Embedding {len(memory_texts)} memories...")
-                embeddings = embed_batch(memory_texts)
-                for i, emb in enumerate(embeddings):
-                    await conn.execute(
-                        "UPDATE memories SET embedding = $1::vector WHERE id = $2",
-                        to_pg_vector(emb),
-                        memory_ids[i],
+                    row = await conn.fetchrow(
+                        """INSERT INTO memories
+                               (index_id, type, title, subtitle, content, session_ref, metadata)
+                           VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+                           RETURNING id""",
+                        index_id,
+                        m["type"],
+                        m["title"],
+                        m["subtitle"],
+                        m["content"],
+                        m["session_ref"],
+                        metadata_json,
                     )
-                print(f"Embedded {len(embeddings)} memories")
-            else:
-                print("VOYAGE_API_KEY not set — skipping embeddings (run embed-missing later)")
+                    memory_ids.append(row["id"])
+                    memory_texts.append(embed_text or "(empty)")
+
+                print(f"Inserted {len(memory_ids)} memories")
+
+                # Embed if API key available (inside transaction)
+                if VOYAGE_API_KEY:
+                    print(f"Embedding {len(memory_texts)} memories...")
+                    embeddings = embed_batch(memory_texts)
+                    for i, emb in enumerate(embeddings):
+                        await conn.execute(
+                            "UPDATE memories SET embedding = $1::vector WHERE id = $2",
+                            to_pg_vector(emb),
+                            memory_ids[i],
+                        )
+                    print(f"Embedded {len(embeddings)} memories")
+                else:
+                    print("VOYAGE_API_KEY not set — skipping embeddings (run embed-missing later)")
 
         # Verify: distribution by type
         print("\n--- Verify: ccmem memories by type ---")
