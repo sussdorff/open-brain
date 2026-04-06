@@ -555,6 +555,32 @@ class TestIssueUrlToken:
         assert data.get("error") == "invalid_request"
         assert "$$garbage" in data.get("error_description", "")
 
+    @pytest.mark.asyncio
+    async def test_issue_url_token_duplicate_name_returns_409(self, auth_client, admin_headers):
+        """POST /token/url with a duplicate name returns 409 conflict."""
+        import asyncpg.exceptions
+
+        mock_pool, mock_conn = _make_mock_pool_with_url_token(None)
+        # The server calls pool.execute() directly (not via acquire/conn)
+        mock_pool.execute = AsyncMock(
+            side_effect=asyncpg.exceptions.UniqueViolationError("duplicate key value violates unique constraint")
+        )
+
+        with patch("open_brain.server.get_pool", new_callable=AsyncMock, return_value=mock_pool):
+            resp = await auth_client.post(
+                "/token/url",
+                json={
+                    "name": "existing-token-name",
+                    "scopes": ["memory"],
+                    "expires_in_days": 30,
+                },
+                headers=admin_headers,
+            )
+
+        assert resp.status_code == 409
+        data = resp.json()
+        assert data.get("error") == "conflict"
+
 
 # ─── AK4: DELETE /token/url/{name} ───────────────────────────────────────────
 
@@ -586,3 +612,31 @@ class TestRevokeUrlToken:
         """DELETE /token/url/{name} returns 401 with no auth."""
         resp = await auth_client.delete("/token/url/some-token")
         assert resp.status_code == 401
+
+
+# ─── Scenario Variant 7: Concurrent requests with same token ─────────────────
+
+class TestConcurrentUrlTokenRequests:
+    """Scenario variant 7: two simultaneous requests with same token both succeed."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_requests_with_same_token_both_succeed(self):
+        """Two concurrent requests using the same valid URL token both authenticate."""
+        import asyncio
+        from open_brain.server import app
+
+        raw_token = secrets.token_hex(32)
+        row = _make_url_token_row(scopes=["memory"])
+        mock_pool, _ = _make_mock_pool_with_url_token(row)
+
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
+
+        async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+            with patch("open_brain.server.get_pool", new_callable=AsyncMock, return_value=mock_pool):
+                resp1, resp2 = await asyncio.gather(
+                    client.get(f"/api/context?token={raw_token}"),
+                    client.get(f"/api/context?token={raw_token}"),
+                )
+
+        assert resp1.status_code != 401, f"First concurrent request got 401: {resp1.text}"
+        assert resp2.status_code != 401, f"Second concurrent request got 401: {resp2.text}"
