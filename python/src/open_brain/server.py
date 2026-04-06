@@ -288,6 +288,7 @@ async def save_memory(
         return json.dumps({"id": -1, "message": "Test artifact — not persisted"})
 
     # ── Rate limit check (sliding window, 10/60s) ──────────────────────────────
+    # Note: not atomic — concurrent coroutines may slightly exceed the limit. Acceptable for soft guardrail.
     now = time.monotonic()
     # Prune timestamps older than the window
     while _save_timestamps and now - _save_timestamps[0] > _RATE_LIMIT_WINDOW:
@@ -299,21 +300,24 @@ async def save_memory(
             "error": "rate_limit_exceeded",
             "message": f"Rate limit exceeded: {_RATE_LIMIT_MAX} saves/{_RATE_LIMIT_WINDOW}s. Try again in {retry_in} seconds.",
         })
-    _save_timestamps.append(now)
 
     # ── Daily guard check ──────────────────────────────────────────────────────
     config = get_config()
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        # DB query for accuracy across restarts and multi-instance deployments
-        today_count = await conn.fetchval(
-            "SELECT COUNT(*)::int FROM memories WHERE created_at >= CURRENT_DATE"
-        ) or 0
-    if today_count >= config.MAX_MEMORIES_PER_DAY:
-        return json.dumps({
-            "error": "daily_limit_exceeded",
-            "message": f"Daily memory limit of {config.MAX_MEMORIES_PER_DAY} exceeded. {today_count} memories saved today.",
-        })
+    if config.MAX_MEMORIES_PER_DAY > 0:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            # DB query for accuracy across restarts and multi-instance deployments
+            today_count = await conn.fetchval(
+                "SELECT COUNT(*)::int FROM memories WHERE created_at >= CURRENT_DATE"
+            ) or 0
+        if today_count >= config.MAX_MEMORIES_PER_DAY:
+            return json.dumps({
+                "error": "daily_limit_exceeded",
+                "message": f"Daily memory limit of {config.MAX_MEMORIES_PER_DAY} exceeded. {today_count} memories saved today.",
+            })
+
+    # Rate-limit slot claimed only after all guards pass
+    _save_timestamps.append(now)
 
     dl = get_dl()
     user_id = _current_user_id.get()

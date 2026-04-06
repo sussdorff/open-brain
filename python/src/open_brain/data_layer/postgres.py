@@ -88,11 +88,15 @@ async def get_pool() -> asyncpg.Pool:
             )
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS embedding_token_log (
-                    id SERIAL PRIMARY KEY,
+                    id BIGSERIAL PRIMARY KEY,
                     operation TEXT NOT NULL,
                     token_count INT NOT NULL,
                     logged_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_embedding_token_log_logged_at
+                ON embedding_token_log(logged_at);
             """)
             await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_memories_content_hash
