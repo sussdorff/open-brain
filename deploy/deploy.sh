@@ -14,11 +14,7 @@ echo "Disabling old systemd unit (if present)..."
 systemctl disable --now open-brain 2>/dev/null || true
 
 echo "Building and starting Docker container..."
-# Load OP service account token if available (server stores it in /etc/op-service-account-token)
-if [ -f /etc/op-service-account-token ]; then
-  export OP_SERVICE_ACCOUNT_TOKEN=$(cat /etc/op-service-account-token)
-fi
-op run --env-file=.env.tpl -- docker compose -f docker-compose.service.yml up --build -d
+docker compose -f docker-compose.service.yml up --build -d
 
 echo "Waiting for startup..."
 sleep 5

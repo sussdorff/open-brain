@@ -10,18 +10,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    env_file:
+      - path: .env
+        required: true
     environment:
-      - PORT=${PORT}
-      - DATABASE_URL=${DATABASE_URL}
-      - MCP_SERVER_URL=${MCP_SERVER_URL}
-      - AUTH_USER=${AUTH_USER}
-      - AUTH_PASSWORD=${AUTH_PASSWORD}
-      - JWT_SECRET=${JWT_SECRET}
-      - VOYAGE_API_KEY=${VOYAGE_API_KEY}
-      - VOYAGE_MODEL=${VOYAGE_MODEL}
-      - LLM_PROVIDER=${LLM_PROVIDER}
-      - LLM_MODEL=${LLM_MODEL}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - CLIENTS_FILE=/app/clients.json
       - USERS_FILE=/app/users.json
     ports:
