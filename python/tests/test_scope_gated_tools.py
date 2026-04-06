@@ -17,7 +17,6 @@ import pytest
 from open_brain.server import (
     _EVOLUTION_TOOLS,
     _current_scopes,
-    generate_evolution_suggestion,
 )
 
 
@@ -162,6 +161,7 @@ class TestUnauthenticatedToolList:
 
 # ─── Defense-in-depth: scope check at tool call time ─────────────────────────
 
+@pytest.mark.integration
 class TestScopeRuntimeEnforcement:
     """Defense-in-depth: scope check happens at tool call time, not just tool listing."""
 

@@ -57,7 +57,7 @@ logger = logging.getLogger(__name__)
 _current_user_id: ContextVar[str | None] = ContextVar("current_user_id", default=None)
 
 # ContextVar to track the OAuth scopes for the current request (Bearer token auth only)
-_current_scopes: ContextVar[list[str]] = ContextVar("current_scopes", default=[])
+_current_scopes: ContextVar[tuple[str, ...]] = ContextVar("current_scopes", default=())
 
 # Evolution tools require the `evolution` OAuth scope
 _EVOLUTION_TOOLS: frozenset[str] = frozenset({
@@ -134,7 +134,7 @@ def _require_scope(scope: str) -> None:
     """
     if scope not in _current_scopes.get():
         raise PermissionError(
-            f"Scope '{scope}' required. Current scopes: {_current_scopes.get()}"
+            f"Scope '{scope}' required"
         )
 
 
@@ -718,7 +718,11 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
         api_key = request.headers.get("x-api-key", "")
         if api_key:
             if api_key in self._get_api_keys():
-                return await call_next(request)
+                scopes_token = _current_scopes.set(("memory", "evolution", "admin"))
+                try:
+                    return await call_next(request)
+                finally:
+                    _current_scopes.reset(scopes_token)
             return JSONResponse(
                 {"error": "unauthorized", "error_description": "Invalid API key"},
                 status_code=401,
@@ -740,7 +744,7 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
             provider = get_provider()
             provider.verify_access_token(token)
             user_token = _current_user_id.set(verified.sub)
-            scopes_token = _current_scopes.set(verified.scopes)
+            scopes_token = _current_scopes.set(tuple(verified.scopes))
         except Exception:
             return JSONResponse(
                 {"error": "unauthorized", "error_description": "Invalid or expired token"},
