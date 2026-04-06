@@ -3,9 +3,32 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Bug Fixes
+
+- *(open-brain-vro)* Address review findings iteration 1
+- *(open-brain-vro)* Address review findings iteration 2
+
+### Features
+
+- *(open-brain-vro)* Green — deploy.sh health check exits with code 1 on failure
+- *(open-brain-vro)* Green — add scripts/install-hooks.sh to install pytest pre-commit hook
+- *(open-brain-vro)* Green — add nightly test runner script and Claude Code schedule trigger
+- *(open-brain-vro)* Green — add post-deploy smoke checks for OAuth endpoints to deploy.sh
+
+### Testing
+
+- *(open-brain-vro)* Red — deploy.sh health check must exit on failure
+- *(open-brain-vro)* Red — install-hooks.sh must exist and install pytest pre-commit hook
+- *(open-brain-vro)* Red — nightly test runner script must exist and run full suite
+- *(open-brain-vro)* Red — deploy.sh must have post-deploy smoke checks on API endpoints
+
+## [2026.04.13] - 2026-04-06
+
 ### Miscellaneous
 
 - Bump version to 2026.04.12
+- Update changelog
+- Bump version to 2026.04.13
 
 ## [2026.04.12] - 2026-04-06
 
