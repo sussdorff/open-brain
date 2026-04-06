@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(open-brain-pg4)* Address review findings iteration 1
+- *(open-brain-pg4)* Address review findings iteration 2
+- *(open-brain-pg4)* Address cmux review panel findings
+- *(open-brain-pg4)* Address cmux review panel findings iteration 2
+
+### Features
+
+- *(open-brain-pg4)* Green — URL-based token auth (AK1-AK7)
+
+## [2026.04.14] - 2026-04-06
+
+### Bug Fixes
+
 - *(open-brain-vro)* Address review findings iteration 1
 - *(open-brain-vro)* Address review findings iteration 2
 
@@ -14,6 +27,11 @@ All notable changes to this project will be documented in this file.
 - *(open-brain-vro)* Green — add scripts/install-hooks.sh to install pytest pre-commit hook
 - *(open-brain-vro)* Green — add nightly test runner script and Claude Code schedule trigger
 - *(open-brain-vro)* Green — add post-deploy smoke checks for OAuth endpoints to deploy.sh
+
+### Miscellaneous
+
+- Update changelog
+- Bump version to 2026.04.14
 
 ### Testing
 
