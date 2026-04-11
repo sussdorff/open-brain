@@ -3,8 +3,14 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Features
+
+- *(plugin)* Add ingest-content, learnings-pipeline, memory-heartbeat skills
+- *(plugin)* Add sync-claude-memories Stop hook and standalone migration script
+
 ### Miscellaneous
 
+- Bump version to 2026.04.21
 - Bump version to 2026.04.20
 
 ### Refactoring
