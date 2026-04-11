@@ -1,7 +1,7 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
-## [unreleased]
+## [0.3.0] - 2026-04-11
 
 ### Features
 
@@ -11,7 +11,17 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous
 
 - Bump version to 2026.04.21
+- Update changelog
+- Bump version to 2026.04.22
+- *(plugin)* Sync version to CalVer 2026.04.22
+- Switch to SemVer, set version 0.3.0
+
+## [2026.04.21] - 2026-04-06
+
+### Miscellaneous
+
 - Bump version to 2026.04.20
+- Update changelog
 
 ### Refactoring
 
