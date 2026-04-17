@@ -1,6 +1,25 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [unreleased]
+
+### Bug Fixes
+
+- *(open-brain-e0k)* Use POST /v1/embeddings for Voyage health check
+- *(open-brain-e0k)* Add TTL cache to Voyage health check to limit quota burn
+- *(open-brain-e0k)* Remove Voyage check from /health, keep live POST in doctor() only
+
+### Documentation
+
+- Add canonical schema doc for /api/worktree-session-summary
+
+## [0.5.0] - 2026-04-17
+
+### Miscellaneous
+
+- Update changelog
+- Bump version to 0.5.0
+
 ## [0.4.0] - 2026-04-17
 
 ### Bug Fixes
