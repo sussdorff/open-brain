@@ -66,6 +66,7 @@ _current_user_id: ContextVar[str | None] = ContextVar("current_user_id", default
 _save_timestamps: dict[str, deque[float]] = {}
 _RATE_LIMIT_MAX = 10
 _RATE_LIMIT_WINDOW = 60
+_MAX_TURNS_TEXT = 8000
 
 # ContextVar to track the OAuth scopes for the current request (Bearer token auth only)
 _current_scopes: ContextVar[tuple[str, ...]] = ContextVar("current_scopes", default=())
@@ -1233,6 +1234,14 @@ async def health() -> JSONResponse:
 
 
 # ─── REST API Endpoints (Plugin Hooks) ────────────────────────────────────────
+#
+# Endpoints (all require X-API-Key or Bearer token auth unless noted):
+#   POST /api/ingest                    — ingest single tool observation (plugin hook)
+#   POST /api/summarize                 — generate session summary from recent observations
+#   POST /api/session-capture           — extract observations from conversation transcript
+#   POST /api/worktree-session-summary  — generate summary from worktree session turn batch
+#   DELETE /api/memories                — delete memories by IDs or filter
+#   GET /api/context                    — get recent memory context (markdown or JSON)
 
 # Skip list for observation capture — tools with no learning value
 _INGEST_SKIP_TOOLS = {
@@ -1417,6 +1426,139 @@ Respond with ONLY valid JSON, no markdown fences."""
         logger.info("Session summary saved for %s [%s]", session_id, hook_type)
     except Exception:
         logger.exception("Failed to process summarize")
+
+
+@app.post("/api/worktree-session-summary")
+async def api_worktree_session_summary(request: Request) -> JSONResponse:
+    """Ingest a batch of worktree session turns and generate a session summary.
+
+    Body schema:
+        worktree (str): path to the worktree (e.g. '.claude/worktrees/bead-x7s')
+        bead_id (str, optional): bead identifier
+        project (str, required): project name
+        turns (list, required, non-empty): list of turn dicts with ts, agent, session_id,
+            user_input_excerpt, assistant_summary_excerpt, tool_calls fields
+
+    Returns 202 Accepted immediately; summary is generated and stored asynchronously.
+    Returns 400 if project is missing or turns is empty.
+    Auth: X-API-Key header (handled by BearerAuthMiddleware).
+    """
+    body = await request.json()
+
+    if not body.get("project"):
+        return JSONResponse({"error": "project is required"}, status_code=400)
+
+    turns = body.get("turns")
+    if not isinstance(turns, list) or not turns:
+        return JSONResponse({"error": "turns must be a non-empty array"}, status_code=400)
+
+    asyncio.create_task(_process_worktree_session_summary(body))
+
+    return JSONResponse({"status": "accepted"}, status_code=202)
+
+
+async def _process_worktree_session_summary(body: dict) -> None:
+    """Background task: build Haiku summary from worktree session turns and save to memory."""
+    try:
+        project = body.get("project", "unknown")
+        worktree = body.get("worktree", "")
+        bead_id = body.get("bead_id")
+        turns = body.get("turns", [])
+
+        # Filter to valid dicts only — skip any malformed entries
+        valid_turns = [t for t in turns if isinstance(t, dict)]
+        if not valid_turns:
+            logger.warning("worktree_session_summary: no valid turn dicts in payload, skipping")
+            return
+
+        # Build prompt from valid_turns
+        turn_lines = []
+        for t in valid_turns:
+            ts = t.get("ts", "")
+            agent = t.get("agent", "")
+            hook = t.get("hook_type", "")
+            user_exc = t.get("user_input_excerpt", "")
+            asst_exc = t.get("assistant_summary_excerpt", "")
+            tool_calls = t.get("tool_calls", [])
+            if isinstance(tool_calls, list):
+                tools_str = ", ".join(
+                    f"{tc.get('name', '')}({tc.get('target', '')})"
+                    for tc in tool_calls
+                    if isinstance(tc, dict)
+                )
+            else:
+                tools_str = ""
+            turn_lines.append(
+                f"[{ts}] {agent} ({hook})\n"
+                f"  User: {user_exc}\n"
+                f"  Assistant: {asst_exc}\n"
+                f"  Tools: {tools_str}"
+            )
+
+        turns_text = "\n\n".join(turn_lines)
+
+        # Truncate to prevent context overflow for long-lived worktrees.
+        # Keep head + tail so the model sees both setup context and the session outcome,
+        # matching the /api/session-capture truncation idiom.
+        if len(turns_text) > _MAX_TURNS_TEXT:
+            half = _MAX_TURNS_TEXT // 2
+            turns_text = turns_text[:half] + "\n\n[...truncated...]\n\n" + turns_text[-half:]
+
+        summary_prompt = f"""Summarize this worktree coding session based on the turn log below.
+
+Project: {project}
+Worktree: {worktree}
+
+Turn log:
+{turns_text}
+
+Respond in JSON:
+- "title": short session headline (max 80 chars)
+- "content": 3-5 sentence summary covering what was worked on, key actions, and outcome
+- "narrative": what was learned or discovered (1-2 sentences, or null)
+
+Respond with ONLY valid JSON, no markdown fences."""
+
+        response = await llm_complete(
+            [LlmMessage(role="user", content=summary_prompt)],
+            model="claude-haiku-4-5-20251001",
+            max_tokens=512,
+        )
+        summary = parse_llm_json(response)
+
+        # Build session_ref from sorted unique session_ids
+        session_ids = sorted({t["session_id"] for t in valid_turns if t.get("session_id")})
+        session_ref = ",".join(session_ids)
+
+        # Metadata fields
+        last_ts = valid_turns[-1].get("ts")
+        agent = valid_turns[-1].get("agent", "")
+        metadata: dict = {
+            "worktree": worktree,
+            "agent": agent,
+            "turn_count": len(valid_turns),
+            "last_ts": last_ts,
+        }
+        if bead_id is not None:
+            metadata["bead_id"] = bead_id
+
+        dl = get_dl()
+        await dl.save_memory(
+            SaveMemoryParams(
+                text=summary.get("content", f"Worktree session summary for {worktree}."),
+                type="session_summary",
+                project=project,
+                title=summary.get("title", f"Worktree session: {worktree}"),
+                narrative=summary.get("narrative"),
+                session_ref=session_ref if session_ref else None,
+                metadata=metadata,
+            )
+        )
+        logger.info(
+            "Worktree session summary saved for %s [%s turns]", worktree, len(valid_turns)
+        )
+    except Exception:
+        logger.exception("Failed to process worktree session summary")
 
 
 @app.post("/api/session-capture")
