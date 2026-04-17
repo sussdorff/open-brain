@@ -66,6 +66,10 @@ _current_user_id: ContextVar[str | None] = ContextVar("current_user_id", default
 _save_timestamps: dict[str, deque[float]] = {}
 _RATE_LIMIT_MAX = 10
 _RATE_LIMIT_WINDOW = 60
+
+# TTL cache for Voyage API health check — avoids billable API calls on every /health poll
+_voyage_status_cache: tuple[str, float] | None = None
+_VOYAGE_STATUS_TTL = 60.0  # seconds
 _MAX_TURNS_TEXT = 8000
 
 # ContextVar to track the OAuth scopes for the current request (Bearer token auth only)
@@ -562,9 +566,19 @@ async def _check_db_status() -> dict:
 async def _check_voyage_api_status() -> str:
     """Check Voyage API reachability.
 
+    Results are cached for _VOYAGE_STATUS_TTL seconds to avoid billable API
+    calls on every /health poll.
+
     Returns:
         One of "ok", "degraded", "unreachable".
     """
+    global _voyage_status_cache
+    now = time.monotonic()
+    if _voyage_status_cache is not None:
+        cached_status, cached_at = _voyage_status_cache
+        if now - cached_at < _VOYAGE_STATUS_TTL:
+            return cached_status
+
     config = get_config()
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
@@ -573,10 +587,13 @@ async def _check_voyage_api_status() -> str:
                 headers={"Authorization": f"Bearer {config.VOYAGE_API_KEY}"},
                 json={"input": ["healthcheck"], "model": config.VOYAGE_MODEL},
             )
-        return "ok" if resp.status_code == 200 else "degraded"
+        status = "ok" if resp.status_code == 200 else "degraded"
     except Exception:
         logger.warning("Health check: Voyage API unreachable", exc_info=True)
-        return "unreachable"
+        status = "unreachable"
+
+    _voyage_status_cache = (status, now)
+    return status
 
 
 @mcp.tool(description="Run diagnostic health check: DB latency, Voyage API status, memory stats, uptime")
