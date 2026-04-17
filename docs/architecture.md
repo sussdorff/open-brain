@@ -290,7 +290,9 @@ The Claude Code plugin provides automatic memory capture without manual MCP tool
 |------|--------|-------------|
 | `SessionStart` | `context_inject.py` | Fetches recent memories and injects a narrative summary into the session |
 | `Stop` | `summarize.py` | Generates and saves a session summary from recent observations |
+| `Stop` | `worktree_turn_log.py` | Appends turn metadata (user input, assistant response, tool calls) to `.worktree-turns.jsonl` for session analytics |
 | `SubagentStop` | `summarize.py` | Same as Stop, for subagent sessions |
+| `SubagentStop` | `worktree_turn_log.py` | Same as Stop, for subagent sessions |
 
 ### Plugin REST API
 

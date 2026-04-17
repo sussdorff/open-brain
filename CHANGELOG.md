@@ -1,21 +1,31 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
-## [unreleased]
+## [0.4.0] - 2026-04-17
 
 ### Bug Fixes
 
+- *(open-brain-9tt)* Address review findings iteration 1
+- *(open-brain-9tt)* Address review findings iteration 2
+- *(open-brain-9tt)* Worktree field relative to main repo root
 - *(open-brain-x7s)* Address review findings iteration 1
 - *(open-brain-x7s)* Prompt truncation and valid_turns guard for robustness
 - *(open-brain-x7s)* Use head+tail truncation to preserve session outcome in prompt
 
+### Documentation
+
+- Update feature documentation for open-brain-9tt
+
 ### Features
 
+- *(open-brain-9tt)* Green — worktree_turn_log hook (19/19 tests passing)
 - *(open-brain-x7s)* Green — implement POST /api/worktree-session-summary
 
 ### Miscellaneous
 
 - Update changelog
+- Update changelog
+- Bump version to 0.4.0
 
 ## [0.3.0] - 2026-04-11
 
