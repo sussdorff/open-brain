@@ -127,7 +127,6 @@ async def _extract_entities(text: str) -> dict:
     try:
         response = await llm_complete(
             messages=[LlmMessage(role="user", content=_ENTITY_EXTRACTION_PROMPT + text)],
-            model="claude-haiku-4-5-20251001",
         )
         parsed = parse_llm_json(response)
         # Filter to expected keys only; strip non-string items from lists (prevents hallucinated keys/values)
@@ -1324,7 +1323,6 @@ Respond with ONLY valid JSON, no markdown fences."""
     try:
         response = await llm_complete(
             [LlmMessage(role="user", content=prompt)],
-            model="claude-haiku-4-5-20251001",
             max_tokens=512,
         )
         result = parse_llm_json(response)
@@ -1402,7 +1400,6 @@ Respond with ONLY valid JSON, no markdown fences."""
 
         response = await llm_complete(
             [LlmMessage(role="user", content=summary_prompt)],
-            model="claude-haiku-4-5-20251001",
             max_tokens=512,
         )
         summary = parse_llm_json(response)
@@ -1515,7 +1512,6 @@ Respond with ONLY valid JSON, no markdown fences."""
 
         response = await llm_complete(
             [LlmMessage(role="user", content=summary_prompt)],
-            model="claude-haiku-4-5-20251001",
             max_tokens=512,
         )
         summary = parse_llm_json(response)
@@ -1625,9 +1621,14 @@ Respond with ONLY valid JSON (no markdown fences):
 
 If nothing worth remembering happened, return: {{"observations": [], "session_summary": null}}"""
 
+        # Session-capture is the heaviest LLM workload (8k input, 1k output).
+        # Use LLM_MODEL_CAPTURE if set, otherwise fall back to LLM_MODEL.
+        config = get_config()
+        capture_model = config.LLM_MODEL_CAPTURE or config.LLM_MODEL
+
         response = await llm_complete(
             [LlmMessage(role="user", content=extraction_prompt)],
-            model="claude-haiku-4-5-20251001",
+            model=capture_model,
             max_tokens=1024,
         )
         result = parse_llm_json(response)

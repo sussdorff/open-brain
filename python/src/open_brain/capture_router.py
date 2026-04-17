@@ -85,7 +85,6 @@ async def classify_and_extract(
     try:
         response = await llm_complete(
             messages=[LlmMessage(role="user", content=prompt)],
-            model="claude-haiku-4-5-20251001",
             max_tokens=512,
         )
         result = parse_llm_json(response)

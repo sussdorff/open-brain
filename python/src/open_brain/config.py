@@ -32,9 +32,21 @@ class Config(BaseSettings):
     # Daily ingestion guard: reject save_memory calls beyond this threshold per day
     MAX_MEMORIES_PER_DAY: int = 500
 
-    # LLM for metadata extraction / refinement
+    # LLM for metadata extraction / refinement.
+    #
+    # LLM_MODEL is the default used by all "small" calls: entity extraction,
+    # capture-router classification, tool-use observation extraction, and
+    # the short session/worktree summaries. These calls have small inputs
+    # (≤4k chars) and ≤512 output tokens, so a cheap model suffices.
+    #
+    # LLM_MODEL_CAPTURE is an OPTIONAL override for the heavier
+    # /api/session-capture endpoint (up to ~8k chars input, 1024 output
+    # tokens). If unset, LLM_MODEL is used. Set this when you want a
+    # stronger model for full-conversation extraction while keeping cheap
+    # models for the high-volume small calls.
     LLM_PROVIDER: Literal["anthropic", "openrouter"] = "anthropic"
     LLM_MODEL: str = "claude-haiku-4-5-20251001"
+    LLM_MODEL_CAPTURE: str | None = None
     ANTHROPIC_API_KEY: str | None = None
     OPENROUTER_API_KEY: str | None = None
 

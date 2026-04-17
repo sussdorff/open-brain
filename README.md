@@ -144,7 +144,8 @@ All configuration is via environment variables (`.env` file or injected by your 
 | `VOYAGE_API_KEY` | Yes | — | [Voyage AI](https://www.voyageai.com/) API key |
 | `VOYAGE_MODEL` | No | `voyage-4` | Embedding model |
 | `LLM_PROVIDER` | No | `anthropic` | `anthropic` or `openrouter` |
-| `LLM_MODEL` | No | `claude-haiku-4-5-20251001` | Model for refine/triage |
+| `LLM_MODEL` | No | `claude-haiku-4-5-20251001` | Default model for small calls (entity/classification/tool-use/summaries) |
+| `LLM_MODEL_CAPTURE` | No | — | Optional override for `/api/session-capture` (falls back to `LLM_MODEL`) |
 | `ANTHROPIC_API_KEY` | Cond. | — | Required when `LLM_PROVIDER=anthropic` |
 | `OPENROUTER_API_KEY` | Cond. | — | Required when `LLM_PROVIDER=openrouter` |
 | `API_KEYS` | No | — | Comma-separated API keys for plugin/script access |
