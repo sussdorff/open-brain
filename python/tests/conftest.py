@@ -54,15 +54,6 @@ def reset_save_timestamps():
 
 
 @pytest.fixture(autouse=True)
-def reset_voyage_status_cache():
-    """Reset Voyage API status TTL cache between tests to avoid cross-test interference."""
-    import open_brain.server as server_module
-    server_module._voyage_status_cache = None
-    yield
-    server_module._voyage_status_cache = None
-
-
-@pytest.fixture(autouse=True)
 def reset_config_singleton():
     """Reset config singleton between tests."""
     import open_brain.config as config_module

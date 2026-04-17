@@ -9,7 +9,7 @@ import pytest
 class TestHealthSubsystems:
     @pytest.mark.asyncio
     async def test_health_returns_subsystem_fields(self):
-        """GET /health must return status, db, embedding_api, memory_count."""
+        """GET /health must return status, db, memory_count."""
         import httpx
         from open_brain.server import app
 
@@ -21,7 +21,6 @@ class TestHealthSubsystems:
             assert "status" in data
             assert "service" in data
             assert "db" in data
-            assert "embedding_api" in data
             assert "memory_count" in data
 
     @pytest.mark.asyncio
@@ -45,14 +44,3 @@ class TestHealthSubsystems:
             response = await client.get("/health")
             data = response.json()
             assert data["db"] in ("ok", "unreachable")
-
-    @pytest.mark.asyncio
-    async def test_health_embedding_api_field_valid_values(self):
-        """embedding_api field must be 'ok', 'degraded', or 'unreachable'."""
-        import httpx
-        from open_brain.server import app
-
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-            response = await client.get("/health")
-            data = response.json()
-            assert data["embedding_api"] in ("ok", "degraded", "unreachable", "unknown")
