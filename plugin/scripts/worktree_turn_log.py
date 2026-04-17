@@ -26,7 +26,7 @@ def _is_worktree(cwd: str) -> bool:
 
 def _extract_bead_id(path: str) -> str | None:
     """Extract bead ID from a worktree path segment like 'bead-open-brain-krx'."""
-    match = re.search(r"bead-([a-z0-9][a-z0-9-]+)", path)
+    match = re.search(r"(?:^|/)\.claude/worktrees/bead-([a-z0-9][a-z0-9-]+?)(?:/|$)", path)
     if match:
         return match.group(1)
     return None
@@ -59,7 +59,10 @@ def _extract_tool_calls(content: list | str) -> list[dict]:
             name = block.get("name", "")
             inp = block.get("input", {})
             # Determine target using priority list of known keys, then first string value
-            target = next((inp[k] for k in KNOWN_TARGET_KEYS if k in inp and isinstance(inp[k], str)), "")
+            target = next(
+                (inp[k] for k in KNOWN_TARGET_KEYS if k in inp and isinstance(inp[k], str)),
+                next((v for v in inp.values() if isinstance(v, str)), ""),
+            )
             # Truncate long targets (e.g. multi-line Bash scripts)
             target = target[:200] if len(target) > 200 else target
             calls.append({"name": name, "target": target})
@@ -151,7 +154,7 @@ def _git_run(args: list[str], cwd: str | None = None) -> str | None:
         if result.returncode == 0:
             return result.stdout.strip()
     except Exception as e:
-        print(f"worktree_turn_log: _git_run failed: {e}", file=sys.stderr)
+        print(f"[worktree_turn_log] _git_run failed: {e}", file=sys.stderr)
     return None
 
 
@@ -182,16 +185,20 @@ def _get_worktree_toplevel(cwd: str) -> str | None:
 
 
 def _ensure_exclude(git_common_dir: Path) -> None:
-    """Idempotently add .worktree-turns.jsonl to git exclude file."""
+    """Idempotently add /.worktree-turns.jsonl to git exclude file."""
     try:
         exclude_file = git_common_dir / "info" / "exclude"
         if not exclude_file.exists():
-            return
-        content = exclude_file.read_text(encoding="utf-8")
-        if ".worktree-turns.jsonl" not in content:
+            exclude_file.parent.mkdir(parents=True, exist_ok=True)
+            exclude_file.touch(mode=0o644)
+            content = ""
+        else:
+            content = exclude_file.read_text(encoding="utf-8")
+        existing_lines = set(content.splitlines())
+        if "/.worktree-turns.jsonl" not in existing_lines:
             if not content.endswith("\n"):
                 content += "\n"
-            content += ".worktree-turns.jsonl\n"
+            content += "/.worktree-turns.jsonl\n"
             exclude_file.write_text(content, encoding="utf-8")
     except Exception as exc:
         print(f"[worktree_turn_log] exclude update error: {exc}", file=sys.stderr)

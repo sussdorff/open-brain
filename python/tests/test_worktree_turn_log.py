@@ -225,6 +225,31 @@ class TestTranscriptParsing:
         assert result["tool_calls"][0]["name"] == "Bash"
         assert result["tool_calls"][0]["target"] == "ls -la"
 
+    def test_tool_target_fallback_to_first_string_value(self, tmp_path):
+        """Falls back to first string value when no known key matches."""
+        import worktree_turn_log
+
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps({
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "name": "UnknownTool",
+                            "input": {"custom_param": "some_value", "count": 42},
+                        }
+                    ],
+                },
+            }) + "\n",
+            encoding="utf-8",
+        )
+        result = worktree_turn_log._parse_transcript(transcript)
+        assert result["tool_calls"][0]["name"] == "UnknownTool"
+        assert result["tool_calls"][0]["target"] == "some_value"
+
     def test_tool_result_entries_not_identified_as_user_input(self, tmp_path):
         """Realistic transcript: tool_result entries must not be treated as user messages.
 
@@ -464,7 +489,22 @@ class TestSelfHealingExclude:
                 worktree_turn_log.handle(hook_data)
 
         exclude_content = (fake_git_dirs / "info" / "exclude").read_text(encoding="utf-8")
-        assert ".worktree-turns.jsonl" in exclude_content
+        assert "/.worktree-turns.jsonl" in exclude_content
+
+    def test_creates_exclude_file_when_missing(self, tmp_path):
+        """Creates info/exclude file and writes pattern when file doesn't exist."""
+        import worktree_turn_log
+
+        git_dir = tmp_path / ".git"
+        git_dir.mkdir()
+        # Intentionally do NOT create info/ or info/exclude
+
+        worktree_turn_log._ensure_exclude(git_dir)
+
+        exclude_file = git_dir / "info" / "exclude"
+        assert exclude_file.exists()
+        content = exclude_file.read_text(encoding="utf-8")
+        assert "/.worktree-turns.jsonl" in content
 
     def test_exclude_is_idempotent(self, fake_worktree, fake_transcript, fake_git_dirs):
         """Running twice doesn't duplicate the exclude entry."""
@@ -494,7 +534,7 @@ class TestSelfHealingExclude:
                     worktree_turn_log.handle(hook_data)
 
         exclude_content = (fake_git_dirs / "info" / "exclude").read_text(encoding="utf-8")
-        count = exclude_content.count(".worktree-turns.jsonl")
+        count = exclude_content.count("/.worktree-turns.jsonl")
         assert count == 1
 
 
