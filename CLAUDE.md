@@ -31,7 +31,18 @@ uv run pytest -m "not integration" # Run without external deps
 
 ## Deployment
 
-See `deploy/deploy.sh` and `docker-compose.service.yml` for production deployment patterns.
+**Production host:** LXC116 on Proxmox node `elysium`. Reach it via the `infra:home` agent or:
+```bash
+ssh elysium  # then: ssh lxc116  (or however home infra routes it)
+bash /opt/open-brain/deploy/deploy.sh
+```
+The deploy script: git pull → docker pull from GHCR → `docker compose up -d` → health check.
+
+Public URL: `https://open-brain.sussdorff.org`
+
+**Do NOT** try to `ssh malte@open-brain.sussdorff.org` directly — DNS resolves to the LXC, but SSH auth goes through elysium.
+
+See `deploy/deploy.sh` and `docker-compose.service.yml` for deployment details.
 
 ## Key Decisions
 
