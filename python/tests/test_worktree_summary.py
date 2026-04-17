@@ -189,3 +189,67 @@ class TestApiWorktreeSessionSummary:
         assert meta["agent"] == "claude-code"
         assert meta["turn_count"] == 3
         assert meta["last_ts"] == "2026-04-17T10:42:18Z"
+
+    @pytest.mark.asyncio
+    async def test_background_task_truncates_long_turns_text(self, mock_dl):
+        """Background task truncates turns_text at 8000 chars to prevent context overflow."""
+        from open_brain.server import _process_worktree_session_summary
+        # Build a turn with very long excerpts so turns_text exceeds _MAX_TURNS_TEXT
+        long_turn = {
+            "ts": "2026-04-17T10:00:00Z",
+            "agent": "claude-code",
+            "session_id": "session-abc",
+            "hook_type": "Stop",
+            "user_input_excerpt": "A" * 5000,
+            "assistant_summary_excerpt": "B" * 5000,
+            "tool_calls": [],
+        }
+        body = {
+            "worktree": ".claude/worktrees/test",
+            "project": "test-project",
+            "turns": [long_turn],
+        }
+        captured_prompt = []
+        async def mock_llm(messages, **kwargs):
+            captured_prompt.append(messages[0].content)
+            return '{"title": "t", "content": "c", "narrative": "n"}'
+
+        with patch("open_brain.server.get_dl", return_value=mock_dl):
+            with patch("open_brain.server.llm_complete", side_effect=mock_llm):
+                with patch("open_brain.server.parse_llm_json", return_value={"title": "t", "content": "c", "narrative": "n"}):
+                    await _process_worktree_session_summary(body)
+
+        assert captured_prompt, "llm_complete was not called"
+        assert "[...truncated...]" in captured_prompt[0]
+
+    @pytest.mark.asyncio
+    async def test_background_task_skips_non_dict_turns(self, mock_dl):
+        """Background task skips non-dict entries in turns array and processes valid ones."""
+        from open_brain.server import _process_worktree_session_summary
+        body = {
+            "worktree": ".claude/worktrees/test",
+            "project": "test-project",
+            "turns": [
+                "not-a-dict",
+                None,
+                {
+                    "ts": "2026-04-17T10:00:00Z",
+                    "agent": "claude-code",
+                    "session_id": "valid-session-id",
+                    "hook_type": "Stop",
+                    "user_input_excerpt": "Fix bug",
+                    "assistant_summary_excerpt": "Applied fix",
+                    "tool_calls": [],
+                },
+            ],
+        }
+        with patch("open_brain.server.get_dl", return_value=mock_dl):
+            with patch("open_brain.server.llm_complete", new_callable=AsyncMock,
+                       return_value='{"title": "t", "content": "c", "narrative": "n"}'):
+                with patch("open_brain.server.parse_llm_json", return_value={"title": "t", "content": "c", "narrative": "n"}):
+                    await _process_worktree_session_summary(body)
+
+        # Only one valid turn: save_memory should be called once with the valid session_id
+        mock_dl.save_memory.assert_called_once()
+        call_params = mock_dl.save_memory.call_args[0][0]
+        assert call_params.session_ref == "valid-session-id"

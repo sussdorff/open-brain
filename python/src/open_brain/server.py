@@ -66,6 +66,7 @@ _current_user_id: ContextVar[str | None] = ContextVar("current_user_id", default
 _save_timestamps: dict[str, deque[float]] = {}
 _RATE_LIMIT_MAX = 10
 _RATE_LIMIT_WINDOW = 60
+_MAX_TURNS_TEXT = 8000
 
 # ContextVar to track the OAuth scopes for the current request (Bearer token auth only)
 _current_scopes: ContextVar[tuple[str, ...]] = ContextVar("current_scopes", default=())
@@ -1462,11 +1463,17 @@ async def _process_worktree_session_summary(body: dict) -> None:
         project = body.get("project", "unknown")
         worktree = body.get("worktree", "")
         bead_id = body.get("bead_id")
-        turns: list[dict] = body.get("turns", [])
+        turns = body.get("turns", [])
 
-        # Build prompt from turns
+        # Filter to valid dicts only — skip any malformed entries
+        valid_turns = [t for t in turns if isinstance(t, dict)]
+        if not valid_turns:
+            logger.warning("worktree_session_summary: no valid turn dicts in payload, skipping")
+            return
+
+        # Build prompt from valid_turns
         turn_lines = []
-        for t in turns:
+        for t in valid_turns:
             ts = t.get("ts", "")
             agent = t.get("agent", "")
             hook = t.get("hook_type", "")
@@ -1474,7 +1481,11 @@ async def _process_worktree_session_summary(body: dict) -> None:
             asst_exc = t.get("assistant_summary_excerpt", "")
             tool_calls = t.get("tool_calls", [])
             if isinstance(tool_calls, list):
-                tools_str = ", ".join(f"{tc.get('name', '')}({tc.get('target', '')})" for tc in tool_calls)
+                tools_str = ", ".join(
+                    f"{tc.get('name', '')}({tc.get('target', '')})"
+                    for tc in tool_calls
+                    if isinstance(tc, dict)
+                )
             else:
                 tools_str = ""
             turn_lines.append(
@@ -1485,6 +1496,10 @@ async def _process_worktree_session_summary(body: dict) -> None:
             )
 
         turns_text = "\n\n".join(turn_lines)
+
+        # Truncate to prevent context overflow for long-lived worktrees
+        if len(turns_text) > _MAX_TURNS_TEXT:
+            turns_text = turns_text[:_MAX_TURNS_TEXT] + "\n\n[...truncated...]"
 
         summary_prompt = f"""Summarize this worktree coding session based on the turn log below.
 
@@ -1509,16 +1524,16 @@ Respond with ONLY valid JSON, no markdown fences."""
         summary = parse_llm_json(response)
 
         # Build session_ref from sorted unique session_ids
-        session_ids = sorted({t["session_id"] for t in turns if t.get("session_id")})
+        session_ids = sorted({t["session_id"] for t in valid_turns if t.get("session_id")})
         session_ref = ",".join(session_ids)
 
         # Metadata fields
-        last_ts = turns[-1].get("ts")
-        agent = turns[-1].get("agent", "")
+        last_ts = valid_turns[-1].get("ts")
+        agent = valid_turns[-1].get("agent", "")
         metadata: dict = {
             "worktree": worktree,
             "agent": agent,
-            "turn_count": len(turns),
+            "turn_count": len(valid_turns),
             "last_ts": last_ts,
         }
         if bead_id is not None:
@@ -1537,7 +1552,7 @@ Respond with ONLY valid JSON, no markdown fences."""
             )
         )
         logger.info(
-            "Worktree session summary saved for %s [%s turns]", worktree, len(turns)
+            "Worktree session summary saved for %s [%s turns]", worktree, len(valid_turns)
         )
     except Exception:
         logger.exception("Failed to process worktree session summary")
