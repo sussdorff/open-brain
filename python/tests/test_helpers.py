@@ -27,6 +27,7 @@ def make_mock_http_client(status_code: int = 200):
     mock_http_response.status_code = status_code
     mock_http_client = AsyncMock()
     mock_http_client.get = AsyncMock(return_value=mock_http_response)
+    mock_http_client.post = AsyncMock(return_value=mock_http_response)
     mock_http_client.__aenter__ = AsyncMock(return_value=mock_http_client)
     mock_http_client.__aexit__ = AsyncMock(return_value=None)
     return mock_http_client

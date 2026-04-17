@@ -66,6 +66,7 @@ _current_user_id: ContextVar[str | None] = ContextVar("current_user_id", default
 _save_timestamps: dict[str, deque[float]] = {}
 _RATE_LIMIT_MAX = 10
 _RATE_LIMIT_WINDOW = 60
+
 _MAX_TURNS_TEXT = 8000
 
 # ContextVar to track the OAuth scopes for the current request (Bearer token auth only)
@@ -560,7 +561,7 @@ async def _check_db_status() -> dict:
 
 
 async def _check_voyage_api_status() -> str:
-    """Check Voyage API reachability.
+    """Check Voyage API reachability via a minimal embedding probe.
 
     Returns:
         One of "ok", "degraded", "unreachable".
@@ -568,9 +569,10 @@ async def _check_voyage_api_status() -> str:
     config = get_config()
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get(
-                "https://api.voyageai.com/v1/models",
+            resp = await client.post(
+                "https://api.voyageai.com/v1/embeddings",
                 headers={"Authorization": f"Bearer {config.VOYAGE_API_KEY}"},
+                json={"input": ["healthcheck"], "model": config.VOYAGE_MODEL},
             )
         return "ok" if resp.status_code == 200 else "degraded"
     except Exception:
@@ -1205,18 +1207,11 @@ async def health() -> JSONResponse:
     """Health check endpoint with subsystem status.
 
     Returns HTTP 200 if DB is reachable, HTTP 503 if DB is down.
-    Voyage API failure is non-critical (degraded, not unhealthy).
-    Short-circuits Voyage API check when DB is down to avoid unnecessary delay.
+    Voyage API is checked only via doctor() on demand, not here.
     """
     db_info = await _check_db_status()
     db_status = db_info["db_status"]
     memory_count = db_info["memory_count"]
-
-    # ── Voyage API check (non-critical) — skipped when DB is down ─────────────
-    if db_status == "unreachable":
-        embedding_api_status = "unknown"
-    else:
-        embedding_api_status = await _check_voyage_api_status()
 
     status = "ok" if db_status == "ok" else "unhealthy"
     http_status = 200 if db_status == "ok" else 503
@@ -1226,7 +1221,6 @@ async def health() -> JSONResponse:
             "service": "open-brain",
             "runtime": "python",
             "db": db_status,
-            "embedding_api": embedding_api_status,
             "memory_count": memory_count,
         },
         status_code=http_status,

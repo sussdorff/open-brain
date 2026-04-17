@@ -99,7 +99,7 @@ class TestDoctorTool:
         """doctor() must report voyage_api_status: unreachable when httpx raises."""
         mock_pool = _make_mock_pool()
         mock_http_client = AsyncMock()
-        mock_http_client.get = AsyncMock(side_effect=Exception("network error"))
+        mock_http_client.post = AsyncMock(side_effect=Exception("network error"))
         mock_http_client.__aenter__ = AsyncMock(return_value=mock_http_client)
         mock_http_client.__aexit__ = AsyncMock(return_value=None)
 
