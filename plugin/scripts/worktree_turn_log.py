@@ -184,6 +184,33 @@ def _get_worktree_toplevel(cwd: str) -> str | None:
     return out
 
 
+def _get_main_repo_root(cwd: str) -> str | None:
+    """Return the main repo root even from inside a linked worktree.
+
+    In a linked worktree, `git rev-parse --git-common-dir` returns a path like:
+      /repo/.git/worktrees/<name>   (linked worktree)
+    or:
+      /repo/.git                    (main worktree)
+
+    We normalise both to return the parent of the .git directory.
+    """
+    result = _git_run(["rev-parse", "--git-common-dir"], cwd=cwd)
+    if result is None:
+        return None
+    git_common = Path(result.strip())
+    # Make absolute if relative (rare, but git can return relative paths)
+    if not git_common.is_absolute():
+        git_common = Path(cwd) / git_common
+    git_common = git_common.resolve()
+    # Walk up until we find the directory named ".git"
+    # For /repo/.git                   -> parent is /repo
+    # For /repo/.git/worktrees/<name>  -> we need to find /repo/.git first
+    for part in [git_common, *git_common.parents]:
+        if part.name == ".git":
+            return str(part.parent)
+    return None
+
+
 def _ensure_exclude(git_common_dir: Path) -> None:
     """Idempotently add /.worktree-turns.jsonl to git exclude file."""
     try:
@@ -229,11 +256,13 @@ def handle(hook_data: dict) -> dict | None:
     # Derive worktree root from cwd (handles subdirectory cwds correctly)
     worktree_root = _get_worktree_root(cwd) or cwd
 
-    # Get worktree relative path (relative to git repo toplevel)
-    toplevel = _get_worktree_toplevel(cwd)
-    if toplevel:
+    # Get worktree relative path (relative to main repo root, not worktree toplevel)
+    # Using --git-common-dir correctly handles linked worktrees where
+    # --show-toplevel returns the worktree root itself (yielding "." when relativized).
+    main_root = _get_main_repo_root(cwd)
+    if main_root:
         try:
-            worktree_rel = str(Path(worktree_root).relative_to(toplevel))
+            worktree_rel = str(Path(worktree_root).relative_to(main_root))
         except ValueError:
             worktree_rel = worktree_root
     else:

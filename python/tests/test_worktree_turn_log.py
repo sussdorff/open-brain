@@ -458,6 +458,94 @@ class TestJsonlOutput:
         assert len(lines) == 3
 
 
+# ─── Main repo root resolution ────────────────────────────────────────────────
+
+
+class TestMainRepoRoot:
+    def test_get_main_repo_root_from_main_worktree(self, tmp_path):
+        """When git-common-dir is /repo/.git, returns /repo."""
+        import worktree_turn_log
+
+        git_dir = tmp_path / ".git"
+        git_dir.mkdir()
+
+        with patch("worktree_turn_log._git_run", return_value=str(git_dir)):
+            result = worktree_turn_log._get_main_repo_root(str(tmp_path))
+
+        assert result == str(tmp_path)
+
+    def test_get_main_repo_root_from_linked_worktree(self, tmp_path):
+        """When git-common-dir is /repo/.git/worktrees/<name>, still returns /repo."""
+        import worktree_turn_log
+
+        git_dir = tmp_path / ".git"
+        worktrees_dir = git_dir / "worktrees" / "bead-open-brain-abc"
+        worktrees_dir.mkdir(parents=True)
+
+        with patch("worktree_turn_log._git_run", return_value=str(worktrees_dir)):
+            result = worktree_turn_log._get_main_repo_root(str(tmp_path))
+
+        assert result == str(tmp_path)
+
+    def test_get_main_repo_root_returns_none_on_git_failure(self, tmp_path):
+        """Returns None when _git_run fails."""
+        import worktree_turn_log
+
+        with patch("worktree_turn_log._git_run", return_value=None):
+            result = worktree_turn_log._get_main_repo_root(str(tmp_path))
+
+        assert result is None
+
+    def test_worktree_field_is_relative_to_main_repo_root(self, tmp_path, fake_transcript, fake_git_dirs):
+        """The 'worktree' field in JSONL is relative to main repo root, not worktree root.
+
+        Simulates a linked worktree scenario:
+          Main repo:   <tmp_path>/main-repo/
+          Worktree:    <tmp_path>/main-repo/.claude/worktrees/bead-open-brain-abc/
+          git-common-dir returns <tmp_path>/main-repo/.git/worktrees/bead-open-brain-abc
+          Expected worktree field: .claude/worktrees/bead-open-brain-abc
+        """
+        import worktree_turn_log
+
+        # Build directory structure
+        main_repo = tmp_path / "main-repo"
+        git_dir = main_repo / ".git"
+        wt_git_dir = git_dir / "worktrees" / "bead-open-brain-abc"
+        wt_git_dir.mkdir(parents=True)
+
+        worktree_path = main_repo / ".claude" / "worktrees" / "bead-open-brain-abc"
+        worktree_path.mkdir(parents=True)
+
+        hook_data = {
+            "cwd": str(worktree_path),
+            "session_id": "sess-wt-test",
+            "hook_event_name": "Stop",
+            "transcript_path": str(fake_transcript),
+        }
+
+        def fake_git_run(cmd, **kwargs):
+            result = MagicMock()
+            result.returncode = 0
+            if "--git-common-dir" in cmd:
+                # Simulate linked worktree: git-common-dir points into .git/worktrees/<name>
+                result.stdout = str(wt_git_dir) + "\n"
+            else:
+                result.stdout = ""
+            return result
+
+        with patch("subprocess.run", side_effect=fake_git_run):
+            with patch("worktree_turn_log._is_worktree", return_value=True):
+                worktree_turn_log.handle(hook_data)
+
+        output_file = worktree_path / ".worktree-turns.jsonl"
+        assert output_file.exists()
+        line = json.loads(output_file.read_text(encoding="utf-8").strip())
+
+        # Must be relative to main repo root, NOT "."
+        assert line["worktree"] == ".claude/worktrees/bead-open-brain-abc"
+        assert line["worktree"] != "."
+
+
 # ─── Self-healing exclude ──────────────────────────────────────────────────────
 
 
