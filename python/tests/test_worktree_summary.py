@@ -137,7 +137,7 @@ class TestApiWorktreeSessionSummary:
         mock_task.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_background_task_saves_memory_with_correct_type(self, api_client, mock_dl):
+    async def test_background_task_saves_memory_with_correct_type(self, mock_dl):
         """Background task calls dl.save_memory with type='session_summary'."""
         mock_llm_response = '{"title": "Test session", "content": "Did stuff.", "narrative": "Learned things."}'
         mock_summary = {"title": "Test session", "content": "Did stuff.", "narrative": "Learned things."}
@@ -153,7 +153,7 @@ class TestApiWorktreeSessionSummary:
         assert call_args.type == "session_summary"
 
     @pytest.mark.asyncio
-    async def test_background_task_session_ref_combines_unique_session_ids(self, api_client, mock_dl):
+    async def test_background_task_session_ref_combines_unique_session_ids(self, mock_dl):
         """session_ref is sorted unique session_ids joined by comma."""
         mock_summary = {"title": "T", "content": "C", "narrative": "N"}
 
@@ -172,7 +172,7 @@ class TestApiWorktreeSessionSummary:
         assert call_args.session_ref == ",".join(expected_ids)
 
     @pytest.mark.asyncio
-    async def test_background_task_metadata_contains_expected_fields(self, api_client, mock_dl):
+    async def test_background_task_metadata_contains_expected_fields(self, mock_dl):
         """Background task stores worktree, bead_id, agent, turn_count, last_ts in metadata."""
         mock_summary = {"title": "T", "content": "C", "narrative": "N"}
 

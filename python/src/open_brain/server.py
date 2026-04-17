@@ -1448,8 +1448,8 @@ async def api_worktree_session_summary(request: Request) -> JSONResponse:
         return JSONResponse({"error": "project is required"}, status_code=400)
 
     turns = body.get("turns")
-    if not turns:
-        return JSONResponse({"error": "turns must be a non-empty list"}, status_code=400)
+    if not isinstance(turns, list) or not turns:
+        return JSONResponse({"error": "turns must be a non-empty array"}, status_code=400)
 
     asyncio.create_task(_process_worktree_session_summary(body))
 
@@ -1473,7 +1473,10 @@ async def _process_worktree_session_summary(body: dict) -> None:
             user_exc = t.get("user_input_excerpt", "")
             asst_exc = t.get("assistant_summary_excerpt", "")
             tool_calls = t.get("tool_calls", [])
-            tools_str = ", ".join(f"{tc.get('name', '')}({tc.get('target', '')})" for tc in tool_calls)
+            if isinstance(tool_calls, list):
+                tools_str = ", ".join(f"{tc.get('name', '')}({tc.get('target', '')})" for tc in tool_calls)
+            else:
+                tools_str = ""
             turn_lines.append(
                 f"[{ts}] {agent} ({hook})\n"
                 f"  User: {user_exc}\n"
@@ -1510,8 +1513,8 @@ Respond with ONLY valid JSON, no markdown fences."""
         session_ref = ",".join(session_ids)
 
         # Metadata fields
-        last_ts = turns[-1].get("ts") if turns else None
-        agent = turns[-1].get("agent", "") if turns else ""
+        last_ts = turns[-1].get("ts")
+        agent = turns[-1].get("agent", "")
         metadata: dict = {
             "worktree": worktree,
             "agent": agent,
