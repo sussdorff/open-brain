@@ -1497,9 +1497,12 @@ async def _process_worktree_session_summary(body: dict) -> None:
 
         turns_text = "\n\n".join(turn_lines)
 
-        # Truncate to prevent context overflow for long-lived worktrees
+        # Truncate to prevent context overflow for long-lived worktrees.
+        # Keep head + tail so the model sees both setup context and the session outcome,
+        # matching the /api/session-capture truncation idiom.
         if len(turns_text) > _MAX_TURNS_TEXT:
-            turns_text = turns_text[:_MAX_TURNS_TEXT] + "\n\n[...truncated...]"
+            half = _MAX_TURNS_TEXT // 2
+            turns_text = turns_text[:half] + "\n\n[...truncated...]\n\n" + turns_text[-half:]
 
         summary_prompt = f"""Summarize this worktree coding session based on the turn log below.
 

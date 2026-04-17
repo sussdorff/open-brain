@@ -194,20 +194,29 @@ class TestApiWorktreeSessionSummary:
     async def test_background_task_truncates_long_turns_text(self, mock_dl):
         """Background task truncates turns_text at 8000 chars to prevent context overflow."""
         from open_brain.server import _process_worktree_session_summary
-        # Build a turn with very long excerpts so turns_text exceeds _MAX_TURNS_TEXT
-        long_turn = {
-            "ts": "2026-04-17T10:00:00Z",
+        # Build a big turn to force truncation and a sentinel turn to verify tail preservation
+        big_turn = {
+            "ts": "2026-04-17T09:00:00Z",
             "agent": "claude-code",
-            "session_id": "session-abc",
+            "session_id": "session-early",
             "hook_type": "Stop",
             "user_input_excerpt": "A" * 5000,
             "assistant_summary_excerpt": "B" * 5000,
             "tool_calls": [],
         }
+        sentinel_turn = {
+            "ts": "2026-04-17T10:00:00Z",
+            "agent": "claude-code",
+            "session_id": "session-final",
+            "hook_type": "Stop",
+            "user_input_excerpt": "final task",
+            "assistant_summary_excerpt": "FINAL_OUTCOME_SENTINEL_Z9",
+            "tool_calls": [],
+        }
         body = {
             "worktree": ".claude/worktrees/test",
             "project": "test-project",
-            "turns": [long_turn],
+            "turns": [big_turn, sentinel_turn],
         }
         captured_prompt = []
         async def mock_llm(messages, **kwargs):
@@ -221,6 +230,7 @@ class TestApiWorktreeSessionSummary:
 
         assert captured_prompt, "llm_complete was not called"
         assert "[...truncated...]" in captured_prompt[0]
+        assert "FINAL_OUTCOME_SENTINEL_Z9" in captured_prompt[0], "tail of turns_text must be preserved after truncation"
 
     @pytest.mark.asyncio
     async def test_background_task_skips_non_dict_turns(self, mock_dl):
