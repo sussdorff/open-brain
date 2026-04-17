@@ -1,6 +1,22 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [unreleased]
+
+### Bug Fixes
+
+- *(open-brain-x7s)* Address review findings iteration 1
+- *(open-brain-x7s)* Prompt truncation and valid_turns guard for robustness
+- *(open-brain-x7s)* Use head+tail truncation to preserve session outcome in prompt
+
+### Features
+
+- *(open-brain-x7s)* Green — implement POST /api/worktree-session-summary
+
+### Miscellaneous
+
+- Update changelog
+
 ## [0.3.0] - 2026-04-11
 
 ### Features
