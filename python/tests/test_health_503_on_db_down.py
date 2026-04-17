@@ -128,7 +128,7 @@ class TestHealth503OnDbDown:
 
         # Voyage API raises network error
         mock_http_client = AsyncMock()
-        mock_http_client.get = AsyncMock(side_effect=Exception("network error"))
+        mock_http_client.post = AsyncMock(side_effect=Exception("network error"))
         mock_http_client.__aenter__ = AsyncMock(return_value=mock_http_client)
         mock_http_client.__aexit__ = AsyncMock(return_value=None)
 

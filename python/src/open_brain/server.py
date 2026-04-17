@@ -568,9 +568,10 @@ async def _check_voyage_api_status() -> str:
     config = get_config()
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get(
-                "https://api.voyageai.com/v1/models",
+            resp = await client.post(
+                "https://api.voyageai.com/v1/embeddings",
                 headers={"Authorization": f"Bearer {config.VOYAGE_API_KEY}"},
+                json={"input": ["healthcheck"], "model": config.VOYAGE_MODEL},
             )
         return "ok" if resp.status_code == 200 else "degraded"
     except Exception:
