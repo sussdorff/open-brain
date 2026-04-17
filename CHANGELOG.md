@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Documentation
+
+- Document production host (LXC116 on elysium) in CLAUDE.md
+
+### Refactoring
+
+- *(llm)* Enable LLM_MODEL env var and add LLM_MODEL_CAPTURE tier
+
+## [0.5.1] - 2026-04-17
+
 ### Bug Fixes
 
 - *(open-brain-e0k)* Use POST /v1/embeddings for Voyage health check
@@ -12,6 +22,11 @@ All notable changes to this project will be documented in this file.
 ### Documentation
 
 - Add canonical schema doc for /api/worktree-session-summary
+
+### Miscellaneous
+
+- Update changelog
+- Bump version to 0.5.1
 
 ## [0.5.0] - 2026-04-17
 
