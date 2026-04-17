@@ -225,6 +225,106 @@ class TestTranscriptParsing:
         assert result["tool_calls"][0]["name"] == "Bash"
         assert result["tool_calls"][0]["target"] == "ls -la"
 
+    def test_tool_result_entries_not_identified_as_user_input(self, tmp_path):
+        """Realistic transcript: tool_result entries must not be treated as user messages.
+
+        Structure:
+          user (text)
+          assistant (text + tool_use)
+          user (tool_result)   <- NOT a real user message
+          assistant (text)     <- this is the final summary
+        """
+        import worktree_turn_log
+
+        transcript = tmp_path / "realistic.jsonl"
+        lines = [
+            # Real user message with text content
+            json.dumps({
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": "Please read the config file and summarize it",
+                },
+            }),
+            # Assistant responds with text + tool_use
+            json.dumps({
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "text", "text": "I will read the config file."},
+                        {
+                            "type": "tool_use",
+                            "id": "tool-123",
+                            "name": "Read",
+                            "input": {"file_path": "config.yml"},
+                        },
+                    ],
+                },
+            }),
+            # tool_result back from user — looks like type=user but is NOT real user input
+            json.dumps({
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "tool-123",
+                            "content": "database: postgres\nport: 5432\n",
+                        }
+                    ],
+                },
+            }),
+            # Final assistant message summarizing the result
+            json.dumps({
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "text", "text": "The config uses postgres on port 5432."},
+                    ],
+                },
+            }),
+        ]
+        transcript.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        result = worktree_turn_log._parse_transcript(transcript)
+
+        # user_input_excerpt must come from the real user text message, not the tool_result
+        assert "config file" in result["user_input_excerpt"]
+        assert "tool_result" not in result["user_input_excerpt"]
+        assert "database" not in result["user_input_excerpt"]
+
+        # assistant_summary_excerpt must come from the final assistant message
+        assert "postgres" in result["assistant_summary_excerpt"]
+        assert "port 5432" in result["assistant_summary_excerpt"]
+
+    def test_tool_target_truncated_at_200_chars(self, tmp_path):
+        """Long command targets are truncated to 200 characters."""
+        import worktree_turn_log
+
+        long_cmd = "echo " + "x" * 300
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps({
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "name": "Bash",
+                            "input": {"command": long_cmd},
+                        }
+                    ],
+                },
+            }) + "\n",
+            encoding="utf-8",
+        )
+        result = worktree_turn_log._parse_transcript(transcript)
+        assert len(result["tool_calls"][0]["target"]) <= 200
+
 
 # ─── JSONL output ─────────────────────────────────────────────────────────────
 

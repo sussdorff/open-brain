@@ -46,6 +46,9 @@ def _extract_text_from_content(content: list | str) -> str:
     return " ".join(parts)
 
 
+KNOWN_TARGET_KEYS = ("file_path", "path", "command", "pattern", "query", "url", "prompt", "cmd")
+
+
 def _extract_tool_calls(content: list | str) -> list[dict]:
     """Extract tool_use items from a message content list."""
     if not isinstance(content, list):
@@ -55,12 +58,10 @@ def _extract_tool_calls(content: list | str) -> list[dict]:
         if isinstance(block, dict) and block.get("type") == "tool_use":
             name = block.get("name", "")
             inp = block.get("input", {})
-            # Determine target: file_path > command > first string value > ""
-            target = (
-                inp.get("file_path")
-                or inp.get("command")
-                or next((v for v in inp.values() if isinstance(v, str)), "")
-            )
+            # Determine target using priority list of known keys, then first string value
+            target = next((inp[k] for k in KNOWN_TARGET_KEYS if k in inp and isinstance(inp[k], str)), "")
+            # Truncate long targets (e.g. multi-line Bash scripts)
+            target = target[:200] if len(target) > 200 else target
             calls.append({"name": name, "target": target})
     return calls
 
@@ -88,12 +89,21 @@ def _parse_transcript(transcript_path: Path) -> dict:
             except json.JSONDecodeError:
                 continue
 
-        # Find last user entry
+        # Find last real user entry (skip tool_result-only entries)
         last_user_idx = -1
         for i, entry in enumerate(entries):
             if entry.get("type") == "user":
                 msg = entry.get("message", {})
                 if msg.get("role") == "user":
+                    content = msg.get("content", "")
+                    # Skip entries that are purely tool_result blocks (not actual user input)
+                    if isinstance(content, list):
+                        has_text = any(
+                            isinstance(b, dict) and b.get("type") == "text"
+                            for b in content
+                        )
+                        if not has_text:
+                            continue
                     last_user_idx = i
 
         user_excerpt = ""
@@ -140,8 +150,8 @@ def _git_run(args: list[str], cwd: str | None = None) -> str | None:
         )
         if result.returncode == 0:
             return result.stdout.strip()
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"worktree_turn_log: _git_run failed: {e}", file=sys.stderr)
     return None
 
 
@@ -156,8 +166,17 @@ def _get_git_common_dir(cwd: str) -> Path | None:
     return None
 
 
-def _get_repo_toplevel(cwd: str) -> str | None:
-    """Return the top-level directory of the main (common) repo."""
+def _get_worktree_root(cwd: str) -> str | None:
+    """Extract the worktree root from a cwd that contains .claude/worktrees/."""
+    p = Path(cwd)
+    for parent in [p, *p.parents]:
+        if parent.parent.name == "worktrees" and parent.parent.parent.name == ".claude":
+            return str(parent)
+    return None
+
+
+def _get_worktree_toplevel(cwd: str) -> str | None:
+    """Return the current worktree's top-level directory."""
     out = _git_run(["rev-parse", "--show-toplevel"], cwd=cwd)
     return out
 
@@ -200,15 +219,18 @@ def handle(hook_data: dict) -> dict | None:
     # Extract bead_id from path
     bead_id = _extract_bead_id(cwd)
 
-    # Get worktree relative path
-    toplevel = _get_repo_toplevel(cwd)
+    # Derive worktree root from cwd (handles subdirectory cwds correctly)
+    worktree_root = _get_worktree_root(cwd) or cwd
+
+    # Get worktree relative path (relative to git repo toplevel)
+    toplevel = _get_worktree_toplevel(cwd)
     if toplevel:
         try:
-            worktree_rel = str(Path(cwd).relative_to(toplevel))
+            worktree_rel = str(Path(worktree_root).relative_to(toplevel))
         except ValueError:
-            worktree_rel = cwd
+            worktree_rel = worktree_root
     else:
-        worktree_rel = cwd
+        worktree_rel = worktree_root
 
     # Build record
     record = {
@@ -226,7 +248,7 @@ def handle(hook_data: dict) -> dict | None:
 
     # Write to .worktree-turns.jsonl in worktree root
     try:
-        output_file = Path(cwd) / ".worktree-turns.jsonl"
+        output_file = Path(worktree_root) / ".worktree-turns.jsonl"
         with open(output_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(record) + "\n")
     except Exception as exc:
