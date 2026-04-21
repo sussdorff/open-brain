@@ -172,8 +172,11 @@ class TestSessionEndSourceMarker:
     @pytest.mark.asyncio
     async def test_session_summary_source_allowlist(self, mock_dl):
         """All source values used in tests are in the expected allowlist."""
-        # This tests that valid sources can flow through without error
-        allowed_sources = {"session-close", "session-end-hook", "transcript-backfill", "worktree-session-summary", None}
+        # Canonical set lives in open_brain.session_summary — single source of
+        # truth shared with the AST-based enforcer in
+        # tests/test_session_summary_ast_allowlist.py.
+        from open_brain.session_summary import ALLOWED_SESSION_SUMMARY_SOURCES
+        allowed_sources = ALLOWED_SESSION_SUMMARY_SOURCES
         mock_summary = {"title": "T", "content": "C", "narrative": None}
 
         for source in allowed_sources:
