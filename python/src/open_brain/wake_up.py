@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from open_brain.data_layer.interface import Memory, rank_importance
+from open_brain.data_layer.interface import Memory
 
 logger = logging.getLogger(__name__)
 
