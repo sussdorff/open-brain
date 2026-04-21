@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Features
+
+- *(open-brain-d4n)* SessionEnd hook as safety-net writer with transcript-based summaries (30s timeout, dedup via session_ref)
+- *(open-brain-d4n)* POST /api/session-end endpoint with fire-and-forget async LLM summarization
+- *(open-brain-d4n)* session_summary.py helper with head+tail truncation for large transcripts
+
 ### Documentation
 
 - Document production host (LXC116 on elysium) in CLAUDE.md
@@ -10,6 +16,7 @@ All notable changes to this project will be documented in this file.
 ### Refactoring
 
 - *(llm)* Enable LLM_MODEL env var and add LLM_MODEL_CAPTURE tier
+- *(open-brain-d4n)* Deprecate /api/summarize endpoint (backward compat shim, removed in open-brain-9j3)
 
 ## [0.5.1] - 2026-04-17
 

@@ -1,0 +1,3 @@
+{"type": "user", "content": "meta filtered", "isMeta": true}
+{"type": "summary", "content": "summary filtered", "isMeta": false}
+{"type": "user", "content": "", "isMeta": true}

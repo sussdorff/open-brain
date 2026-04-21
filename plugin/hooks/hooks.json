@@ -1,6 +1,17 @@
 {
   "description": "open-brain memory hooks: context injection at start, session/agent summaries at end",
   "hooks": {
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/session_end_summary.py",
+            "timeout": 30000
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "matcher": "startup|clear|compact",

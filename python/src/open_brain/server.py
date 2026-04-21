@@ -1268,7 +1268,8 @@ async def health() -> JSONResponse:
 #
 # Endpoints (all require X-API-Key or Bearer token auth unless noted):
 #   POST /api/ingest                    — ingest single tool observation (plugin hook)
-#   POST /api/summarize                 — generate session summary from recent observations
+#   POST /api/session-end               — generate session summary from transcript turns (SessionEnd hook)
+#   POST /api/summarize (deprecated)    — no-op shim for backward compat; removed in open-brain-9j3
 #   POST /api/session-capture           — extract observations from conversation transcript
 #   POST /api/worktree-session-summary  — generate summary from worktree session turn batch
 #   DELETE /api/memories                — delete memories by IDs or filter
@@ -1375,86 +1376,60 @@ Respond with ONLY valid JSON, no markdown fences."""
 
 
 @app.post("/api/summarize")
-async def api_summarize(request: Request) -> JSONResponse:
-    """Generate session summary from recent observations. Returns 202, processes async."""
+async def api_summarize_deprecated(request: Request) -> JSONResponse:
+    """Deprecated: use /api/session-end instead. Returns 202 no-op for backward compat."""
+    logger.warning("POST /api/summarize is deprecated and will be removed; use /api/session-end")
+    return JSONResponse({"status": "accepted", "deprecated": True}, status_code=202)
+
+
+@app.post("/api/session-end")
+async def api_session_end(request: Request) -> JSONResponse:
+    """Generate session summary from transcript turns (SessionEnd hook safety-net).
+
+    Body schema:
+        session_id (str): session identifier
+        project (str, optional): project name; auto-detected from cwd if missing
+        turns (list, required): list of raw transcript turn dicts
+        reason (str, optional): SessionEnd reason (e.g. 'stop', 'clear')
+        cwd (str, optional): working directory for project auto-detection
+        transcript_path (str, optional): source transcript path (informational)
+
+    Returns 202 immediately (fire-and-forget); empty or non-list turns → 202 no-op.
+    Auth: X-API-Key header (handled by BearerAuthMiddleware).
+    """
     body = await request.json()
 
-    asyncio.create_task(_process_summarize(body))
+    turns = body.get("turns")
+    if not isinstance(turns, list) or not turns:
+        return JSONResponse({"status": "accepted"}, status_code=202)
 
+    asyncio.create_task(_process_session_end(body))
     return JSONResponse({"status": "accepted"}, status_code=202)
 
 
-async def _process_summarize(body: dict) -> None:
-    """Background task: generate and save session summary."""
+async def _process_session_end(body: dict) -> None:
+    """Background task: summarize transcript turns and save session summary."""
     try:
+        from open_brain.session_summary import summarize_transcript_turns
+
         session_id = body.get("session_id", "")
-        project = body.get("project", "unknown")
-        hook_type = body.get("hook_type", "Stop")
+        project = body.get("project") or "unknown"
+        turns = body.get("turns", [])
+        reason = body.get("reason")
 
         if not session_id:
-            logger.warning("Summarize called without session_id")
+            logger.warning("session-end: called without session_id, skipping")
             return
 
-        dl = get_dl()
-
-        # Fetch recent observations for this session
-        result = await dl.search(
-            SearchParams(project=project, limit=30, order_by="oldest")
+        await summarize_transcript_turns(
+            project=project,
+            session_id=session_id,
+            turns=turns,
+            source="session-end-hook",
+            reason=reason,
         )
-
-        if not result.results:
-            # No observations yet — save minimal summary
-            await dl.save_memory(
-                SaveMemoryParams(
-                    text=f"Session {session_id} ended ({hook_type}). No observations captured.",
-                    type="session_summary",
-                    project=project,
-                    title=f"Session summary ({hook_type})",
-                    session_ref=session_id,
-                )
-            )
-            return
-
-        # Build context from observations
-        obs_text = "\n".join(
-            f"- [{m.type}] {m.title}: {m.content[:200]}"
-            for m in result.results[-20:]  # Last 20 observations
-        )
-
-        summary_prompt = f"""Summarize this coding session based on the observations below.
-
-Session Type: {hook_type} ({"main session ended" if hook_type == "Stop" else "subagent completed"})
-Project: {project}
-
-Observations:
-{obs_text}
-
-Respond in JSON:
-- "title": short session headline (max 80 chars)
-- "content": 3-5 sentence summary covering: what was worked on, key decisions made, outcome
-- "narrative": what was learned or discovered (1-2 sentences, or null)
-
-Respond with ONLY valid JSON, no markdown fences."""
-
-        response = await llm_complete(
-            [LlmMessage(role="user", content=summary_prompt)],
-            max_tokens=512,
-        )
-        summary = parse_llm_json(response)
-
-        await dl.save_memory(
-            SaveMemoryParams(
-                text=summary.get("content", f"Session {session_id} ended."),
-                type="session_summary",
-                project=project,
-                title=summary.get("title", f"Session summary ({hook_type})"),
-                narrative=summary.get("narrative"),
-                session_ref=session_id,
-            )
-        )
-        logger.info("Session summary saved for %s [%s]", session_id, hook_type)
     except Exception:
-        logger.exception("Failed to process summarize")
+        logger.exception("Failed to process session-end")
 
 
 @app.post("/api/worktree-session-summary")

@@ -1,6 +1,6 @@
 {
   "name": "open-brain",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "description": "Automatic memory capture for Claude Code — observations, session summaries, and context injection backed by open-brain server",
   "author": {
     "name": "Malte Sussdorff"

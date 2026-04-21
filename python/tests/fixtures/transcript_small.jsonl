@@ -1,0 +1,42 @@
+{"type": "user", "content": "User message turn 0", "isMeta": false}
+{"type": "assistant", "content": "Assistant response turn 1", "isMeta": false}
+{"type": "user", "content": "User message turn 2", "isMeta": false}
+{"type": "assistant", "content": "Assistant response turn 3", "isMeta": false}
+{"type": "user", "content": "User message turn 4", "isMeta": false}
+{"type": "assistant", "content": "meta content 5", "isMeta": true}
+{"type": "user", "content": "User message turn 6", "isMeta": false}
+{"type": "assistant", "content": "Assistant response turn 7", "isMeta": false}
+{"type": "user", "content": "User message turn 8", "isMeta": false}
+{"type": "assistant", "content": "Assistant response turn 9", "isMeta": false}
+{"type": "user", "content": "User message turn 10", "isMeta": false}
+{"type": "assistant", "content": "Assistant response turn 11", "isMeta": false}
+{"type": "user", "content": "User message turn 12", "isMeta": false}
+{"type": "assistant", "content": "Assistant response turn 13", "isMeta": false}
+{"type": "user", "content": "User message turn 14", "isMeta": false}
+{"type": "assistant", "content": "meta content 15", "isMeta": true}
+{"type": "user", "content": "User message turn 16", "isMeta": false}
+{"type": "assistant", "content": "Assistant response turn 17", "isMeta": false}
+{"type": "user", "content": "User message turn 18", "isMeta": false}
+{"type": "assistant", "content": "Assistant response turn 19", "isMeta": false}
+{"type": "summary", "content": "session context summary", "isMeta": false}
+{"type": "assistant", "content": "Assistant response turn 21", "isMeta": false}
+{"type": "user", "content": "User message turn 22", "isMeta": false}
+{"type": "assistant", "content": "Assistant response turn 23", "isMeta": false}
+{"type": "user", "content": "User message turn 24", "isMeta": false}
+{"type": "assistant", "content": "Assistant response turn 25", "isMeta": false}
+{"type": "user", "content": "User message turn 26", "isMeta": false}
+{"type": "assistant", "content": "Assistant response turn 27", "isMeta": false}
+{"type": "user", "content": "User message turn 28", "isMeta": false}
+{"type": "assistant", "content": "Assistant response turn 29", "isMeta": false}
+{"type": "user", "content": "User message turn 30", "isMeta": false}
+{"type": "assistant", "content": "Assistant response turn 31", "isMeta": false}
+{"type": "user", "content": "User message turn 32", "isMeta": false}
+{"type": "assistant", "content": "Assistant response turn 33", "isMeta": false}
+{"type": "user", "content": "User message turn 34", "isMeta": false}
+{"type": "assistant", "content": "Assistant response turn 35", "isMeta": false}
+{"type": "user", "content": "User message turn 36", "isMeta": false}
+{"type": "assistant", "content": "Assistant response turn 37", "isMeta": false}
+{"type": "user", "content": "User message turn 38", "isMeta": false}
+{"type": "assistant", "content": "Assistant response turn 39", "isMeta": false}
+{"type": "user", "content": "User message turn 40", "isMeta": false}
+{"type": "assistant", "content": "Assistant response turn 41", "isMeta": false}

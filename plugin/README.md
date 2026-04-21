@@ -85,7 +85,7 @@ Keys must have the `ob_` prefix.
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/api/ingest` | POST | Receive tool observations |
-| `/api/summarize` | POST | Generate session summaries |
+| `/api/session-end` | POST | Generate session summary from transcript turns |
 | `/api/context` | GET | Fetch recent context for injection |
 | `/health` | GET | Health check |
 

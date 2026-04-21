@@ -1,4 +1,4 @@
-"""Tests for REST API endpoints: /api/ingest, /api/context, /api/summarize."""
+"""Tests for REST API endpoints: /api/ingest, /api/context."""
 
 from __future__ import annotations
 
@@ -246,48 +246,3 @@ class TestApiContext:
         resp = await api_client.get("/api/context")
         assert resp.status_code == 401
 
-
-# ─── POST /api/summarize ──────────────────────────────────────────────────────
-
-class TestApiSummarize:
-    @pytest.mark.asyncio
-    async def test_returns_202_accepted(self, api_client, mock_dl):
-        with patch("open_brain.server.get_dl", return_value=mock_dl):
-            with patch("open_brain.server.asyncio.create_task"):
-                resp = await api_client.post(
-                    "/api/summarize",
-                    json={"session_id": "sess-456", "project": "open-brain", "hook_type": "Stop"},
-                    headers=_api_headers(),
-                )
-        assert resp.status_code == 202
-        assert resp.json()["status"] == "accepted"
-
-    @pytest.mark.asyncio
-    async def test_create_task_is_called(self, api_client, mock_dl):
-        with patch("open_brain.server.get_dl", return_value=mock_dl):
-            with patch("open_brain.server.asyncio.create_task") as mock_task:
-                await api_client.post(
-                    "/api/summarize",
-                    json={"session_id": "sess-789", "project": "proj"},
-                    headers=_api_headers(),
-                )
-        mock_task.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_missing_api_key_returns_401(self, api_client):
-        resp = await api_client.post(
-            "/api/summarize",
-            json={"session_id": "sess-123"},
-        )
-        assert resp.status_code == 401
-
-    @pytest.mark.asyncio
-    async def test_bearer_token_also_accepted(self, api_client, mock_dl):
-        with patch("open_brain.server.get_dl", return_value=mock_dl):
-            with patch("open_brain.server.asyncio.create_task"):
-                resp = await api_client.post(
-                    "/api/summarize",
-                    json={"session_id": "s1", "project": "p1"},
-                    headers={"Authorization": _bearer_headers()},
-                )
-        assert resp.status_code == 202
