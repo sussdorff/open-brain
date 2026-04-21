@@ -301,7 +301,7 @@ The server exposes additional REST endpoints for the plugin:
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/api/context` | GET | Fetch recent memories for context injection |
-| `/api/summarize` | POST | Generate and save session summary |
+| `/api/session-end` | POST | Generate session summary from transcript turns (SessionEnd hook) |
 | `/api/session-capture` | POST | Batch extract observations from conversation |
 | `/api/memories` | DELETE | Bulk delete memories by IDs or filter |
 
