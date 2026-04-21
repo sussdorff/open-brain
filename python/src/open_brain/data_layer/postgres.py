@@ -622,42 +622,65 @@ class PostgresDataLayer:
 
             # ── Upsert path for session_summary ──
             if params.type == "session_summary" and params.session_ref:
-                existing = await conn.fetchrow(
-                    "SELECT id, content FROM memories WHERE session_ref = $1 LIMIT 1",
-                    params.session_ref,
-                )
-                if existing:
-                    existing_id: int = existing["id"]
-                    merged_content = existing["content"] + "\n\n---\n\n" + params.text
-                    updates: dict[str, Any] = {"content": merged_content}
-                    if params.title is not None:
-                        updates["title"] = params.title
-                    if params.subtitle is not None:
-                        updates["subtitle"] = params.subtitle
-                    if params.narrative is not None:
-                        updates["narrative"] = params.narrative
-
-                    set_parts = []
-                    values: list[Any] = []
-                    param_idx = 1
-                    for col, val in updates.items():
-                        set_parts.append(f"{col} = ${param_idx}")
-                        values.append(val)
-                        param_idx += 1
-                    set_parts.append("updated_at = NOW()")
-                    values.append(existing_id)
-                    await conn.execute(
-                        f"UPDATE memories SET {', '.join(set_parts)} WHERE id = ${param_idx}",
-                        *values,
+                if params.upsert_mode == "replace":
+                    # Delete existing rows in FK-safe order, then fall through to INSERT
+                    existing_ids_rows = await conn.fetch(
+                        "SELECT id FROM memories WHERE session_ref = $1 AND type = 'session_summary'",
+                        params.session_ref,
                     )
-
-                    text_to_embed = ": ".join(
-                        part
-                        for part in [params.title, params.subtitle, params.narrative, merged_content]
-                        if part
+                    existing_ids: list[int] = [r["id"] for r in existing_ids_rows]
+                    if existing_ids:
+                        await conn.execute(
+                            "DELETE FROM memory_usage_log WHERE memory_id = ANY($1::int[])",
+                            existing_ids,
+                        )
+                        await conn.execute(
+                            "DELETE FROM memory_relationships WHERE source_id = ANY($1::int[]) OR target_id = ANY($1::int[])",
+                            existing_ids,
+                        )
+                        await conn.execute(
+                            "DELETE FROM memories WHERE session_ref = $1 AND type = 'session_summary'",
+                            params.session_ref,
+                        )
+                    # Fall through to INSERT path below
+                else:
+                    # append mode: merge content into existing row
+                    existing = await conn.fetchrow(
+                        "SELECT id, content FROM memories WHERE session_ref = $1 LIMIT 1",
+                        params.session_ref,
                     )
-                    asyncio.create_task(self._embed_and_link(existing_id, text_to_embed))
-                    return SaveMemoryResult(id=existing_id, message="Memory updated (upsert)")
+                    if existing:
+                        existing_id: int = existing["id"]
+                        merged_content = existing["content"] + "\n\n---\n\n" + params.text
+                        updates: dict[str, Any] = {"content": merged_content}
+                        if params.title is not None:
+                            updates["title"] = params.title
+                        if params.subtitle is not None:
+                            updates["subtitle"] = params.subtitle
+                        if params.narrative is not None:
+                            updates["narrative"] = params.narrative
+
+                        set_parts = []
+                        values: list[Any] = []
+                        param_idx = 1
+                        for col, val in updates.items():
+                            set_parts.append(f"{col} = ${param_idx}")
+                            values.append(val)
+                            param_idx += 1
+                        set_parts.append("updated_at = NOW()")
+                        values.append(existing_id)
+                        await conn.execute(
+                            f"UPDATE memories SET {', '.join(set_parts)} WHERE id = ${param_idx}",
+                            *values,
+                        )
+
+                        text_to_embed = ": ".join(
+                            part
+                            for part in [params.title, params.subtitle, params.narrative, merged_content]
+                            if part
+                        )
+                        asyncio.create_task(self._embed_and_link(existing_id, text_to_embed))
+                        return SaveMemoryResult(id=existing_id, message="Memory updated (upsert)")
 
             # ── Content hash dedup ──
             content_hash = hashlib.sha256(params.text.encode()).hexdigest()

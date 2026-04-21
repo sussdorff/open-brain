@@ -95,19 +95,18 @@ class TestSaveMemoryUpsertMode:
 
         mock_pool, mock_conn = _make_pool_mock()
 
-        # _resolve_index_id returns index_id=1 (via fetch on project_index)
-        # fetchrow calls sequence:
-        #  1. _resolve_index_id -> None (no project lookup needed if project=None)
-        #  2. existing row check -> returns a row  (so replace path is triggered)
-        #  3. content_hash dedup -> None (no dup)
-        #  4. INSERT -> returns {"id": 99}
-        fetchrow_returns = [
-            None,        # _resolve_index_id: no project row
-            None,        # content_hash dedup check -> no dup
-        ]
+        # Replace mode call sequence (project=None, so _resolve_index_id skips fetchrow):
+        #  1. conn.fetch for existing session_summary IDs -> returns rows with id=42
+        #  2. 3x execute for DELETE (memory_usage_log, memory_relationships, memories)
+        #  3. fetchrow for content_hash dedup -> None (no dup)
+        #  4. fetchrow for INSERT RETURNING id -> {"id": 99}
+        existing_id_row = MagicMock()
+        existing_id_row.__getitem__ = MagicMock(side_effect=lambda k: 42 if k == "id" else None)
+        mock_conn.fetch = AsyncMock(return_value=[existing_id_row])
+
         insert_row = MagicMock()
         insert_row.__getitem__ = MagicMock(side_effect=lambda k: 99 if k == "id" else None)
-        mock_conn.fetchrow = AsyncMock(side_effect=fetchrow_returns + [insert_row])
+        mock_conn.fetchrow = AsyncMock(side_effect=[None, insert_row])  # dedup=None, INSERT=row
         mock_conn.fetchval = AsyncMock(return_value=None)
 
         dl = PostgresDataLayer()
@@ -146,11 +145,9 @@ class TestSaveMemoryUpsertMode:
             }.get(k)
         )
 
-        # fetchrow sequence:
-        # 1. _resolve_index_id -> None
-        # 2. existing row for session_summary upsert -> existing_row
-        fetchrow_returns = [None, existing_row]
-        mock_conn.fetchrow = AsyncMock(side_effect=fetchrow_returns)
+        # fetchrow sequence (project=None so _resolve_index_id skips fetchrow):
+        # 1. SELECT existing session_summary row -> existing_row (triggers UPDATE path)
+        mock_conn.fetchrow = AsyncMock(return_value=existing_row)
 
         dl = PostgresDataLayer()
         params = SaveMemoryParams(

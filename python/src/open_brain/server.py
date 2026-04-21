@@ -1806,6 +1806,59 @@ async def query_evolution_history_tool(
         raise
 
 
+@mcp.tool(
+    description=(
+        "Regenerate session_summary memories from raw JSONL transcripts. "
+        "Reads transcripts from transcript_root (default ~/.claude/projects/), "
+        "finds matching sessions in the DB, and re-summarizes using the LLM. "
+        "Use dry_run=True (default) to preview the plan without making changes. "
+        "Set delete_orphans=True to delete session summaries with no matching transcript. "
+        "Returns JSON with regenerated_count, orphan_count, transcript_missing_list, new_summary_ids."
+    )
+)
+async def regenerate_summaries_from_transcripts(
+    scope: str | None = None,
+    transcript_root: str = "~/.claude/projects/",
+    dry_run: bool = True,
+    delete_orphans: bool = False,
+) -> str:
+    """Regenerate session_summary memories from raw JSONL transcripts."""
+    from open_brain.regenerate import RegenerateParams, regenerate_summaries
+
+    dl = get_dl()
+    params = RegenerateParams(
+        scope=scope,
+        transcript_root=transcript_root,
+        dry_run=dry_run,
+        delete_orphans=delete_orphans,
+    )
+    try:
+        result = await regenerate_summaries(dl, params)
+    except Exception:
+        logger.exception("regenerate_summaries_from_transcripts failed")
+        raise
+
+    return json.dumps({
+        "regenerated_count": result.regenerated_count,
+        "orphan_count": result.orphan_count,
+        "transcript_missing_list": result.transcript_missing_list,
+        "new_summary_ids": result.new_summary_ids,
+        "failures": result.failures,
+        "plan": [
+            {
+                "session_ref": p.session_ref,
+                "existing_memory_ids": p.existing_memory_ids,
+                "transcript_found": p.transcript_found,
+                "transcript_path": p.transcript_path,
+                "transcript_turn_count": p.transcript_turn_count,
+                "action": p.action,
+            }
+            for p in result.plan
+        ],
+        "dry_run": dry_run,
+    })
+
+
 @app.delete("/api/memories")
 async def api_delete_memories(request: Request) -> JSONResponse:
     """Delete memories by IDs or by filter (project + type + before).

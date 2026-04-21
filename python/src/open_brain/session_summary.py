@@ -31,8 +31,12 @@ def get_dl() -> PostgresDataLayer:
 def _build_turns_text(turns: list[dict[str, Any]]) -> str:
     """Filter and join transcript turns into a single text block.
 
+    Handles two formats:
+    - Flat format: {type, content: str} — used by session-end API / hooks
+    - Raw JSONL format: {type, message: {content: str | list[block]}} — from ~/.claude/projects/
+
     Filters: type must be 'user' or 'assistant', isMeta must not be True,
-    content must be a non-empty string.
+    content must resolve to a non-empty string.
     """
     lines = []
     for turn in turns:
@@ -42,9 +46,35 @@ def _build_turns_text(turns: list[dict[str, Any]]) -> str:
             continue
         if turn.get("isMeta") is True:
             continue
-        content = turn.get("content", "")
-        if not isinstance(content, str) or not content:
+
+        # Try flat content first (API / hook format)
+        raw_content = turn.get("content")
+        # Fall back to JSONL message.content
+        if raw_content is None:
+            msg = turn.get("message", {})
+            if isinstance(msg, dict):
+                raw_content = msg.get("content")
+
+        # Handle list content (Claude API message.content format)
+        if isinstance(raw_content, list):
+            parts = []
+            for block in raw_content:
+                if not isinstance(block, dict):
+                    continue
+                btype = block.get("type", "")
+                if btype == "text":
+                    parts.append(block.get("text", ""))
+                elif btype == "tool_use":
+                    parts.append(f"[tool: {block.get('name', '')}]")
+            content = "\n".join(p for p in parts if p)
+        elif isinstance(raw_content, str):
+            content = raw_content
+        else:
             continue
+
+        if not content:
+            continue
+
         role = turn["type"].upper()
         lines.append(f"[{role}] {content}")
     return "\n".join(lines)
@@ -56,11 +86,13 @@ async def summarize_transcript_turns(
     turns: list[dict[str, Any]],
     source: str | None,
     reason: str | None = None,
+    bypass_dedup: bool = False,
 ) -> int | None:
     """Summarize a session transcript and save it as a session_summary memory.
 
-    Performs a pessimistic dedup check before writing: if ANY existing
-    session_summary row exists for session_ref=session_id, skip and return None.
+    Performs a pessimistic dedup check before writing (unless bypass_dedup=True):
+    if ANY existing session_summary row exists for session_ref=session_id, skip
+    and return None.
 
     Args:
         project: Project name.
@@ -69,6 +101,9 @@ async def summarize_transcript_turns(
         source: Provenance marker (e.g. 'session-end-hook', 'session-close',
                 'transcript-backfill', or None for legacy).
         reason: SessionEnd reason string (e.g. 'stop'), or None.
+        bypass_dedup: When True, skip the dedup check — the caller (e.g.
+                      regenerate_summaries) handles deletion atomically via
+                      upsert_mode='replace' in save_memory.
 
     Returns:
         memory_id (int) on success, or None if skipped (dedup/empty turns).
@@ -85,18 +120,19 @@ async def summarize_transcript_turns(
         half = _MAX_TURNS_TEXT // 2
         turns_text = turns_text[:half] + "\n\n[...truncated...]\n\n" + turns_text[-half:]
 
-    # Dedup check: pessimistically skip if ANY session_summary row exists
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT id, metadata FROM memories WHERE session_ref = $1 AND type = 'session_summary' LIMIT 1",
-            session_id,
-        )
-        if row is not None:
-            logger.info(
-                "session-end dedup: existing summary found, skipping (session_ref=%s)", session_id
+    if not bypass_dedup:
+        # Dedup check: pessimistically skip if ANY session_summary row exists
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT id, metadata FROM memories WHERE session_ref = $1 AND type = 'session_summary' LIMIT 1",
+                session_id,
             )
-            return None
+            if row is not None:
+                logger.info(
+                    "session-end dedup: existing summary found, skipping (session_ref=%s)", session_id
+                )
+                return None
 
     turn_count = sum(
         1
@@ -148,6 +184,7 @@ Respond with ONLY valid JSON, no markdown fences."""
             narrative=summary.get("narrative"),
             session_ref=session_id,
             metadata=metadata,
+            upsert_mode="replace" if bypass_dedup else "append",
         )
     )
     logger.info(
