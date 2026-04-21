@@ -341,8 +341,9 @@ async def get_observations(ids: list[int]) -> str:
     "household: {category: str, item: str, location: str, details: str, warranty_expiry: ISO datetime}. "
     "ISO datetime format: 'YYYY-MM-DDTHH:MM:SS' (e.g. '2026-04-15T10:00:00'). "
     "Invalid or missing required datetime fields produce a warning in the response but still save the memory. "
-    "Params: text (required), type, project, title, subtitle, narrative, session_ref, is_test, metadata, importance. "
-    "importance: optional retention class (critical|high|medium|low, default medium)."
+    "Params: text (required), type, project, title, subtitle, narrative, session_ref, is_test, metadata, importance, dedup_mode. "
+    "importance: optional retention class (critical|high|medium|low, default medium). "
+    "dedup_mode: 'skip' (default) or 'merge' — if 'merge', returns existing id when vector similarity >= DEDUP_THRESHOLD instead of inserting."
 )
 async def save_memory(
     text: str,
@@ -360,6 +361,9 @@ async def save_memory(
     """Save a new memory entry."""
     if is_test:
         return json.dumps({"id": -1, "message": "Test artifact — not persisted"})
+
+    if dedup_mode not in ("skip", "merge"):
+        return json.dumps({"error": "invalid_dedup_mode", "message": f"dedup_mode must be 'skip' or 'merge', got: {dedup_mode!r}"})
 
     # ── Rate limit check (per-user sliding window, 10/60s) ─────────────────────
     # Note: not atomic — concurrent coroutines may slightly exceed the limit. Acceptable for soft guardrail.

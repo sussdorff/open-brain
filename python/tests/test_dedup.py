@@ -180,6 +180,12 @@ class TestDedupMergeMiss:
 
         assert result.id == 77
         assert result.duplicate_of is None
+        # Verify exactly 3 fetchrow calls: SELECT (merge check), content-hash check, INSERT
+        assert conn.fetchrow.call_count == 3
+        # Last call is the INSERT
+        insert_call = conn.fetchrow.call_args_list[-1]
+        insert_sql = insert_call[0][0]
+        assert "INSERT" in insert_sql
 
 
 # ─── Test 4: duplicate_of precedence ─────────────────────────────────────────
@@ -295,8 +301,8 @@ class TestMergeImportanceHigherWins:
 
         conn.execute.assert_called_once()
         update_args = conn.execute.call_args[0]
-        # The importance argument should be 'high' (higher rank wins)
-        assert "high" in update_args, f"Expected 'high' in update args, got: {update_args}"
+        # args[0]=SQL, args[1]=existing_id, args[2]=importance (higher rank wins)
+        assert update_args[2] == "high", f"Expected importance='high', got: {update_args[2]}"
 
 
 # ─── Test 7: importance rank preservation (existing wins) ────────────────────
@@ -335,15 +341,15 @@ class TestMergeImportanceExistingWins:
 
         conn.execute.assert_called_once()
         update_args = conn.execute.call_args[0]
-        # The importance argument should be 'critical' (existing wins)
-        assert "critical" in update_args, f"Expected 'critical' in update args, got: {update_args}"
+        # args[0]=SQL, args[1]=existing_id, args[2]=importance (existing wins)
+        assert update_args[2] == "critical", f"Expected importance='critical', got: {update_args[2]}"
 
 
 # ─── Test 8: updated_at-only constraint ──────────────────────────────────────
 
 
 class TestMergeUpdatedAtConstraint:
-    """T8: After merge, UPDATE SQL must only touch updated_at, importance, priority (not access_count/last_accessed_at)."""
+    """T8: After merge, UPDATE SQL must only touch updated_at, importance (not access_count/last_accessed_at/priority)."""
 
     @pytest.fixture
     def dl(self) -> PostgresDataLayer:
@@ -377,9 +383,10 @@ class TestMergeUpdatedAtConstraint:
         update_sql = conn.execute.call_args[0][0]
         # Must set updated_at
         assert "updated_at" in update_sql
-        # Must NOT set these recall-only fields
+        # Must NOT set these fields
         assert "access_count" not in update_sql
         assert "last_accessed_at" not in update_sql
+        assert "priority" not in update_sql
 
 
 # ─── Test 9: default value (no dedup_mode) ───────────────────────────────────

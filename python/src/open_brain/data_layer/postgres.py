@@ -741,23 +741,25 @@ class PostgresDataLayer:
             # ── Semantic dedup (dedup_mode == "merge" only) ──
             if params.dedup_mode == "merge":
                 config = get_config()
-                query_embedding, _embed_tokens = await embed_query_with_usage(params.text)
+                query_embedding, query_tokens = await embed_query_with_usage(params.text)
+                asyncio.create_task(self._log_embedding_tokens("query", query_tokens))
                 vec_str = to_pg_vector(query_embedding)
                 match_row = await conn.fetchrow(
-                    """SELECT id, importance, priority, content,
+                    """SELECT id, importance, content,
                               1 - (embedding <=> $1::vector) AS similarity
                        FROM memories
                        WHERE embedding IS NOT NULL
                          AND (index_id IS NOT DISTINCT FROM $2)
+                         AND created_at > NOW() - ($3 * INTERVAL '1 day')
                        ORDER BY embedding <=> $1::vector
                        LIMIT 1""",
                     vec_str,
                     index_id,
+                    DEDUP_WINDOW_DAYS,
                 )
                 if match_row is not None and match_row["similarity"] >= config.DEDUP_THRESHOLD:
-                    existing_id: int = match_row["id"]
+                    existing_id = match_row["id"]
                     existing_importance: str = match_row["importance"] or "medium"
-                    existing_priority: float = match_row["priority"] or 0.5
 
                     # Higher importance wins
                     new_importance = (
@@ -765,14 +767,11 @@ class PostgresDataLayer:
                         if rank_importance(params.importance) > rank_importance(existing_importance)
                         else existing_importance
                     )
-                    # New memories default to priority 0.5; preserve existing if higher
-                    new_priority = max(existing_priority, 0.5)
-
+                    # Do not mutate priority — preserve existing value
                     await conn.execute(
-                        "UPDATE memories SET updated_at = NOW(), importance = $2, priority = $3 WHERE id = $1",
+                        "UPDATE memories SET updated_at = NOW(), importance = $2 WHERE id = $1",
                         existing_id,
                         new_importance,
-                        new_priority,
                     )
                     return SaveMemoryResult(
                         id=existing_id,
