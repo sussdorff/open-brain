@@ -1,27 +1,21 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
-## [unreleased]
+## [0.8.2] - 2026-04-21
+
+### Miscellaneous
+
+- *(open-brain-058)* Add source='worktree-session-summary' marker to session_summary writer
+- *(open-brain-2co)* Bump cryptography, pygments, pyjwt, python-multipart to CVE-patched versions
+- Bump version to 0.8.2
+
+## [0.8.1] - 2026-04-21
 
 ### Miscellaneous
 
 - *(open-brain-pfn)* Fleet-wide compact_memories run + decision doc
-
-## [0.8.2] - 2026-04-21
-
-### Security
-
-- *(open-brain-2co)* Bump cryptography, pygments, pyjwt, python-multipart to CVE-patched versions
-
-  | Package          | Before → After   | CVE(s)                          |
-  |------------------|------------------|---------------------------------|
-  | cryptography     | 46.0.5 → 46.0.7  | CVE-2026-34073, CVE-2026-39892  |
-  | pygments         | 2.19.2 → 2.20.0  | CVE-2026-4539                   |
-  | pyjwt            | 2.11.0 → 2.12.1  | CVE-2026-32597                  |
-  | python-multipart | 0.0.22 → 0.0.26  | CVE-2026-40347                  |
-
-  `aiohttp` (named in bead title) is not in the dep tree. `starlette` and `mcp`
-  were named but not flagged by pip-audit and left unchanged.
+- Update changelog
+- Bump version to 0.8.1
 
 ## [0.8.0] - 2026-04-21
 
