@@ -44,6 +44,7 @@ from open_brain.data_layer.interface import (
     SearchResult,
     TimelineParams,
     TimelineResult,
+    rank_importance,
 )
 from open_brain.data_layer.refine import analyze_with_llm
 
@@ -728,6 +729,56 @@ class PostgresDataLayer:
                         )
                         asyncio.create_task(self._embed_and_link(existing_id, text_to_embed))
                         return SaveMemoryResult(id=existing_id, message="Memory updated (upsert)")
+
+            # ── Caller-provided duplicate_of short-circuit ──
+            if params.duplicate_of is not None:
+                return SaveMemoryResult(
+                    id=params.duplicate_of,
+                    message="Duplicate (caller-provided)",
+                    duplicate_of=params.duplicate_of,
+                )
+
+            # ── Semantic dedup (dedup_mode == "merge" only) ──
+            if params.dedup_mode == "merge":
+                config = get_config()
+                query_embedding, _embed_tokens = await embed_query_with_usage(params.text)
+                vec_str = to_pg_vector(query_embedding)
+                match_row = await conn.fetchrow(
+                    """SELECT id, importance, priority, content,
+                              1 - (embedding <=> $1::vector) AS similarity
+                       FROM memories
+                       WHERE embedding IS NOT NULL
+                         AND (index_id IS NOT DISTINCT FROM $2)
+                       ORDER BY embedding <=> $1::vector
+                       LIMIT 1""",
+                    vec_str,
+                    index_id,
+                )
+                if match_row is not None and match_row["similarity"] >= config.DEDUP_THRESHOLD:
+                    existing_id: int = match_row["id"]
+                    existing_importance: str = match_row["importance"] or "medium"
+                    existing_priority: float = match_row["priority"] or 0.5
+
+                    # Higher importance wins
+                    new_importance = (
+                        params.importance
+                        if rank_importance(params.importance) > rank_importance(existing_importance)
+                        else existing_importance
+                    )
+                    # New memories default to priority 0.5; preserve existing if higher
+                    new_priority = max(existing_priority, 0.5)
+
+                    await conn.execute(
+                        "UPDATE memories SET updated_at = NOW(), importance = $2, priority = $3 WHERE id = $1",
+                        existing_id,
+                        new_importance,
+                        new_priority,
+                    )
+                    return SaveMemoryResult(
+                        id=existing_id,
+                        message="Duplicate (semantic merge)",
+                        duplicate_of=existing_id,
+                    )
 
             # ── Content hash dedup ──
             content_hash = hashlib.sha256(params.text.encode()).hexdigest()

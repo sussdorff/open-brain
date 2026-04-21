@@ -216,6 +216,8 @@ class SaveMemoryParams:
     user_id: str | None = None  # authenticated user who created this memory
     upsert_mode: Literal["append", "replace"] = "append"
     importance: str = "medium"  # caller-declared significance: critical|high|medium|low
+    dedup_mode: Literal["skip", "merge"] = "skip"  # auto-dedup strategy at store time
+    duplicate_of: int | None = None  # caller-asserted duplicate; short-circuits dedup logic
 
 
 @dataclass

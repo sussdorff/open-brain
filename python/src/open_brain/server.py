@@ -355,6 +355,7 @@ async def save_memory(
     is_test: bool = False,
     metadata: dict | None = None,
     importance: str = "medium",
+    dedup_mode: str = "skip",
 ) -> str:
     """Save a new memory entry."""
     if is_test:
@@ -415,6 +416,7 @@ async def save_memory(
         metadata=metadata,
         user_id=user_id,
         importance=importance,
+        dedup_mode=dedup_mode,  # type: ignore[arg-type]
     )
 
     # Save first — must know if duplicate before firing expensive LLM calls.

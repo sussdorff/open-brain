@@ -32,6 +32,9 @@ class Config(BaseSettings):
     # Daily ingestion guard: reject save_memory calls beyond this threshold per day
     MAX_MEMORIES_PER_DAY: int = 500
 
+    # Semantic dedup threshold: minimum cosine similarity to treat a memory as a duplicate
+    DEDUP_THRESHOLD: float = 0.85
+
     # LLM for metadata extraction / refinement.
     #
     # LLM_MODEL is the default used by all "small" calls: entity extraction,
