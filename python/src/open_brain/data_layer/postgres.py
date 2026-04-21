@@ -44,6 +44,7 @@ from open_brain.data_layer.interface import (
     SearchResult,
     TimelineParams,
     TimelineResult,
+    rank_importance,
 )
 from open_brain.data_layer.refine import analyze_with_llm
 
@@ -741,6 +742,16 @@ class PostgresDataLayer:
                 f"Must be one of: {sorted(IMPORTANCE_VALUES)}"
             )
 
+        # ── Caller-provided duplicate_of short-circuit ──
+        # Must run BEFORE any DB access so it wins over all other paths
+        # (including session_summary upsert) per the "duplicate_of ALWAYS wins" contract.
+        if params.duplicate_of is not None:
+            return SaveMemoryResult(
+                id=params.duplicate_of,
+                message="Duplicate (caller-provided)",
+                duplicate_of=params.duplicate_of,
+            )
+
         pool = await get_pool()
         async with pool.acquire() as conn:
             index_id = await self._resolve_index_id(conn, params.project)
@@ -840,6 +851,49 @@ class PostgresDataLayer:
                         )
                         asyncio.create_task(self._embed_and_link(existing_id, text_to_embed))
                         return SaveMemoryResult(id=existing_id, message="Memory updated (upsert)")
+
+            # ── Semantic dedup (dedup_mode == "merge" only) ──
+            if params.dedup_mode == "merge":
+                config = get_config()
+                query_embedding, query_tokens = await embed_query_with_usage(params.text)
+                asyncio.create_task(self._log_embedding_tokens("query", query_tokens))
+                vec_str = to_pg_vector(query_embedding)
+                # Normalize index_id for dedup: inserts use `index_id or 1`; match the same scope
+                search_index_id = index_id if index_id is not None else 1
+                match_row = await conn.fetchrow(
+                    """SELECT id, importance, content,
+                              1 - (embedding <=> $1::vector) AS similarity
+                       FROM memories
+                       WHERE embedding IS NOT NULL
+                         AND (index_id IS NOT DISTINCT FROM $2)
+                         AND created_at > NOW() - ($3 * INTERVAL '1 day')
+                       ORDER BY embedding <=> $1::vector
+                       LIMIT 1""",
+                    vec_str,
+                    search_index_id,
+                    DEDUP_WINDOW_DAYS,
+                )
+                if match_row is not None and match_row["similarity"] >= config.DEDUP_THRESHOLD:
+                    existing_id = match_row["id"]
+                    existing_importance: str = match_row["importance"] or "medium"
+
+                    # Higher importance wins
+                    new_importance = (
+                        params.importance
+                        if rank_importance(params.importance) > rank_importance(existing_importance)
+                        else existing_importance
+                    )
+                    # Do not mutate priority — preserve existing value
+                    await conn.execute(
+                        "UPDATE memories SET updated_at = NOW(), importance = $2 WHERE id = $1",
+                        existing_id,
+                        new_importance,
+                    )
+                    return SaveMemoryResult(
+                        id=existing_id,
+                        message="Duplicate (semantic merge)",
+                        duplicate_of=existing_id,
+                    )
 
             # ── Content hash dedup ──
             content_hash = hashlib.sha256(params.text.encode()).hexdigest()

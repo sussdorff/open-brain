@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- *(open-brain-qrw)* Green — semantic deduplication at store time: optional dedup_mode parameter ("skip" default for backward compatibility, "merge" for vector similarity matching); merges into existing memories when similarity ≥ 0.85 threshold (configurable); preserves higher importance rank and leaves access_count/last_accessed_at unchanged
 - *(open-brain-9md)* Green — importance-based memory decay: recall-triggered atomic decay (24h guard), critical/high memory protection, importance multipliers (critical=no decay, high=0.5×, medium=1.0×, low=2.0×), and access-count damping
 - *(open-brain-hhw)* Green — structured wake-up pack: get_wake_up_pack(token_budget) MCP tool with 5 fixed categories (Identity, Decisions, Constraints, Errors, Project) + importance-ranked + SessionStart hook integration
 - *(open-brain-jpz)* Green — importance contract & schema migration

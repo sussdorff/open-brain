@@ -130,7 +130,7 @@ Memories flow through a defined lifecycle from creation to long-term storage:
 
 | Stage | Tool | Mode | Description |
 |-------|------|------|-------------|
-| **Save** | `save_memory` | Auto/Manual | Store observation with metadata. Auto-embeds async. **Capture Router** applies templates concurrently. Auto-extracts entities (people, orgs, tech, locations, dates). |
+| **Save** | `save_memory` | Auto/Manual | Store observation with metadata. Auto-embeds async. **Capture Router** applies templates concurrently. Auto-extracts entities (people, orgs, tech, locations, dates). Optional `dedup_mode="merge"` enables semantic deduplication via vector similarity (see Deduplication section). |
 | **Embed** | (internal) | Automatic | Voyage-4 embedding + auto-link to similar memories (cosine > 0.65). |
 | **Search** | `search`, `timeline`, `get_observations` | On demand | 3-step funnel: search → context → details. Minimizes token usage. |
 | **Refine** | `refine_memories` | Automatic | LLM finds duplicates, merges similar, adjusts priority. Rule-based. |
@@ -260,9 +260,35 @@ Triggered automatically during work hours via the `memory-heartbeat` skill:
 
 ### Deduplication
 
-Both extraction modes use **content-hash deduplication** (SHA-256 of normalized content) to prevent duplicate learnings. When a duplicate is detected, the response surfaces `duplicate_of: <id>` to indicate the canonical learning.
+#### Content-Hash Deduplication (default)
+
+Both extraction modes use **content-hash deduplication** (SHA-256 of normalized content) to prevent duplicate learnings. When a duplicate is detected within the 30-day dedup window, the response surfaces `duplicate_of: <id>` to indicate the canonical row. This is the default behavior and requires no special parameters.
 
 See [Periodic Learnings Extraction](./features/periodic-learnings-extraction.md) for detailed documentation.
+
+#### Caller-Provided Short-Circuit
+
+If the caller explicitly passes `duplicate_of=<id>` in `save_memory` parameters, the call returns immediately with `id=<id>` and no DB access. This takes precedence over all other dedup modes and upsert paths.
+
+#### Semantic Deduplication (opt-in)
+
+`save_memory` supports an optional `dedup_mode` parameter (`"skip"` | `"merge"`, default `"skip"`):
+
+- **`dedup_mode="skip"`** — identical to the default content-hash path. No vector search, no mutation.
+- **`dedup_mode="merge"`** — runs a vector similarity search (Voyage-4 embeddings, cosine similarity) scoped to the same `index_id` and dedup window (30 days). If the best match has similarity ≥ `DEDUP_THRESHOLD` (default 0.85, config-driven), the call **merges into the existing row** rather than inserting a new one.
+
+**Merge rules (when a hit is found):**
+
+| Field | Merge policy |
+|-------|--------------|
+| `id` | Existing row id is returned (no new row) |
+| `importance` | Higher rank wins via `rank_importance()` (critical=3, high=2, medium=1, low=0) |
+| `updated_at` | Set to `NOW()` |
+| `access_count` | **Unchanged** — merge is a write, not a recall |
+| `last_accessed_at` | **Unchanged** — same recall-only rule |
+| `priority` | **Unchanged** — preserved from existing row |
+
+The merge path uses only vector similarity (no LLM call). The `duplicate_of` caller-provided short-circuit always wins over semantic dedup: if both are supplied, merge logic is never consulted.
 
 ## Plugin Architecture
 
