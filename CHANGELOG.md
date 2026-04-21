@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.7.1] - 2026-04-21
+
+### Breaking Changes
+
+- BREAKING: `summarize.py` invocation removed from Stop + SubagentStop hook triggers; `/api/summarize` endpoint deleted. Session summaries now only written by core:session-close agent or SessionEnd safety-net hook.
+
 ## [0.6.0] - 2026-04-21
 
 ### Bug Fixes

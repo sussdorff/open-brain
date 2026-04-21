@@ -29,11 +29,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/summarize.py",
-            "timeout": 15
-          },
-          {
-            "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/sync-claude-memories.sh",
             "timeout": 5
           },
@@ -48,11 +43,6 @@
     "SubagentStop": [
       {
         "hooks": [
-          {
-            "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/summarize.py",
-            "timeout": 15
-          },
           {
             "type": "command",
             "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/worktree_turn_log.py",
