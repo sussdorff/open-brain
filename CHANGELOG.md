@@ -1,11 +1,21 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
-## [unreleased]
+## [0.8.2] - 2026-04-21
+
+### Miscellaneous
+
+- *(open-brain-058)* Add source='worktree-session-summary' marker to session_summary writer
+- *(open-brain-2co)* Bump cryptography, pygments, pyjwt, python-multipart to CVE-patched versions
+- Bump version to 0.8.2
+
+## [0.8.1] - 2026-04-21
 
 ### Miscellaneous
 
 - *(open-brain-pfn)* Fleet-wide compact_memories run + decision doc
+- Update changelog
+- Bump version to 0.8.1
 
 ## [0.8.0] - 2026-04-21
 
