@@ -1,6 +1,13 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+
+## [Unreleased]
+
+### Features
+
+- *(open-brain-jpz)* **Memory Importance** contract with critical/high/medium/low levels, orthogonal to priority and stability
+
 ## [0.8.3] - 2026-04-21
 
 ### Miscellaneous
