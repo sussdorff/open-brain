@@ -5,7 +5,33 @@ All notable changes to this project will be documented in this file.
 
 ### Miscellaneous
 
+- *(open-brain-pfn)* Fleet-wide compact_memories run + decision doc
+
+## [0.8.0] - 2026-04-21
+
+### Miscellaneous
+
+- Bump version to 0.8.0
+
+## [0.7.1] - 2026-04-21
+
+### Bug Fixes
+
+- *(open-brain-v76)* Address review findings iteration 1
+
+### Features
+
+- *(open-brain-v76)* Green — transcript-based session-summary regeneration
+
+### Miscellaneous
+
 - *(open-brain-9j3)* Remove summarize.py from Stop+SubagentStop hooks, delete /api/summarize endpoint
+- Update changelog
+- Bump version to 0.7.1
+
+### Testing
+
+- *(open-brain-v76)* Red — transcript-based session-summary regeneration
 
 ## [0.7.0] - 2026-04-21
 
