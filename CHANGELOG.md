@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- *(open-brain-hhw)* Green — structured wake-up pack: get_wake_up_pack(token_budget) MCP tool with 5 fixed categories (Identity, Decisions, Constraints, Errors, Project) + importance-ranked + SessionStart hook integration
 - *(open-brain-jpz)* Green — importance contract & schema migration
 
 ### Miscellaneous
