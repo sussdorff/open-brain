@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from open_brain.data_layer.interface import DataLayer, DeleteParams, SearchParams
+from open_brain.data_layer.postgres import get_pool
 from open_brain.session_summary import summarize_transcript_turns
 
 logger = logging.getLogger(__name__)
@@ -61,7 +62,13 @@ def _find_transcript(session_ref: str, transcript_root: str) -> Path | None:
     """Glob for a JSONL transcript matching session_ref under transcript_root."""
     root = Path(transcript_root).expanduser()
     pattern = str(root / "*" / f"{session_ref}.jsonl")
-    matches = glob.glob(pattern)
+    matches = sorted(glob.glob(pattern))
+    if len(matches) > 1:
+        logger.warning(
+            "Multiple transcripts for session_ref=%s: %s — using first",
+            session_ref,
+            matches,
+        )
     if matches:
         return Path(matches[0])
     # Also check directly under root (no subdirectory)
@@ -72,16 +79,18 @@ def _find_transcript(session_ref: str, transcript_root: str) -> Path | None:
 
 
 def _parse_raw_jsonl_turns(path: Path) -> list[dict[str, Any]]:
-    """Parse a raw JSONL transcript into normalized flat-format turns.
+    """Parse a raw JSONL transcript into normalized turns.
 
-    Filters:
-    - entry type must be 'user' or 'assistant'
-    - isMeta must not be True
-    - content must be non-empty after normalization
+    Normalizes raw JSONL entries by promoting ``message.content`` to the
+    top-level ``content`` field so that the shared ``_build_turns_text``
+    / ``_is_valid_turn`` logic in session_summary.py handles all filtering
+    (type, isMeta, empty content, list vs string content).
 
-    Returns a list of {type, content, isMeta} dicts (flat format compatible
-    with _build_turns_text).
+    Returns a list of entry dicts with a top-level ``content`` key (raw value
+    preserved — may be str or list[block]).
     """
+    from open_brain.session_summary import _is_valid_turn
+
     turns = []
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
@@ -93,40 +102,18 @@ def _parse_raw_jsonl_turns(path: Path) -> list[dict[str, Any]]:
             continue
         if not isinstance(entry, dict):
             continue
-        entry_type = entry.get("type", "")
-        if entry_type not in ("user", "assistant"):
-            continue
-        if entry.get("isMeta") is True:
-            continue
 
-        # Extract content from message.content (raw JSONL format)
-        msg = entry.get("message", {})
-        raw_content = msg.get("content") if isinstance(msg, dict) else None
-        # Also accept flat content field
-        if raw_content is None:
-            raw_content = entry.get("content")
+        # Promote message.content to top-level content so the shared predicate
+        # and _build_turns_text can handle both formats uniformly.
+        if "content" not in entry:
+            msg = entry.get("message", {})
+            if isinstance(msg, dict) and "content" in msg:
+                entry = {**entry, "content": msg["content"]}
 
-        # Normalize list content to string
-        if isinstance(raw_content, list):
-            parts = []
-            for block in raw_content:
-                if not isinstance(block, dict):
-                    continue
-                if block.get("type") == "text":
-                    parts.append(block.get("text", ""))
-                elif block.get("type") == "tool_use":
-                    parts.append(f"[tool: {block.get('name', '')}]")
-            content = "\n".join(p for p in parts if p)
-        elif isinstance(raw_content, str):
-            content = raw_content
-        else:
+        if not _is_valid_turn(entry):
             continue
 
-        if not content:
-            continue
-
-        # Normalize to flat format for _build_turns_text
-        turns.append({"type": entry_type, "content": content, "isMeta": False})
+        turns.append(entry)
     return turns
 
 
@@ -135,6 +122,26 @@ def _extract_project_from_scope(scope: str | None) -> str | None:
     if scope and scope.startswith("project:"):
         return scope[len("project:"):]
     return None
+
+
+async def _resolve_index_name(index_id: int | None) -> str | None:
+    """Look up the name of a memory index by its ID.
+
+    Returns the index name, or None if not found or index_id is None.
+    """
+    if index_id is None:
+        return None
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT name FROM memory_indexes WHERE id = $1",
+                index_id,
+            )
+            return row["name"] if row else None
+    except Exception:
+        logger.debug("_resolve_index_name: failed for index_id=%s", index_id, exc_info=True)
+        return None
 
 
 # ─── Core orchestration ───────────────────────────────────────────────────────
@@ -238,18 +245,25 @@ async def regenerate_summaries(
         if params.dry_run:
             continue
 
-        # Determine project name for summarization
-        # Use the project from the first memory if available
-        mem_project: str | None = None
+        # Determine project name for summarization.
+        # Prefer scope-derived project, then look up from the memory's index_id.
         if project:
-            mem_project = project
+            mem_project: str = project
         else:
-            # Try to infer from the memory's index (no direct field, use scope)
-            mem_project = "unknown"
+            first_mem = mems[0]
+            index_id_val = getattr(first_mem, "index_id", None)
+            resolved = await _resolve_index_name(index_id_val)
+            if resolved is None:
+                logger.debug(
+                    "regenerate: could not resolve project for session_ref=%s index_id=%s, using 'unknown'",
+                    session_ref,
+                    index_id_val,
+                )
+            mem_project = resolved or "unknown"
 
         try:
             new_id = await summarize_transcript_turns(
-                project=mem_project or "unknown",
+                project=mem_project,
                 session_id=session_ref,
                 turns=turns,
                 source="transcript-backfill",

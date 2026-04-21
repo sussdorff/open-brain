@@ -28,6 +28,58 @@ def get_dl() -> PostgresDataLayer:
     return _dl
 
 
+def _resolve_turn_content(turn: dict[str, Any]) -> str | None:
+    """Resolve the text content of a turn dict, handling both formats.
+
+    Flat format: {type, content: str}
+    Raw JSONL format: {type, message: {content: str | list[block]}}
+
+    Returns the resolved non-empty string content, or None if the turn has no
+    valid content.
+    """
+    # Try flat content first (API / hook format)
+    raw_content = turn.get("content")
+    # Fall back to JSONL message.content
+    if raw_content is None:
+        msg = turn.get("message", {})
+        if isinstance(msg, dict):
+            raw_content = msg.get("content")
+
+    # Handle list content (Claude API message.content format)
+    if isinstance(raw_content, list):
+        parts = []
+        for block in raw_content:
+            if not isinstance(block, dict):
+                continue
+            btype = block.get("type", "")
+            if btype == "text":
+                parts.append(block.get("text", ""))
+            elif btype == "tool_use":
+                parts.append(f"[tool: {block.get('name', '')}]")
+        content = "\n".join(p for p in parts if p)
+    elif isinstance(raw_content, str):
+        content = raw_content
+    else:
+        return None
+
+    return content if content else None
+
+
+def _is_valid_turn(turn: dict[str, Any]) -> bool:
+    """Return True if this turn should be included in the transcript summary.
+
+    Handles both flat format ({type, content: str}) and raw JSONL format
+    ({type, message: {content: str | list[block]}}).
+    """
+    if not isinstance(turn, dict):
+        return False
+    if turn.get("type") not in ("user", "assistant"):
+        return False
+    if turn.get("isMeta") is True:
+        return False
+    return _resolve_turn_content(turn) is not None
+
+
 def _build_turns_text(turns: list[dict[str, Any]]) -> str:
     """Filter and join transcript turns into a single text block.
 
@@ -40,41 +92,11 @@ def _build_turns_text(turns: list[dict[str, Any]]) -> str:
     """
     lines = []
     for turn in turns:
-        if not isinstance(turn, dict):
+        if not _is_valid_turn(turn):
             continue
-        if turn.get("type") not in ("user", "assistant"):
-            continue
-        if turn.get("isMeta") is True:
-            continue
-
-        # Try flat content first (API / hook format)
-        raw_content = turn.get("content")
-        # Fall back to JSONL message.content
-        if raw_content is None:
-            msg = turn.get("message", {})
-            if isinstance(msg, dict):
-                raw_content = msg.get("content")
-
-        # Handle list content (Claude API message.content format)
-        if isinstance(raw_content, list):
-            parts = []
-            for block in raw_content:
-                if not isinstance(block, dict):
-                    continue
-                btype = block.get("type", "")
-                if btype == "text":
-                    parts.append(block.get("text", ""))
-                elif btype == "tool_use":
-                    parts.append(f"[tool: {block.get('name', '')}]")
-            content = "\n".join(p for p in parts if p)
-        elif isinstance(raw_content, str):
-            content = raw_content
-        else:
-            continue
-
+        content = _resolve_turn_content(turn)
         if not content:
             continue
-
         role = turn["type"].upper()
         lines.append(f"[{role}] {content}")
     return "\n".join(lines)
@@ -134,15 +156,7 @@ async def summarize_transcript_turns(
                 )
                 return None
 
-    turn_count = sum(
-        1
-        for t in turns
-        if isinstance(t, dict)
-        and t.get("type") in ("user", "assistant")
-        and not t.get("isMeta")
-        and isinstance(t.get("content"), str)
-        and t.get("content")
-    )
+    turn_count = sum(1 for t in turns if _is_valid_turn(t))
 
     prompt = f"""Summarize this session transcript.
 

@@ -623,26 +623,59 @@ class PostgresDataLayer:
             # ── Upsert path for session_summary ──
             if params.type == "session_summary" and params.session_ref:
                 if params.upsert_mode == "replace":
-                    # Delete existing rows in FK-safe order, then fall through to INSERT
-                    existing_ids_rows = await conn.fetch(
-                        "SELECT id FROM memories WHERE session_ref = $1 AND type = 'session_summary'",
-                        params.session_ref,
-                    )
-                    existing_ids: list[int] = [r["id"] for r in existing_ids_rows]
-                    if existing_ids:
-                        await conn.execute(
-                            "DELETE FROM memory_usage_log WHERE memory_id = ANY($1::int[])",
-                            existing_ids,
-                        )
-                        await conn.execute(
-                            "DELETE FROM memory_relationships WHERE source_id = ANY($1::int[]) OR target_id = ANY($1::int[])",
-                            existing_ids,
-                        )
-                        await conn.execute(
-                            "DELETE FROM memories WHERE session_ref = $1 AND type = 'session_summary'",
+                    # Delete existing rows in FK-safe order, then insert fresh.
+                    # Wrapped in a transaction for atomicity.
+                    async with conn.transaction():
+                        existing_ids_rows = await conn.fetch(
+                            "SELECT id FROM memories WHERE session_ref = $1 AND type = 'session_summary'",
                             params.session_ref,
                         )
-                    # Fall through to INSERT path below
+                        existing_ids: list[int] = [r["id"] for r in existing_ids_rows]
+                        if existing_ids:
+                            await conn.execute(
+                                "DELETE FROM memory_usage_log WHERE memory_id = ANY($1::int[])",
+                                existing_ids,
+                            )
+                            await conn.execute(
+                                "DELETE FROM memory_relationships WHERE source_id = ANY($1::int[]) OR target_id = ANY($1::int[])",
+                                existing_ids,
+                            )
+                            await conn.execute(
+                                "DELETE FROM memories WHERE session_ref = $1 AND type = 'session_summary'",
+                                params.session_ref,
+                            )
+
+                        # Content-hash dedup is skipped for replace mode (we're intentionally
+                        # replacing content for this session_ref; duplicates across other
+                        # sessions are irrelevant).
+                        base_metadata = dict(params.metadata) if params.metadata else {}
+                        content_hash_replace = hashlib.sha256(params.text.encode()).hexdigest()
+                        base_metadata["content_hash"] = content_hash_replace
+                        metadata_json_replace = _json.dumps(base_metadata)
+                        row_replace = await conn.fetchrow(
+                            """INSERT INTO memories (index_id, type, title, subtitle, narrative, content, session_ref, metadata, user_id)
+                               VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
+                               RETURNING id""",
+                            index_id or 1,
+                            params.type or "observation",
+                            params.title,
+                            params.subtitle,
+                            params.narrative,
+                            params.text,
+                            params.session_ref,
+                            metadata_json_replace,
+                            params.user_id,
+                        )
+                        memory_id_replace: int = row_replace["id"]
+
+                    # Kick off embedding + auto-linking outside the transaction
+                    text_to_embed_replace = ": ".join(
+                        part
+                        for part in [params.title, params.subtitle, params.narrative, params.text]
+                        if part
+                    )
+                    asyncio.create_task(self._embed_and_link(memory_id_replace, text_to_embed_replace))
+                    return SaveMemoryResult(id=memory_id_replace, message="Memory saved")
                 else:
                     # append mode: merge content into existing row
                     existing = await conn.fetchrow(

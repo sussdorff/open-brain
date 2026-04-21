@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -53,6 +53,12 @@ def _make_pool_mock(
     mock_conn.fetch = AsyncMock(return_value=fetch_return or [])
     mock_conn.fetchval = AsyncMock(return_value=fetchval_return)
     mock_conn.execute = AsyncMock(return_value=execute_return)
+
+    # Support conn.transaction() as an async context manager (no-op)
+    txn_ctx = MagicMock()
+    txn_ctx.__aenter__ = AsyncMock(return_value=None)
+    txn_ctx.__aexit__ = AsyncMock(return_value=None)
+    mock_conn.transaction = MagicMock(return_value=txn_ctx)
 
     acquire_ctx = MagicMock()
     acquire_ctx.__aenter__ = AsyncMock(return_value=mock_conn)
@@ -98,15 +104,15 @@ class TestSaveMemoryUpsertMode:
         # Replace mode call sequence (project=None, so _resolve_index_id skips fetchrow):
         #  1. conn.fetch for existing session_summary IDs -> returns rows with id=42
         #  2. 3x execute for DELETE (memory_usage_log, memory_relationships, memories)
-        #  3. fetchrow for content_hash dedup -> None (no dup)
-        #  4. fetchrow for INSERT RETURNING id -> {"id": 99}
+        #  3. fetchrow for INSERT RETURNING id -> {"id": 99}
+        #  (content-hash dedup is skipped in replace mode)
         existing_id_row = MagicMock()
         existing_id_row.__getitem__ = MagicMock(side_effect=lambda k: 42 if k == "id" else None)
         mock_conn.fetch = AsyncMock(return_value=[existing_id_row])
 
         insert_row = MagicMock()
         insert_row.__getitem__ = MagicMock(side_effect=lambda k: 99 if k == "id" else None)
-        mock_conn.fetchrow = AsyncMock(side_effect=[None, insert_row])  # dedup=None, INSERT=row
+        mock_conn.fetchrow = AsyncMock(return_value=insert_row)  # INSERT RETURNING id
         mock_conn.fetchval = AsyncMock(return_value=None)
 
         dl = PostgresDataLayer()
@@ -263,16 +269,19 @@ class TestParseRawJsonlTurns:
         for t in turns:
             assert t["type"] in ("user", "assistant")
             assert t.get("isMeta") is not True
-            assert isinstance(t["content"], str)
+            # content may be str or list[block] — both are valid after normalization
+            assert isinstance(t["content"], (str, list))
             assert t["content"]
 
     def test_tool_use_blocks_represented(self):
-        """AK3: tool_use blocks in assistant content appear as [tool: name]."""
+        """AK3: tool_use blocks in assistant content appear as [tool: name] after _build_turns_text."""
         from open_brain.regenerate import _parse_raw_jsonl_turns
+        from open_brain.session_summary import _build_turns_text
         path = FIXTURES_DIR / "session-abc123.jsonl"
         turns = _parse_raw_jsonl_turns(path)
-        assistant_turns = [t for t in turns if t["type"] == "assistant"]
-        assert any("[tool: Edit]" in t["content"] for t in assistant_turns)
+        # Verify the full pipeline: _parse_raw_jsonl_turns + _build_turns_text
+        text = _build_turns_text(turns)
+        assert "[tool: Edit]" in text
 
     def test_handles_invalid_json_lines(self, tmp_path):
         """AK3: invalid JSON lines are skipped gracefully."""
