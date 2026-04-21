@@ -266,6 +266,7 @@ class Memory:
     updated_at: str
     user_id: str | None = None  # user who created this memory (NULL for pre-feature or API key auth)
     importance: str = "medium"  # caller-declared significance: critical|high|medium|low
+    project_name: str | None = None  # populated by get_wake_up_memories JOIN
 
 
 @dataclass
@@ -525,3 +526,5 @@ class DataLayer(Protocol):
     async def decay_memories(self, params: DecayParams) -> DecayResult: ...
 
     async def compact_memories(self, params: CompactParams) -> CompactResult: ...
+
+    async def get_wake_up_memories(self, limit: int = 500) -> list[Memory]: ...
