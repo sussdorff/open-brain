@@ -364,6 +364,7 @@ Requires a running Postgres instance with pgvector.
 | `narrative` | text | Supplementary reasoning / context |
 | `embedding` | vector(1024) | Voyage-4 embedding |
 | `metadata` | jsonb | Arbitrary structured data — includes auto-extracted `entities` (people, orgs, tech, locations, dates), capture templates, custom fields |
-| `priority` | real | Decays based on usage; affects ranking |
-| `stability` | text | `tentative` → `stable` → `canonical` |
+| `priority` | real | Decays based on usage; affects ranking. **Orthogonal to importance.** |
+| `stability` | text | `tentative` → `stable` → `canonical`. **Orthogonal to importance.** |
+| `importance` | text | Caller-declared retention class: `critical` \| `high` \| `medium` (default) \| `low`. Orthogonal to `priority` (dynamic float) and `stability` (lifecycle phase). Use `rank_importance()` to convert to int (critical=3, high=2, medium=1, low=0). `access_count` is a read-only recall counter — it MUST NOT be mutated by write paths. |
 | `type` | text | Memory type vocabulary (discovery, learning, session_summary, ...) |
