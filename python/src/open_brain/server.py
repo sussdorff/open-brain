@@ -1269,7 +1269,6 @@ async def health() -> JSONResponse:
 # Endpoints (all require X-API-Key or Bearer token auth unless noted):
 #   POST /api/ingest                    — ingest single tool observation (plugin hook)
 #   POST /api/session-end               — generate session summary from transcript turns (SessionEnd hook)
-#   POST /api/summarize (deprecated)    — no-op shim for backward compat; removed in open-brain-9j3
 #   POST /api/session-capture           — extract observations from conversation transcript
 #   POST /api/worktree-session-summary  — generate summary from worktree session turn batch
 #   DELETE /api/memories                — delete memories by IDs or filter
@@ -1373,13 +1372,6 @@ Respond with ONLY valid JSON, no markdown fences."""
     except Exception:
         logger.exception("Extraction failed")
         return None
-
-
-@app.post("/api/summarize")
-async def api_summarize_deprecated(request: Request) -> JSONResponse:
-    """Deprecated: use /api/session-end instead. Returns 202 no-op for backward compat."""
-    logger.warning("POST /api/summarize is deprecated and will be removed; use /api/session-end")
-    return JSONResponse({"status": "accepted", "deprecated": True}, status_code=202)
 
 
 @app.post("/api/session-end")

@@ -1,6 +1,19 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [unreleased]
+
+### Miscellaneous
+
+- *(open-brain-9j3)* Remove summarize.py from Stop+SubagentStop hooks, delete /api/summarize endpoint
+
+## [0.7.0] - 2026-04-21
+
+### Miscellaneous
+
+- Update changelog
+- Bump version to 0.7.0
+
 ## [0.6.0] - 2026-04-21
 
 ### Bug Fixes
