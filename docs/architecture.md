@@ -134,7 +134,7 @@ Memories flow through a defined lifecycle from creation to long-term storage:
 | **Embed** | (internal) | Automatic | Voyage-4 embedding + auto-link to similar memories (cosine > 0.65). |
 | **Search** | `search`, `timeline`, `get_observations` | On demand | 3-step funnel: search → context → details. Minimizes token usage. |
 | **Refine** | `refine_memories` | Automatic | LLM finds duplicates, merges similar, adjusts priority. Rule-based. |
-| **Decay** | `run_lifecycle_pipeline` (Step 0) | Automatic | Reduce priority of stale (30+ days unaccessed) memories, boost frequently accessed ones. Recent memories protected. |
+| **Decay** | `decay_memories` / `run_lifecycle_pipeline` (Step 0) | Automatic | Reduce priority of stale memories using importance-class multipliers (critical=no decay, high=0.5×, medium=1.0×, low=2.0×). Access-count damping: effective rate ÷ (1 + access_count × 0.1). Boost frequently accessed memories. Recall-triggered decay fires on `search()` if `last_decay_at` > 24 h. Critical/high memories protected from pruning. |
 | **Triage** | `triage_memories` | Human-in-loop | LLM classifies memories; user approves each action. |
 | **Materialize** | `materialize_memories` | Semi-auto | Writes approved triage actions to their targets (files, issues, etc.). |
 
@@ -393,4 +393,5 @@ Requires a running Postgres instance with pgvector.
 | `priority` | real | Decays based on usage; affects ranking. **Orthogonal to importance.** |
 | `stability` | text | `tentative` → `stable` → `canonical`. **Orthogonal to importance.** |
 | `importance` | text | Caller-declared retention class: `critical` \| `high` \| `medium` (default) \| `low`. Orthogonal to `priority` (dynamic float) and `stability` (lifecycle phase). Use `rank_importance()` to convert to int (critical=3, high=2, medium=1, low=0). `access_count` is a read-only recall counter — it MUST NOT be mutated by write paths. |
+| `last_decay_at` | timestamptz | Timestamp of the most recent decay application (NULL = never decayed). Used as an atomic race guard: the `decay_unused_priorities` SQL function and recall-triggered decay both include `AND (last_decay_at IS NULL OR last_decay_at < NOW() - interval '24 hours')`, ensuring concurrent callers skip already-decayed rows without advisory locks. |
 | `type` | text | Memory type vocabulary (discovery, learning, session_summary, ...) |

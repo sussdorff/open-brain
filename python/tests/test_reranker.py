@@ -198,8 +198,17 @@ class TestSearchWithReranking:
             "title": "Test memory", "subtitle": None, "narrative": None,
             "content": "asyncpg is fast", "metadata": {}, "priority": 0.8,
             "stability": "stable", "access_count": 0, "last_accessed_at": None,
-            "created_at": None, "updated_at": None,
+            "created_at": None, "updated_at": None, "user_id": None,
+            "importance": "medium", "last_decay_at": None,
         }[k])
+        mock_row.get = MagicMock(side_effect=lambda k, default=None: {
+            "id": 1, "index_id": 1, "session_id": None, "type": "observation",
+            "title": "Test memory", "subtitle": None, "narrative": None,
+            "content": "asyncpg is fast", "metadata": {}, "priority": 0.8,
+            "stability": "stable", "access_count": 0, "last_accessed_at": None,
+            "created_at": None, "updated_at": None, "user_id": None,
+            "importance": "medium", "last_decay_at": None,
+        }.get(k, default))
 
         mock_conn = AsyncMock()
         mock_conn.fetchrow = AsyncMock(return_value={"id": 1})
