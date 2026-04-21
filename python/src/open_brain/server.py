@@ -34,6 +34,7 @@ from open_brain.auth.provider import get_provider
 from open_brain.auth.tokens import verify_token
 from open_brain.config import get_config
 from open_brain.data_layer.interface import (
+    CompactParams,
     DecayParams,
     DeleteParams,
     MaterializeParams,
@@ -751,6 +752,43 @@ async def run_lifecycle_pipeline(
             "actions_taken": [vars(r) for r in mat_result.results],
             "kept_count": keep_count,
             "dry_run": dry_run,
+        }
+    )
+
+
+@mcp.tool(
+    description="Cluster and hard-delete near-duplicate memories using pgvector cosine similarity. "
+    "Default threshold=0.87 (empirically calibrated). dry_run=True by default. "
+    "Strategies: keep_highest_access (default), keep_latest, keep_most_comprehensive. "
+    "Params: scope (project:X, type:Y, or None=all), threshold, strategy, dry_run"
+)
+async def compact_memories(
+    scope: str | None = None,
+    threshold: float = 0.87,
+    strategy: str = "keep_highest_access",
+    dry_run: bool = True,
+) -> str:
+    """Cluster near-duplicate memories and optionally hard-delete them."""
+    dl = get_dl()
+    result = await dl.compact_memories(
+        CompactParams(scope=scope, threshold=threshold, strategy=strategy, dry_run=dry_run)
+    )
+    return json.dumps(
+        {
+            "clusters_found": result.clusters_found,
+            "memories_deleted": result.memories_deleted,
+            "memories_kept": result.memories_kept,
+            "deleted_ids": result.deleted_ids,
+            "strategy_used": result.strategy_used,
+            "plan": [
+                {
+                    "cluster_id": p.cluster_id,
+                    "members": p.members,
+                    "canonical_id": p.canonical_id,
+                    "to_delete": p.to_delete,
+                }
+                for p in result.plan
+            ],
         }
     )
 

@@ -21,6 +21,9 @@ from open_brain.data_layer.embedding import (
 )
 from open_brain.data_layer.reranker import rerank
 from open_brain.data_layer.interface import (
+    ClusterPlan,
+    CompactParams,
+    CompactResult,
     DecayParams,
     DecayResult,
     DeleteParams,
@@ -46,6 +49,56 @@ from open_brain.data_layer.refine import analyze_with_llm
 logger = logging.getLogger(__name__)
 
 DEDUP_WINDOW_DAYS = 30  # How far back the content-hash dedup check looks
+
+# ─── compact_memories helpers ─────────────────────────────────────────────────
+
+def _build_clusters(ids: list[int], edges: list[tuple[int, int]]) -> list[list[int]]:
+    """Union-find over edges; return only clusters with >= 2 members."""
+    parent: dict[int, int] = {i: i for i in ids}
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]  # path compression
+            x = parent[x]
+        return x
+
+    def union(a: int, b: int) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    for a, b in edges:
+        union(a, b)
+
+    # Group by root
+    groups: dict[int, list[int]] = {}
+    for i in ids:
+        root = find(i)
+        groups.setdefault(root, []).append(i)
+
+    return [members for members in groups.values() if len(members) >= 2]
+
+
+def _select_canonical(members: list[int], rows: dict[int, Any], strategy: str) -> int:
+    """Select the canonical memory ID from a cluster according to strategy."""
+    if strategy == "keep_latest":
+        return max(members, key=lambda i: str(rows[i]["created_at"]))
+    if strategy == "keep_most_comprehensive":
+        return max(
+            members,
+            key=lambda i: len((rows[i]["content"] or "").replace("---", "").strip()),
+        )
+    # Default: keep_highest_access, tiebreak by updated_at
+    return max(
+        members,
+        key=lambda i: (rows[i]["access_count"], str(rows[i]["updated_at"])),
+    )
+
+
+_compact_lifecycle_filter = (
+    "AND (metadata->>'status' IS NULL "
+    "OR metadata->>'status' NOT IN ('materialized', 'discarded', 'archived'))"
+)
 
 _pool: asyncpg.Pool | None = None
 
@@ -1229,6 +1282,105 @@ class PostgresDataLayer:
             f" ({failed} failed)" if failed else ""
         )
         return MaterializeResult(processed=len(results), results=results, summary=summary)
+
+    async def compact_memories(self, params: CompactParams) -> CompactResult:
+        """Cluster and hard-delete near-duplicate memories using pgvector cosine similarity."""
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            # Step 1: Fetch memories for scope
+            scope = params.scope
+            if scope and scope.startswith("project:"):
+                project = scope[8:]
+                index_id = await self._resolve_index_id(conn, project)
+                mem_rows = await conn.fetch(
+                    f"SELECT * FROM memories WHERE index_id = $1 {_compact_lifecycle_filter}",
+                    index_id or 1,
+                )
+            elif scope and scope.startswith("type:"):
+                mem_type = scope[5:]
+                mem_rows = await conn.fetch(
+                    f"SELECT * FROM memories WHERE type = $1 {_compact_lifecycle_filter}",
+                    mem_type,
+                )
+            else:
+                mem_rows = await conn.fetch(
+                    f"SELECT * FROM memories WHERE 1=1 {_compact_lifecycle_filter}",
+                )
+
+            # Step 2: If fewer than 2 memories → return early
+            if len(mem_rows) < 2:
+                return CompactResult(
+                    clusters_found=0,
+                    memories_deleted=0,
+                    memories_kept=[],
+                    deleted_ids=[],
+                    strategy_used=params.strategy,
+                    plan=[],
+                )
+
+            # Build rows dict for strategy selection
+            rows_by_id: dict[int, Any] = {row["id"]: row for row in mem_rows}
+            all_ids = list(rows_by_id.keys())
+
+            # Step 3: Fetch all-pairs cosine similarity via pgvector
+            sim_rows = await conn.fetch(
+                """SELECT m1.id AS id1, m2.id AS id2,
+                          1 - (m1.embedding <=> m2.embedding) AS similarity
+                   FROM memories m1 JOIN memories m2 ON m1.id < m2.id
+                   WHERE m1.id = ANY($1::int[]) AND m2.id = ANY($1::int[])
+                     AND m1.embedding IS NOT NULL AND m2.embedding IS NOT NULL
+                     AND 1 - (m1.embedding <=> m2.embedding) >= $2""",
+                all_ids,
+                params.threshold,
+            )
+
+            # Step 4: Build edge list and run pure-Python union-find
+            edges = [(row["id1"], row["id2"]) for row in sim_rows]
+            clusters = _build_clusters(all_ids, edges)
+
+            # Step 5: Per cluster >= 2 members, choose Canonical via strategy
+            plan: list[ClusterPlan] = []
+            all_to_delete: list[int] = []
+            for cluster_id, members in enumerate(clusters):
+                canonical = _select_canonical(members, rows_by_id, params.strategy)
+                to_delete = [m for m in members if m != canonical]
+                plan.append(ClusterPlan(
+                    cluster_id=cluster_id,
+                    members=members,
+                    canonical_id=canonical,
+                    to_delete=to_delete,
+                ))
+                all_to_delete.extend(to_delete)
+
+            # Memories kept = all_ids minus to_delete
+            deleted_set = set(all_to_delete)
+            memories_kept = [i for i in all_ids if i not in deleted_set]
+
+            # Step 6: dry_run=True → return plan without deleting
+            if params.dry_run or not all_to_delete:
+                return CompactResult(
+                    clusters_found=len(clusters),
+                    memories_deleted=0,
+                    memories_kept=memories_kept,
+                    deleted_ids=all_to_delete,
+                    strategy_used=params.strategy,
+                    plan=plan,
+                )
+
+            # Step 7: dry_run=False → DELETE non-canonical IDs
+            await conn.execute(
+                "DELETE FROM memories WHERE id = ANY($1::int[])",
+                all_to_delete,
+            )
+
+            return CompactResult(
+                clusters_found=len(clusters),
+                memories_deleted=len(all_to_delete),
+                memories_kept=memories_kept,
+                deleted_ids=all_to_delete,
+                strategy_used=params.strategy,
+                plan=plan,
+            )
 
     async def delete_memories(self, params: DeleteParams) -> DeleteResult:
         """Delete memories by IDs or by filter (project + type + before)."""

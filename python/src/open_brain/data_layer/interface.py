@@ -376,6 +376,38 @@ class DecayResult:
     summary: str
 
 
+@dataclass
+class ClusterPlan:
+    """Plan for a single cluster of near-duplicate memories."""
+
+    cluster_id: int
+    members: list[int]        # all member IDs
+    canonical_id: int         # the one to keep
+    to_delete: list[int]      # members minus canonical
+
+
+@dataclass
+class CompactParams:
+    """Parameters for compact_memories operation."""
+
+    scope: str | None = None
+    threshold: float = 0.87
+    strategy: str = "keep_highest_access"
+    dry_run: bool = True
+
+
+@dataclass
+class CompactResult:
+    """Result of a compact_memories operation."""
+
+    clusters_found: int
+    memories_deleted: int
+    memories_kept: list[int]
+    deleted_ids: list[int]
+    strategy_used: str
+    plan: list[ClusterPlan]   # always populated (dry_run=True: plan only; False: executed)
+
+
 class DataLayer(Protocol):
     """Protocol defining the data layer interface."""
 
@@ -408,3 +440,5 @@ class DataLayer(Protocol):
     async def materialize_memories(self, params: MaterializeParams) -> MaterializeResult: ...
 
     async def decay_memories(self, params: DecayParams) -> DecayResult: ...
+
+    async def compact_memories(self, params: CompactParams) -> CompactResult: ...
