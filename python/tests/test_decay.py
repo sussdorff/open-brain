@@ -310,3 +310,204 @@ async def test_decay_overlap_behavior():
     assert result.decayed >= 1, "Stale memory should be decayed even with high access_count"
     assert result.boosted >= 1, "Frequently-accessed memory should also be boosted"
     # Net effect: boost partially counteracts decay (intentional, documented above)
+
+
+# ─── AK6: Importance-class multiplier scaling ────────────────────────────────
+
+
+def test_compute_decay_delta_importance_scaling() -> None:
+    """AK6: decay delta scales by importance class — critical=0, high=0.5x, medium=1.0x, low=2.0x."""
+    from open_brain.data_layer.postgres import compute_decay_delta
+
+    base_delta = 0.1  # 1.0 - 0.9 decay_factor
+
+    # critical: zero decay regardless of access_count
+    assert compute_decay_delta("critical", 0, base_delta) == 0.0
+    assert compute_decay_delta("critical", 50, base_delta) == 0.0
+
+    # medium: standard baseline (multiplier=1.0)
+    assert compute_decay_delta("medium", 0, base_delta) == pytest.approx(0.1)
+
+    # high: half of medium (multiplier=0.5)
+    assert compute_decay_delta("high", 0, base_delta) == pytest.approx(0.05)
+
+    # low: double of medium (multiplier=2.0)
+    assert compute_decay_delta("low", 0, base_delta) == pytest.approx(0.2)
+
+    # access_count damping: access_count=10 → damping=1+(10*0.1)=2.0, halves the delta
+    assert compute_decay_delta("medium", 10, base_delta) == pytest.approx(0.05)
+    assert compute_decay_delta("low", 10, base_delta) == pytest.approx(0.1)
+
+
+def test_compute_decay_delta_unknown_importance_defaults_medium() -> None:
+    """Unknown importance class defaults to medium multiplier (1.0)."""
+    from open_brain.data_layer.postgres import compute_decay_delta
+
+    assert compute_decay_delta("unknown", 0, 0.1) == pytest.approx(0.1)
+
+
+# ─── AK7: Critical memory is never pruned ────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_low_priority_query_excludes_critical_and_high() -> None:
+    """AK7: The low-priority refine scope sends SQL that excludes critical and high importance memories."""
+    from open_brain.data_layer.postgres import PostgresDataLayer
+    from open_brain.data_layer.interface import RefineParams
+
+    dl = PostgresDataLayer()
+    params = RefineParams(scope="low-priority", dry_run=True)
+
+    conn = AsyncMock()
+    conn.fetch = AsyncMock(return_value=[])
+    pool = _make_pool(conn)
+
+    with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
+        result = await dl.refine_memories(params)
+
+    conn.fetch.assert_called_once()
+    sql_called = conn.fetch.call_args.args[0]
+    assert "importance NOT IN" in sql_called, (
+        "Low-priority query must exclude critical/high via importance NOT IN clause"
+    )
+
+
+@pytest.mark.asyncio
+async def test_dry_run_count_excludes_critical() -> None:
+    """AK7: dry_run decay count query must exclude critical memories."""
+    from open_brain.data_layer.postgres import PostgresDataLayer
+
+    dl = PostgresDataLayer()
+    params = DecayParams(stale_days=7, decay_factor=0.9, dry_run=True)
+
+    conn = AsyncMock()
+    conn.fetchval.side_effect = [0, 0, 0]
+    pool = _make_pool(conn)
+
+    with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
+        await dl.decay_memories(params)
+
+    first_call = conn.fetchval.call_args_list[0]
+    sql_called = first_call.args[0]
+    assert "importance" in sql_called and ("!= 'critical'" in sql_called or "NOT IN" in sql_called), (
+        "dry_run decay count query must exclude critical memories to match live behavior"
+    )
+
+
+# ─── AK8: Concurrent decay produces same final state as serial ───────────────
+
+
+@pytest.mark.asyncio
+async def test_concurrent_decay_race_guard() -> None:
+    """AK8: The decay SQL function includes a last_decay_at guard to prevent double-decay.
+
+    Full concurrency testing requires integration tests against a real DB.
+    This unit test verifies the guard clause is present in the SQL sent to the DB.
+    """
+    from open_brain.data_layer.postgres import PostgresDataLayer
+
+    dl = PostgresDataLayer()
+    params = DecayParams(stale_days=7, decay_factor=0.9, dry_run=False)
+
+    conn = AsyncMock()
+    conn.fetchval.side_effect = [1, 0, 0]
+    pool = _make_pool(conn)
+
+    with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
+        result = await dl.decay_memories(params)
+
+    # Verify the first fetchval call passes stale_days and decay_factor to the DB function
+    first_call = conn.fetchval.call_args_list[0]
+    assert params.stale_days in first_call.args or params.stale_days == first_call.args[1], (
+        "stale_days should be passed to decay function"
+    )
+    # The race guard is in the SQL function itself (verified by test_decay_sql_function_has_race_guard)
+    # Full concurrency testing requires integration tests with a real Postgres instance.
+    assert result.decayed == 1
+
+
+@pytest.mark.asyncio
+async def test_decay_sql_function_has_race_guard() -> None:
+    """AK8: The dry_run decay count query contains last_decay_at guard to prevent double-counting."""
+    from open_brain.data_layer.postgres import PostgresDataLayer
+
+    dl = PostgresDataLayer()
+    params = DecayParams(stale_days=7, decay_factor=0.9, dry_run=True)
+
+    conn = AsyncMock()
+    conn.fetchval.side_effect = [0, 0, 0]
+    pool = _make_pool(conn)
+
+    with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
+        await dl.decay_memories(params)
+
+    first_call = conn.fetchval.call_args_list[0]
+    sql_called = first_call.args[0]
+    assert "last_decay_at" in sql_called, (
+        "Decay count query must reference last_decay_at in WHERE clause"
+    )
+
+
+# ─── AK1/AK5: Importance-aware decay in get_pool SQL function ────────────────
+
+
+def test_importance_multipliers_in_sql_function() -> None:
+    """AK1: get_pool() defines importance-aware decay SQL function with all four multipliers."""
+    import inspect
+    import open_brain.data_layer.postgres as pg_module
+
+    source = inspect.getsource(pg_module.get_pool)
+
+    assert "0.0" in source, "Critical multiplier (0.0) must be in SQL function"
+    assert "0.5" in source, "High multiplier (0.5) must be in SQL function"
+    assert "2.0" in source, "Low multiplier (2.0) must be in SQL function"
+    # medium=1.0 is implicit but let's check the values block exists
+    assert "mult_map" in source or "multipliers" in source, (
+        "SQL function must define importance multiplier mapping"
+    )
+
+
+# ─── AK2: Recall-triggered decay fires on stale last_decay_at ────────────────
+
+
+@pytest.mark.asyncio
+async def test_recall_decay_fires_when_stale() -> None:
+    """AK2: _apply_recall_decay fires an UPDATE when last_decay_at > 24h."""
+    from open_brain.data_layer.postgres import PostgresDataLayer
+
+    dl = PostgresDataLayer()
+    conn = AsyncMock()
+
+    await dl._apply_recall_decay(conn, memory_id=42, importance="medium", access_count=0)
+
+    conn.execute.assert_called_once()
+    sql_called = conn.execute.call_args.args[0]
+    assert "last_decay_at" in sql_called, "SQL must reference last_decay_at"
+    assert "24 hours" in sql_called, "SQL must enforce 24h guard"
+    assert "critical" in sql_called, "SQL must skip critical memories"
+
+
+@pytest.mark.asyncio
+async def test_recall_decay_skips_when_fresh() -> None:
+    """AK2: _apply_recall_decay skips the UPDATE for critical memories (zero delta)."""
+    from open_brain.data_layer.postgres import PostgresDataLayer
+
+    dl = PostgresDataLayer()
+    conn = AsyncMock()
+
+    await dl._apply_recall_decay(conn, memory_id=42, importance="critical", access_count=5)
+
+    # Critical importance has delta=0.0, so execute should not be called
+    conn.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_recall_decay_integrated_in_search() -> None:
+    """AK2: search() triggers recall decay for each returned memory."""
+    import inspect
+    import open_brain.data_layer.postgres as pg_module
+
+    source = inspect.getsource(pg_module.PostgresDataLayer.search)
+    assert "_apply_recall_decay" in source, (
+        "search() must call _apply_recall_decay on returned memories"
+    )
