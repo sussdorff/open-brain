@@ -21,8 +21,7 @@ async def main() -> None:
             ADD COLUMN IF NOT EXISTS last_decay_at TIMESTAMPTZ
         """)
         # Backfill: set last_decay_at = updated_at for rows that pre-date this migration,
-        # so they are eligible for decay on the next scheduled run (rather than being
-        # immediately decayed due to a NULL last_decay_at).
+        # to populate historical baseline so observability/reporting tools see non-NULL values.
         status = await conn.execute(
             "UPDATE memories SET last_decay_at = updated_at WHERE last_decay_at IS NULL"
         )

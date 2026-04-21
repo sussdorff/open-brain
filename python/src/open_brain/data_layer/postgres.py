@@ -152,7 +152,10 @@ def compute_decay_delta(importance: str, access_count: int, base_decay_delta: fl
     Returns:
         Effective decay delta. Multiply by priority to get the amount to subtract.
     """
-    mult = _IMPORTANCE_MULTIPLIERS.get(importance, 1.0)
+    mult = _IMPORTANCE_MULTIPLIERS.get(importance)
+    if mult is None:
+        logger.warning("Unknown importance %r, defaulting to medium multiplier", importance)
+        mult = 1.0
     if mult == 0.0:
         return 0.0
     damping = 1.0 + access_count * 0.1
@@ -476,7 +479,7 @@ class PostgresDataLayer:
                         )
                         SELECT m.id, m.index_id, m.session_id, m.type, m.title, m.subtitle,
                                m.narrative, m.content, m.metadata, m.priority, m.stability,
-                               m.access_count, m.last_accessed_at, m.created_at, m.updated_at, m.user_id, m.importance
+                               m.access_count, m.last_accessed_at, m.last_decay_at, m.created_at, m.updated_at, m.user_id, m.importance
                         FROM scored s
                         JOIN memories m ON m.id = s.id
                         WHERE 1=1 {post_where}
@@ -503,13 +506,14 @@ class PostgresDataLayer:
                     asyncio.create_task(
                         self._log_usage_background([m.id for m in memories], "search_hit")
                     )
-                    # Recall-triggered decay: atomically apply decay to each returned memory
-                    # if its last_decay_at is older than 24h. Fire-and-forget via background task
-                    # so it does not block the search response.
-                    for m in memories:
-                        asyncio.create_task(
-                            self._apply_recall_decay_background(m.id, m.importance, m.access_count)
-                        )
+                    # Recall-triggered decay: batch all candidates into ONE background task
+                    # to avoid N concurrent pool acquisitions causing connection contention.
+                    decay_candidates = [
+                        (m.id, m.importance, m.access_count)
+                        for m in memories
+                    ]
+                    if decay_candidates:
+                        asyncio.create_task(self._apply_recall_decay_background(decay_candidates))
                     return SearchResult(results=memories, total=len(memories))
 
                 except Exception:
@@ -561,7 +565,7 @@ class PostgresDataLayer:
 
             rows = await conn.fetch(
                 f"""SELECT m.id, m.index_id, m.session_id, m.type, m.title, m.subtitle, m.narrative, m.content,
-                        m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.created_at, m.updated_at, m.user_id, m.importance
+                        m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.last_decay_at, m.created_at, m.updated_at, m.user_id, m.importance
                  FROM memories m {where}
                  ORDER BY {order_by}
                  LIMIT ${param_idx} OFFSET ${param_idx+1}""",
@@ -577,24 +581,27 @@ class PostgresDataLayer:
             asyncio.create_task(
                 self._log_usage_background([m.id for m in memories], "search_hit")
             )
-            # Recall-triggered decay: atomically apply decay to each returned memory
-            # if its last_decay_at is older than 24h. Fire-and-forget background tasks.
-            for m in memories:
-                asyncio.create_task(
-                    self._apply_recall_decay_background(m.id, m.importance, m.access_count)
-                )
+            # Recall-triggered decay: batch all candidates into ONE background task
+            # to avoid N concurrent pool acquisitions causing connection contention.
+            decay_candidates = [
+                (m.id, m.importance, m.access_count)
+                for m in memories
+            ]
+            if decay_candidates:
+                asyncio.create_task(self._apply_recall_decay_background(decay_candidates))
             return SearchResult(results=memories, total=count_row["total"])
 
     async def _apply_recall_decay_background(
-        self, memory_id: int, importance: str, access_count: int
+        self, candidates: list[tuple[int, str, int]]
     ) -> None:
-        """Background wrapper for _apply_recall_decay — acquires its own connection."""
+        """Fire-and-forget: apply recall decay for a batch of memories."""
         try:
             pool = await get_pool()
             async with pool.acquire() as conn:
-                await self._apply_recall_decay(conn, memory_id, importance, access_count)
-        except Exception:
-            logger.debug("Recall decay background task failed for memory %d", memory_id)
+                for memory_id, importance, access_count in candidates:
+                    await self._apply_recall_decay(conn, memory_id, importance, access_count)
+        except Exception as err:
+            logger.warning("Recall decay background batch failed: %s", err)
 
     async def _log_usage_background(self, memory_ids: list[int], event_type: str) -> None:
         """Log usage in background (fire-and-forget)."""
@@ -643,7 +650,7 @@ class PostgresDataLayer:
 
                 rows = await conn.fetch(
                     f"""SELECT m.id, m.index_id, m.user_id, m.session_id, m.type, m.title, m.subtitle, m.narrative, m.content,
-                            m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.created_at, m.updated_at, m.importance
+                            m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.last_decay_at, m.created_at, m.updated_at, m.importance
                      FROM memories m {where}
                      ORDER BY m.created_at ASC
                      LIMIT ${param_idx}""",
@@ -689,12 +696,12 @@ class PostgresDataLayer:
 
             rows = await conn.fetch(
                 f"""(SELECT m.id, m.index_id, m.user_id, m.session_id, m.type, m.title, m.subtitle, m.narrative, m.content,
-                         m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.created_at, m.updated_at, m.importance
+                         m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.last_decay_at, m.created_at, m.updated_at, m.importance
                   FROM memories m WHERE m.created_at <= $1 {index_filter}
                   ORDER BY m.created_at DESC LIMIT {depth_before + 1})
                  UNION ALL
                  (SELECT m.id, m.index_id, m.user_id, m.session_id, m.type, m.title, m.subtitle, m.narrative, m.content,
-                         m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.created_at, m.updated_at, m.importance
+                         m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.last_decay_at, m.created_at, m.updated_at, m.importance
                   FROM memories m WHERE m.created_at > $1 {index_filter}
                   ORDER BY m.created_at ASC LIMIT {depth_after})
                  ORDER BY created_at ASC""",
@@ -1043,7 +1050,7 @@ class PostgresDataLayer:
         memory_id: int,
         importance: str,
         access_count: int,
-    ) -> float | None:
+    ) -> None:
         """Apply decay to a single memory on recall if last_decay_at is older than 24 hours.
 
         Uses an atomic UPDATE ... WHERE to avoid races: only the first concurrent caller within
@@ -1054,25 +1061,20 @@ class PostgresDataLayer:
             memory_id: ID of the memory to maybe decay.
             importance: Importance class of the memory (skips if 'critical').
             access_count: Current access count (used for damping).
-
-        Returns:
-            New priority value if decay was applied, None if skipped (fresh or critical).
         """
         delta = compute_decay_delta(importance, access_count, 1.0 - RECALL_DECAY_FACTOR)
         if delta == 0.0:
-            return None
-        row = await conn.fetchrow(
+            return
+        await conn.execute(
             """UPDATE memories
                SET priority = GREATEST(0.0, priority - priority * $1),
                    last_decay_at = NOW()
                WHERE id = $2
                  AND importance != 'critical'
-                 AND (last_decay_at IS NULL OR last_decay_at < NOW() - interval '24 hours')
-               RETURNING priority""",
+                 AND (last_decay_at IS NULL OR last_decay_at < NOW() - interval '24 hours')""",
             delta,
             memory_id,
         )
-        return float(row["priority"]) if row else None
 
     async def _embed_and_link(self, memory_id: int, text: str) -> None:
         """Background task: embed a memory and auto-link similar ones."""
@@ -1149,7 +1151,7 @@ class PostgresDataLayer:
 
             rows = await conn.fetch(
                 f"""SELECT m.id, m.index_id, m.session_id, m.type, m.title, m.subtitle, m.narrative, m.content,
-                        m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.created_at, m.updated_at, m.user_id, m.importance,
+                        m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.last_decay_at, m.created_at, m.updated_at, m.user_id, m.importance,
                         1 - (m.embedding <=> $1::vector) AS similarity
                  FROM memories m
                  WHERE {' AND '.join(conditions)}
