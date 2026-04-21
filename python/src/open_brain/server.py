@@ -341,7 +341,8 @@ async def get_observations(ids: list[int]) -> str:
     "household: {category: str, item: str, location: str, details: str, warranty_expiry: ISO datetime}. "
     "ISO datetime format: 'YYYY-MM-DDTHH:MM:SS' (e.g. '2026-04-15T10:00:00'). "
     "Invalid or missing required datetime fields produce a warning in the response but still save the memory. "
-    "Params: text (required), type, project, title, subtitle, narrative, session_ref, is_test, metadata"
+    "Params: text (required), type, project, title, subtitle, narrative, session_ref, is_test, metadata, importance. "
+    "importance: optional retention class (critical|high|medium|low, default medium)."
 )
 async def save_memory(
     text: str,
@@ -353,6 +354,7 @@ async def save_memory(
     session_ref: str | None = None,
     is_test: bool = False,
     metadata: dict | None = None,
+    importance: str = "medium",
 ) -> str:
     """Save a new memory entry."""
     if is_test:
@@ -412,6 +414,7 @@ async def save_memory(
         session_ref=session_ref,
         metadata=metadata,
         user_id=user_id,
+        importance=importance,
     )
 
     # Save first — must know if duplicate before firing expensive LLM calls.

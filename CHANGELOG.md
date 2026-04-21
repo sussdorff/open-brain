@@ -1,6 +1,35 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [unreleased]
+
+### Bug Fixes
+
+- *(open-brain-jpz)* Address review findings iteration 1
+
+### Documentation
+
+- *(open-brain-jpz)* Add importance axis to architecture.md memory fields table
+
+### Features
+
+- *(open-brain-jpz)* Green — importance contract & schema migration
+
+### Miscellaneous
+
+- *(open-brain-jpz)* Update changelog
+
+### Testing
+
+- *(open-brain-jpz)* Red — importance contract test suite
+
+## [0.8.4] - 2026-04-21
+
+### Miscellaneous
+
+- Update changelog
+- Bump version to 0.8.4
+
 ## [0.8.3] - 2026-04-21
 
 ### Miscellaneous

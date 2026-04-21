@@ -107,6 +107,7 @@ def sample_memories():
             created_at="2026-01-01T00:00:00",
             updated_at="2026-01-01T00:00:00",
             user_id=None,
+            importance="medium",
         ),
         Memory(
             id=2,
@@ -125,6 +126,7 @@ def sample_memories():
             created_at="2026-01-02T00:00:00",
             updated_at="2026-01-02T00:00:00",
             user_id=None,
+            importance="medium",
         ),
         Memory(
             id=3,
@@ -143,5 +145,6 @@ def sample_memories():
             created_at="2026-01-03T00:00:00",
             updated_at="2026-01-03T00:00:00",
             user_id=None,
+            importance="medium",
         ),
     ]

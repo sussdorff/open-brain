@@ -41,7 +41,7 @@ def _make_row(overrides: dict | None = None) -> MagicMock:
         "content": "test content", "metadata": {}, "priority": 0.5,
         "stability": "stable", "access_count": 0,
         "last_accessed_at": None, "created_at": "2026-01-01",
-        "updated_at": "2026-01-01",
+        "updated_at": "2026-01-01", "importance": "medium",
     }
     if overrides:
         data.update(overrides)
