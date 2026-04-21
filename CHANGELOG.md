@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- *(open-brain-9md)* Green — importance-based memory decay: recall-triggered atomic decay (24h guard), critical/high memory protection, importance multipliers (critical=no decay, high=0.5×, medium=1.0×, low=2.0×), and access-count damping
 - *(open-brain-jpz)* Green — importance contract & schema migration
 
 ### Miscellaneous
