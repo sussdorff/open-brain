@@ -1,22 +1,41 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
-## [unreleased]
+## [0.6.0] - 2026-04-21
+
+### Bug Fixes
+
+- *(open-brain-52g)* Address review findings iteration 1
+- *(open-brain-52g)* Address codex adversarial findings
+- *(open-brain-d4n)* Address review findings iteration 1
+
+### Documentation
+
+- *(open-brain-d4n)* Update changelog
 
 ### Features
 
-- *(open-brain-d4n)* SessionEnd hook as safety-net writer with transcript-based summaries (30s timeout, dedup via session_ref)
-- *(open-brain-d4n)* POST /api/session-end endpoint with fire-and-forget async LLM summarization
-- *(open-brain-d4n)* session_summary.py helper with head+tail truncation for large transcripts
+- *(open-brain-52g)* Green — compact_memories MCP tool
+- *(open-brain-d4n)* Green — SessionEnd hook safety-net writer
+
+### Miscellaneous
+
+- Bump version to 0.6.0
+
+## [0.5.2] - 2026-04-17
 
 ### Documentation
 
 - Document production host (LXC116 on elysium) in CLAUDE.md
 
+### Miscellaneous
+
+- Update changelog
+- Bump version to 0.5.2
+
 ### Refactoring
 
 - *(llm)* Enable LLM_MODEL env var and add LLM_MODEL_CAPTURE tier
-- *(open-brain-d4n)* Deprecate /api/summarize endpoint (backward compat shim, removed in open-brain-9j3)
 
 ## [0.5.1] - 2026-04-17
 
