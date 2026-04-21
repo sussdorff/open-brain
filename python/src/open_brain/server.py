@@ -522,6 +522,21 @@ async def get_context(limit: int | None = None, project: str | None = None) -> s
     return json.dumps(result, default=str)
 
 
+@mcp.tool(
+    description=(
+        "Get session start wake-up pack. Returns memories grouped by category "
+        "(identity, decisions, constraints, errors, project) within a token budget. "
+        "Params: token_budget (default 500)"
+    )
+)
+async def get_wake_up_pack(token_budget: int = 500) -> str:
+    """Get categorized memory context optimized for session start injection."""
+    from open_brain.wake_up import build_wake_up_pack
+    dl = get_dl()
+    memories = await dl.get_wake_up_memories()
+    return build_wake_up_pack(memories, token_budget)
+
+
 @mcp.tool(description="Get database statistics (memory count, sessions, DB size, type taxonomy with counts)")
 async def stats() -> str:
     """Get DB statistics."""
@@ -1971,6 +1986,28 @@ async def api_context(
 
     md = "\n".join(lines)
     return Response(content=md, media_type="text/markdown")
+
+
+@app.get("/api/wake_up_pack")
+async def api_wake_up_pack(
+    token_budget: int = 500,
+    project: str | None = None,
+) -> Response:
+    """Get session start wake-up pack (for SessionStart hook).
+
+    Returns markdown-formatted memories organized by category within token_budget.
+    Optional project filter: include memories from this project or unassigned ones.
+    """
+    from open_brain.wake_up import build_wake_up_pack
+    dl = get_dl()
+    memories = await dl.get_wake_up_memories()
+    if project:
+        memories = [
+            m for m in memories
+            if (m.project_name or "") == project or not m.project_name
+        ]
+    result = build_wake_up_pack(memories, token_budget)
+    return Response(content=result, media_type="text/markdown")
 
 
 # Mount MCP sub-app AFTER all routes (mount at "/" catches everything)
