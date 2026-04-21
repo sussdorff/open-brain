@@ -126,6 +126,39 @@ def _parse_date(value: str | None) -> datetime | None:
         return None
 
 
+# Importance multipliers for decay rate: critical=0 (no decay), high=0.5x, medium=1.0x, low=2.0x
+_IMPORTANCE_MULTIPLIERS: dict[str, float] = {
+    "critical": 0.0,
+    "high": 0.5,
+    "medium": 1.0,
+    "low": 2.0,
+}
+
+# Default decay factor applied during recall-triggered decay
+RECALL_DECAY_FACTOR: float = 0.9
+
+
+def compute_decay_delta(importance: str, access_count: int, base_decay_delta: float) -> float:
+    """Compute the effective decay delta for a memory given importance and access count.
+
+    Implements: delta = base_decay_delta * mult / (1 + access_count * 0.1)
+    where mult is the importance multiplier (critical=0.0, high=0.5, medium=1.0, low=2.0).
+
+    Args:
+        importance: Memory importance class (critical|high|medium|low).
+        access_count: Number of times the memory has been accessed (reduces decay via damping).
+        base_decay_delta: Base decay delta = 1.0 - decay_factor.
+
+    Returns:
+        Effective decay delta. Multiply by priority to get the amount to subtract.
+    """
+    mult = _IMPORTANCE_MULTIPLIERS.get(importance, 1.0)
+    if mult == 0.0:
+        return 0.0
+    damping = 1.0 + access_count * 0.1
+    return base_decay_delta * mult / damping
+
+
 async def get_pool() -> asyncpg.Pool:
     """Return the shared asyncpg connection pool."""
     global _pool
@@ -145,6 +178,12 @@ async def get_pool() -> asyncpg.Pool:
             await conn.execute(
                 "ALTER TABLE memories ADD COLUMN IF NOT EXISTS importance VARCHAR(8) NOT NULL DEFAULT 'medium' "
                 "CHECK (importance IN ('critical', 'high', 'medium', 'low'));"
+            )
+            await conn.execute(
+                "ALTER TABLE memories ADD COLUMN IF NOT EXISTS last_decay_at TIMESTAMPTZ;"
+            )
+            await conn.execute(
+                "UPDATE memories SET last_decay_at = updated_at WHERE last_decay_at IS NULL;"
             )
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS embedding_token_log (
@@ -227,6 +266,47 @@ async def get_pool() -> asyncpg.Pool:
                   LIMIT match_limit;
                 $fn$;
             """)
+            # Importance-aware decay function: skips critical (mult=0.0), applies importance
+            # multipliers (high=0.5x, medium=1.0x, low=2.0x), includes 24h race guard via
+            # last_decay_at so concurrent calls are safe without advisory locks.
+            await conn.execute("""
+                CREATE OR REPLACE FUNCTION decay_unused_priorities(
+                    p_stale_days integer,
+                    p_decay_factor float
+                ) RETURNS integer
+                LANGUAGE plpgsql
+                AS $$
+                DECLARE
+                    v_updated integer;
+                BEGIN
+                    WITH mult_map(importance, mult) AS (
+                        VALUES ('critical'::text, 0.0::float),
+                               ('high'::text,     0.5::float),
+                               ('medium'::text,   1.0::float),
+                               ('low'::text,      2.0::float)
+                    ),
+                    updated AS (
+                        UPDATE memories m
+                        SET priority = GREATEST(
+                                0.0,
+                                priority - priority * (1.0 - p_decay_factor)
+                                           * mult_map.mult
+                                           / (1.0 + CAST(m.access_count AS float) * 0.1)
+                            ),
+                            last_decay_at = NOW()
+                        FROM mult_map
+                        WHERE m.importance = mult_map.importance
+                          AND mult_map.mult > 0.0
+                          AND (m.last_accessed_at IS NULL OR m.last_accessed_at < NOW() - (p_stale_days || ' days')::interval)
+                          AND m.created_at < NOW() - (p_stale_days || ' days')::interval
+                          AND (m.last_decay_at IS NULL OR m.last_decay_at < NOW() - interval '24 hours')
+                        RETURNING m.id
+                    )
+                    SELECT COUNT(*) INTO v_updated FROM updated;
+                    RETURN v_updated;
+                END;
+                $$;
+            """)
     return _pool
 
 
@@ -270,6 +350,7 @@ def _row_to_memory(row: asyncpg.Record) -> Memory:
         updated_at=str(row["updated_at"]),
         user_id=row.get("user_id"),
         importance=row.get("importance", "medium"),
+        last_decay_at=str(row.get("last_decay_at")) if row.get("last_decay_at") else None,
     )
 
 
@@ -422,6 +503,13 @@ class PostgresDataLayer:
                     asyncio.create_task(
                         self._log_usage_background([m.id for m in memories], "search_hit")
                     )
+                    # Recall-triggered decay: atomically apply decay to each returned memory
+                    # if its last_decay_at is older than 24h. Fire-and-forget via background task
+                    # so it does not block the search response.
+                    for m in memories:
+                        asyncio.create_task(
+                            self._apply_recall_decay_background(m.id, m.importance, m.access_count)
+                        )
                     return SearchResult(results=memories, total=len(memories))
 
                 except Exception:
@@ -489,7 +577,24 @@ class PostgresDataLayer:
             asyncio.create_task(
                 self._log_usage_background([m.id for m in memories], "search_hit")
             )
+            # Recall-triggered decay: atomically apply decay to each returned memory
+            # if its last_decay_at is older than 24h. Fire-and-forget background tasks.
+            for m in memories:
+                asyncio.create_task(
+                    self._apply_recall_decay_background(m.id, m.importance, m.access_count)
+                )
             return SearchResult(results=memories, total=count_row["total"])
+
+    async def _apply_recall_decay_background(
+        self, memory_id: int, importance: str, access_count: int
+    ) -> None:
+        """Background wrapper for _apply_recall_decay — acquires its own connection."""
+        try:
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                await self._apply_recall_decay(conn, memory_id, importance, access_count)
+        except Exception:
+            logger.debug("Recall decay background task failed for memory %d", memory_id)
 
     async def _log_usage_background(self, memory_ids: list[int], event_type: str) -> None:
         """Log usage in background (fire-and-forget)."""
@@ -876,7 +981,9 @@ class PostgresDataLayer:
                 decayed = await conn.fetchval(
                     """SELECT COUNT(*) FROM memories
                        WHERE (last_accessed_at IS NULL OR last_accessed_at < NOW() - ($1 || ' days')::interval)
-                         AND created_at < NOW() - ($1 || ' days')::interval""",
+                         AND created_at < NOW() - ($1 || ' days')::interval
+                         AND importance != 'critical'
+                         AND (last_decay_at IS NULL OR last_decay_at < NOW() - interval '24 hours')""",
                     str(params.stale_days),
                 )
                 boosted = await conn.fetchval(
@@ -929,6 +1036,43 @@ class PostgresDataLayer:
             + (" (dry_run)" if params.dry_run else "")
         )
         return DecayResult(decayed=decayed, boosted=boosted, recent_memories=recent_memories, summary=summary)
+
+    async def _apply_recall_decay(
+        self,
+        conn: asyncpg.Connection,
+        memory_id: int,
+        importance: str,
+        access_count: int,
+    ) -> float | None:
+        """Apply decay to a single memory on recall if last_decay_at is older than 24 hours.
+
+        Uses an atomic UPDATE ... WHERE to avoid races: only the first concurrent caller within
+        the 24h window will update the row. Critical memories are always skipped.
+
+        Args:
+            conn: Active asyncpg connection.
+            memory_id: ID of the memory to maybe decay.
+            importance: Importance class of the memory (skips if 'critical').
+            access_count: Current access count (used for damping).
+
+        Returns:
+            New priority value if decay was applied, None if skipped (fresh or critical).
+        """
+        delta = compute_decay_delta(importance, access_count, 1.0 - RECALL_DECAY_FACTOR)
+        if delta == 0.0:
+            return None
+        row = await conn.fetchrow(
+            """UPDATE memories
+               SET priority = GREATEST(0.0, priority - priority * $1),
+                   last_decay_at = NOW()
+               WHERE id = $2
+                 AND importance != 'critical'
+                 AND (last_decay_at IS NULL OR last_decay_at < NOW() - interval '24 hours')
+               RETURNING priority""",
+            delta,
+            memory_id,
+        )
+        return float(row["priority"]) if row else None
 
     async def _embed_and_link(self, memory_id: int, text: str) -> None:
         """Background task: embed a memory and auto-link similar ones."""
@@ -1137,7 +1281,7 @@ class PostgresDataLayer:
                 candidates = [_row_to_memory(r) for r in rows]
             elif scope == "low-priority":
                 rows = await conn.fetch(
-                    "SELECT * FROM memories WHERE priority < 0.2 ORDER BY priority ASC LIMIT $1",
+                    "SELECT * FROM memories WHERE priority < 0.2 AND importance NOT IN ('critical', 'high') ORDER BY priority ASC LIMIT $1",
                     limit,
                 )
                 candidates = [_row_to_memory(r) for r in rows]
@@ -1253,7 +1397,7 @@ class PostgresDataLayer:
                 )
             elif scope == "low-priority":
                 rows = await conn.fetch(
-                    f"SELECT * FROM memories WHERE priority < 0.2 {_lifecycle_filter} ORDER BY priority ASC LIMIT $1",
+                    f"SELECT * FROM memories WHERE priority < 0.2 AND importance NOT IN ('critical', 'high') {_lifecycle_filter} ORDER BY priority ASC LIMIT $1",
                     limit,
                 )
             elif scope.startswith("session_ref:"):
