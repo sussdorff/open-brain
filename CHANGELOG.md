@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(open-brain-7n0)* Guard materialize_archive against critical/high importance memories
+
+## [0.12.0] - 2026-04-21
+
+### Miscellaneous
+
+- Bump version to 0.12.0
+
+## [0.11.0] - 2026-04-21
+
+### Bug Fixes
+
+- *(open-brain-9md)* Address review findings — batch recall decay, behavioral tests, last_decay_at in selects
+
+### Documentation
+
+- *(open-brain-9md)* Update architecture.md with importance-based decay mechanics and last_decay_at field
+
+### Features
+
+- *(open-brain-9md)* Importance-based memory decay with 24h race guard
+
+### Miscellaneous
+
+- Pre-merge CHANGELOG sync for open-brain-9md
+- *(open-brain-9md)* Update changelog
+- Bump version to 0.11.0
+
+## [0.10.0] - 2026-04-21
+
+### Bug Fixes
+
+- *(open-brain-qrw)* Address review findings iteration 1
+- *(open-brain-qrw)* Address codex adversarial findings
+- *(open-brain-hhw)* Address review findings iteration 1
+
+### Documentation
+
+- *(open-brain-qrw)* Document dedup_mode=merge semantic deduplication in architecture.md
+
+### Features
+
+- *(open-brain-qrw)* Add auto-deduplication at store time (dedup_mode=merge)
+- *(open-brain-hhw)* Green — wake_up.py + Memory.project_name + get_wake_up_memories (AK7/AK8/AK9/AK2)
+- *(open-brain-hhw)* Green — get_wake_up_pack MCP tool + /api/wake_up_pack REST endpoint (AK1/AK5)
+- *(open-brain-hhw)* Green — update context_inject.py to call /api/wake_up_pack (AK6)
+
+### Miscellaneous
+
+- *(open-brain-qrw)* Update changelog
+- Pre-merge CHANGELOG sync for open-brain-hhw
+- *(open-brain-hhw)* Remove unused rank_importance import
+- *(open-brain-hhw)* Update changelog
+- Bump version to 0.10.0
+
+## [0.9.0] - 2026-04-21
+
+### Bug Fixes
+
 - *(open-brain-jpz)* Address review findings iteration 1
 
 ### Documentation
@@ -13,14 +72,13 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
-- *(open-brain-qrw)* Green — semantic deduplication at store time: optional dedup_mode parameter ("skip" default for backward compatibility, "merge" for vector similarity matching); merges into existing memories when similarity ≥ 0.85 threshold (configurable); preserves higher importance rank and leaves access_count/last_accessed_at unchanged
-- *(open-brain-9md)* Green — importance-based memory decay: recall-triggered atomic decay (24h guard), critical/high memory protection, importance multipliers (critical=no decay, high=0.5×, medium=1.0×, low=2.0×), and access-count damping
-- *(open-brain-hhw)* Green — structured wake-up pack: get_wake_up_pack(token_budget) MCP tool with 5 fixed categories (Identity, Decisions, Constraints, Errors, Project) + importance-ranked + SessionStart hook integration
 - *(open-brain-jpz)* Green — importance contract & schema migration
 
 ### Miscellaneous
 
 - *(open-brain-jpz)* Update changelog
+- Update changelog
+- Bump version to 0.9.0
 
 ### Testing
 
