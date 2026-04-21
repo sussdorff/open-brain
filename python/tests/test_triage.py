@@ -444,6 +444,60 @@ class TestMaterializeArchive:
         assert result.success is False
         assert "Archive failed" in result.detail
 
+    @pytest.mark.asyncio
+    async def test_archive_skips_critical_importance(self):
+        """archive does NOT call update_fn for critical importance memories."""
+        memory = _make_memory(42)
+        memory.importance = "critical"
+        update_fn = AsyncMock()
+
+        result = await materialize_archive(memory, update_fn)
+
+        update_fn.assert_not_awaited()
+        assert result.success is True
+        assert result.action == "archive"
+        assert result.detail == "skipped: protected importance"
+
+    @pytest.mark.asyncio
+    async def test_archive_skips_high_importance(self):
+        """archive does NOT call update_fn for high importance memories."""
+        memory = _make_memory(43)
+        memory.importance = "high"
+        update_fn = AsyncMock()
+
+        result = await materialize_archive(memory, update_fn)
+
+        update_fn.assert_not_awaited()
+        assert result.success is True
+        assert result.action == "archive"
+        assert result.detail == "skipped: protected importance"
+
+    @pytest.mark.asyncio
+    async def test_archive_proceeds_for_medium_importance(self):
+        """archive calls update_fn normally for medium importance memories."""
+        memory = _make_memory(44)
+        memory.importance = "medium"
+        update_fn = AsyncMock()
+
+        result = await materialize_archive(memory, update_fn)
+
+        update_fn.assert_awaited_once_with(44, 0.1)
+        assert result.success is True
+        assert result.detail == "Priority set to 0.1"
+
+    @pytest.mark.asyncio
+    async def test_archive_proceeds_for_low_importance(self):
+        """archive calls update_fn normally for low importance memories."""
+        memory = _make_memory(45)
+        memory.importance = "low"
+        update_fn = AsyncMock()
+
+        result = await materialize_archive(memory, update_fn)
+
+        update_fn.assert_awaited_once_with(45, 0.1)
+        assert result.success is True
+        assert result.detail == "Priority set to 0.1"
+
 
 # ─── Test: execute_triage_actions ─────────────────────────────────────────────
 

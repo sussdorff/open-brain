@@ -160,7 +160,24 @@ async def materialize_archive(
     memory: Memory,
     update_fn,  # async callable: (memory_id, priority) -> None
 ) -> MaterializeActionResult:
-    """Deprioritize a memory (archive = set priority to 0.1)."""
+    """Deprioritize a memory (archive = set priority to 0.1).
+
+    Critical and high importance memories are protected from archiving and
+    returned as a skipped success to preserve the retention rule.
+    """
+    if memory.importance in ("critical", "high"):
+        logger.info(
+            "Skipping archive for memory %d (importance=%s: protected from pruning)",
+            memory.id,
+            memory.importance,
+        )
+        return MaterializeActionResult(
+            memory_id=memory.id,
+            action="archive",
+            success=True,
+            detail="skipped: protected importance",
+        )
+
     try:
         await update_fn(memory.id, 0.1)
         logger.info("Archived memory %d (priority → 0.1)", memory.id)
