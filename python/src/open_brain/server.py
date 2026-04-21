@@ -1529,6 +1529,7 @@ Respond with ONLY valid JSON, no markdown fences."""
         last_ts = valid_turns[-1].get("ts")
         agent = valid_turns[-1].get("agent", "")
         metadata: dict = {
+            "source": "worktree-session-summary",
             "worktree": worktree,
             "agent": agent,
             "turn_count": len(valid_turns),

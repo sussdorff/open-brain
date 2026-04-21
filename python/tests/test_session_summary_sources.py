@@ -173,7 +173,7 @@ class TestSessionEndSourceMarker:
     async def test_session_summary_source_allowlist(self, mock_dl):
         """All source values used in tests are in the expected allowlist."""
         # This tests that valid sources can flow through without error
-        allowed_sources = {"session-close", "session-end-hook", "transcript-backfill", None}
+        allowed_sources = {"session-close", "session-end-hook", "transcript-backfill", "worktree-session-summary", None}
         mock_summary = {"title": "T", "content": "C", "narrative": None}
 
         for source in allowed_sources:
