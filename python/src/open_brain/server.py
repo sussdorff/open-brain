@@ -353,6 +353,7 @@ async def save_memory(
     session_ref: str | None = None,
     is_test: bool = False,
     metadata: dict | None = None,
+    importance: str = "medium",
 ) -> str:
     """Save a new memory entry."""
     if is_test:
@@ -412,6 +413,7 @@ async def save_memory(
         session_ref=session_ref,
         metadata=metadata,
         user_id=user_id,
+        importance=importance,
     )
 
     # Save first — must know if duplicate before firing expensive LLM calls.

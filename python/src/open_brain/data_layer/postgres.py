@@ -21,6 +21,7 @@ from open_brain.data_layer.embedding import (
 )
 from open_brain.data_layer.reranker import rerank
 from open_brain.data_layer.interface import (
+    IMPORTANCE_VALUES,
     ClusterPlan,
     CompactParams,
     CompactResult,
@@ -140,6 +141,10 @@ async def get_pool() -> asyncpg.Pool:
             )
             await conn.execute(
                 "ALTER TABLE memories ADD COLUMN IF NOT EXISTS user_id TEXT;"
+            )
+            await conn.execute(
+                "ALTER TABLE memories ADD COLUMN IF NOT EXISTS importance VARCHAR(8) NOT NULL DEFAULT 'medium' "
+                "CHECK (importance IN ('critical', 'high', 'medium', 'low'));"
             )
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS embedding_token_log (
@@ -264,6 +269,7 @@ def _row_to_memory(row: asyncpg.Record) -> Memory:
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
         user_id=row.get("user_id"),
+        importance=row.get("importance", "medium"),
     )
 
 
@@ -389,7 +395,7 @@ class PostgresDataLayer:
                         )
                         SELECT m.id, m.index_id, m.session_id, m.type, m.title, m.subtitle,
                                m.narrative, m.content, m.metadata, m.priority, m.stability,
-                               m.access_count, m.last_accessed_at, m.created_at, m.updated_at, m.user_id
+                               m.access_count, m.last_accessed_at, m.created_at, m.updated_at, m.user_id, m.importance
                         FROM scored s
                         JOIN memories m ON m.id = s.id
                         WHERE 1=1 {post_where}
@@ -467,7 +473,7 @@ class PostgresDataLayer:
 
             rows = await conn.fetch(
                 f"""SELECT m.id, m.index_id, m.session_id, m.type, m.title, m.subtitle, m.narrative, m.content,
-                        m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.created_at, m.updated_at, m.user_id
+                        m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.created_at, m.updated_at, m.user_id, m.importance
                  FROM memories m {where}
                  ORDER BY {order_by}
                  LIMIT ${param_idx} OFFSET ${param_idx+1}""",
@@ -532,7 +538,7 @@ class PostgresDataLayer:
 
                 rows = await conn.fetch(
                     f"""SELECT m.id, m.index_id, m.session_id, m.type, m.title, m.subtitle, m.narrative, m.content,
-                            m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.created_at, m.updated_at
+                            m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.created_at, m.updated_at, m.importance
                      FROM memories m {where}
                      ORDER BY m.created_at ASC
                      LIMIT ${param_idx}""",
@@ -578,12 +584,12 @@ class PostgresDataLayer:
 
             rows = await conn.fetch(
                 f"""(SELECT m.id, m.index_id, m.session_id, m.type, m.title, m.subtitle, m.narrative, m.content,
-                         m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.created_at, m.updated_at
+                         m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.created_at, m.updated_at, m.importance
                   FROM memories m WHERE m.created_at <= $1 {index_filter}
                   ORDER BY m.created_at DESC LIMIT {depth_before + 1})
                  UNION ALL
                  (SELECT m.id, m.index_id, m.session_id, m.type, m.title, m.subtitle, m.narrative, m.content,
-                         m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.created_at, m.updated_at
+                         m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.created_at, m.updated_at, m.importance
                   FROM memories m WHERE m.created_at > $1 {index_filter}
                   ORDER BY m.created_at ASC LIMIT {depth_after})
                  ORDER BY created_at ASC""",
@@ -616,6 +622,13 @@ class PostgresDataLayer:
         an existing memory with the same session_ref is updated (content appended,
         title/subtitle/narrative replaced if provided) instead of inserting a new row.
         """
+        # Validate importance BEFORE any DB access (V6)
+        if params.importance not in IMPORTANCE_VALUES:
+            raise ValueError(
+                f"Invalid importance: {params.importance!r}. "
+                f"Must be one of: {sorted(IMPORTANCE_VALUES)}"
+            )
+
         pool = await get_pool()
         async with pool.acquire() as conn:
             index_id = await self._resolve_index_id(conn, params.project)
@@ -653,8 +666,8 @@ class PostgresDataLayer:
                         base_metadata["content_hash"] = content_hash_replace
                         metadata_json_replace = _json.dumps(base_metadata)
                         row_replace = await conn.fetchrow(
-                            """INSERT INTO memories (index_id, type, title, subtitle, narrative, content, session_ref, metadata, user_id)
-                               VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
+                            """INSERT INTO memories (index_id, type, title, subtitle, narrative, content, session_ref, metadata, user_id, importance)
+                               VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10)
                                RETURNING id""",
                             index_id or 1,
                             params.type or "observation",
@@ -665,6 +678,7 @@ class PostgresDataLayer:
                             params.session_ref,
                             metadata_json_replace,
                             params.user_id,
+                            params.importance,
                         )
                         memory_id_replace: int = row_replace["id"]
 
@@ -739,8 +753,8 @@ class PostgresDataLayer:
             base_metadata["content_hash"] = content_hash
             metadata_json = _json.dumps(base_metadata)
             row = await conn.fetchrow(
-                """INSERT INTO memories (index_id, type, title, subtitle, narrative, content, session_ref, metadata, user_id)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
+                """INSERT INTO memories (index_id, type, title, subtitle, narrative, content, session_ref, metadata, user_id, importance)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10)
                    RETURNING id""",
                 index_id or 1,
                 params.type or "observation",
@@ -751,6 +765,7 @@ class PostgresDataLayer:
                 params.session_ref,
                 metadata_json,
                 params.user_id,
+                params.importance,
             )
             memory_id: int = row["id"]
 
@@ -990,7 +1005,7 @@ class PostgresDataLayer:
 
             rows = await conn.fetch(
                 f"""SELECT m.id, m.index_id, m.session_id, m.type, m.title, m.subtitle, m.narrative, m.content,
-                        m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.created_at, m.updated_at,
+                        m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.created_at, m.updated_at, m.user_id, m.importance,
                         1 - (m.embedding <=> $1::vector) AS similarity
                  FROM memories m
                  WHERE {' AND '.join(conditions)}
@@ -1100,7 +1115,7 @@ class PostgresDataLayer:
                 rows = await conn.fetch(
                     """SELECT DISTINCT ON (m1.id)
                          m1.id, m1.index_id, m1.session_id, m1.type, m1.title, m1.subtitle, m1.narrative, m1.content,
-                         m1.metadata, m1.priority, m1.stability, m1.access_count, m1.last_accessed_at, m1.created_at, m1.updated_at,
+                         m1.metadata, m1.priority, m1.stability, m1.access_count, m1.last_accessed_at, m1.created_at, m1.updated_at, m1.importance,
                          m2.id AS similar_id, 1 - (m1.embedding <=> m2.embedding) AS similarity
                        FROM memories m1
                        JOIN memories m2 ON m1.id < m2.id

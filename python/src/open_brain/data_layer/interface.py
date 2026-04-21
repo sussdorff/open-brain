@@ -1,8 +1,63 @@
-"""DataLayer interface: dataclasses + Protocol."""
+"""DataLayer interface: dataclasses + Protocol.
+
+Importance contract
+-------------------
+``importance`` is an orthogonal axis from ``priority`` and ``stability``:
+
+- **importance** (this module): caller-declared significance of the *content*
+  (``critical`` > ``high`` > ``medium`` > ``low``).  Set at save time; unchanged
+  by recall.  Use :func:`rank_importance` to convert to an integer for sorting.
+
+- **priority** (float 0–1): computed recall-score updated by the DB function
+  ``update_priority()`` whenever a memory is accessed.  *access_count* feeds
+  into priority — it must NOT be mutated by write paths (save/update).
+
+- **stability** (``tentative`` | ``stable`` | ``canonical``): editorial
+  life-cycle state, promoted/demoted by refine actions.
+
+``access_count`` recall-only rule
+----------------------------------
+``access_count`` is incremented only by the ``update_priority()`` DB trigger on
+read events.  No write path (``save_memory``, ``update_memory``, etc.) may
+modify it.
+
+rank_importance mapping
+-----------------------
+``critical`` → 3, ``high`` → 2, ``medium`` → 1, ``low`` → 0.
+Any other value raises :class:`ValueError`.
+"""
 
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal, Protocol, TypedDict
+
+# ─── Importance constants ─────────────────────────────────────────────────────
+
+IMPORTANCE_VALUES: frozenset[str] = frozenset(["critical", "high", "medium", "low"])
+
+_IMPORTANCE_RANK: dict[str, int] = {
+    "critical": 3,
+    "high": 2,
+    "medium": 1,
+    "low": 0,
+}
+
+
+def rank_importance(level: str) -> int:
+    """Convert an importance level string to an integer rank.
+
+    Returns:
+        critical=3, high=2, medium=1, low=0
+
+    Raises:
+        ValueError: if *level* is not one of the four valid importance values.
+    """
+    try:
+        return _IMPORTANCE_RANK[level]
+    except (KeyError, TypeError):
+        raise ValueError(
+            f"Invalid importance: {level!r}. Must be one of: {sorted(IMPORTANCE_VALUES)}"
+        )
 
 
 # ─── Domain metadata schemas ──────────────────────────────────────────────────
@@ -160,6 +215,7 @@ class SaveMemoryParams:
     metadata: dict[str, Any] | None = None
     user_id: str | None = None  # authenticated user who created this memory
     upsert_mode: Literal["append", "replace"] = "append"
+    importance: str = "medium"  # caller-declared significance: critical|high|medium|low
 
 
 @dataclass
@@ -209,6 +265,7 @@ class Memory:
     created_at: str
     updated_at: str
     user_id: str | None = None  # user who created this memory (NULL for pre-feature or API key auth)
+    importance: str = "medium"  # caller-declared significance: critical|high|medium|low
 
 
 @dataclass
