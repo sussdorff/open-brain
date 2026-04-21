@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+
 from open_brain.data_layer.interface import Memory, rank_importance
+
+logger = logging.getLogger(__name__)
 
 CATEGORY_ORDER = ["identity", "decisions", "constraints", "errors", "project"]
 CATEGORY_DISPLAY = {
@@ -40,26 +44,30 @@ def classify_memory(memory: Memory) -> str:
         return "constraints"
     if t == "error_resolved" or meta_cat == "error":
         return "errors"
-    if project_name.startswith("project:") or meta_cat == "project":
+    if project_name or meta_cat == "project":
         return "project"
     return "context"
 
 
-def _importance_rank(memory: Memory) -> int:
-    """Return importance rank (3=critical, 2=high, 1=medium, 0=low)."""
+def _importance_rank(importance: str) -> int:
+    """Return importance rank (3=critical, 2=high, 1=medium, 0=low). Unknown values → 0 with warning."""
+    known = {"critical": 3, "high": 2, "medium": 1, "low": 0}
+    if importance not in known:
+        logger.warning("Unknown importance value %r, treating as low", importance)
+    return known.get(importance, 0)
+
+
+def _sort_key(memory: Memory) -> tuple[int, float, int, float]:
+    """Sort key for descending order: importance rank, priority, access_count, updated_at (newest first)."""
     imp = memory.importance if memory.importance in ("critical", "high", "medium", "low") else "low"
-    return rank_importance(imp)
-
-
-def _sort_key(memory: Memory) -> tuple:
-    """Sort key for descending order: importance rank, priority, access_count, updated_at."""
-    return (
-        -_importance_rank(memory),
-        -memory.priority,
-        -memory.access_count,
-        # Negate updated_at for descending sort — newer timestamps sort first
-        memory.updated_at[:19] if memory.updated_at else "",
-    )
+    rank = _importance_rank(imp)
+    try:
+        from datetime import datetime, timezone
+        dt = datetime.fromisoformat(memory.updated_at.replace("Z", "+00:00"))
+        ts = -dt.timestamp()
+    except Exception:
+        ts = 0.0
+    return (-rank, -memory.priority, -memory.access_count, ts)
 
 
 def _format_entry(memory: Memory) -> str:

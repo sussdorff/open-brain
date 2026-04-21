@@ -7,8 +7,6 @@ AK9: Unit test: importance-rank ordering is applied within each category
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 
 # ─── Helper to build Memory objects ───────────────────────────────────────────
 
@@ -121,10 +119,10 @@ class TestCategoryMapping:
         m = _make_memory(type="observation", metadata={"category": "error"})
         assert classify_memory(m) == "errors"
 
-    def test_project_by_project_name_prefix(self):
-        """project_name starting with 'project:' maps to 'project'."""
+    def test_project_by_project_name(self):
+        """Any non-empty project_name maps to 'project'."""
         from open_brain.wake_up import classify_memory
-        m = _make_memory(type="observation", project_name="project:open-brain")
+        m = _make_memory(type="observation", project_name="open-brain")
         assert classify_memory(m) == "project"
 
     def test_project_by_metadata_category(self):
@@ -139,10 +137,10 @@ class TestCategoryMapping:
         m = _make_memory(type="observation", metadata={})
         assert classify_memory(m) == "context"
 
-    def test_project_name_not_starting_with_prefix_goes_to_context(self):
-        """project_name NOT starting with 'project:' does not map to 'project'."""
+    def test_no_project_name_goes_to_context(self):
+        """Memory with no project_name and no matching type/metadata goes to 'context'."""
         from open_brain.wake_up import classify_memory
-        m = _make_memory(type="observation", project_name="open-brain")
+        m = _make_memory(type="observation", project_name=None)
         assert classify_memory(m) == "context"
 
 
@@ -253,10 +251,13 @@ class TestTokenBudget:
 
     def test_lowest_ranked_dropped_first(self):
         """When budget is tight, lowest-ranked (low importance) entries are dropped first."""
-        from open_brain.wake_up import build_wake_up_pack, token_estimate
+        from open_brain.wake_up import build_wake_up_pack
 
-        # One critical entry (short), one low entry (short)
-        # Budget is just enough for the critical but not both
+        # One critical entry (~20 tokens content), one low entry (~20 tokens content).
+        # Budget is sized to fit exactly the header + critical entry but NOT the low entry.
+        # header = "## Identity\n" ~3 tokens
+        # critical line = "- **Critical entry** (critical): CCC..." ~ 25 tokens
+        # Total for critical ~28 tokens. Budget=35 fits critical but not both.
         critical_content = "C" * 80  # ~20 tokens
         low_content = "L" * 80       # ~20 tokens
 
@@ -267,37 +268,37 @@ class TestTokenBudget:
                          title="Low entry", importance="low"),
         ]
 
-        # Budget: enough for header + critical entry but not low entry
-        # header = "## Identity\n" ~3 tokens
-        # critical line ~ "- **Critical entry** (critical): CCC..." ~ 25 tokens
-        # Total for critical ~28 tokens; add low entry would push past ~50 tokens
         result = build_wake_up_pack(memories, token_budget=35)
 
-        if "Critical entry" in result or "Low entry" in result:
-            # If budget was enough for at least one entry, critical should be there
-            if "Low entry" in result and "Critical entry" not in result:
-                assert False, "Low entry should be dropped before critical entry"
+        # The critical entry MUST appear; the low entry MUST NOT.
+        assert "Critical entry" in result, "Critical entry must be included within budget"
+        assert "Low entry" not in result, "Low entry must be dropped when budget is tight"
 
     def test_context_bucket_only_if_budget_remains(self):
-        """Context (fallback) bucket only appears if budget remains after named categories."""
-        from open_brain.wake_up import build_wake_up_pack
+        """Context (fallback) bucket is omitted when named categories have consumed the budget."""
+        from open_brain.wake_up import build_wake_up_pack, token_estimate, _format_entry
 
-        # One high-importance identity entry that consumes most budget
-        # One context-only entry
-        big_content = "A" * 1600  # ~400 tokens
+        # _format_entry truncates content to 200 chars, so actual token cost is deterministic.
+        # "## Identity\n" = 3 tokens; identity entry line ≈ 58 tokens → section ≈ 61 tokens.
+        # "## Context\n" = 2 tokens; context entry line ≈ 11 tokens → section ≈ 13 tokens.
+        # Total if both fit: ~74 tokens. Budget=70 fits identity (61) but not context (74).
+        big_content = "A" * 1600  # content is truncated to 200 chars in _format_entry
         memories = [
             _make_memory(id=1, type="identity", content=big_content,
                          title="Identity entry", importance="critical"),
             _make_memory(id=2, type="observation", content="Context fallback",
                          title="Context entry", importance="medium"),
         ]
-        # Budget just barely fits the identity section (header ~3 + entry ~410)
-        # After identity, no budget remains for context
-        result = build_wake_up_pack(memories, token_budget=50)
-        # If context appears, it means budget was available — that's fine
-        # The key invariant is that total tokens <= budget
-        from open_brain.wake_up import token_estimate
-        assert token_estimate(result) <= 50
+        result = build_wake_up_pack(memories, token_budget=70)
+
+        # Budget invariant must hold.
+        assert token_estimate(result) <= 70, "Total output must not exceed budget"
+        # The identity section must be present (it fits within 70 tokens).
+        assert "## Identity" in result, "Identity section must appear"
+        # The context section must NOT appear — budget is exhausted by the identity section.
+        assert "## Context" not in result, (
+            "Context section must be omitted when budget is exhausted by named categories"
+        )
 
 
 # ─── AK2: Category grouping ───────────────────────────────────────────────────

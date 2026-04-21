@@ -1497,11 +1497,16 @@ class PostgresDataLayer:
                 plan=plan,
             )
 
-    async def get_wake_up_memories(self, limit: int = 500) -> list[Memory]:
+    async def get_wake_up_memories(self, limit: int = 500, project: str | None = None) -> list[Memory]:
         """Fetch memories with project_name for wake-up pack construction.
 
-        Returns memories (across all projects) ordered by updated_at DESC.
+        Returns memories ordered by updated_at DESC, optionally filtered to a specific project.
         Each Memory's project_name field is populated from memory_indexes.name.
+
+        Args:
+            limit: Maximum number of memories to return (applied after project filter).
+            project: Optional project name to filter by. When provided, only memories
+                belonging to this project are returned.
         """
         pool = await get_pool()
         async with pool.acquire() as conn:
@@ -1509,9 +1514,11 @@ class PostgresDataLayer:
                 """SELECT m.*, mi.name AS project_name
                    FROM memories m
                    LEFT JOIN memory_indexes mi ON mi.id = m.index_id
+                   WHERE ($2::text IS NULL OR mi.name = $2)
                    ORDER BY m.updated_at DESC
                    LIMIT $1""",
                 limit,
+                project,
             )
             memories = []
             for row in rows:

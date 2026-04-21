@@ -3,6 +3,7 @@
 
 import json
 import sys
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -12,10 +13,8 @@ from config import load_config, detect_project
 
 def fetch_wake_up_pack(config: dict, project: str, token_budget: int = 500) -> str | None:
     """Fetch wake-up pack markdown from open-brain server."""
-    url = (
-        f"{config['server_url'].rstrip('/')}/api/wake_up_pack"
-        f"?token_budget={token_budget}&project={project}"
-    )
+    params = urllib.parse.urlencode({"token_budget": token_budget, "project": project})
+    url = f"{config['server_url'].rstrip('/')}/api/wake_up_pack?{params}"
     req = urllib.request.Request(
         url,
         headers={"X-API-Key": config.get("api_key", "")},
