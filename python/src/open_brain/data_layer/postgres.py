@@ -1297,10 +1297,26 @@ class PostgresDataLayer:
                 )
             elif scope.startswith("project:"):
                 project = scope[8:]
-                index_id = await self._resolve_index_id(conn, project)
+                # Read-only lookup — do NOT auto-create missing indexes
+                # (would be a side effect of dry_run=True, and `index_id or 1`
+                # fallback would silently target a different project)
+                index_row = await conn.fetchrow(
+                    "SELECT id FROM memory_indexes WHERE name = $1", project
+                )
+                if index_row is None:
+                    # Project doesn't exist → no memories to compact
+                    return CompactResult(
+                        clusters_found=0,
+                        memories_deleted=0,
+                        memories_kept=[],
+                        deleted_ids=[],
+                        strategy_used=params.strategy,
+                        plan=[],
+                    )
+                index_id = index_row["id"]
                 mem_rows = await conn.fetch(
                     f"SELECT * FROM memories WHERE index_id = $1 {_compact_lifecycle_filter}",
-                    index_id or 1,
+                    index_id,
                 )
             elif scope.startswith("type:"):
                 mem_type = scope[5:]
@@ -1315,11 +1331,13 @@ class PostgresDataLayer:
                 )
 
             # Step 2: If fewer than 2 memories → return early
+            # (A single existing memory is still retained — report it in memories_kept.)
             if len(mem_rows) < 2:
+                existing_ids = [row["id"] for row in mem_rows]
                 return CompactResult(
                     clusters_found=0,
                     memories_deleted=0,
-                    memories_kept=[],
+                    memories_kept=existing_ids,
                     deleted_ids=[],
                     strategy_used=params.strategy,
                     plan=[],
@@ -1381,7 +1399,18 @@ class PostgresDataLayer:
                     plan=plan,
                 )
 
-            # Step 7: dry_run=False → DELETE non-canonical IDs
+            # Step 7: dry_run=False → DELETE non-canonical IDs.
+            # Schema does NOT use ON DELETE CASCADE, so we must delete
+            # dependent rows first to avoid dangling references.
+            await conn.execute(
+                "DELETE FROM memory_usage_log WHERE memory_id = ANY($1::int[])",
+                all_to_delete,
+            )
+            await conn.execute(
+                "DELETE FROM memory_relationships "
+                "WHERE source_id = ANY($1::int[]) OR target_id = ANY($1::int[])",
+                all_to_delete,
+            )
             result = await conn.execute(
                 "DELETE FROM memories WHERE id = ANY($1::int[])",
                 all_to_delete,

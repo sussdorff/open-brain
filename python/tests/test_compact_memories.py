@@ -198,6 +198,27 @@ class TestCompactMemoriesEmpty:
         assert result.deleted_ids == []
         assert result.plan == []
 
+    @pytest.mark.asyncio
+    async def test_single_memory_is_reported_in_memories_kept(self):
+        """One memory → no clusters, but the ID must appear in memories_kept.
+
+        Regression: previously returned memories_kept=[] which falsely
+        implied the existing memory was dropped.
+        """
+        conn = AsyncMock()
+        conn.fetch = AsyncMock(return_value=[_make_memory_row(42)])
+        pool = _make_pool(conn)
+
+        dl = PostgresDataLayer()
+        with patch("open_brain.data_layer.postgres.get_pool", return_value=pool):
+            result = await dl.compact_memories(CompactParams())
+
+        assert result.clusters_found == 0
+        assert result.memories_deleted == 0
+        assert result.memories_kept == [42]
+        assert result.deleted_ids == []
+        assert result.plan == []
+
 
 class TestCompactMemoriesSimplePair:
     """Cluster with 2 members — simplest case."""
@@ -237,7 +258,10 @@ class TestCompactMemoriesSimplePair:
         ]
         sim_rows = [_make_sim_row(1, 2, 0.92)]
         conn.fetch = AsyncMock(side_effect=[rows, sim_rows])
-        conn.execute = AsyncMock(return_value="DELETE 1")
+        # execute is called 3x: memory_usage_log, memory_relationships, memories
+        conn.execute = AsyncMock(
+            side_effect=["DELETE 0", "DELETE 0", "DELETE 1"],
+        )
         pool = _make_pool(conn)
 
         dl = PostgresDataLayer()
@@ -248,10 +272,17 @@ class TestCompactMemoriesSimplePair:
         assert result.memories_deleted == 1
         assert 2 in result.memories_kept
         assert 1 in result.deleted_ids
-        # Verify DELETE was called
-        conn.execute.assert_called_once()
-        call_args = conn.execute.call_args
-        assert "DELETE" in call_args[0][0]
+        # Verify dependent rows are deleted BEFORE the memories row
+        # (schema has no ON DELETE CASCADE → manual order required).
+        assert conn.execute.call_count == 3
+        call_args_list = conn.execute.call_args_list
+        assert "memory_usage_log" in call_args_list[0][0][0]
+        assert "memory_relationships" in call_args_list[1][0][0]
+        assert "DELETE FROM memories" in call_args_list[2][0][0]
+        # All three deletes target the same IDs
+        assert call_args_list[0][0][1] == [1]
+        assert call_args_list[1][0][1] == [1]
+        assert call_args_list[2][0][1] == [1]
 
 
 class TestCompactMemoriesTransitive:
@@ -386,6 +417,39 @@ class TestCompactMemoriesScope:
             )
 
         assert result.clusters_found == 1
+
+    @pytest.mark.asyncio
+    async def test_project_scope_missing_returns_empty_no_side_effect(self):
+        """Project doesn't exist → no-op result; must NOT auto-create an index row.
+
+        Regression: previously used _resolve_index_id which INSERTed a new
+        memory_indexes row as a side effect of a dry-run lookup.
+        """
+        conn = AsyncMock()
+        # Project lookup returns None (project does not exist)
+        conn.fetchrow = AsyncMock(return_value=None)
+        conn.fetch = AsyncMock()
+        conn.execute = AsyncMock()
+        pool = _make_pool(conn)
+
+        dl = PostgresDataLayer()
+        with patch("open_brain.data_layer.postgres.get_pool", return_value=pool):
+            result = await dl.compact_memories(
+                CompactParams(scope="project:does-not-exist", dry_run=True)
+            )
+
+        assert result.clusters_found == 0
+        assert result.memories_deleted == 0
+        assert result.memories_kept == []
+        assert result.deleted_ids == []
+        assert result.plan == []
+        # Only a SELECT should have happened — no INSERT/UPDATE side effects.
+        conn.fetchrow.assert_awaited_once()
+        select_sql = conn.fetchrow.await_args[0][0]
+        assert "SELECT" in select_sql
+        assert "INSERT" not in select_sql
+        conn.fetch.assert_not_awaited()
+        conn.execute.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_type_scope(self):
