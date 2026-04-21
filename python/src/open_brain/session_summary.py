@@ -17,6 +17,23 @@ logger = logging.getLogger(__name__)
 
 _MAX_TURNS_TEXT = 8000
 
+# Canonical allowlist of `metadata.source` values for session_summary memories.
+# Any new writer of type='session_summary' must use one of these markers (or
+# leave metadata.source unset, which resolves to None). See
+# docs/standards/session-summary-writers.md for the full writer catalog.
+# Enforced at test time by:
+#   - tests/test_session_summary_sources.py::test_session_summary_source_allowlist (behavioral)
+#   - tests/test_session_summary_ast_allowlist.py (exhaustive AST scan)
+ALLOWED_SESSION_SUMMARY_SOURCES: frozenset[str | None] = frozenset(
+    {
+        "session-close",
+        "session-end-hook",
+        "transcript-backfill",
+        "worktree-session-summary",
+        None,
+    }
+)
+
 _dl: PostgresDataLayer | None = None
 
 
