@@ -8,8 +8,12 @@ AK8: test_session_end_writes_source_marker
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
+
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "plugin" / "scripts"))
+from session_end_summary import _filter_turns
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -331,6 +335,95 @@ class TestFixtureFiles:
             and t["content"]
         ]
         assert len(valid) == 0
+
+
+# ─── AK10: _filter_turns unit tests ──────────────────────────────────────────
+
+class TestFilterTurns:
+    """Unit tests for _filter_turns in the session_end_summary hook script."""
+
+    def test_filter_turns_small(self):
+        """42 raw lines → skip 2 isMeta + 1 type=summary → 39 valid turns."""
+        lines = (FIXTURES_DIR / "transcript_small.jsonl").read_text().splitlines()
+        turns = _filter_turns(lines)
+        assert len(turns) == 39
+
+    def test_filter_turns_empty(self):
+        """Empty fixture → no valid turns returned."""
+        lines = (FIXTURES_DIR / "transcript_empty.jsonl").read_text().splitlines()
+        turns = _filter_turns(lines)
+        assert turns == []
+
+    def test_filter_turns_skips_isMeta(self):
+        """isMeta=true entries are excluded from results."""
+        lines = [
+            '{"type": "user", "content": "hello", "isMeta": false}',
+            '{"type": "assistant", "content": "system note", "isMeta": true}',
+            '{"type": "assistant", "content": "world", "isMeta": false}',
+            '{"type": "user", "content": "meta too", "isMeta": true}',
+        ]
+        turns = _filter_turns(lines)
+        assert len(turns) == 2
+        assert all(not t.get("isMeta") for t in turns)
+        assert turns[0]["content"] == "hello"
+        assert turns[1]["content"] == "world"
+
+    def test_filter_turns_skips_non_user_assistant_types(self):
+        """Entries with type other than user/assistant are excluded."""
+        lines = [
+            '{"type": "user", "content": "keep", "isMeta": false}',
+            '{"type": "summary", "content": "skip this", "isMeta": false}',
+            '{"type": "tool_result", "content": "skip too", "isMeta": false}',
+            '{"type": "assistant", "content": "keep too", "isMeta": false}',
+        ]
+        turns = _filter_turns(lines)
+        assert len(turns) == 2
+        assert turns[0]["content"] == "keep"
+        assert turns[1]["content"] == "keep too"
+
+    def test_filter_turns_skips_non_string_content(self):
+        """Entries with non-string content are excluded."""
+        lines = [
+            '{"type": "user", "content": ["list", "not", "string"], "isMeta": false}',
+            '{"type": "assistant", "content": null, "isMeta": false}',
+            '{"type": "user", "content": "valid", "isMeta": false}',
+        ]
+        turns = _filter_turns(lines)
+        assert len(turns) == 1
+        assert turns[0]["content"] == "valid"
+
+    def test_filter_turns_skips_invalid_json(self):
+        """Lines that are not valid JSON are silently skipped."""
+        lines = [
+            "not json at all",
+            '{"type": "user", "content": "good", "isMeta": false}',
+            "{broken",
+        ]
+        turns = _filter_turns(lines)
+        assert len(turns) == 1
+        assert turns[0]["content"] == "good"
+
+    def test_filter_turns_empty_lines_skipped(self):
+        """Blank lines are silently skipped."""
+        lines = [
+            "",
+            '{"type": "user", "content": "hi", "isMeta": false}',
+            "   ",
+        ]
+        turns = _filter_turns(lines)
+        assert len(turns) == 1
+
+    def test_filter_turns_preserves_type_and_content(self):
+        """Returned dicts have normalized type and content fields."""
+        lines = [
+            '{"type": "user", "content": "question", "isMeta": false}',
+            '{"type": "assistant", "content": "answer", "isMeta": false}',
+        ]
+        turns = _filter_turns(lines)
+        assert turns[0]["type"] == "user"
+        assert turns[0]["content"] == "question"
+        assert turns[1]["type"] == "assistant"
+        assert turns[1]["content"] == "answer"
 
 
 # ─── Helper ───────────────────────────────────────────────────────────────────

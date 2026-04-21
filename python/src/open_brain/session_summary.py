@@ -13,6 +13,10 @@ from open_brain.data_layer.llm import LlmMessage, llm_complete
 from open_brain.data_layer.postgres import PostgresDataLayer, get_pool
 from open_brain.utils import parse_llm_json
 
+logger = logging.getLogger(__name__)
+
+_MAX_TURNS_TEXT = 8000
+
 _dl: PostgresDataLayer | None = None
 
 
@@ -22,10 +26,6 @@ def get_dl() -> PostgresDataLayer:
     if _dl is None:
         _dl = PostgresDataLayer()
     return _dl
-
-logger = logging.getLogger(__name__)
-
-_MAX_TURNS_TEXT = 8000
 
 
 def _build_turns_text(turns: list[dict[str, Any]]) -> str:
@@ -144,7 +144,7 @@ Respond with ONLY valid JSON, no markdown fences."""
             text=summary.get("content", f"Session {session_id} ended."),
             type="session_summary",
             project=project,
-            title=summary.get("title", f"Session summary"),
+            title=summary.get("title", "Session summary"),
             narrative=summary.get("narrative"),
             session_ref=session_id,
             metadata=metadata,

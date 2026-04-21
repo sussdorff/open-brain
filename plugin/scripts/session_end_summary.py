@@ -21,9 +21,6 @@ logger = logging.getLogger("session-end-summary")
 # Reasons that should NOT trigger a session summary
 _SKIP_REASONS = {"clear", "resume", "logout", "bypass_permissions_disabled"}
 
-_MAX_TURNS_TEXT = 8000
-
-
 def _filter_turns(lines: list[str]) -> list[dict]:
     """Parse JSONL lines and filter to valid user/assistant turns."""
     turns = []
@@ -46,16 +43,6 @@ def _filter_turns(lines: list[str]) -> list[dict]:
             continue
         turns.append({"type": entry["type"], "content": content, "isMeta": False})
     return turns
-
-
-def _truncate_turns_text(turns: list[dict]) -> str:
-    """Join turns text and truncate to _MAX_TURNS_TEXT chars (head + tail)."""
-    lines = [f"[{t['type'].upper()}] {t['content']}" for t in turns]
-    text = "\n".join(lines)
-    if len(text) > _MAX_TURNS_TEXT:
-        half = _MAX_TURNS_TEXT // 2
-        text = text[:half] + "\n\n[...truncated...]\n\n" + text[-half:]
-    return text
 
 
 def main() -> None:
