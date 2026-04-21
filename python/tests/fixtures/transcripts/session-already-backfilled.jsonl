@@ -1,0 +1,2 @@
+{"type":"user","isMeta":false,"message":{"role":"user","content":"Do something"},"timestamp":"2026-04-01T11:00:00Z"}
+{"type":"assistant","isMeta":false,"message":{"role":"assistant","content":[{"type":"text","text":"Done."}]},"timestamp":"2026-04-01T11:00:05Z"}

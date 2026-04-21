@@ -1,0 +1,5 @@
+{"type":"user","isMeta":false,"message":{"role":"user","content":"Hello, implement feature X"},"timestamp":"2026-04-01T10:00:00Z"}
+{"type":"assistant","isMeta":false,"message":{"role":"assistant","content":[{"type":"text","text":"Sure, I'll implement feature X."},{"type":"tool_use","name":"Edit","id":"tu1","input":{}}]},"timestamp":"2026-04-01T10:00:05Z"}
+{"type":"user","isMeta":false,"message":{"role":"user","content":"Great, now run tests"},"timestamp":"2026-04-01T10:01:00Z"}
+{"type":"assistant","isMeta":false,"message":{"role":"assistant","content":[{"type":"text","text":"Running tests now."},{"type":"tool_use","name":"Bash","id":"tu2","input":{}}]},"timestamp":"2026-04-01T10:01:05Z"}
+{"type":"summary","isMeta":true,"message":{"role":"system","content":"Compact summary"},"timestamp":"2026-04-01T10:02:00Z"}

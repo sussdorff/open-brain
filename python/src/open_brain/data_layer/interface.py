@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Protocol, TypedDict
+from typing import Any, Literal, Protocol, TypedDict
 
 
 # ─── Domain metadata schemas ──────────────────────────────────────────────────
@@ -159,6 +159,7 @@ class SaveMemoryParams:
     session_ref: str | None = None
     metadata: dict[str, Any] | None = None
     user_id: str | None = None  # authenticated user who created this memory
+    upsert_mode: Literal["append", "replace"] = "append"
 
 
 @dataclass

@@ -28,22 +28,74 @@ def get_dl() -> PostgresDataLayer:
     return _dl
 
 
+def _resolve_turn_content(turn: dict[str, Any]) -> str | None:
+    """Resolve the text content of a turn dict, handling both formats.
+
+    Flat format: {type, content: str}
+    Raw JSONL format: {type, message: {content: str | list[block]}}
+
+    Returns the resolved non-empty string content, or None if the turn has no
+    valid content.
+    """
+    # Try flat content first (API / hook format)
+    raw_content = turn.get("content")
+    # Fall back to JSONL message.content
+    if raw_content is None:
+        msg = turn.get("message", {})
+        if isinstance(msg, dict):
+            raw_content = msg.get("content")
+
+    # Handle list content (Claude API message.content format)
+    if isinstance(raw_content, list):
+        parts = []
+        for block in raw_content:
+            if not isinstance(block, dict):
+                continue
+            btype = block.get("type", "")
+            if btype == "text":
+                parts.append(block.get("text", ""))
+            elif btype == "tool_use":
+                parts.append(f"[tool: {block.get('name', '')}]")
+        content = "\n".join(p for p in parts if p)
+    elif isinstance(raw_content, str):
+        content = raw_content
+    else:
+        return None
+
+    return content if content else None
+
+
+def _is_valid_turn(turn: dict[str, Any]) -> bool:
+    """Return True if this turn should be included in the transcript summary.
+
+    Handles both flat format ({type, content: str}) and raw JSONL format
+    ({type, message: {content: str | list[block]}}).
+    """
+    if not isinstance(turn, dict):
+        return False
+    if turn.get("type") not in ("user", "assistant"):
+        return False
+    if turn.get("isMeta") is True:
+        return False
+    return _resolve_turn_content(turn) is not None
+
+
 def _build_turns_text(turns: list[dict[str, Any]]) -> str:
     """Filter and join transcript turns into a single text block.
 
+    Handles two formats:
+    - Flat format: {type, content: str} — used by session-end API / hooks
+    - Raw JSONL format: {type, message: {content: str | list[block]}} — from ~/.claude/projects/
+
     Filters: type must be 'user' or 'assistant', isMeta must not be True,
-    content must be a non-empty string.
+    content must resolve to a non-empty string.
     """
     lines = []
     for turn in turns:
-        if not isinstance(turn, dict):
+        if not _is_valid_turn(turn):
             continue
-        if turn.get("type") not in ("user", "assistant"):
-            continue
-        if turn.get("isMeta") is True:
-            continue
-        content = turn.get("content", "")
-        if not isinstance(content, str) or not content:
+        content = _resolve_turn_content(turn)
+        if not content:
             continue
         role = turn["type"].upper()
         lines.append(f"[{role}] {content}")
@@ -56,11 +108,13 @@ async def summarize_transcript_turns(
     turns: list[dict[str, Any]],
     source: str | None,
     reason: str | None = None,
+    bypass_dedup: bool = False,
 ) -> int | None:
     """Summarize a session transcript and save it as a session_summary memory.
 
-    Performs a pessimistic dedup check before writing: if ANY existing
-    session_summary row exists for session_ref=session_id, skip and return None.
+    Performs a pessimistic dedup check before writing (unless bypass_dedup=True):
+    if ANY existing session_summary row exists for session_ref=session_id, skip
+    and return None.
 
     Args:
         project: Project name.
@@ -69,6 +123,9 @@ async def summarize_transcript_turns(
         source: Provenance marker (e.g. 'session-end-hook', 'session-close',
                 'transcript-backfill', or None for legacy).
         reason: SessionEnd reason string (e.g. 'stop'), or None.
+        bypass_dedup: When True, skip the dedup check — the caller (e.g.
+                      regenerate_summaries) handles deletion atomically via
+                      upsert_mode='replace' in save_memory.
 
     Returns:
         memory_id (int) on success, or None if skipped (dedup/empty turns).
@@ -85,28 +142,21 @@ async def summarize_transcript_turns(
         half = _MAX_TURNS_TEXT // 2
         turns_text = turns_text[:half] + "\n\n[...truncated...]\n\n" + turns_text[-half:]
 
-    # Dedup check: pessimistically skip if ANY session_summary row exists
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT id, metadata FROM memories WHERE session_ref = $1 AND type = 'session_summary' LIMIT 1",
-            session_id,
-        )
-        if row is not None:
-            logger.info(
-                "session-end dedup: existing summary found, skipping (session_ref=%s)", session_id
+    if not bypass_dedup:
+        # Dedup check: pessimistically skip if ANY session_summary row exists
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT id, metadata FROM memories WHERE session_ref = $1 AND type = 'session_summary' LIMIT 1",
+                session_id,
             )
-            return None
+            if row is not None:
+                logger.info(
+                    "session-end dedup: existing summary found, skipping (session_ref=%s)", session_id
+                )
+                return None
 
-    turn_count = sum(
-        1
-        for t in turns
-        if isinstance(t, dict)
-        and t.get("type") in ("user", "assistant")
-        and not t.get("isMeta")
-        and isinstance(t.get("content"), str)
-        and t.get("content")
-    )
+    turn_count = sum(1 for t in turns if _is_valid_turn(t))
 
     prompt = f"""Summarize this session transcript.
 
@@ -148,6 +198,7 @@ Respond with ONLY valid JSON, no markdown fences."""
             narrative=summary.get("narrative"),
             session_ref=session_id,
             metadata=metadata,
+            upsert_mode="replace" if bypass_dedup else "append",
         )
     )
     logger.info(
