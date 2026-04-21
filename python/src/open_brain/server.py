@@ -341,7 +341,8 @@ async def get_observations(ids: list[int]) -> str:
     "household: {category: str, item: str, location: str, details: str, warranty_expiry: ISO datetime}. "
     "ISO datetime format: 'YYYY-MM-DDTHH:MM:SS' (e.g. '2026-04-15T10:00:00'). "
     "Invalid or missing required datetime fields produce a warning in the response but still save the memory. "
-    "Params: text (required), type, project, title, subtitle, narrative, session_ref, is_test, metadata"
+    "Params: text (required), type, project, title, subtitle, narrative, session_ref, is_test, metadata, importance. "
+    "importance: optional retention class (critical|high|medium|low, default medium)."
 )
 async def save_memory(
     text: str,

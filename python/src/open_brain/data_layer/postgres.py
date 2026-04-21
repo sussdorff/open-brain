@@ -537,7 +537,7 @@ class PostgresDataLayer:
                 limit = (params.depth_before or 5) + (params.depth_after or 5) + 1
 
                 rows = await conn.fetch(
-                    f"""SELECT m.id, m.index_id, m.session_id, m.type, m.title, m.subtitle, m.narrative, m.content,
+                    f"""SELECT m.id, m.index_id, m.user_id, m.session_id, m.type, m.title, m.subtitle, m.narrative, m.content,
                             m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.created_at, m.updated_at, m.importance
                      FROM memories m {where}
                      ORDER BY m.created_at ASC
@@ -583,12 +583,12 @@ class PostgresDataLayer:
                 base_values.append(index_id)
 
             rows = await conn.fetch(
-                f"""(SELECT m.id, m.index_id, m.session_id, m.type, m.title, m.subtitle, m.narrative, m.content,
+                f"""(SELECT m.id, m.index_id, m.user_id, m.session_id, m.type, m.title, m.subtitle, m.narrative, m.content,
                          m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.created_at, m.updated_at, m.importance
                   FROM memories m WHERE m.created_at <= $1 {index_filter}
                   ORDER BY m.created_at DESC LIMIT {depth_before + 1})
                  UNION ALL
-                 (SELECT m.id, m.index_id, m.session_id, m.type, m.title, m.subtitle, m.narrative, m.content,
+                 (SELECT m.id, m.index_id, m.user_id, m.session_id, m.type, m.title, m.subtitle, m.narrative, m.content,
                          m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.created_at, m.updated_at, m.importance
                   FROM memories m WHERE m.created_at > $1 {index_filter}
                   ORDER BY m.created_at ASC LIMIT {depth_after})
@@ -1114,7 +1114,7 @@ class PostgresDataLayer:
             if scope == "duplicates":
                 rows = await conn.fetch(
                     """SELECT DISTINCT ON (m1.id)
-                         m1.id, m1.index_id, m1.session_id, m1.type, m1.title, m1.subtitle, m1.narrative, m1.content,
+                         m1.id, m1.index_id, m1.user_id, m1.session_id, m1.type, m1.title, m1.subtitle, m1.narrative, m1.content,
                          m1.metadata, m1.priority, m1.stability, m1.access_count, m1.last_accessed_at, m1.created_at, m1.updated_at, m1.importance,
                          m2.id AS similar_id, 1 - (m1.embedding <=> m2.embedding) AS similarity
                        FROM memories m1
