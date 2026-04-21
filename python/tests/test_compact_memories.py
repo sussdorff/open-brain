@@ -122,9 +122,35 @@ class TestCanonicalStrategy:
 
     def test_keep_highest_access_tiebreak_by_updated_at(self):
         from open_brain.data_layer.postgres import _select_canonical
+        # Build rows manually with distinct updated_at values to actually test the tiebreak
+        # Row A: access_count=10, updated_at older (2026-01-15)
+        # Row B: access_count=10, updated_at newer (2026-01-20)
+        def _make_row_with_updated_at(id: int, access_count: int, updated_at: str) -> MagicMock:
+            data = {
+                "id": id,
+                "index_id": 1,
+                "session_id": None,
+                "type": "session_summary",
+                "title": f"Memory {id}",
+                "subtitle": None,
+                "narrative": None,
+                "content": "test",
+                "metadata": {},
+                "priority": 0.5,
+                "stability": "stable",
+                "access_count": access_count,
+                "last_accessed_at": None,
+                "created_at": "2026-01-01",
+                "updated_at": updated_at,
+            }
+            row = MagicMock()
+            row.__getitem__ = lambda self, key: data[key]
+            row.get = lambda key, default=None: data.get(key, default)
+            return row
+
         rows = {
-            1: _make_memory_row(1, access_count=5, created_at="2026-01-01"),
-            2: _make_memory_row(2, access_count=5, created_at="2026-06-01"),
+            1: _make_row_with_updated_at(1, access_count=10, updated_at="2026-01-15"),
+            2: _make_row_with_updated_at(2, access_count=10, updated_at="2026-01-20"),
         }
         canonical = _select_canonical([1, 2], rows, "keep_highest_access")
         # Both have same access_count; newer updated_at wins → row 2
@@ -287,56 +313,57 @@ class TestCompactMemoriesMixed:
 class TestCompactMemoriesStrategies:
     """Different strategies produce different canonicals."""
 
-    @pytest.mark.asyncio
-    async def test_strategies_produce_different_canonicals(self):
-        conn = AsyncMock()
+    def _make_strategy_rows(self):
         # Memory 1: access_count=1, old content, old date
         # Memory 2: access_count=5, long content, very old date
         # Memory 3: access_count=2, short content, newest date
-        rows = [
+        return [
             _make_memory_row(1, access_count=1, created_at="2025-06-01", content="short text"),
             _make_memory_row(2, access_count=5, created_at="2024-01-01", content="this is very long detailed content about something important and comprehensive"),
             _make_memory_row(3, access_count=2, created_at="2026-06-01", content="medium content"),
         ]
-        sim_rows = [
+
+    def _make_strategy_sim_rows(self):
+        return [
             _make_sim_row(1, 2, 0.93),
             _make_sim_row(2, 3, 0.88),
         ]
 
-        # Test keep_highest_access → should pick id=2
-        conn.fetch = AsyncMock(side_effect=[rows, sim_rows])
+    @pytest.mark.asyncio
+    async def test_keep_highest_access_selects_by_access_count(self):
+        conn = AsyncMock()
+        conn.fetch = AsyncMock(side_effect=[self._make_strategy_rows(), self._make_strategy_sim_rows()])
         pool = _make_pool(conn)
         dl = PostgresDataLayer()
         with patch("open_brain.data_layer.postgres.get_pool", return_value=pool):
-            result_access = await dl.compact_memories(
+            result = await dl.compact_memories(
                 CompactParams(dry_run=True, strategy="keep_highest_access")
             )
+        assert result.plan[0].canonical_id == 2   # highest access_count=5
 
-        # Test keep_latest → should pick id=3
-        conn2 = AsyncMock()
-        conn2.fetch = AsyncMock(side_effect=[rows, sim_rows])
-        pool2 = _make_pool(conn2)
-        dl2 = PostgresDataLayer()
-        with patch("open_brain.data_layer.postgres.get_pool", return_value=pool2):
-            result_latest = await dl2.compact_memories(
+    @pytest.mark.asyncio
+    async def test_keep_latest_selects_by_created_at(self):
+        conn = AsyncMock()
+        conn.fetch = AsyncMock(side_effect=[self._make_strategy_rows(), self._make_strategy_sim_rows()])
+        pool = _make_pool(conn)
+        dl = PostgresDataLayer()
+        with patch("open_brain.data_layer.postgres.get_pool", return_value=pool):
+            result = await dl.compact_memories(
                 CompactParams(dry_run=True, strategy="keep_latest")
             )
+        assert result.plan[0].canonical_id == 3   # newest created_at=2026-06-01
 
-        # Test keep_most_comprehensive → should pick id=2 (longest content)
-        conn3 = AsyncMock()
-        conn3.fetch = AsyncMock(side_effect=[rows, sim_rows])
-        pool3 = _make_pool(conn3)
-        dl3 = PostgresDataLayer()
-        with patch("open_brain.data_layer.postgres.get_pool", return_value=pool3):
-            result_comprehensive = await dl3.compact_memories(
+    @pytest.mark.asyncio
+    async def test_keep_most_comprehensive_selects_by_content_length(self):
+        conn = AsyncMock()
+        conn.fetch = AsyncMock(side_effect=[self._make_strategy_rows(), self._make_strategy_sim_rows()])
+        pool = _make_pool(conn)
+        dl = PostgresDataLayer()
+        with patch("open_brain.data_layer.postgres.get_pool", return_value=pool):
+            result = await dl.compact_memories(
                 CompactParams(dry_run=True, strategy="keep_most_comprehensive")
             )
-
-        # Verify that different strategies yield different canonicals
-        assert result_access.plan[0].canonical_id != result_latest.plan[0].canonical_id
-        assert result_access.plan[0].canonical_id == 2   # highest access
-        assert result_latest.plan[0].canonical_id == 3   # newest created_at
-        assert result_comprehensive.plan[0].canonical_id == 2  # longest content
+        assert result.plan[0].canonical_id == 2   # longest content
 
 
 class TestCompactMemoriesScope:

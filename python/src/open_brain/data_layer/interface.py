@@ -386,6 +386,11 @@ class ClusterPlan:
     to_delete: list[int]      # members minus canonical
 
 
+_VALID_COMPACT_STRATEGIES = frozenset(
+    ["keep_highest_access", "keep_latest", "keep_most_comprehensive"]
+)
+
+
 @dataclass
 class CompactParams:
     """Parameters for compact_memories operation."""
@@ -394,6 +399,26 @@ class CompactParams:
     threshold: float = 0.87
     strategy: str = "keep_highest_access"
     dry_run: bool = True
+
+    def __post_init__(self) -> None:
+        if not (0.0 <= self.threshold <= 1.0):
+            raise ValueError(
+                f"threshold must be between 0.0 and 1.0, got {self.threshold}"
+            )
+        if self.strategy not in _VALID_COMPACT_STRATEGIES:
+            raise ValueError(
+                f"Unknown strategy: {self.strategy!r}. Expected one of: "
+                + ", ".join(sorted(_VALID_COMPACT_STRATEGIES))
+            )
+        if self.scope is not None:
+            if not (
+                self.scope.startswith("project:")
+                or self.scope.startswith("type:")
+            ):
+                raise ValueError(
+                    f"Unknown scope format: {self.scope!r}. "
+                    "Expected None, 'project:<name>', or 'type:<name>'"
+                )
 
 
 @dataclass

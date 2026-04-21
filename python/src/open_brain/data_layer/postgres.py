@@ -82,7 +82,7 @@ def _build_clusters(ids: list[int], edges: list[tuple[int, int]]) -> list[list[i
 def _select_canonical(members: list[int], rows: dict[int, Any], strategy: str) -> int:
     """Select the canonical memory ID from a cluster according to strategy."""
     if strategy == "keep_latest":
-        return max(members, key=lambda i: str(rows[i]["created_at"]))
+        return max(members, key=lambda i: rows[i]["created_at"])
     if strategy == "keep_most_comprehensive":
         return max(
             members,
@@ -91,10 +91,12 @@ def _select_canonical(members: list[int], rows: dict[int, Any], strategy: str) -
     # Default: keep_highest_access, tiebreak by updated_at
     return max(
         members,
-        key=lambda i: (rows[i]["access_count"], str(rows[i]["updated_at"])),
+        key=lambda i: (rows[i]["access_count"], rows[i]["updated_at"]),
     )
 
 
+# compact_memories also excludes 'archived' (in addition to materialized/discarded)
+# because compaction should only touch actively-managed memories.
 _compact_lifecycle_filter = (
     "AND (metadata->>'status' IS NULL "
     "OR metadata->>'status' NOT IN ('materialized', 'discarded', 'archived'))"
@@ -1289,22 +1291,27 @@ class PostgresDataLayer:
         async with pool.acquire() as conn:
             # Step 1: Fetch memories for scope
             scope = params.scope
-            if scope and scope.startswith("project:"):
+            if scope is None:
+                mem_rows = await conn.fetch(
+                    f"SELECT * FROM memories WHERE 1=1 {_compact_lifecycle_filter}",
+                )
+            elif scope.startswith("project:"):
                 project = scope[8:]
                 index_id = await self._resolve_index_id(conn, project)
                 mem_rows = await conn.fetch(
                     f"SELECT * FROM memories WHERE index_id = $1 {_compact_lifecycle_filter}",
                     index_id or 1,
                 )
-            elif scope and scope.startswith("type:"):
+            elif scope.startswith("type:"):
                 mem_type = scope[5:]
                 mem_rows = await conn.fetch(
                     f"SELECT * FROM memories WHERE type = $1 {_compact_lifecycle_filter}",
                     mem_type,
                 )
             else:
-                mem_rows = await conn.fetch(
-                    f"SELECT * FROM memories WHERE 1=1 {_compact_lifecycle_filter}",
+                raise ValueError(
+                    f"Unknown scope format: {scope!r}. "
+                    "Expected None, 'project:<name>', or 'type:<name>'"
                 )
 
             # Step 2: If fewer than 2 memories → return early
@@ -1321,6 +1328,13 @@ class PostgresDataLayer:
             # Build rows dict for strategy selection
             rows_by_id: dict[int, Any] = {row["id"]: row for row in mem_rows}
             all_ids = list(rows_by_id.keys())
+
+            if scope is None and len(all_ids) > 500:
+                logger.warning(
+                    "compact_memories: scope=None fetched %d memories — "
+                    "pairwise similarity query may be slow",
+                    len(all_ids),
+                )
 
             # Step 3: Fetch all-pairs cosine similarity via pgvector
             sim_rows = await conn.fetch(
@@ -1368,14 +1382,15 @@ class PostgresDataLayer:
                 )
 
             # Step 7: dry_run=False → DELETE non-canonical IDs
-            await conn.execute(
+            result = await conn.execute(
                 "DELETE FROM memories WHERE id = ANY($1::int[])",
                 all_to_delete,
             )
+            count = int(result.split()[-1])
 
             return CompactResult(
                 clusters_found=len(clusters),
-                memories_deleted=len(all_to_delete),
+                memories_deleted=count,
                 memories_kept=memories_kept,
                 deleted_ids=all_to_delete,
                 strategy_used=params.strategy,
