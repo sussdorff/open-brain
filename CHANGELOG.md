@@ -3,22 +3,42 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
-### Features
+### Bug Fixes
 
-- *(open-brain-g3z)* Add tree-sitter AST parsing for smart_* tools (TypeScript/JavaScript/TSX/JSX/Go/Rust) with accurate line numbers
+- *(open-brain-pi9)* Add PEP 723 inline metadata to plugin scripts for tree-sitter dep
+
+## [0.13.0] - 2026-04-22
+
+### Miscellaneous
+
+- Bump version to 0.13.0
+
+## [0.12.3] - 2026-04-22
 
 ### Bug Fixes
 
 - *(open-brain-rxz)* Normalize index_id in content-hash dedup to match insert path
 
+### Miscellaneous
+
+- *(open-brain-rxz)* Update changelog
+- Bump version to 0.12.3
+
 ## [0.12.2] - 2026-04-22
 
 ### Bug Fixes
 
+- *(open-brain-g3z)* Address review findings — Go/Rust spec, cleanup dead code, type safety
 - *(open-brain-2nr)* Replace local _importance_rank with interface.rank_importance
+
+### Features
+
+- *(open-brain-g3z)* Green — tree-sitter library integration for smart_* tools
 
 ### Miscellaneous
 
+- *(open-brain-g3z)* Add tree-sitter-language-pack>=1.6.2 dependency
+- *(open-brain-g3z)* Update changelog
 - *(open-brain-2nr)* Update changelog
 - Bump version to 0.12.2
 
