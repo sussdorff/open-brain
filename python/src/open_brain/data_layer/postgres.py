@@ -155,6 +155,11 @@ def compute_decay_delta(importance: str, access_count: int, base_decay_delta: fl
     """
     mult = _IMPORTANCE_MULTIPLIERS.get(importance)
     if mult is None:
+        # Deliberate exception to the ValueError contract of rank_importance/interface.py:
+        # here we default silently to the medium multiplier rather than raising.  This is
+        # safe because a DB CHECK constraint prevents any unknown importance value from
+        # being stored in the first place; the warning is logged for observability but the
+        # function must not crash so that lifecycle pipelines remain resilient.
         logger.warning("Unknown importance %r, defaulting to medium multiplier", importance)
         mult = 1.0
     if mult == 0.0:
