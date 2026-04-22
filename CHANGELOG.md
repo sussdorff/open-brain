@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Features
+
+- *(open-brain-g3z)* Add tree-sitter AST parsing for smart_* tools (TypeScript/JavaScript/TSX/JSX/Go/Rust) with accurate line numbers
+
 ### Bug Fixes
 
 - *(open-brain-7n0)* Guard materialize_archive against critical/high importance memories
