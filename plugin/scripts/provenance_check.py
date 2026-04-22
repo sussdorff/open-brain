@@ -56,8 +56,15 @@ def main() -> None:
     content = memory.get("content", "")
     metadata = memory.get("metadata")
 
-    # Resolve base_path: use env var PROVENANCE_REPO_ROOT, else home directory
-    base_path = os.environ.get("PROVENANCE_REPO_ROOT", str(Path.home()))
+    # Resolve base_path: require PROVENANCE_REPO_ROOT env var — fail fast if absent
+    # to avoid silently resolving relative code refs against the wrong directory.
+    base_path = os.environ.get("PROVENANCE_REPO_ROOT")
+    if not base_path:
+        print(
+            json.dumps({"error": "PROVENANCE_REPO_ROOT env var is required", "result": None}),
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     result = build_provenance_update(
         memory_id=memory_id,

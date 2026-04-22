@@ -77,16 +77,65 @@ def check_due() -> dict:
     Returns:
         Execution-result envelope with data.result set to "due" or "skip".
     """
-    state_file = pathlib.Path.home() / ".claude/learnings/processing-state.json"
-
     try:
-        state = json.loads(state_file.read_text()) if state_file.exists() else {}
+        state_file = pathlib.Path.home() / ".claude/learnings/processing-state.json"
+
+        try:
+            state = json.loads(state_file.read_text()) if state_file.exists() else {}
+        except Exception:
+            state = {}
+
+        if not isinstance(state, dict):
+            state = {}
+
+        last_run_str = state.get("last_learnings_run", "")
+
+        if not last_run_str:
+            return _make_envelope(
+                status="ok",
+                summary="due",
+                result="due",
+                last_run="",
+                next_eligible_at="",
+            )
+
+        try:
+            last_run_dt = datetime.datetime.fromisoformat(last_run_str)
+            # Ensure both datetimes are timezone-aware for comparison
+            if last_run_dt.tzinfo is None:
+                last_run_dt = last_run_dt.replace(tzinfo=datetime.timezone.utc)
+            now = _now_utc()
+            delta = now - last_run_dt
+            if delta.total_seconds() >= INTERVAL_SECONDS:
+                next_eligible_at = ""
+                result = "due"
+                summary = "due"
+            else:
+                remaining = INTERVAL_SECONDS - delta.total_seconds()
+                next_eligible_at = (now + datetime.timedelta(seconds=remaining)).isoformat()
+                result = "skip"
+                summary = "skip"
+        except ValueError:
+            # Unparseable timestamp — treat as due
+            return _make_envelope(
+                status="ok",
+                summary="due",
+                result="due",
+                last_run=last_run_str,
+                next_eligible_at="",
+            )
+
+        return _make_envelope(
+            status="ok",
+            summary=summary,
+            result=result,
+            last_run=last_run_str,
+            next_eligible_at=next_eligible_at,
+        )
+
     except Exception:
-        state = {}
-
-    last_run_str = state.get("last_learnings_run", "")
-
-    if not last_run_str:
+        # Broad fallback matching the original || echo "due" behavior:
+        # any unexpected error defaults to "due" so extraction proceeds.
         return _make_envelope(
             status="ok",
             summary="due",
@@ -94,37 +143,6 @@ def check_due() -> dict:
             last_run="",
             next_eligible_at="",
         )
-
-    try:
-        last_run_dt = datetime.datetime.fromisoformat(last_run_str)
-        now = _now_utc()
-        delta = now - last_run_dt
-        if delta.total_seconds() >= INTERVAL_SECONDS:
-            next_eligible_at = ""
-            result = "due"
-            summary = "due"
-        else:
-            remaining = INTERVAL_SECONDS - delta.total_seconds()
-            next_eligible_at = (now + datetime.timedelta(seconds=remaining)).isoformat()
-            result = "skip"
-            summary = "skip"
-    except ValueError:
-        # Unparseable timestamp — treat as due
-        return _make_envelope(
-            status="ok",
-            summary="due",
-            result="due",
-            last_run=last_run_str,
-            next_eligible_at="",
-        )
-
-    return _make_envelope(
-        status="ok",
-        summary=summary,
-        result=result,
-        last_run=last_run_str,
-        next_eligible_at=next_eligible_at,
-    )
 
 
 def main() -> None:

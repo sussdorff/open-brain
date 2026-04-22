@@ -214,10 +214,18 @@ Call `mcp__open-brain__search` with:
 
 Use `plugin/scripts/provenance_check.py` to compute the metadata patch.
 
-Run: `echo '<memory_json>' | uv run python plugin/scripts/provenance_check.py`
+Assign the JSON-serialised dict for each memory to a shell variable, then pipe it:
+
+```bash
+MEMORY_JSON=$(...)   # JSON-serialised dict for the memory returned by the search
+printf '%s' "$MEMORY_JSON" | uv run python plugin/scripts/provenance_check.py
+```
+
 Parse stdout as JSON; `null` means no code refs found.
 
-Where `<memory_json>` is the JSON-serialised dict for each memory returned by the search.
+**Important**: always assign the JSON to a variable first and pipe via `printf '%s' "$MEMORY_JSON"`.
+Do NOT use `echo '<literal_json>'` — single quotes cannot be nested and newlines break the shell
+syntax if the JSON contains either.
 Set the `PROVENANCE_REPO_ROOT` env var to the absolute path of the claude-config repo root
 (e.g. `/Users/malte/code/claude`) so relative code refs are resolved correctly.
 
