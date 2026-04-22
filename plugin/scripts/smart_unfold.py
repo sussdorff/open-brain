@@ -1,4 +1,4 @@
-"""smart_unfold.py — AST-bounded Symbol-Extraktion.
+"""smart_unfold.py — AST-bounded symbol extraction.
 
 Usage:
     uv run python smart_unfold.py <file_path> <symbol_name>
@@ -20,16 +20,16 @@ from typing import Protocol
 
 
 class CommandRunner(Protocol):
-    """Protokoll fuer subprocess-Aufrufe."""
+    """Protocol for subprocess calls."""
 
     def run(self, cmd: list[str]) -> tuple[int, str, str]:
-        """Fuehrt einen Befehl aus."""
+        """Execute a command and return (returncode, stdout, stderr)."""
         ...
 
 
 @dataclass
 class DefaultCommandRunner:
-    """Echter subprocess-Runner mit sicherer Umgebung."""
+    """Real subprocess runner with a restricted environment."""
 
     _SAFE_ENV: dict[str, str] = field(default_factory=lambda: {
         "PATH": __import__("os").environ.get("PATH", ""),
@@ -37,7 +37,7 @@ class DefaultCommandRunner:
     })
 
     def run(self, cmd: list[str]) -> tuple[int, str, str]:
-        """Fuehrt Befehl aus."""
+        """Execute a command and return (returncode, stdout, stderr)."""
         try:
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=10, env=self._SAFE_ENV
@@ -51,13 +51,13 @@ class DefaultCommandRunner:
 
 @dataclass
 class MockCommandRunner:
-    """Test-Runner mit konfigurierbaren Antworten."""
+    """Test runner with configurable responses."""
 
     responses: dict[str, tuple[int, str, str]] = field(default_factory=dict)
     default_response: tuple[int, str, str] = (0, "", "")
 
     def run(self, cmd: list[str]) -> tuple[int, str, str]:
-        """Gibt konfigurierte Antwort zurueck."""
+        """Return the configured response for the given command."""
         key = " ".join(cmd)
         for pattern, response in self.responses.items():
             if pattern in key:
@@ -66,7 +66,7 @@ class MockCommandRunner:
 
 
 def get_default_runner() -> CommandRunner:
-    """Gibt den Standard-CommandRunner zurueck."""
+    """Return the default CommandRunner instance."""
     return DefaultCommandRunner()
 
 
@@ -76,14 +76,14 @@ def get_default_runner() -> CommandRunner:
 def _find_python_symbol(
     tree: ast.AST, symbol_name: str
 ) -> ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | None:
-    """Findet ein Symbol im AST (top-level oder Klassenmethode)."""
-    # Top-level suchen
+    """Find a symbol in the AST (top-level or class method)."""
+    # Search at top level
     if isinstance(tree, ast.Module):
         for node in tree.body:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 if node.name == symbol_name:
                     return node
-            # Methoden in Klassen suchen
+            # Search methods inside classes
             if isinstance(node, ast.ClassDef):
                 for item in node.body:
                     if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -94,14 +94,14 @@ def _find_python_symbol(
 
 
 def _extract_python_symbol(file_path: Path, symbol_name: str) -> dict | None:
-    """Extrahiert ein Symbol aus einer Python-Datei via ast-Modul.
+    """Extract a symbol from a Python file using the ast module.
 
     Args:
-        file_path: Pfad zur Python-Datei
-        symbol_name: Name des gesuchten Symbols
+        file_path: Path to the Python file
+        symbol_name: Name of the symbol to find
 
     Returns:
-        Dict mit {file, symbol, line_start, line_end, source_code} oder None
+        Dict with {file, symbol, line_start, line_end, source_code} or None
     """
     try:
         source = file_path.read_text(encoding="utf-8")
@@ -116,7 +116,7 @@ def _extract_python_symbol(file_path: Path, symbol_name: str) -> dict | None:
     line_start = node.lineno
     line_end = node.end_lineno or node.lineno
 
-    # Quellcode-Extraktion (1-basiert)
+    # Source extraction (1-based line numbers)
     source_lines = source.splitlines()
     symbol_lines = source_lines[line_start - 1 : line_end]
     source_code = "\n".join(symbol_lines)
@@ -130,36 +130,36 @@ def _extract_python_symbol(file_path: Path, symbol_name: str) -> dict | None:
     }
 
 
-# ─── Grep-Fallback fuer nicht-Python Dateien ─────────────────────────────────
+# ─── Grep fallback for non-Python files ──────────────────────────────────────
 
-# Muster die einen Symbolstart erkennen
+# Patterns that identify the start of a symbol definition
 _START_PATTERNS = [
-    # TypeScript/JavaScript Funktionen
+    # TypeScript/JavaScript functions
     r"(?:export\s+)?(?:async\s+)?function\s+{name}\s*[\(<]",
-    # TypeScript/JavaScript Arrow Functions
+    # TypeScript/JavaScript arrow functions
     r"(?:export\s+)?(?:const|let|var)\s+{name}\s*=",
-    # Klassen
+    # Classes
     r"(?:export\s+)?(?:abstract\s+)?class\s+{name}[\s{{<]",
-    # Go Funktionen
+    # Go functions
     r"func\s+(?:\(\w+\s+\*?\w+\)\s+)?{name}\s*\(",
-    # Rust Funktionen
+    # Rust functions
     r"(?:pub\s+)?(?:async\s+)?fn\s+{name}\s*[(<]",
 ]
 
 
 def _find_block_end(lines: list[str], start_idx: int) -> int:
-    """Findet das Ende eines { }-Blocks oder indentierten Blocks.
+    """Find the end of a { }-block or indented block.
 
     Args:
-        lines: Alle Zeilen der Datei (0-basiert)
-        start_idx: Startzeile des Blocks (0-basiert)
+        lines: All lines of the file (0-indexed)
+        start_idx: Start line index of the block (0-indexed)
 
     Returns:
-        End-Zeilenindex (0-basiert, inklusiv)
+        End line index (0-indexed, inclusive)
     """
     start_line = lines[start_idx]
 
-    # Strategie 1: Geschweifte Klammern zaehlen
+    # Strategy 1: Count curly braces
     brace_count = 0
     found_opening = False
 
@@ -174,14 +174,14 @@ def _find_block_end(lines: list[str], start_idx: int) -> int:
                 if found_opening and brace_count == 0:
                     return i
 
-    # Strategie 2: Indentierung verfolgen (Python-Stil)
+    # Strategy 2: Track indentation (Python-style)
     if not found_opening:
-        # Basis-Einrueckung des Startblocks bestimmen
+        # Determine base indentation of the start block
         base_indent = len(start_line) - len(start_line.lstrip())
 
         for i in range(start_idx + 1, len(lines)):
             line = lines[i]
-            if not line.strip():  # Leerzeilen ueberspringen
+            if not line.strip():  # Skip blank lines
                 continue
             current_indent = len(line) - len(line.lstrip())
             if current_indent <= base_indent:
@@ -191,14 +191,14 @@ def _find_block_end(lines: list[str], start_idx: int) -> int:
 
 
 def _extract_grep_symbol(file_path: Path, symbol_name: str) -> dict | None:
-    """Extrahiert ein Symbol via Regex + Indentierungs-Heuristik (Fallback).
+    """Extract a symbol via regex + indentation heuristic (fallback).
 
     Args:
-        file_path: Pfad zur Datei
-        symbol_name: Name des gesuchten Symbols
+        file_path: Path to the file
+        symbol_name: Name of the symbol to find
 
     Returns:
-        Dict oder None
+        Dict or None
     """
     try:
         content = file_path.read_text(encoding="utf-8")
@@ -206,7 +206,7 @@ def _extract_grep_symbol(file_path: Path, symbol_name: str) -> dict | None:
     except UnicodeDecodeError:
         return None
 
-    # Suche nach Symbolstart
+    # Search for symbol start
     start_idx: int | None = None
 
     for pattern_template in _START_PATTERNS:
@@ -227,13 +227,13 @@ def _extract_grep_symbol(file_path: Path, symbol_name: str) -> dict | None:
     return {
         "file": str(file_path),
         "symbol": symbol_name,
-        "line_start": start_idx + 1,  # 1-basiert
-        "line_end": end_idx + 1,  # 1-basiert
+        "line_start": start_idx + 1,  # 1-based
+        "line_end": end_idx + 1,      # 1-based
         "source_code": "\n".join(symbol_lines),
     }
 
 
-# ─── Hauptfunktion ────────────────────────────────────────────────────────────
+# ─── Main function ────────────────────────────────────────────────────────────
 
 
 def unfold_symbol(
@@ -241,17 +241,16 @@ def unfold_symbol(
     symbol_name: str,
     command_runner: CommandRunner | None = None,
 ) -> dict | None:
-    """Extrahiert ein vollstaendiges Symbol AST-bounded aus einer Datei.
+    """Extract a complete symbol (AST-bounded) from a file.
 
     Args:
-        file_path: Pfad zur zu analysierenden Datei
-        symbol_name: Name des gesuchten Symbols
-        command_runner: CommandRunner-Instanz (None = Default)
+        file_path: Path to the file to analyse
+        symbol_name: Name of the symbol to find
+        command_runner: CommandRunner instance (unused, kept for API compatibility)
 
     Returns:
-        Dict mit {file, symbol, line_start, line_end, source_code} oder None
+        Dict with {file, symbol, line_start, line_end, source_code} or None
     """
-    runner = command_runner or get_default_runner()
     file_path = Path(file_path)
 
     if not file_path.exists():
@@ -260,24 +259,23 @@ def unfold_symbol(
     if file_path.suffix == ".py":
         return _extract_python_symbol(file_path, symbol_name)
 
-    # Versuche tree-sitter CLI
-    rc, stdout, stderr = runner.run(["ts", "parse", str(file_path)])
-    if rc == 0 and stdout.strip():
-        result = _parse_treesitter_symbol(file_path, symbol_name, stdout)
-        if result:
-            return result
+    # Try tree-sitter library (real AST, accurate line boundaries)
+    try:
+        from tree_sitter_utils import find_symbol_in_file
+        sym = find_symbol_in_file(file_path, symbol_name)
+        if sym is not None:
+            return {
+                "file": str(file_path),
+                "symbol": symbol_name,
+                "line_start": sym.line_start,
+                "line_end": sym.line_end,
+                "source_code": sym.source_code,
+            }
+    except ImportError:
+        pass
 
-    # Grep-Fallback
+    # Fallback: grep-based heuristic
     return _extract_grep_symbol(file_path, symbol_name)
-
-
-def _parse_treesitter_symbol(
-    file_path: Path, symbol_name: str, ts_output: str
-) -> dict | None:
-    """Parst tree-sitter Output und sucht nach einem bestimmten Symbol."""
-    # Vereinfachte Implementierung — faellt auf grep-Fallback zurueck
-    # wenn keine strukturierten Daten verfuegbar
-    return None
 
 
 # ─── CLI Entry Point ──────────────────────────────────────────────────────────

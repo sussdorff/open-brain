@@ -1,4 +1,4 @@
-"""smart_search.py — AST-basierte Symbolsuche fuer Python, grep-Fallback fuer andere Sprachen.
+"""smart_search.py — AST-based symbol search for Python, grep fallback for other languages.
 
 Usage:
     uv run python smart_search.py <query> [--path=.] [--pattern=*.py] [--max-results=20]
@@ -20,23 +20,16 @@ from typing import Protocol
 
 
 class CommandRunner(Protocol):
-    """Protokoll fuer subprocess-Aufrufe."""
+    """Protocol for subprocess calls."""
 
     def run(self, cmd: list[str]) -> tuple[int, str, str]:
-        """Fuehrt einen Befehl aus.
-
-        Args:
-            cmd: Befehlsliste
-
-        Returns:
-            (returncode, stdout, stderr)
-        """
+        """Execute a command and return (returncode, stdout, stderr)."""
         ...
 
 
 @dataclass
 class DefaultCommandRunner:
-    """Echter subprocess-Runner mit sicherer Umgebung."""
+    """Real subprocess runner with a restricted environment."""
 
     _SAFE_ENV: dict[str, str] = field(default_factory=lambda: {
         "PATH": __import__("os").environ.get("PATH", ""),
@@ -44,7 +37,7 @@ class DefaultCommandRunner:
     })
 
     def run(self, cmd: list[str]) -> tuple[int, str, str]:
-        """Fuehrt einen Befehl aus und gibt (returncode, stdout, stderr) zurueck."""
+        """Execute a command and return (returncode, stdout, stderr)."""
         try:
             result = subprocess.run(
                 cmd,
@@ -62,13 +55,13 @@ class DefaultCommandRunner:
 
 @dataclass
 class MockCommandRunner:
-    """Test-Runner mit konfigurierbaren Antworten."""
+    """Test runner with configurable responses."""
 
     responses: dict[str, tuple[int, str, str]] = field(default_factory=dict)
     default_response: tuple[int, str, str] = (0, "", "")
 
     def run(self, cmd: list[str]) -> tuple[int, str, str]:
-        """Gibt konfigurierte Antwort oder Default zurueck."""
+        """Return the configured response or the default."""
         key = " ".join(cmd)
         for pattern, response in self.responses.items():
             if pattern in key:
@@ -77,16 +70,16 @@ class MockCommandRunner:
 
 
 def get_default_runner() -> CommandRunner:
-    """Gibt den Standard-CommandRunner zurueck."""
+    """Return the default CommandRunner instance."""
     return DefaultCommandRunner()
 
 
-# ─── Typen ────────────────────────────────────────────────────────────────────
+# ─── Types ────────────────────────────────────────────────────────────────────
 
 
 @dataclass
 class SymbolResult:
-    """Gefundenes Symbol."""
+    """A found symbol."""
 
     file: str
     line: int
@@ -96,15 +89,15 @@ class SymbolResult:
     context: str = ""
 
 
-# ─── Python AST Analyse ───────────────────────────────────────────────────────
+# ─── Python AST analysis ──────────────────────────────────────────────────────
 
 
 def _build_signature(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
-    """Baut eine lesbare Funktionssignatur aus einem AST-Knoten."""
+    """Build a readable function signature from an AST node."""
     args = []
     func_args = node.args
 
-    # Positionsargumente
+    # Positional arguments
     for arg in func_args.args:
         arg_str = arg.arg
         if arg.annotation:
@@ -128,7 +121,7 @@ def _build_signature(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
 def _extract_python_symbols(
     file_path: Path, parent_class: str | None = None
 ) -> list[SymbolResult]:
-    """Extrahiert alle Symbole aus einer Python-Datei via ast-Modul."""
+    """Extract all symbols from a Python file via the ast module."""
     try:
         source = file_path.read_text(encoding="utf-8")
         tree = ast.parse(source)
@@ -146,7 +139,7 @@ def _extract_python_symbols(
                 name=node.name,
                 signature=node.name,
             ))
-            # Methoden der Klasse
+            # Class methods
             for item in node.body:
                 if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     results.append(SymbolResult(
@@ -158,8 +151,8 @@ def _extract_python_symbols(
                         context=f"class {node.name}",
                     ))
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            # Nur top-level Funktionen (Methoden werden oben erfasst)
-            # Pruefe ob es eine Methode ist (parent ist ClassDef)
+            # Only top-level functions (methods are captured above)
+            # Check whether this node is a method (parent is ClassDef)
             is_method = False
             for potential_parent in ast.walk(tree):
                 if isinstance(potential_parent, ast.ClassDef):
@@ -180,7 +173,7 @@ def _extract_python_symbols(
     return results
 
 
-# ─── Grep-Fallback fuer nicht-Python Dateien ─────────────────────────────────
+# ─── Grep fallback for non-Python files ──────────────────────────────────────
 
 
 _SYMBOL_PATTERNS = [
@@ -198,7 +191,7 @@ _SYMBOL_PATTERNS = [
 
 
 def _extract_grep_symbols(file_path: Path) -> list[SymbolResult]:
-    """Extrahiert Symbole via regex-Muster (Fallback fuer nicht-Python Dateien)."""
+    """Extract symbols via regex patterns (fallback for non-Python files)."""
     try:
         lines = file_path.read_text(encoding="utf-8").splitlines()
     except UnicodeDecodeError:
@@ -219,7 +212,7 @@ def _extract_grep_symbols(file_path: Path) -> list[SymbolResult]:
                     signature=line.strip()[:100],
                     context=line.strip(),
                 ))
-                break  # Nur erste Uebereinstimmung pro Zeile
+                break  # Only first match per line
 
     return results
 
@@ -228,7 +221,7 @@ def _extract_grep_symbols(file_path: Path) -> list[SymbolResult]:
 
 
 def _rank_score(name: str, query: str) -> int:
-    """Berechnet einen Ranking-Score: hoeher ist besser.
+    """Calculate a ranking score: higher is better.
 
     Exact match > prefix match > substring match
     """
@@ -254,19 +247,19 @@ def _rank_score(name: str, query: str) -> int:
 def rank_results(
     results: list[dict], query: str
 ) -> list[dict]:
-    """Sortiert Ergebnisse nach Relevanz zum Query.
+    """Sort results by relevance to the query.
 
     Args:
-        results: Liste von Symbol-Dicts
-        query: Suchbegriff
+        results: List of symbol dicts
+        query: Search term
 
     Returns:
-        Sortierte Liste (beste Uebereinstimmung zuerst)
+        Sorted list (best match first)
     """
     return sorted(results, key=lambda r: _rank_score(r["name"], query), reverse=True)
 
 
-# ─── Hauptfunktion ────────────────────────────────────────────────────────────
+# ─── Main function ────────────────────────────────────────────────────────────
 
 
 def search_files(
@@ -276,22 +269,21 @@ def search_files(
     max_results: int = 20,
     command_runner: CommandRunner | None = None,
 ) -> list[dict]:
-    """Sucht nach Symbolen in Dateien.
+    """Search for symbols in files.
 
     Args:
-        query: Symbolname oder Teilname
-        search_path: Verzeichnis fuer die rekursive Suche
-        pattern: Glob-Muster fuer Dateifilter
-        max_results: Maximale Anzahl Ergebnisse
-        command_runner: CommandRunner-Instanz (None = Default)
+        query: Symbol name or partial name
+        search_path: Directory for recursive search
+        pattern: Glob pattern for file filtering
+        max_results: Maximum number of results
+        command_runner: CommandRunner instance (unused, kept for API compatibility)
 
     Returns:
-        JSON-serialisierbare Liste von Symbol-Dicts
+        JSON-serialisable list of symbol dicts
     """
-    runner = command_runner or get_default_runner()
     search_path = Path(search_path)
 
-    # Alle passenden Dateien finden
+    # Collect all matching files
     if "," in pattern:
         patterns = [p.strip() for p in pattern.split(",")]
     else:
@@ -299,12 +291,12 @@ def search_files(
 
     files: list[Path] = []
     for pat in patterns:
-        # Sicherstellen dass recursive glob genutzt wird
+        # Ensure recursive glob is used
         if not pat.startswith("**/"):
             pat = f"**/{pat}"
         files.extend(search_path.glob(pat))
 
-    # Deduplizieren und sortieren
+    # Deduplicate and sort
     files = sorted(set(files))
 
     all_symbols: list[SymbolResult] = []
@@ -313,17 +305,34 @@ def search_files(
         if file_path.suffix == ".py":
             symbols = _extract_python_symbols(file_path)
         else:
-            # Versuche tree-sitter CLI, Fallback auf grep
-            rc, stdout, stderr = runner.run(["ts", "parse", str(file_path)])
-            if rc == 0 and stdout.strip():
-                # tree-sitter Output parsen (vereinfacht)
-                symbols = _parse_treesitter_output(file_path, stdout)
+            # Try tree-sitter library first (real AST, accurate line numbers)
+            try:
+                from tree_sitter_utils import parse_file_with_treesitter
+                ast_symbols = parse_file_with_treesitter(file_path)
+            except ImportError:
+                ast_symbols = None
+
+            if ast_symbols is not None:
+                symbols = []
+                for sym in ast_symbols:
+                    signature = sym.source_code.splitlines()[0][:100] if sym.source_code else sym.name
+                    symbols.append(SymbolResult(
+                        file=str(file_path),
+                        line=sym.line_start,
+                        type=sym.type,
+                        name=sym.name,
+                        signature=signature,
+                        context=signature,
+                    ))
+                if not symbols:
+                    symbols = _extract_grep_symbols(file_path)
             else:
+                # Fallback: grep-based heuristic
                 symbols = _extract_grep_symbols(file_path)
 
         all_symbols.extend(symbols)
 
-    # Filtern: nur Symbole die den Query enthalten
+    # Filter: only symbols whose name contains the query
     matching = [s for s in all_symbols if query.lower() in s.name.lower()]
 
     # Ranking
@@ -343,44 +352,11 @@ def search_files(
     return ranked[:max_results]
 
 
-def _parse_treesitter_output(file_path: Path, output: str) -> list[SymbolResult]:
-    """Parst tree-sitter CLI Output nach Symbolen."""
-    results: list[SymbolResult] = []
-    # Vereinfachte Implementierung: suche nach Funktions- und Klassennamen
-    # in tree-sitter S-expression Output
-    fn_pattern = re.compile(r'\(function_declaration\s+name:\s*\(identifier\)\s+"(\w+)"')
-    class_pattern = re.compile(r'\(class_declaration\s+name:\s*\(type_identifier\)\s+"(\w+)"')
-
-    for match in fn_pattern.finditer(output):
-        results.append(SymbolResult(
-            file=str(file_path),
-            line=1,
-            type="function",
-            name=match.group(1),
-            signature=match.group(1),
-        ))
-
-    for match in class_pattern.finditer(output):
-        results.append(SymbolResult(
-            file=str(file_path),
-            line=1,
-            type="class",
-            name=match.group(1),
-            signature=match.group(1),
-        ))
-
-    # Fallback wenn keine tree-sitter Strukturen erkannt
-    if not results:
-        results = _extract_grep_symbols(file_path)
-
-    return results
-
-
 # ─── CLI Entry Point ──────────────────────────────────────────────────────────
 
 
 def _parse_args(argv: list[str]) -> tuple[str, Path, str, int]:
-    """Parst Kommandozeilen-Argumente."""
+    """Parse command-line arguments."""
     if not argv:
         print("Usage: smart_search.py <query> [--path=.] [--pattern=*.py] [--max-results=20]")
         sys.exit(1)

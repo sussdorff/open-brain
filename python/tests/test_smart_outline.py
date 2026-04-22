@@ -177,3 +177,145 @@ class TestSmartOutlineFallback:
 
         names = [s["name"] for s in result["symbols"]]
         assert "processOrder" in names or len(names) >= 1
+
+
+# ─── Test: TypeScript tree-sitter AST outline ────────────────────────────────
+
+
+class TestSmartOutlineTypeScriptAST:
+    """Tests for real tree-sitter AST parsing of TypeScript files."""
+
+    def _make_ts_file(self, tmp_path, content: str, name: str = "module.ts"):
+        f = tmp_path / name
+        f.write_text(content)
+        return f
+
+    def test_ts_outline_function_declaration_accurate_lines(self, tmp_path):
+        """tree-sitter outline gives accurate line numbers for function declarations."""
+        from smart_outline import outline_file
+
+        ts_file = self._make_ts_file(
+            tmp_path,
+            "function alpha(): void {\n"
+            "  console.log('a');\n"
+            "}\n"
+            "\n"
+            "function beta(x: number): number {\n"
+            "  return x * 2;\n"
+            "}\n",
+        )
+
+        result = outline_file(ts_file)
+
+        symbols = {s["name"]: s for s in result["symbols"]}
+        assert "alpha" in symbols, f"Expected 'alpha' in {list(symbols)}"
+        assert symbols["alpha"]["line"] == 1
+        assert symbols["alpha"]["end_line"] == 3
+        assert symbols["beta"]["line"] == 5
+        assert symbols["beta"]["end_line"] == 7
+
+    def test_ts_outline_class_declaration_accurate_lines(self, tmp_path):
+        """tree-sitter outline gives accurate line numbers for class declarations."""
+        from smart_outline import outline_file
+
+        ts_file = self._make_ts_file(
+            tmp_path,
+            "class MyService {\n"
+            "  getUser(id: string): User {\n"
+            "    return db.find(id);\n"
+            "  }\n"
+            "}\n",
+        )
+
+        result = outline_file(ts_file)
+
+        symbols = {s["name"]: s for s in result["symbols"]}
+        assert "MyService" in symbols
+        assert symbols["MyService"]["line"] == 1
+        assert symbols["MyService"]["end_line"] == 5
+        assert symbols["MyService"]["type"] == "class"
+
+    def test_ts_outline_interface_declaration(self, tmp_path):
+        """tree-sitter outline detects interface declarations."""
+        from smart_outline import outline_file
+
+        ts_file = self._make_ts_file(
+            tmp_path,
+            "interface Config {\n"
+            "  host: string;\n"
+            "  port: number;\n"
+            "}\n",
+        )
+
+        result = outline_file(ts_file)
+
+        symbols = {s["name"]: s for s in result["symbols"]}
+        assert "Config" in symbols
+        assert symbols["Config"]["type"] == "interface"
+        assert symbols["Config"]["line"] == 1
+        assert symbols["Config"]["end_line"] == 4
+
+    def test_ts_outline_arrow_function_variable(self, tmp_path):
+        """tree-sitter outline detects arrow function variables."""
+        from smart_outline import outline_file
+
+        ts_file = self._make_ts_file(
+            tmp_path,
+            "const handler = async (req: Request): Promise<Response> => {\n"
+            "  return new Response();\n"
+            "};\n",
+        )
+
+        result = outline_file(ts_file)
+
+        symbols = {s["name"]: s for s in result["symbols"]}
+        assert "handler" in symbols
+        assert symbols["handler"]["type"] == "arrow_function"
+        assert symbols["handler"]["line"] == 1
+        assert symbols["handler"]["end_line"] == 3
+
+    def test_ts_outline_method_definition(self, tmp_path):
+        """tree-sitter outline detects method definitions inside classes."""
+        from smart_outline import outline_file
+
+        ts_file = self._make_ts_file(
+            tmp_path,
+            "class Api {\n"
+            "  fetchData(url: string): Promise<void> {\n"
+            "    return fetch(url);\n"
+            "  }\n"
+            "\n"
+            "  postData(url: string, body: object): Promise<void> {\n"
+            "    return fetch(url, { method: 'POST', body });\n"
+            "  }\n"
+            "}\n",
+        )
+
+        result = outline_file(ts_file)
+
+        names = [s["name"] for s in result["symbols"]]
+        assert "fetchData" in names
+        assert "postData" in names
+        methods = {s["name"]: s for s in result["symbols"] if s["name"] in ("fetchData", "postData")}
+        assert methods["fetchData"]["type"] == "method"
+        assert methods["fetchData"]["line"] == 2
+        assert methods["fetchData"]["end_line"] == 4
+
+    def test_ts_outline_exported_function(self, tmp_path):
+        """tree-sitter outline handles exported function declarations."""
+        from smart_outline import outline_file
+
+        ts_file = self._make_ts_file(
+            tmp_path,
+            "export function greet(name: string): string {\n"
+            "  return 'Hello ' + name;\n"
+            "}\n",
+        )
+
+        result = outline_file(ts_file)
+
+        symbols = {s["name"]: s for s in result["symbols"]}
+        assert "greet" in symbols
+        assert symbols["greet"]["type"] == "function"
+        assert symbols["greet"]["line"] == 1
+        assert symbols["greet"]["end_line"] == 3
