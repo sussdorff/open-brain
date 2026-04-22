@@ -4,6 +4,11 @@ Usage:
     uv run python smart_unfold.py <file_path> <symbol_name>
 """
 
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["tree-sitter-language-pack>=1.6.2"]
+# ///
+
 from __future__ import annotations
 
 import ast

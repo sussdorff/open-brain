@@ -6,6 +6,11 @@ TSX, JSX, Go, and Rust, plus a generic parse_file_with_treesitter() function.
 Gracefully degrades if tree-sitter-language-pack is not installed (ImportError).
 """
 
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["tree-sitter-language-pack>=1.6.2"]
+# ///
+
 from __future__ import annotations
 
 from dataclasses import dataclass

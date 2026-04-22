@@ -4,6 +4,11 @@ Usage:
     uv run python smart_search.py <query> [--path=.] [--pattern=*.py] [--max-results=20]
 """
 
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["tree-sitter-language-pack>=1.6.2"]
+# ///
+
 from __future__ import annotations
 
 import ast
