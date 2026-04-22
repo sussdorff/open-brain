@@ -5,7 +5,18 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(open-brain-rxz)* Normalize index_id in content-hash dedup to match insert path
+
+## [0.12.2] - 2026-04-22
+
+### Bug Fixes
+
 - *(open-brain-2nr)* Replace local _importance_rank with interface.rank_importance
+
+### Miscellaneous
+
+- *(open-brain-2nr)* Update changelog
+- Bump version to 0.12.2
 
 ## [0.12.1] - 2026-04-21
 

@@ -902,14 +902,16 @@ class PostgresDataLayer:
 
             # ── Content hash dedup ──
             content_hash = hashlib.sha256(params.text.encode()).hexdigest()
+            # Normalize index_id for dedup: inserts use `index_id or 1`; match the same scope
+            content_hash_index_id = index_id if index_id is not None else 1
             dup_row = await conn.fetchrow(
                 """SELECT id FROM memories
                    WHERE metadata->>'content_hash' = $1
                      AND created_at > NOW() - ($3 * INTERVAL '1 day')
-                     AND (index_id IS NOT DISTINCT FROM $2)
+                     AND index_id = $2
                    LIMIT 1""",
                 content_hash,
-                index_id,
+                content_hash_index_id,
                 DEDUP_WINDOW_DAYS,
             )
             if dup_row:
