@@ -5,7 +5,18 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(open-brain-2nr)* Replace local _importance_rank with interface.rank_importance
+
+## [0.12.1] - 2026-04-21
+
+### Bug Fixes
+
 - *(open-brain-7n0)* Guard materialize_archive against critical/high importance memories
+
+### Miscellaneous
+
+- *(open-brain-7n0)* Update changelog
+- Bump version to 0.12.1
 
 ## [0.12.0] - 2026-04-21
 

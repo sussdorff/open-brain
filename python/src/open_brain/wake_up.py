@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from open_brain.data_layer.interface import Memory
+from open_brain.data_layer.interface import Memory, rank_importance
 
 logger = logging.getLogger(__name__)
 
@@ -49,18 +49,12 @@ def classify_memory(memory: Memory) -> str:
     return "context"
 
 
-def _importance_rank(importance: str) -> int:
-    """Return importance rank (3=critical, 2=high, 1=medium, 0=low). Unknown values → 0 with warning."""
-    known = {"critical": 3, "high": 2, "medium": 1, "low": 0}
-    if importance not in known:
-        logger.warning("Unknown importance value %r, treating as low", importance)
-    return known.get(importance, 0)
-
-
 def _sort_key(memory: Memory) -> tuple[int, float, int, float]:
     """Sort key for descending order: importance rank, priority, access_count, updated_at (newest first)."""
+    # Normalize unknown importance values to "low" before calling rank_importance,
+    # which raises ValueError for unknown values.
     imp = memory.importance if memory.importance in ("critical", "high", "medium", "low") else "low"
-    rank = _importance_rank(imp)
+    rank = rank_importance(imp)
     try:
         from datetime import datetime, timezone
         dt = datetime.fromisoformat(memory.updated_at.replace("Z", "+00:00"))
