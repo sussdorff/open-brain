@@ -3,8 +3,12 @@
 Reads a memory JSON object from stdin, runs build_provenance_update,
 and prints the result as JSON (or "null" if no code references found).
 
-Usage:
-    echo '<memory_json>' | uv run python plugin/scripts/provenance_check.py
+Usage (safe for arbitrary JSON — assign to variable first):
+    MEMORY_JSON=$(...)
+    printf '%s' "$MEMORY_JSON" | uv run python plugin/scripts/provenance_check.py
+
+Requires env var:
+    PROVENANCE_REPO_ROOT — absolute path to the repo root for resolving code refs
 
 Input (stdin):
     JSON object with keys: id, type (optional), content, metadata (optional)
@@ -13,8 +17,9 @@ Output (stdout):
     JSON object with "metadata_patch" key, or the string "null".
 
 Example:
-    echo '{"id":"abc","content":"See src/foo.py for details."}' \\
-        | uv run python plugin/scripts/provenance_check.py
+    export PROVENANCE_REPO_ROOT="/Users/malte/code/claude"
+    MEMORY_JSON='{"id":"abc","content":"See src/foo.py for details."}'
+    printf '%s' "$MEMORY_JSON" | uv run python plugin/scripts/provenance_check.py
 """
 
 # /// script
