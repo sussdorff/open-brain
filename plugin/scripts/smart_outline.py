@@ -253,12 +253,32 @@ def outline_file(
     if file_path.suffix == ".py":
         symbols = _outline_python(file_path)
     else:
-        # Versuche tree-sitter CLI
-        rc, stdout, stderr = runner.run(["ts", "parse", str(file_path)])
-        if rc == 0 and stdout.strip():
-            symbols = _parse_treesitter_symbols(file_path, stdout)
+        # Try tree-sitter library first (real AST, accurate line numbers)
+        try:
+            from tree_sitter_utils import parse_file_with_treesitter
+            ast_symbols = parse_file_with_treesitter(file_path)
+        except ImportError:
+            ast_symbols = None
+
+        if ast_symbols is not None:
+            symbols = []
+            for sym in ast_symbols:
+                symbols.append(SymbolInfo(
+                    name=sym.name,
+                    type=sym.type,
+                    line=sym.line_start,
+                    end_line=sym.line_end,
+                    signature=sym.source_code.splitlines()[0][:120] if sym.source_code else sym.name,
+                ))
+            if not symbols:
+                symbols = _outline_grep(file_path)
         else:
-            symbols = _outline_grep(file_path)
+            # Fallback: try tree-sitter CLI, then grep
+            rc, stdout, stderr = runner.run(["ts", "parse", str(file_path)])
+            if rc == 0 and stdout.strip():
+                symbols = _parse_treesitter_symbols(file_path, stdout)
+            else:
+                symbols = _outline_grep(file_path)
 
     return {
         "file": str(file_path),
@@ -276,17 +296,29 @@ def outline_file(
 
 
 def _parse_treesitter_symbols(file_path: Path, output: str) -> list[SymbolInfo]:
-    """Parst tree-sitter Output nach Symbolen."""
-    # Vereinfachte Implementierung — tree-sitter S-expression Output
+    """Parse symbols using tree-sitter library (real AST) with grep fallback.
+
+    The 'output' parameter is kept for backward compatibility but is no longer
+    used — the tree-sitter library parses the file directly.
+    """
+    try:
+        from tree_sitter_utils import parse_file_with_treesitter
+    except ImportError:
+        return _outline_grep(file_path)
+
+    ast_symbols = parse_file_with_treesitter(file_path)
+    if ast_symbols is None:
+        return _outline_grep(file_path)
+
     results: list[SymbolInfo] = []
-    fn_pattern = re.compile(r'\(function_declaration\s+name:\s*\(identifier\)\s+"(\w+)"')
-    class_pattern = re.compile(r'\(class_declaration\s+name:\s*\(type_identifier\)\s+"(\w+)"')
-
-    for match in fn_pattern.finditer(output):
-        results.append(SymbolInfo(name=match.group(1), type="function", line=1, end_line=1, signature=match.group(1)))
-
-    for match in class_pattern.finditer(output):
-        results.append(SymbolInfo(name=match.group(1), type="class", line=1, end_line=1, signature=match.group(1)))
+    for sym in ast_symbols:
+        results.append(SymbolInfo(
+            name=sym.name,
+            type=sym.type,
+            line=sym.line_start,
+            end_line=sym.line_end,
+            signature=sym.source_code.splitlines()[0][:120] if sym.source_code else sym.name,
+        ))
 
     if not results:
         results = _outline_grep(file_path)

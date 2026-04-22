@@ -260,7 +260,22 @@ def unfold_symbol(
     if file_path.suffix == ".py":
         return _extract_python_symbol(file_path, symbol_name)
 
-    # Versuche tree-sitter CLI
+    # Try tree-sitter library first (real AST, accurate line boundaries)
+    try:
+        from tree_sitter_utils import find_symbol_in_file
+        sym = find_symbol_in_file(file_path, symbol_name)
+        if sym is not None:
+            return {
+                "file": str(file_path),
+                "symbol": symbol_name,
+                "line_start": sym.line_start,
+                "line_end": sym.line_end,
+                "source_code": sym.source_code,
+            }
+    except ImportError:
+        pass
+
+    # Fallback: try tree-sitter CLI, then grep
     rc, stdout, stderr = runner.run(["ts", "parse", str(file_path)])
     if rc == 0 and stdout.strip():
         result = _parse_treesitter_symbol(file_path, symbol_name, stdout)
@@ -274,10 +289,27 @@ def unfold_symbol(
 def _parse_treesitter_symbol(
     file_path: Path, symbol_name: str, ts_output: str
 ) -> dict | None:
-    """Parst tree-sitter Output und sucht nach einem bestimmten Symbol."""
-    # Vereinfachte Implementierung — faellt auf grep-Fallback zurueck
-    # wenn keine strukturierten Daten verfuegbar
-    return None
+    """Find a symbol using tree-sitter library (real AST parsing).
+
+    The 'ts_output' parameter is kept for backward compatibility but is no longer
+    used — the tree-sitter library parses the file directly.
+    """
+    try:
+        from tree_sitter_utils import find_symbol_in_file
+    except ImportError:
+        return None
+
+    sym = find_symbol_in_file(file_path, symbol_name)
+    if sym is None:
+        return None
+
+    return {
+        "file": str(file_path),
+        "symbol": symbol_name,
+        "line_start": sym.line_start,
+        "line_end": sym.line_end,
+        "source_code": sym.source_code,
+    }
 
 
 # ─── CLI Entry Point ──────────────────────────────────────────────────────────

@@ -217,3 +217,125 @@ class TestSmartSearchMaxResults:
         results = search_files("target_fn", search_path=tmp_path)
 
         assert len(results) == 2
+
+
+# ─── Test: TypeScript tree-sitter AST search ─────────────────────────────────
+
+
+class TestSmartSearchTypeScriptAST:
+    """Tests for real tree-sitter AST parsing of TypeScript files."""
+
+    def test_ts_search_finds_function_with_accurate_line(self, tmp_path):
+        """tree-sitter search finds a TS function with accurate line number."""
+        from smart_search import search_files
+
+        ts_file = tmp_path / "api.ts"
+        ts_file.write_text(
+            "function helperFn(): void {\n"
+            "  console.log('helper');\n"
+            "}\n"
+            "\n"
+            "function fetchUser(id: string): Promise<User> {\n"
+            "  return api.get(id);\n"
+            "}\n"
+        )
+
+        results = search_files("fetchUser", search_path=tmp_path, pattern="*.ts")
+
+        assert len(results) >= 1
+        match = next((r for r in results if r["name"] == "fetchUser"), None)
+        assert match is not None
+        assert match["type"] == "function"
+        assert match["line"] == 5
+
+    def test_ts_search_finds_class_with_accurate_line(self, tmp_path):
+        """tree-sitter search finds a TS class with accurate line number."""
+        from smart_search import search_files
+
+        ts_file = tmp_path / "service.ts"
+        ts_file.write_text(
+            "function helper(): void {}\n"
+            "\n"
+            "class UserService {\n"
+            "  getUser(id: string): User {\n"
+            "    return db.find(id);\n"
+            "  }\n"
+            "}\n"
+        )
+
+        results = search_files("UserService", search_path=tmp_path, pattern="*.ts")
+
+        assert len(results) >= 1
+        match = next((r for r in results if r["name"] == "UserService"), None)
+        assert match is not None
+        assert match["type"] == "class"
+        assert match["line"] == 3
+
+    def test_ts_search_finds_interface(self, tmp_path):
+        """tree-sitter search finds a TS interface."""
+        from smart_search import search_files
+
+        ts_file = tmp_path / "types.ts"
+        ts_file.write_text(
+            "interface UserConfig {\n"
+            "  id: string;\n"
+            "  name: string;\n"
+            "}\n"
+        )
+
+        results = search_files("UserConfig", search_path=tmp_path, pattern="*.ts")
+
+        assert len(results) >= 1
+        match = next((r for r in results if r["name"] == "UserConfig"), None)
+        assert match is not None
+        assert match["type"] == "interface"
+
+    def test_ts_search_finds_arrow_function(self, tmp_path):
+        """tree-sitter search finds arrow function variables."""
+        from smart_search import search_files
+
+        ts_file = tmp_path / "handlers.ts"
+        ts_file.write_text(
+            "const handleRequest = async (req: Request): Promise<Response> => {\n"
+            "  return new Response();\n"
+            "};\n"
+        )
+
+        results = search_files("handleRequest", search_path=tmp_path, pattern="*.ts")
+
+        assert len(results) >= 1
+        match = next((r for r in results if r["name"] == "handleRequest"), None)
+        assert match is not None
+        assert match["type"] == "arrow_function"
+        assert match["line"] == 1
+
+    def test_ts_search_finds_class_method_with_accurate_line(self, tmp_path):
+        """tree-sitter search finds methods inside classes with accurate line numbers.
+
+        Grep fallback cannot detect methods inside class bodies because it only
+        matches top-level patterns. Tree-sitter traverses the full AST.
+        """
+        from smart_search import search_files
+
+        ts_file = tmp_path / "service.ts"
+        ts_file.write_text(
+            "class UserService {\n"
+            "  private id: string = '';\n"
+            "\n"
+            "  fetchUserData(userId: string): string {\n"
+            "    return this.id + userId;\n"
+            "  }\n"
+            "\n"
+            "  updateUserData(data: string): void {\n"
+            "    this.id = data;\n"
+            "  }\n"
+            "}\n"
+        )
+
+        results = search_files("fetchUserData", search_path=tmp_path, pattern="*.ts")
+
+        assert len(results) >= 1
+        match = next((r for r in results if r["name"] == "fetchUserData"), None)
+        assert match is not None, f"fetchUserData not found, got: {[r['name'] for r in results]}"
+        assert match["type"] == "method"
+        assert match["line"] == 4

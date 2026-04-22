@@ -313,13 +313,34 @@ def search_files(
         if file_path.suffix == ".py":
             symbols = _extract_python_symbols(file_path)
         else:
-            # Versuche tree-sitter CLI, Fallback auf grep
-            rc, stdout, stderr = runner.run(["ts", "parse", str(file_path)])
-            if rc == 0 and stdout.strip():
-                # tree-sitter Output parsen (vereinfacht)
-                symbols = _parse_treesitter_output(file_path, stdout)
+            # Try tree-sitter library first (real AST, accurate line numbers)
+            try:
+                from tree_sitter_utils import parse_file_with_treesitter
+                ast_symbols = parse_file_with_treesitter(file_path)
+            except ImportError:
+                ast_symbols = None
+
+            if ast_symbols is not None:
+                symbols = []
+                for sym in ast_symbols:
+                    signature = sym.source_code.splitlines()[0][:100] if sym.source_code else sym.name
+                    symbols.append(SymbolResult(
+                        file=str(file_path),
+                        line=sym.line_start,
+                        type=sym.type,
+                        name=sym.name,
+                        signature=signature,
+                        context=signature,
+                    ))
+                if not symbols:
+                    symbols = _extract_grep_symbols(file_path)
             else:
-                symbols = _extract_grep_symbols(file_path)
+                # Fallback: try tree-sitter CLI, then grep
+                rc, stdout, stderr = runner.run(["ts", "parse", str(file_path)])
+                if rc == 0 and stdout.strip():
+                    symbols = _parse_treesitter_output(file_path, stdout)
+                else:
+                    symbols = _extract_grep_symbols(file_path)
 
         all_symbols.extend(symbols)
 
@@ -344,32 +365,32 @@ def search_files(
 
 
 def _parse_treesitter_output(file_path: Path, output: str) -> list[SymbolResult]:
-    """Parst tree-sitter CLI Output nach Symbolen."""
+    """Parse symbols using tree-sitter library (real AST) with grep fallback.
+
+    The 'output' parameter is kept for backward compatibility but is no longer
+    used — the tree-sitter library parses the file directly.
+    """
+    try:
+        from tree_sitter_utils import parse_file_with_treesitter
+    except ImportError:
+        return _extract_grep_symbols(file_path)
+
+    ast_symbols = parse_file_with_treesitter(file_path)
+    if ast_symbols is None:
+        return _extract_grep_symbols(file_path)
+
     results: list[SymbolResult] = []
-    # Vereinfachte Implementierung: suche nach Funktions- und Klassennamen
-    # in tree-sitter S-expression Output
-    fn_pattern = re.compile(r'\(function_declaration\s+name:\s*\(identifier\)\s+"(\w+)"')
-    class_pattern = re.compile(r'\(class_declaration\s+name:\s*\(type_identifier\)\s+"(\w+)"')
-
-    for match in fn_pattern.finditer(output):
+    for sym in ast_symbols:
+        signature = sym.source_code.splitlines()[0][:100] if sym.source_code else sym.name
         results.append(SymbolResult(
             file=str(file_path),
-            line=1,
-            type="function",
-            name=match.group(1),
-            signature=match.group(1),
+            line=sym.line_start,
+            type=sym.type,
+            name=sym.name,
+            signature=signature,
+            context=signature,
         ))
 
-    for match in class_pattern.finditer(output):
-        results.append(SymbolResult(
-            file=str(file_path),
-            line=1,
-            type="class",
-            name=match.group(1),
-            signature=match.group(1),
-        ))
-
-    # Fallback wenn keine tree-sitter Strukturen erkannt
     if not results:
         results = _extract_grep_symbols(file_path)
 

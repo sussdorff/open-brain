@@ -196,3 +196,151 @@ class TestSmartUnfoldOutputFormat:
 
         assert result is not None
         assert "return line_7" in result["source_code"]
+
+
+# ─── Test: TypeScript tree-sitter AST unfold ─────────────────────────────────
+
+
+class TestSmartUnfoldTypeScriptAST:
+    """Tests for real tree-sitter AST parsing of TypeScript files.
+
+    These tests verify the tree-sitter LIBRARY path (not CLI runner).
+    They use a MockCommandRunner that returns failure to simulate missing ts CLI,
+    but the tree-sitter library should still extract accurate boundaries.
+    """
+
+    def test_ts_unfold_function_accurate_boundaries_via_library(self, tmp_path):
+        """tree-sitter library unfolds a TS function without needing CLI runner.
+
+        With ts CLI disabled, grep fallback cannot determine end_line accurately
+        for nested constructs. Tree-sitter library path must handle this via AST.
+        """
+        from smart_unfold import MockCommandRunner, unfold_symbol
+
+        ts_file = tmp_path / "handler.ts"
+        # Design: a class method that grep cannot end-line correctly,
+        # but tree-sitter library can via accurate AST end_point
+        ts_file.write_text(
+            "class Helper {\n"
+            "  static compute(): number { return 1; }\n"
+            "}\n"
+            "\n"
+            "function targetFunction(req: string): string {\n"
+            "  const data = req.trim();\n"
+            "  const processed = data.toUpperCase();\n"
+            "  return processed;\n"
+            "}\n"
+            "\n"
+            "function afterTarget(): void {\n"
+            "  console.log('after');\n"
+            "}\n"
+        )
+
+        # Even with failing CLI runner, library path must work
+        failing_runner = MockCommandRunner(default_response=(127, "", "not found"))
+        result = unfold_symbol(ts_file, "targetFunction", command_runner=failing_runner)
+
+        assert result is not None
+        assert result["symbol"] == "targetFunction"
+        assert result["line_start"] == 5
+        assert result["line_end"] == 9
+        assert "targetFunction" in result["source_code"]
+        assert "processed = data.toUpperCase" in result["source_code"]
+        assert "afterTarget" not in result["source_code"]
+
+    def test_ts_unfold_class_accurate_boundaries_via_library(self, tmp_path):
+        """tree-sitter library extracts a TS class with accurate end_line."""
+        from smart_unfold import MockCommandRunner, unfold_symbol
+
+        ts_file = tmp_path / "service.ts"
+        ts_file.write_text(
+            "class UserService {\n"
+            "  private users: string[] = [];\n"
+            "\n"
+            "  getUser(id: string): string {\n"
+            "    return this.users.find(u => u === id) || '';\n"
+            "  }\n"
+            "\n"
+            "  addUser(user: string): void {\n"
+            "    this.users.push(user);\n"
+            "  }\n"
+            "}\n"
+            "\n"
+            "class OtherClass {}\n"
+        )
+
+        failing_runner = MockCommandRunner(default_response=(127, "", "not found"))
+        result = unfold_symbol(ts_file, "UserService", command_runner=failing_runner)
+
+        assert result is not None
+        assert result["line_start"] == 1
+        assert result["line_end"] == 11
+        assert "getUser" in result["source_code"]
+        assert "addUser" in result["source_code"]
+        assert "OtherClass" not in result["source_code"]
+
+    def test_ts_unfold_inline_arrow_function_accurate_end_line(self, tmp_path):
+        """tree-sitter library gives accurate end_line for single-line arrow functions.
+
+        Grep fallback _find_block_end uses brace counting, which fails for arrow
+        functions without braces (e.g. 'const f = () => value;'). Tree-sitter
+        gives the correct end_line via node.end_point.
+        """
+        from smart_unfold import MockCommandRunner, unfold_symbol
+
+        ts_file = tmp_path / "api.ts"
+        ts_file.write_text(
+            "const helperFn = (): string => 'helper';\n"
+            "\n"
+            "const handleRequest = async (req: string): Promise<string> => {\n"
+            "  const body = req.trim();\n"
+            "  return body.toUpperCase();\n"
+            "};\n"
+            "\n"
+            "const otherFn = (): string => 'other';\n"
+        )
+
+        failing_runner = MockCommandRunner(default_response=(127, "", "not found"))
+        result = unfold_symbol(ts_file, "helperFn", command_runner=failing_runner)
+
+        assert result is not None
+        # tree-sitter must know helperFn is only line 1, not 6
+        assert result["line_start"] == 1
+        assert result["line_end"] == 1
+        assert "helperFn" in result["source_code"]
+        assert "handleRequest" not in result["source_code"]
+
+    def test_ts_unfold_not_found_returns_none(self, tmp_path):
+        """tree-sitter library returns None for missing symbol in TS file."""
+        from smart_unfold import MockCommandRunner, unfold_symbol
+
+        ts_file = tmp_path / "module.ts"
+        ts_file.write_text("function existingFn(): void {}\n")
+
+        failing_runner = MockCommandRunner(default_response=(127, "", "not found"))
+        result = unfold_symbol(ts_file, "missingSymbol", command_runner=failing_runner)
+
+        assert result is None
+
+    def test_ts_unfold_output_fields(self, tmp_path):
+        """tree-sitter library unfold output includes all required fields."""
+        from smart_unfold import MockCommandRunner, unfold_symbol
+
+        ts_file = tmp_path / "fmt.ts"
+        ts_file.write_text(
+            "function myTsFunc(a: number, b: number): number {\n"
+            "  return a + b;\n"
+            "}\n"
+        )
+
+        failing_runner = MockCommandRunner(default_response=(127, "", "not found"))
+        result = unfold_symbol(ts_file, "myTsFunc", command_runner=failing_runner)
+
+        assert result is not None
+        assert "file" in result
+        assert "symbol" in result
+        assert "line_start" in result
+        assert "line_end" in result
+        assert "source_code" in result
+        assert result["line_start"] == 1
+        assert result["line_end"] == 3
