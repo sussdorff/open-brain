@@ -5,7 +5,23 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(open-brain-l5l)* Fix 3 regressions from Codex review
+- *(open-brain-l5l)* Update provenance_check.py docstring to safe printf pattern
+
+### Refactoring
+
+- *(open-brain-l5l)* Extract memory-heartbeat inline code to plugin/scripts
+
+## [0.13.1] - 2026-04-22
+
+### Bug Fixes
+
 - *(open-brain-pi9)* Add PEP 723 inline metadata to plugin scripts for tree-sitter dep
+
+### Miscellaneous
+
+- *(open-brain-pi9)* Update changelog
+- Bump version to 0.13.1
 
 ## [0.13.0] - 2026-04-22
 
