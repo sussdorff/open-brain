@@ -8,8 +8,24 @@ Gracefully degrades if tree-sitter-language-pack is not installed (ImportError).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
+
+
+# ─── Node Protocol ────────────────────────────────────────────────────────────
+
+
+class _Node(Protocol):
+    """Protocol matching the tree-sitter Node interface."""
+
+    type: str
+    text: bytes | None
+    start_point: tuple  # (row, col)
+    end_point: tuple    # (row, col)
+    start_byte: int
+    end_byte: int
+    children: list  # list of _Node
 
 
 # ─── LanguageSpec Registry ────────────────────────────────────────────────────
@@ -45,6 +61,9 @@ class LanguageSpec:
 
     interface_name_child_type: str = ""
     """Child node type that carries the name for interfaces."""
+
+    method_name_child_type: str = ""
+    """Child node type for method names when different from function_name_child_type."""
 
 
 # Registry: extension -> LanguageSpec
@@ -100,20 +119,25 @@ _register(LanguageSpec(
     arrow_var_node_type="lexical_declaration",
 ))
 
+# Go: method_declaration uses "field_identifier" for name; type_declaration
+# wraps its name inside a type_spec child (handled by explicit walker logic).
 _register(LanguageSpec(
     name="go",
     extensions=(".go",),
-    function_node_types=("function_declaration", "method_declaration"),
+    function_node_types=("function_declaration",),
     class_node_types=("type_declaration",),
     function_name_child_type="identifier",
     class_name_child_type="type_identifier",
+    method_name_child_type="field_identifier",
 ))
 
+# Rust: impl_item is NOT a class — it's an implementation block.
+# Methods inside impl blocks are picked up as top-level function_item symbols.
 _register(LanguageSpec(
     name="rust",
     extensions=(".rs",),
     function_node_types=("function_item",),
-    class_node_types=("struct_item", "enum_item", "impl_item"),
+    class_node_types=("struct_item", "enum_item"),
     function_name_child_type="identifier",
     class_name_child_type="type_identifier",
 ))
@@ -141,31 +165,45 @@ class ASTSymbol:
 # ─── Generic Tree Walker ──────────────────────────────────────────────────────
 
 
-def _get_child_name(node: object, name_type: str) -> str | None:
-    """Extract name from a child node of the given type."""
-    for child in node.children:  # type: ignore[attr-defined]
+def _get_child_name(node: _Node, name_type: str) -> str | None:
+    """Extract name from a direct child node of the given type."""
+    for child in node.children:
         if child.type == name_type:
-            return child.text.decode("utf-8")
+            return child.text.decode("utf-8") if child.text else None
     return None
 
 
-def _extract_source(code_bytes: bytes, node: object) -> str:
-    """Extract source text for a node (1-indexed lines)."""
-    start_row = node.start_point.row  # type: ignore[attr-defined]
-    end_row = node.end_point.row  # type: ignore[attr-defined]
-    lines = code_bytes.decode("utf-8", errors="replace").splitlines()
-    return "\n".join(lines[start_row:end_row + 1])
+def _extract_source(node: _Node, code_bytes: bytes) -> str:
+    """Extract source text for a node using byte offsets (efficient, no line splitting)."""
+    return code_bytes[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
 
 
 def _walk_node(
-    node: object,
+    node: _Node,
     code_bytes: bytes,
     spec: LanguageSpec,
     symbols: list[ASTSymbol],
     in_class: bool = False,
 ) -> None:
     """Recursively walk AST node and collect symbols."""
-    node_type: str = node.type  # type: ignore[attr-defined]
+    node_type: str = node.type
+
+    # Go method_declaration: uses "field_identifier" for the method name
+    if node_type == "method_declaration" and spec.name == "go":
+        name_type = spec.method_name_child_type or spec.function_name_child_type
+        name = _get_child_name(node, name_type)
+        if name:
+            symbols.append(ASTSymbol(
+                name=name,
+                type="function",
+                line_start=node.start_point[0] + 1,
+                line_end=node.end_point[0] + 1,
+                source_code=_extract_source(node, code_bytes),
+            ))
+        # Recurse into children
+        for child in node.children:
+            _walk_node(child, code_bytes, spec, symbols, in_class=False)
+        return
 
     # Function declarations
     if node_type in spec.function_node_types:
@@ -175,16 +213,36 @@ def _walk_node(
             symbols.append(ASTSymbol(
                 name=name,
                 type=sym_type,
-                line_start=node.start_point.row + 1,  # type: ignore[attr-defined]
-                line_end=node.end_point.row + 1,  # type: ignore[attr-defined]
-                source_code=_extract_source(code_bytes, node),
+                line_start=node.start_point[0] + 1,
+                line_end=node.end_point[0] + 1,
+                source_code=_extract_source(node, code_bytes),
             ))
-            # Walk into methods to find nested functions (but mark as in_class=False)
-            for child in node.children:  # type: ignore[attr-defined]
-                _walk_node(child, code_bytes, spec, symbols, in_class=False)
-            return
+        # Walk into children to find nested functions
+        for child in node.children:
+            _walk_node(child, code_bytes, spec, symbols, in_class=False)
+        return
 
-    # Class declarations
+    # Go type_declaration: name is inside a type_spec child
+    if node_type == "type_declaration" and spec.name == "go":
+        # Walk into type_spec children to extract the type name
+        for child in node.children:
+            if child.type == "type_spec":
+                name = _get_child_name(child, "type_identifier")
+                if name:
+                    symbols.append(ASTSymbol(
+                        name=name,
+                        type="class",
+                        line_start=node.start_point[0] + 1,
+                        line_end=node.end_point[0] + 1,
+                        source_code=_extract_source(node, code_bytes),
+                    ))
+                break
+        # Recurse into children
+        for child in node.children:
+            _walk_node(child, code_bytes, spec, symbols, in_class=True)
+        return
+
+    # Class declarations (non-Go)
     if node_type in spec.class_node_types:
         name = _get_child_name(node, spec.class_name_child_type)
         if not name:
@@ -193,14 +251,14 @@ def _walk_node(
             symbols.append(ASTSymbol(
                 name=name,
                 type="class",
-                line_start=node.start_point.row + 1,  # type: ignore[attr-defined]
-                line_end=node.end_point.row + 1,  # type: ignore[attr-defined]
-                source_code=_extract_source(code_bytes, node),
+                line_start=node.start_point[0] + 1,
+                line_end=node.end_point[0] + 1,
+                source_code=_extract_source(node, code_bytes),
             ))
-            # Walk class body for methods
-            for child in node.children:  # type: ignore[attr-defined]
-                _walk_node(child, code_bytes, spec, symbols, in_class=True)
-            return
+        # Walk class body for methods
+        for child in node.children:
+            _walk_node(child, code_bytes, spec, symbols, in_class=True)
+        return
 
     # Interface declarations
     if spec.interface_node_type and node_type == spec.interface_node_type:
@@ -209,15 +267,18 @@ def _walk_node(
             symbols.append(ASTSymbol(
                 name=name,
                 type="interface",
-                line_start=node.start_point.row + 1,  # type: ignore[attr-defined]
-                line_end=node.end_point.row + 1,  # type: ignore[attr-defined]
-                source_code=_extract_source(code_bytes, node),
+                line_start=node.start_point[0] + 1,
+                line_end=node.end_point[0] + 1,
+                source_code=_extract_source(node, code_bytes),
             ))
+        # Recurse into interface body
+        for child in node.children:
+            _walk_node(child, code_bytes, spec, symbols, in_class=in_class)
         return
 
     # Arrow function variables: lexical_declaration > variable_declarator > arrow_function
     if spec.arrow_var_node_type and node_type == spec.arrow_var_node_type:
-        for declarator in node.children:  # type: ignore[attr-defined]
+        for declarator in node.children:
             if declarator.type == "variable_declarator":
                 # Check if it contains an arrow_function
                 has_arrow = any(c.type == "arrow_function" for c in declarator.children)
@@ -227,9 +288,9 @@ def _walk_node(
                         symbols.append(ASTSymbol(
                             name=name,
                             type="arrow_function",
-                            line_start=node.start_point.row + 1,  # type: ignore[attr-defined]
-                            line_end=node.end_point.row + 1,  # type: ignore[attr-defined]
-                            source_code=_extract_source(code_bytes, node),
+                            line_start=node.start_point[0] + 1,
+                            line_end=node.end_point[0] + 1,
+                            source_code=_extract_source(node, code_bytes),
                         ))
         return
 
@@ -240,26 +301,29 @@ def _walk_node(
             symbols.append(ASTSymbol(
                 name=name,
                 type="method",
-                line_start=node.start_point.row + 1,  # type: ignore[attr-defined]
-                line_end=node.end_point.row + 1,  # type: ignore[attr-defined]
-                source_code=_extract_source(code_bytes, node),
+                line_start=node.start_point[0] + 1,
+                line_end=node.end_point[0] + 1,
+                source_code=_extract_source(node, code_bytes),
             ))
+        # Recurse into method body
+        for child in node.children:
+            _walk_node(child, code_bytes, spec, symbols, in_class=False)
         return
 
     # Export statement: unwrap and walk the exported declaration
     if node_type == "export_statement":
-        for child in node.children:  # type: ignore[attr-defined]
+        for child in node.children:
             _walk_node(child, code_bytes, spec, symbols, in_class=in_class)
         return
 
     # Class body: walk children as class members
     if node_type == "class_body":
-        for child in node.children:  # type: ignore[attr-defined]
+        for child in node.children:
             _walk_node(child, code_bytes, spec, symbols, in_class=True)
         return
 
     # Default: recurse into children
-    for child in node.children:  # type: ignore[attr-defined]
+    for child in node.children:
         _walk_node(child, code_bytes, spec, symbols, in_class=in_class)
 
 

@@ -1,4 +1,4 @@
-"""smart_outline.py — AST-basiertes Struktur-Skelett fuer Dateien.
+"""smart_outline.py — AST-based structural skeleton for files.
 
 Usage:
     uv run python smart_outline.py <file_path>
@@ -20,16 +20,16 @@ from typing import Protocol
 
 
 class CommandRunner(Protocol):
-    """Protokoll fuer subprocess-Aufrufe."""
+    """Protocol for subprocess calls."""
 
     def run(self, cmd: list[str]) -> tuple[int, str, str]:
-        """Fuehrt einen Befehl aus."""
+        """Execute a command and return (returncode, stdout, stderr)."""
         ...
 
 
 @dataclass
 class DefaultCommandRunner:
-    """Echter subprocess-Runner mit sicherer Umgebung."""
+    """Real subprocess runner with a restricted environment."""
 
     _SAFE_ENV: dict[str, str] = field(default_factory=lambda: {
         "PATH": __import__("os").environ.get("PATH", ""),
@@ -37,7 +37,7 @@ class DefaultCommandRunner:
     })
 
     def run(self, cmd: list[str]) -> tuple[int, str, str]:
-        """Fuehrt Befehl aus."""
+        """Execute a command and return (returncode, stdout, stderr)."""
         try:
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=10, env=self._SAFE_ENV
@@ -51,13 +51,13 @@ class DefaultCommandRunner:
 
 @dataclass
 class MockCommandRunner:
-    """Test-Runner mit konfigurierbaren Antworten."""
+    """Test runner with configurable responses."""
 
     responses: dict[str, tuple[int, str, str]] = field(default_factory=dict)
     default_response: tuple[int, str, str] = (0, "", "")
 
     def run(self, cmd: list[str]) -> tuple[int, str, str]:
-        """Gibt konfigurierte Antwort zurueck."""
+        """Return the configured response for the given command."""
         key = " ".join(cmd)
         for pattern, response in self.responses.items():
             if pattern in key:
@@ -66,16 +66,16 @@ class MockCommandRunner:
 
 
 def get_default_runner() -> CommandRunner:
-    """Gibt den Standard-CommandRunner zurueck."""
+    """Return the default CommandRunner instance."""
     return DefaultCommandRunner()
 
 
-# ─── Typen ────────────────────────────────────────────────────────────────────
+# ─── Types ────────────────────────────────────────────────────────────────────
 
 
 @dataclass
 class SymbolInfo:
-    """Symbol in einer Datei."""
+    """A symbol found in a file."""
 
     name: str
     type: str
@@ -86,7 +86,7 @@ class SymbolInfo:
 
 @dataclass
 class OutlineResult:
-    """Ergebnis der Datei-Analyse."""
+    """Result of a file analysis."""
 
     file: str
     symbols: list[SymbolInfo]
@@ -96,7 +96,7 @@ class OutlineResult:
 
 
 def _build_signature(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
-    """Baut eine lesbare Funktionssignatur aus einem AST-Knoten."""
+    """Build a readable function signature from an AST node."""
     args = []
     func_args = node.args
 
@@ -119,7 +119,7 @@ def _build_signature(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
 
 
 def _outline_python(file_path: Path) -> list[SymbolInfo]:
-    """Extrahiert alle top-level und class-level Symbole via ast-Modul."""
+    """Extract all top-level and class-level symbols via the ast module."""
     try:
         source = file_path.read_text(encoding="utf-8")
         if not source.strip():
@@ -140,7 +140,7 @@ def _outline_python(file_path: Path) -> list[SymbolInfo]:
                 end_line=end_line,
                 signature=node.name,
             ))
-            # Methoden der Klasse
+            # Class methods
             for item in node.body:
                 if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     item_end = item.end_lineno or item.lineno
@@ -183,7 +183,7 @@ def _outline_python(file_path: Path) -> list[SymbolInfo]:
     return symbols
 
 
-# ─── Grep-Fallback fuer nicht-Python Dateien ─────────────────────────────────
+# ─── Grep fallback for non-Python files ──────────────────────────────────────
 
 
 _GREP_PATTERNS = [
@@ -203,7 +203,7 @@ _GREP_PATTERNS = [
 
 
 def _outline_grep(file_path: Path) -> list[SymbolInfo]:
-    """Extrahiert Symbole via Regex-Muster (Fallback)."""
+    """Extract symbols via regex patterns (fallback)."""
     try:
         lines = file_path.read_text(encoding="utf-8").splitlines()
     except UnicodeDecodeError:
@@ -220,7 +220,7 @@ def _outline_grep(file_path: Path) -> list[SymbolInfo]:
                     name=name,
                     type=sym_type,
                     line=line_num,
-                    end_line=line_num,  # Ohne AST unbekannt
+                    end_line=line_num,  # End line unknown without AST
                     signature=line.strip()[:120],
                 ))
                 break
@@ -228,23 +228,22 @@ def _outline_grep(file_path: Path) -> list[SymbolInfo]:
     return symbols
 
 
-# ─── Hauptfunktion ────────────────────────────────────────────────────────────
+# ─── Main function ────────────────────────────────────────────────────────────
 
 
 def outline_file(
     file_path: Path,
     command_runner: CommandRunner | None = None,
 ) -> dict:
-    """Erstellt ein Struktur-Skelett einer Datei.
+    """Build a structural skeleton of a file.
 
     Args:
-        file_path: Pfad zur zu analysierenden Datei
-        command_runner: CommandRunner-Instanz (None = Default)
+        file_path: Path to the file to analyse
+        command_runner: CommandRunner instance (unused, kept for API compatibility)
 
     Returns:
-        Dict mit {file, symbols: [{name, type, line, end_line, signature}]}
+        Dict with {file, symbols: [{name, type, line, end_line, signature}]}
     """
-    runner = command_runner or get_default_runner()
     file_path = Path(file_path)
 
     if not file_path.exists():
@@ -273,12 +272,8 @@ def outline_file(
             if not symbols:
                 symbols = _outline_grep(file_path)
         else:
-            # Fallback: try tree-sitter CLI, then grep
-            rc, stdout, stderr = runner.run(["ts", "parse", str(file_path)])
-            if rc == 0 and stdout.strip():
-                symbols = _parse_treesitter_symbols(file_path, stdout)
-            else:
-                symbols = _outline_grep(file_path)
+            # Fallback: grep-based heuristic
+            symbols = _outline_grep(file_path)
 
     return {
         "file": str(file_path),
@@ -293,37 +288,6 @@ def outline_file(
             for s in symbols
         ],
     }
-
-
-def _parse_treesitter_symbols(file_path: Path, output: str) -> list[SymbolInfo]:
-    """Parse symbols using tree-sitter library (real AST) with grep fallback.
-
-    The 'output' parameter is kept for backward compatibility but is no longer
-    used — the tree-sitter library parses the file directly.
-    """
-    try:
-        from tree_sitter_utils import parse_file_with_treesitter
-    except ImportError:
-        return _outline_grep(file_path)
-
-    ast_symbols = parse_file_with_treesitter(file_path)
-    if ast_symbols is None:
-        return _outline_grep(file_path)
-
-    results: list[SymbolInfo] = []
-    for sym in ast_symbols:
-        results.append(SymbolInfo(
-            name=sym.name,
-            type=sym.type,
-            line=sym.line_start,
-            end_line=sym.line_end,
-            signature=sym.source_code.splitlines()[0][:120] if sym.source_code else sym.name,
-        ))
-
-    if not results:
-        results = _outline_grep(file_path)
-
-    return results
 
 
 # ─── CLI Entry Point ──────────────────────────────────────────────────────────
