@@ -39,13 +39,8 @@ Use these as a verification reference when testing or reviewing the skill.
 
 ## Step 1: Detect Time Context
 
-Run the following bash to determine the current time window:
-
-```bash
-HOUR=$(date +%H | sed 's/^0//')   # strip leading zero: 09→9
-DOW=$(date +%u)                    # 1=Mon ... 5=Fri ... 7=Sun
-echo "HOUR=$HOUR DOW=$DOW"
-```
+Run: `uv run python plugin/scripts/check_time_window.py`
+Parse the JSON output: `window`, `hour`, `dow`.
 
 Classify the window using this priority order (highest first):
 
@@ -100,22 +95,9 @@ After running the lifecycle pipeline, check if periodic learnings extraction is 
 1. Check the rate-limit in processing-state.json:
    <!-- NOTE: Rate-limit logic (4h interval, last_learnings_run key) is duplicated in
         open_brain/learnings_state.py — keep both in sync when changing interval or key name. -->
-```bash
-python3 -c "
-import json, sys, datetime, pathlib
-state_file = pathlib.Path.home() / '.claude/learnings/processing-state.json'
-try:
-    state = json.loads(state_file.read_text()) if state_file.exists() else {}
-except Exception:
-    state = {}
-last_run = state.get('last_learnings_run', '')
-if not last_run:
-    print('due')
-else:
-    delta = datetime.datetime.now(datetime.timezone.utc) - datetime.datetime.fromisoformat(last_run)
-    print('due' if delta.total_seconds() >= 14400 else 'skip')
-" || echo "due"
-```
+
+   Run: `uv run python plugin/scripts/check_learnings_due.py`
+   Parse `data.result` from the execution-result envelope: `due` or `skip`.
 
 2. If output is `due`:
    - Spawn `Agent(subagent_type="learning-extractor")` with prompt:
@@ -230,43 +212,14 @@ Call `mcp__open-brain__search` with:
 
 ### 3.2 For each memory, run the staleness check
 
-Use the `build_provenance_update` function from `provenance.py` to compute the
-metadata patch.  Claude executes this as an inline Python subprocess:
+Use `plugin/scripts/provenance_check.py` to compute the metadata patch.
 
-```python
-import subprocess, json, os
+Run: `echo '<memory_json>' | uv run python plugin/scripts/provenance_check.py`
+Parse stdout as JSON; `null` means no code refs found.
 
-# Resolve the repo root (contains malte/skills/memory_heartbeat/provenance.py)
-REPO_ROOT = "<absolute path to the claude-config repo root>"
-
-env = {**os.environ, "PROVENANCE_REPO_ROOT": REPO_ROOT}
-
-result = subprocess.run(
-    ["python3", "-c",
-     "import json, sys, os;"
-     "sys.path.insert(0, os.environ['PROVENANCE_REPO_ROOT']);"
-     "from malte.skills.memory_heartbeat.provenance import build_provenance_update;"
-     "memory = json.loads(sys.stdin.read());"
-     "update = build_provenance_update("
-     "    memory_id=memory['id'],"
-     "    memory_type=memory.get('type'),"
-     "    content=memory.get('content', ''),"
-     "    metadata=memory.get('metadata'),"
-     "    base_path=os.environ['PROVENANCE_REPO_ROOT'],"
-     ");"
-     "print(json.dumps(update) if update else 'null')"
-    ],
-    input=json.dumps(memory_data),
-    capture_output=True,
-    text=True,
-    env=env,
-)
-update = json.loads(result.stdout.strip()) if result.stdout.strip() else None
-```
-
-Where `memory_data` is the dict for each memory returned by the search.
-`REPO_ROOT` must be the absolute path to the claude-config repo root
-(e.g. `/Users/malte/code/claude`). Using an env var avoids shell-quoting issues with paths containing spaces or special characters. `base_path=REPO_ROOT` ensures relative code refs like `malte/skills/foo.py` are resolved correctly against the repo root rather than the unreliable CWD.
+Where `<memory_json>` is the JSON-serialised dict for each memory returned by the search.
+Set the `PROVENANCE_REPO_ROOT` env var to the absolute path of the claude-config repo root
+(e.g. `/Users/malte/code/claude`) so relative code refs are resolved correctly.
 
 ### 3.3 Apply updates — stale memories (AK4)
 
