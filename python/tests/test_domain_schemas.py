@@ -399,3 +399,115 @@ class TestValidateDomainMetadata:
         assert hasattr(HouseholdMetadata, "__annotations__")
         assert hasattr(DecisionMetadata, "__annotations__")
         assert hasattr(MeetingMetadata, "__annotations__")
+
+
+# ─── MentionMetadata TypedDict importability ──────────────────────────────────
+
+class TestMentionMetadataImportable:
+    def test_mention_metadata_importable(self):
+        """MentionMetadata is importable from interface."""
+        from open_brain.data_layer.interface import MentionMetadata
+        assert hasattr(MentionMetadata, "__annotations__")
+        assert "person_ref" in MentionMetadata.__annotations__
+        assert "context" in MentionMetadata.__annotations__
+        assert "source_memory_ref" in MentionMetadata.__annotations__
+        assert "sentiment_hint" in MentionMetadata.__annotations__
+
+
+# ─── InteractionMetadata TypedDict importability ──────────────────────────────
+
+class TestInteractionMetadataImportable:
+    def test_interaction_metadata_importable(self):
+        """InteractionMetadata is importable from interface."""
+        from open_brain.data_layer.interface import InteractionMetadata
+        assert hasattr(InteractionMetadata, "__annotations__")
+        assert "person_ref" in InteractionMetadata.__annotations__
+        assert "channel" in InteractionMetadata.__annotations__
+        assert "direction" in InteractionMetadata.__annotations__
+        assert "summary" in InteractionMetadata.__annotations__
+        assert "occurred_at" in InteractionMetadata.__annotations__
+        assert "follow_up_needed" in InteractionMetadata.__annotations__
+
+
+# ─── validate_domain_metadata: mention type ───────────────────────────────────
+
+class TestValidateMentionMetadata:
+    def test_validate_mention_with_person_ref_returns_no_warnings(self):
+        """validate_domain_metadata returns [] for mention with person_ref present."""
+        from open_brain.data_layer.interface import validate_domain_metadata
+        warnings = validate_domain_metadata("mention", {"person_ref": "person-42", "context": "said hello"})
+        assert warnings == []
+
+    def test_validate_mention_without_person_ref_returns_warning(self):
+        """validate_domain_metadata returns warning for mention missing person_ref."""
+        from open_brain.data_layer.interface import validate_domain_metadata
+        warnings = validate_domain_metadata("mention", {})
+        assert len(warnings) == 1
+        assert "person_ref" in warnings[0].lower()
+
+    def test_validate_mention_with_none_metadata_returns_warning(self):
+        """validate_domain_metadata returns warning when mention metadata is None."""
+        from open_brain.data_layer.interface import validate_domain_metadata
+        warnings = validate_domain_metadata("mention", None)
+        assert len(warnings) == 1
+        assert "person_ref" in warnings[0].lower()
+
+    def test_validate_mention_with_other_fields_but_no_person_ref_returns_warning(self):
+        """validate_domain_metadata returns warning for mention with context but no person_ref."""
+        from open_brain.data_layer.interface import validate_domain_metadata
+        warnings = validate_domain_metadata("mention", {"context": "said something", "sentiment_hint": "positive"})
+        assert len(warnings) == 1
+        assert "person_ref" in warnings[0].lower()
+
+
+# ─── validate_domain_metadata: interaction type ───────────────────────────────
+
+class TestValidateInteractionMetadata:
+    def test_validate_interaction_with_person_ref_and_valid_occurred_at_returns_no_warnings(self):
+        """validate_domain_metadata returns [] for interaction with all required fields valid."""
+        from open_brain.data_layer.interface import validate_domain_metadata
+        warnings = validate_domain_metadata("interaction", {
+            "person_ref": "person-42",
+            "occurred_at": "2026-04-20T14:00:00",
+            "channel": "email",
+        })
+        assert warnings == []
+
+    def test_validate_interaction_without_person_ref_returns_warning(self):
+        """validate_domain_metadata returns warning for interaction missing person_ref."""
+        from open_brain.data_layer.interface import validate_domain_metadata
+        warnings = validate_domain_metadata("interaction", {"occurred_at": "2026-04-20T14:00:00"})
+        assert len(warnings) >= 1
+        assert any("person_ref" in w.lower() for w in warnings)
+
+    def test_validate_interaction_with_malformed_occurred_at_returns_warning(self):
+        """validate_domain_metadata returns warning for interaction with invalid occurred_at."""
+        from open_brain.data_layer.interface import validate_domain_metadata
+        warnings = validate_domain_metadata("interaction", {
+            "person_ref": "person-42",
+            "occurred_at": "last Monday",
+        })
+        assert len(warnings) >= 1
+        assert any("occurred_at" in w.lower() for w in warnings)
+
+    def test_validate_interaction_without_person_ref_and_malformed_occurred_at_returns_two_warnings(self):
+        """validate_domain_metadata returns two warnings when both person_ref and occurred_at are invalid."""
+        from open_brain.data_layer.interface import validate_domain_metadata
+        warnings = validate_domain_metadata("interaction", {"occurred_at": "not-a-date"})
+        assert len(warnings) == 2
+        warning_text = " ".join(warnings).lower()
+        assert "person_ref" in warning_text
+        assert "occurred_at" in warning_text
+
+    def test_validate_interaction_without_occurred_at_returns_no_warning_for_occurred_at(self):
+        """validate_domain_metadata does not warn when occurred_at is absent (it's optional)."""
+        from open_brain.data_layer.interface import validate_domain_metadata
+        warnings = validate_domain_metadata("interaction", {"person_ref": "person-42"})
+        assert warnings == []
+
+    def test_validate_interaction_with_none_metadata_returns_warning(self):
+        """validate_domain_metadata returns warning when interaction metadata is None."""
+        from open_brain.data_layer.interface import validate_domain_metadata
+        warnings = validate_domain_metadata("interaction", None)
+        assert len(warnings) >= 1
+        assert any("person_ref" in w.lower() for w in warnings)

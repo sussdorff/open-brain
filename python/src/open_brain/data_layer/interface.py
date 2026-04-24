@@ -112,6 +112,26 @@ class MeetingMetadata(TypedDict, total=False):
     date: str  # ISO datetime
 
 
+class MentionMetadata(TypedDict, total=False):
+    """Structured metadata for type='mention' memories."""
+
+    person_ref: str          # stable identifier pointing to a person memory
+    context: str             # short snippet from source
+    source_memory_ref: str   # memory id that contains the mention
+    sentiment_hint: str      # positive|neutral|negative|ambiguous|unknown
+
+
+class InteractionMetadata(TypedDict, total=False):
+    """Structured metadata for type='interaction' memories."""
+
+    person_ref: str
+    channel: str             # meeting|call|email|chat|unknown
+    direction: str           # inbound|outbound|bidirectional
+    summary: str
+    occurred_at: str         # ISO 8601 datetime
+    follow_up_needed: bool
+
+
 def _is_iso_datetime(value: str) -> bool:
     """Check if a string is a valid ISO 8601 datetime."""
     try:
@@ -155,6 +175,19 @@ def validate_domain_metadata(memory_type: str | None, metadata: dict[str, Any] |
         warranty_expiry = md.get("warranty_expiry")
         if warranty_expiry is not None and not _is_iso_datetime(str(warranty_expiry)):
             warnings.append(f"household metadata field 'warranty_expiry' is not a valid ISO datetime: {warranty_expiry!r}")
+
+    elif memory_type == "mention":
+        person_ref = md.get("person_ref")
+        if person_ref is None:
+            warnings.append("mention metadata missing recommended field 'person_ref' (expected stable identifier pointing to a person memory)")
+
+    elif memory_type == "interaction":
+        person_ref = md.get("person_ref")
+        if person_ref is None:
+            warnings.append("interaction metadata missing recommended field 'person_ref' (expected stable identifier pointing to a person memory)")
+        occurred_at = md.get("occurred_at")
+        if occurred_at is not None and not _is_iso_datetime(str(occurred_at)):
+            warnings.append(f"interaction metadata field 'occurred_at' is not a valid ISO datetime: {occurred_at!r}")
 
     # All other types pass through without validation
     return warnings
