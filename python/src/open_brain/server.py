@@ -44,6 +44,7 @@ from open_brain.data_layer.interface import (
     TimelineParams,
     TriageParams,
     UpdateMemoryParams,
+    VALID_LINK_TYPES,
     validate_domain_metadata,
 )
 from open_brain.capture_router import classify_and_extract
@@ -1874,6 +1875,58 @@ async def regenerate_summaries_from_transcripts(
         ],
         "dry_run": dry_run,
     })
+
+
+@mcp.tool(
+    description=(
+        "Create a typed semantic relationship between two memories. "
+        f"Valid link_types: {', '.join(sorted(VALID_LINK_TYPES))}. "
+        "Returns the relationship id. "
+        "Params: source_id (int), target_id (int), link_type (str), metadata (dict, optional)"
+    )
+)
+async def create_relationship(
+    source_id: int,
+    target_id: int,
+    link_type: str,
+    metadata: dict | None = None,
+) -> str:
+    """Create a typed relationship between two memories."""
+    dl = get_dl()
+    rel_id = await dl.create_relationship(
+        source_id=source_id,
+        target_id=target_id,
+        link_type=link_type,
+        metadata=metadata,
+    )
+    return json.dumps({"id": rel_id, "source_id": source_id, "target_id": target_id, "link_type": link_type})
+
+
+@mcp.tool(
+    description=(
+        "Traverse the memory relationship graph starting from an anchor memory. "
+        "Uses iterative BFS up to the specified depth. "
+        f"Valid link_types: {', '.join(sorted(VALID_LINK_TYPES))}. "
+        "Params: anchor_id (int), link_types (list[str]), depth (int, default 1), "
+        "direction ('outbound'|'inbound'|'both', default 'outbound'). "
+        "Returns list of {id, link_type, depth, source_id, target_id}."
+    )
+)
+async def traverse_relationships(
+    anchor_id: int,
+    link_types: list[str],
+    depth: int = 1,
+    direction: str = "outbound",
+) -> str:
+    """Traverse the memory relationship graph."""
+    dl = get_dl()
+    results = await dl.traverse(
+        anchor_id=anchor_id,
+        link_types=link_types,
+        depth=depth,
+        direction=direction,
+    )
+    return json.dumps({"results": results, "count": len(results)})
 
 
 @app.delete("/api/memories")

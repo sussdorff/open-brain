@@ -35,6 +35,18 @@ from typing import Any, Literal, Protocol, TypedDict
 
 IMPORTANCE_VALUES: frozenset[str] = frozenset(["critical", "high", "medium", "low"])
 
+# ─── Relationship link-type constants ────────────────────────────────────────
+
+VALID_LINK_TYPES: frozenset[str] = frozenset({
+    "similar_to",       # legacy, auto-written by embedding dedup
+    "attended_by",      # meeting -> person
+    "mentioned_in",     # person -> memory where mentioned
+    "spawned_task",     # meeting/mention -> bd issue
+    "supersedes",       # memory -> older memory it replaces
+    "contradicts",      # memory -> contradicted memory
+    "co_occurs",        # weak co-mention edge
+})
+
 _IMPORTANCE_RANK: dict[str, int] = {
     "critical": 3,
     "high": 2,
@@ -564,3 +576,33 @@ class DataLayer(Protocol):
     async def compact_memories(self, params: CompactParams) -> CompactResult: ...
 
     async def get_wake_up_memories(self, limit: int = 500, project: str | None = None) -> list[Memory]: ...
+
+    async def create_relationship(
+        self,
+        source_id: int,
+        target_id: int,
+        link_type: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> int: ...
+
+    async def traverse(
+        self,
+        anchor_id: int,
+        link_types: list[str],
+        depth: int = 1,
+        direction: Literal["outbound", "inbound", "both"] = "outbound",
+    ) -> list[dict[str, Any]]:
+        """Traverse the relationship graph using iterative BFS.
+
+        depth must be between 1 and 10 (inclusive). Values outside this range
+        raise ValueError.
+        direction must be 'outbound', 'inbound', or 'both'. Invalid values
+        raise ValueError.
+        """
+        ...
+
+    async def get_relationships(
+        self,
+        memory_id: int,
+        link_types: list[str] | None = None,
+    ) -> list[dict[str, Any]]: ...

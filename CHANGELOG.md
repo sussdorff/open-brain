@@ -5,13 +5,35 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(open-brain-cr3.10)* Address review findings iteration 1
+- *(open-brain-cr3.10)* Address codex adversarial findings
+
+### Features
+
+- *(open-brain-cr3.10)* Green — typed-relationship API + backcompat migration
+
+### Miscellaneous
+
+- Resolve CHANGELOG.md merge conflict — merge cr3.2 and main entries
+
+## [0.14.0] - 2026-04-24
+
+### Miscellaneous
+
+- *(open-brain-cr3.15)* Update changelog
+- Bump version to 0.14.0
+
+## [0.13.2] - 2026-04-24
+
+### Bug Fixes
+
 - *(open-brain-cr3.14)* Address review findings iteration 1
 - *(open-brain-cr3.14)* Address codex adversarial findings
 - *(open-brain-cr3.2)* Address review findings iteration 1
 - *(open-brain-cr3.2)* Address codex adversarial findings
 - *(open-brain-cr3.1)* Correct docs inconsistency — schema count in prose vs code block
-- *(open-brain-cr3.5)* Align Protocol Shape run_id signature with run_id Contract
 - *(open-brain-cr3.15)* Fix section numbering in ADR 0002 decision block
+- *(open-brain-cr3.5)* Align Protocol Shape run_id signature with run_id Contract
 
 ### CI/CD
 
@@ -21,8 +43,8 @@ All notable changes to this project will be documented in this file.
 ### Documentation
 
 - *(open-brain-cr3.1)* Add mention + interaction schema documentation
-- *(open-brain-cr3.5)* Add ADR-0001 ingest-adapter interface
 - *(open-brain-cr3.15)* Add ADR 0002 — credentials and privacy policy
+- *(open-brain-cr3.5)* Add ADR-0001 ingest-adapter interface
 
 ### Features
 
@@ -33,6 +55,11 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous
 
 - *(ci)* Bump actions to Node 24 runtimes (#1)
+- *(open-brain-cr3.14)* Update changelog for fixture pack release
+- *(open-brain-cr3.2)* Update changelog
+- *(open-brain-cr3.1)* Update changelog
+- *(open-brain-cr3.5)* Session close — update changelog
+- Bump version to 0.13.2
 
 ## [2026.04.22] - 2026-04-22
 
