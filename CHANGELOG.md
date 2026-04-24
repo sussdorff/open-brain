@@ -7,14 +7,19 @@ All notable changes to this project will be documented in this file.
 
 - *(open-brain-cr3.10)* Address review findings iteration 1
 - *(open-brain-cr3.10)* Address codex adversarial findings
+- *(cr3.12)* Address review findings iteration 1
+- *(cr3.12)* Address codex adversarial findings — preserve existing aliases in normalize
+- *(cr3.12)* Re-add --dry-run flag as documented alias for default mode (AK1 literal compliance)
 
 ### Features
 
 - *(open-brain-cr3.10)* Green — typed-relationship API + backcompat migration
+- *(cr3.12)* Green — person memory migration to people-v1 schema
 
 ### Miscellaneous
 
 - Resolve CHANGELOG.md merge conflict — merge cr3.2 and main entries
+- *(open-brain-cr3.10)* Update changelog for typed-relationship API release
 
 ## [0.14.0] - 2026-04-24
 
