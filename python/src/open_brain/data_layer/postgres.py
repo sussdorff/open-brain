@@ -28,6 +28,7 @@ from open_brain.data_layer.interface import (
     CompactResult,
     DecayParams,
     DecayResult,
+    DeleteByRunIdResult,
     DeleteParams,
     DeleteResult,
     MaterializeParams,
@@ -48,6 +49,8 @@ from open_brain.data_layer.interface import (
     rank_importance,
 )
 from open_brain.data_layer.refine import analyze_with_llm
+
+from open_brain.ingest.runs import get_current_run_id
 
 logger = logging.getLogger(__name__)
 
@@ -809,6 +812,9 @@ class PostgresDataLayer:
                         base_metadata = dict(params.metadata) if params.metadata else {}
                         content_hash_replace = hashlib.sha256(params.text.encode()).hexdigest()
                         base_metadata["content_hash"] = content_hash_replace
+                        # Inject run_id if inside an ingest_run context
+                        if run_id := get_current_run_id():
+                            base_metadata["run_id"] = run_id
                         metadata_json_replace = _json.dumps(base_metadata)
                         row_replace = await conn.fetchrow(
                             """INSERT INTO memories (index_id, type, title, subtitle, narrative, content, session_ref, metadata, user_id, importance)
@@ -941,6 +947,9 @@ class PostgresDataLayer:
             # ── Normal insert path ──
             base_metadata = dict(params.metadata) if params.metadata else {}
             base_metadata["content_hash"] = content_hash
+            # Inject run_id if inside an ingest_run context
+            if run_id := get_current_run_id():
+                base_metadata["run_id"] = run_id
             metadata_json = _json.dumps(base_metadata)
             row = await conn.fetchrow(
                 """INSERT INTO memories (index_id, type, title, subtitle, narrative, content, session_ref, metadata, user_id, importance)
@@ -2206,6 +2215,59 @@ class PostgresDataLayer:
             logger.info("Deleted %d memories (project=%s, type=%s, before=%s)",
                         count, params.project, params.type, params.before)
             return DeleteResult(deleted=count)
+
+    async def delete_by_run_id(self, run_id: str) -> DeleteByRunIdResult:
+        """Delete all memories and relationships created in the given ingest run.
+
+        Deletion is atomic: relationships are removed first (no CASCADE FK), then memories.
+        Returns counts of deleted rows.
+        Returns DeleteByRunIdResult(memories=0, relationships=0) for a non-existent run_id
+        (not an error).
+
+        Args:
+            run_id: The run_id string stored in metadata->>'run_id'.
+
+        Returns:
+            DeleteByRunIdResult with counts of deleted memories and relationships.
+        """
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            # Collect memory IDs for this run_id first
+            rows = await conn.fetch(
+                "SELECT id FROM memories WHERE metadata->>'run_id' = $1",
+                run_id,
+            )
+            memory_ids: list[int] = [r["id"] for r in rows]
+
+            if not memory_ids:
+                return DeleteByRunIdResult(memories=0, relationships=0)
+
+            async with conn.transaction():
+                # Delete relationships touching these memories (no CASCADE FK)
+                rel_result = await conn.execute(
+                    "DELETE FROM memory_relationships WHERE source_id = ANY($1::int[]) OR target_id = ANY($1::int[])",
+                    memory_ids,
+                )
+                rel_count = int(rel_result.split()[-1]) if rel_result else 0
+
+                # Delete usage log entries (FK constraint)
+                await conn.execute(
+                    "DELETE FROM memory_usage_log WHERE memory_id = ANY($1::int[])",
+                    memory_ids,
+                )
+
+                # Delete the memories themselves
+                mem_result = await conn.execute(
+                    "DELETE FROM memories WHERE id = ANY($1::int[])",
+                    memory_ids,
+                )
+                mem_count = int(mem_result.split()[-1]) if mem_result else 0
+
+        logger.info(
+            "delete_by_run_id: deleted %d memories, %d relationships for run_id=%s",
+            mem_count, rel_count, run_id,
+        )
+        return DeleteByRunIdResult(memories=mem_count, relationships=rel_count)
 
 
 async def _execute_refine_actions(actions: list[RefineAction]) -> None:

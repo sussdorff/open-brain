@@ -393,6 +393,14 @@ class DeleteResult:
 
 
 @dataclass
+class DeleteByRunIdResult:
+    """Result of a delete_by_run_id operation."""
+
+    memories: int
+    relationships: int
+
+
+@dataclass
 class TriageParams:
     """Parameters for memory triage."""
 
@@ -606,6 +614,8 @@ class DataLayer(Protocol):
         memory_id: int,
         link_types: list[str] | None = None,
     ) -> list[dict[str, Any]]: ...
+
+    async def delete_by_run_id(self, run_id: str) -> DeleteByRunIdResult: ...
 
     async def people_discussed_with(
         self,

@@ -876,6 +876,26 @@ async def compact_memories(
     )
 
 
+@mcp.tool(
+    description=(
+        "Roll back an ingest run by deleting all memories and relationships created with the given run_id. "
+        "Returns deletion counts. Non-existent run_id returns zero counts (not an error). "
+        "Param: run_id (str, required — the run_id returned by ingest_run())."
+    )
+)
+async def ingest_rollback(run_id: str) -> str:
+    """Delete all memories and relationships for the given ingest run_id."""
+    if not run_id or not run_id.strip():
+        raise ValueError("run_id must be a non-empty string")
+    dl = get_dl()
+    result = await dl.delete_by_run_id(run_id)
+    return json.dumps({
+        "memories_deleted": result.memories,
+        "relationships_deleted": result.relationships,
+        "run_id": run_id,
+    })
+
+
 # ─── FastAPI App ──────────────────────────────────────────────────────────────
 
 # Build the MCP sub-app first so session_manager is available
