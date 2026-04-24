@@ -6,7 +6,6 @@ Verifies: 3-stage scoring, directory iteration, subset-cap, llm_confirm invocati
 
 import json
 from pathlib import Path
-from typing import Callable
 from unittest.mock import MagicMock
 
 import pytest
@@ -120,7 +119,7 @@ def test_llm_confirm_callable_invoked_and_returns_true(
     existing_records: list[PersonRecord],
 ) -> None:
     """When decision is llm_confirm and llm_confirm callable returns True → auto_merge."""
-    mock_llm: Callable[[MatchDecision], bool] = MagicMock(return_value=True)
+    mock_llm = MagicMock(return_value=True)
     decision = match_person("Siamak", "Dental-Now", None, existing_records, llm_confirm=mock_llm)
     mock_llm.assert_called_once()
     assert decision.action == "auto_merge"
@@ -130,7 +129,7 @@ def test_llm_confirm_callable_invoked_and_returns_false(
     existing_records: list[PersonRecord],
 ) -> None:
     """When decision is llm_confirm and llm_confirm callable returns False → new."""
-    mock_llm: Callable[[MatchDecision], bool] = MagicMock(return_value=False)
+    mock_llm = MagicMock(return_value=False)
     decision = match_person("Siamak", "Dental-Now", None, existing_records, llm_confirm=mock_llm)
     mock_llm.assert_called_once()
     assert decision.action == "new"
@@ -140,7 +139,7 @@ def test_llm_confirm_not_called_for_auto_merge(
     existing_records: list[PersonRecord],
 ) -> None:
     """llm_confirm callable must NOT be invoked for auto_merge decisions."""
-    mock_llm: Callable[[MatchDecision], bool] = MagicMock(return_value=True)
+    mock_llm = MagicMock(return_value=True)
     decision = match_person("Jochen Jungbluth", "Dental-Now", None, existing_records, llm_confirm=mock_llm)
     assert decision.action == "auto_merge"
     mock_llm.assert_not_called()
@@ -150,7 +149,7 @@ def test_llm_confirm_not_called_for_new(
     existing_records: list[PersonRecord],
 ) -> None:
     """llm_confirm callable must NOT be invoked for new decisions."""
-    mock_llm: Callable[[MatchDecision], bool] = MagicMock(return_value=True)
+    mock_llm = MagicMock(return_value=True)
     decision = match_person("Reza Mollaei", "HeyDonto", None, existing_records, llm_confirm=mock_llm)
     assert decision.action == "new"
     mock_llm.assert_not_called()

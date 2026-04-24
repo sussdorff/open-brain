@@ -18,11 +18,15 @@ the LLM-confirm gate.
 
 import re
 import unicodedata
-from collections.abc import Callable
 from difflib import SequenceMatcher
-from typing import cast
+from typing import Literal
 
-from open_brain.people.models import MatchCandidate, MatchDecision, PersonRecord
+from open_brain.people.models import (
+    LLMConfirmCallback,
+    MatchCandidate,
+    MatchDecision,
+    PersonRecord,
+)
 
 # ---------------------------------------------------------------------------
 # Thresholds
@@ -30,6 +34,9 @@ from open_brain.people.models import MatchCandidate, MatchDecision, PersonRecord
 
 AUTO_MERGE_T: float = 0.92
 LLM_CONFIRM_T: float = 0.85
+
+# Maximum confidence allowed for a subset-capped candidate (must stay below AUTO_MERGE_T)
+SUBSET_CAP_MAX: float = AUTO_MERGE_T - 0.01
 
 # Stage-specific scores
 LINKEDIN_EXACT_SCORE: float = 0.99
@@ -43,7 +50,9 @@ ORG_BOOST_SUBSET: float = 0.10  # used combined with subset
 # Minimum score to even keep a fuzzy candidate
 MIN_FUZZY_SCORE: float = 0.4
 
-# Title prefixes to strip during normalisation
+# Title prefixes to strip during normalisation.
+# Dotless forms: punctuation is stripped before tokenization,
+# so "dr." becomes "dr" — but dotted forms listed for clarity.
 _TITLE_PREFIXES: frozenset[str] = frozenset(
     {"dr.", "dr", "prof.", "prof", "herr", "frau", "mr.", "mr", "ms.", "ms"}
 )
@@ -139,7 +148,7 @@ def match_person(
     new_org: str | None,
     new_linkedin: str | None,
     existing: list[PersonRecord],
-    llm_confirm: Callable[[MatchDecision], bool] | None = None,
+    llm_confirm: LLMConfirmCallback | None = None,
 ) -> MatchDecision:
     """Match an incoming person against existing records.
 
@@ -170,10 +179,10 @@ def match_person(
 
     for record in existing:
         for member in record.members:
-            member_linkedin = cast(str | None, member.get("linkedin"))
-            member_name = cast(str, member["name"])
-            member_org = cast(str | None, member.get("org"))
-            aliases = cast(list[str], member.get("aliases") or [])
+            member_linkedin: str | None = member.get("linkedin")
+            member_name: str = member["name"]
+            member_org: str | None = member.get("org")
+            aliases: list[str] = member.get("aliases") or []
 
             # --- Stage 1: LinkedIn exact match ---
             if new_linkedin and member_linkedin and new_linkedin == member_linkedin:
@@ -238,7 +247,7 @@ def match_person(
 
             # Subset-cap rule: partial references must not auto_merge
             if subset_applied and sim < 1.0 and confidence >= AUTO_MERGE_T:
-                confidence = AUTO_MERGE_T - 0.01
+                confidence = SUBSET_CAP_MAX
                 reasons.append("capped:subset-below-auto-merge")
 
             candidates.append(
@@ -260,9 +269,16 @@ def match_person(
     top = candidates[0]
     runners_up = candidates[1:3]
 
-    # Ambiguity: two high-confidence matches for DIFFERENT people
+    # Ambiguity: two high-confidence matches for DIFFERENT people.
+    # If the top candidate has a hard signal (linkedin-exact or alias-match),
+    # skip the ambiguity gate — hard signals are unambiguous.
+    has_hard_signal = top.reasons and any(
+        r.startswith("linkedin-exact") or r.startswith("alias-match:")
+        for r in top.reasons
+    )
     if (
-        len(candidates) >= 2
+        not has_hard_signal
+        and len(candidates) >= 2
         and candidates[1].confidence >= LLM_CONFIRM_T
         and candidates[0].member_name != candidates[1].member_name
     ):
@@ -293,12 +309,20 @@ def match_person(
         )
         if llm_confirm is not None:
             confirmed = llm_confirm(decision)
-            decision.action = "auto_merge" if confirmed else "new"
+            action: Literal["auto_merge", "new"] = "auto_merge" if confirmed else "new"
+            return MatchDecision(
+                action=action,
+                target=decision.target,
+                runners_up=decision.runners_up,
+                rationale=f"llm_confirm decided: {action}",
+            )
         return decision
 
+    # Confidence below LLM_CONFIRM_T: set target to top so callers can inspect
+    # the rejected candidate's score.
     return MatchDecision(
         action="new",
-        target=None,
+        target=top,
         runners_up=runners_up,
         rationale=f"top confidence {top.confidence:.2f} below {LLM_CONFIRM_T}",
     )

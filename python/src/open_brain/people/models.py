@@ -6,7 +6,23 @@ returned by the match_person matcher.
 """
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, Protocol, TypedDict, runtime_checkable
+
+
+class PersonMember(TypedDict, total=False):
+    """Typed representation of a person entry within a PersonRecord."""
+
+    name: str
+    org: str | None
+    linkedin: str | None
+    aliases: list[str]
+
+
+@runtime_checkable
+class LLMConfirmCallback(Protocol):
+    """Protocol for the optional llm_confirm callback passed to match_person."""
+
+    def __call__(self, decision: "MatchDecision") -> bool: ...
 
 
 @dataclass(slots=True)
@@ -21,7 +37,7 @@ class PersonRecord:
 
     memory_id: int
     style: Literal["single", "directory"]
-    members: list[dict[str, object]]
+    members: list[PersonMember]
 
 
 @dataclass(slots=True)
@@ -49,7 +65,10 @@ class MatchDecision:
 
     Attributes:
         action: One of "new", "auto_merge", "llm_confirm", "ambiguous".
-        target: The top-ranked candidate (None if action is "new").
+        target: The top-ranked candidate. When action is "new" due to no candidates,
+            target is None. When action is "new" because confidence is below
+            LLM_CONFIRM_T but candidates exist, target is set to the top candidate
+            so callers can inspect the rejected candidate's score.
         runners_up: Up to 2 additional candidates for context.
         rationale: Short human-readable explanation.
     """
