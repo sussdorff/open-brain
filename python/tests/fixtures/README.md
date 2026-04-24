@@ -29,7 +29,7 @@ MacWhisper transcript format: timestamped lines like `[HH:MM:SS] Speaker Name: [
   - Lisa Chen (fictional, Cognovis) — reviewed data mapping, has comments on Budgetplanung fields
   - Jan Kowalski (fictional) — Rechenzentrum, responsible for SSL certificates (name uncertain)
 - **Duration:** ~25 minutes simulated (timestamps 00:00–00:05:24)
-- **Word count:** ~400 words
+- **Word count:** ~750 words
 - **Expected extraction hints:**
   - `meeting_type`: in_person/video, 3 active speakers
   - `attendees`: Sarah Hoffmann, Marcus Berger, Priya Nair
@@ -65,7 +65,7 @@ MacWhisper transcript format: timestamped lines like `[HH:MM:SS] Speaker Name: [
   - Jochen Jungbluth (Polaris, consent-confirmed) — called Stefan about Q2 guidance
   - Dr. Naumann (fictional, brief reference) — Geschäftsführer who referred Thomas
   - Implicit: Engineering team members not named
-- **Duration:** ~70 minutes simulated (timestamps 00:00–00:11:50)
+- **Duration:** ~12 minutes simulated (timestamps 00:00–00:11:50)
 - **Word count:** ~1500 words
 - **Agenda drift pattern:**
   1. Q1 Revenue numbers
@@ -110,7 +110,7 @@ All `.eml` files use RFC 822 format with proper headers (Message-ID, Date, MIME-
 - **Format:** `text/html`, multipart with proper newsletter headers
 - **People:** None — no personal names, no personal interaction
 - **Sender:** `FHIR Deutschland <newsletter@fhir-community.example>` (mailing list)
-- **Recipient:** `Malte Sussdorff <malte@example.com>` (using fictional domain)
+- **Recipient:** `Malte Sussdorff <malte@personal.example>` — Recipient is `malte@personal.example` (Malte's own data, consent-implicit as fixture subject)
 - **Language:** German
 - **Special headers:** `List-Unsubscribe`, `List-ID`, `Precedence: bulk`, `X-Mailer: MailChimp`
 - **Expected extraction hints:**
@@ -140,6 +140,8 @@ All `.eml` files use RFC 822 format with proper headers (Message-ID, Date, MIME-
 ## people/
 
 Static JSON fixture files with structured person records. Used for deduplication, identity resolution, and ingest schema tests.
+
+Note: `directory_polaris.json` and `synthetic_testperson.json` use a flat `organization` string field; `singleton_weihe.json` uses an `organizations` array of objects with `name`+`description`. This divergence is intentional — it exercises schema flexibility in dedup/extraction tests.
 
 ### directory_polaris.json
 
