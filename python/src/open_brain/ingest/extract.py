@@ -6,6 +6,7 @@ and follow-up tasks.
 
 import json
 import logging
+import re
 
 from open_brain.data_layer.llm import LlmMessage, llm_complete
 
@@ -50,17 +51,19 @@ async def extract_from_transcript(text: str) -> dict:
     try:
         # Strip potential markdown code fences
         cleaned = response.strip()
-        if cleaned.startswith("```"):
-            lines = cleaned.split("\n")
-            # Remove first and last lines (``` markers)
-            cleaned = "\n".join(lines[1:-1]) if len(lines) > 2 else cleaned
+        fence_match = re.match(r"^```(?:json)?\s*\n(.*?)\n```\s*$", cleaned, re.DOTALL)
+        if fence_match:
+            cleaned = fence_match.group(1)
         data = json.loads(cleaned)
+        if not isinstance(data, dict):
+            logger.warning("Extraction response is not a dict (got %s) — response: %r", type(data).__name__, response)
+            return {"attendees": [], "mentioned_people": [], "topics": [], "follow_up_tasks": []}
         return {
             "attendees": data.get("attendees") or [],
             "mentioned_people": data.get("mentioned_people") or [],
             "topics": data.get("topics") or [],
             "follow_up_tasks": data.get("follow_up_tasks") or [],
         }
-    except (json.JSONDecodeError, ValueError) as exc:
+    except (json.JSONDecodeError, ValueError, AttributeError) as exc:
         logger.warning("Failed to parse extraction response: %s — response: %r", exc, response)
         return {"attendees": [], "mentioned_people": [], "topics": [], "follow_up_tasks": []}

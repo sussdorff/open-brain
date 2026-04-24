@@ -8,9 +8,9 @@ Acceptance criteria covered:
 5. test_ingest_no_attendees — transcript with no named persons
 6. test_ingest_follow_up_candidates_not_auto_created — follow_up_candidates populated, no bd calls
 7. test_ingest_fixture_transcript — fixture from fixtures/macwhisper/sample_transcript_3person_meeting.txt
+8. test_ingest_fixture_dictated_note — dictated note fixture (mentioned people, no attendees)
+9. test_ingest_fixture_long_meeting — long meeting fixture (4 attendees + 1 mentioned)
 """
-
-from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -26,6 +26,8 @@ from open_brain.ingest.models import IngestResult
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 TRANSCRIPT_3PERSON = FIXTURES_DIR / "macwhisper" / "sample_transcript_3person_meeting.txt"
+TRANSCRIPT_DICTATED_NOTE = FIXTURES_DIR / "macwhisper" / "sample_transcript_dictated_note.txt"
+TRANSCRIPT_LONG_MEETING = FIXTURES_DIR / "macwhisper" / "sample_transcript_long_meeting.txt"
 
 # ─── Canned LLM responses ────────────────────────────────────────────────────
 
@@ -41,6 +43,20 @@ LLM_WITH_MENTIONED = json.dumps({
     "mentioned_people": ["Carol White"],
     "topics": ["project planning"],
     "follow_up_tasks": ["schedule review with Carol"],
+})
+
+LLM_DICTATED_NOTE = json.dumps({
+    "attendees": [],
+    "mentioned_people": ["David Park", "Emma Torres", "Robert Whitfield"],
+    "topics": ["timeline", "data migration", "vendor comparison"],
+    "follow_up_tasks": ["send contract to David", "set up 3-way call", "review vendor sheet"],
+})
+
+LLM_LONG_MEETING = json.dumps({
+    "attendees": ["Katharina Meier", "Stefan Wolf", "Annika Baum", "Michael Torres"],
+    "mentioned_people": ["Jochen Jungbluth"],
+    "topics": ["Q1 financials", "Q2 roadmap"],
+    "follow_up_tasks": ["review Q1 numbers"],
 })
 
 LLM_NO_ATTENDEES = json.dumps({
@@ -182,16 +198,29 @@ class TestIngestIdempotency:
     async def test_ingest_idempotency(self):
         from open_brain.data_layer.interface import Memory
 
-        # First call returns fresh IDs
         mock_dl = AsyncMock()
 
-        # The first search returns no prior run
-        # The second search (idempotency check) returns the prior meeting memory
-        first_call_done = [False]
+        # Capture what update_memory persists so the second search can return it
+        persisted_metadata: dict = {}
+
+        async def _update_memory(params):
+            persisted_metadata.update(params.metadata or {})
+            return SaveMemoryResult(id=params.id, message="ok")
+
+        mock_dl.update_memory.side_effect = _update_memory
+
+        # search: first call (idempotency check) returns nothing;
+        # subsequent calls return the meeting memory with persisted ingest_result
+        search_call_count = [0]
 
         async def _search(params):
-            if first_call_done[0]:
-                # Return the prior meeting memory on second call
+            search_call_count[0] += 1
+            # First search call is the idempotency check on the first ingest — no prior run
+            if search_call_count[0] == 1:
+                return SearchResult(results=[], total=0)
+            # After first ingest completes, the second ingest's idempotency check
+            # (and person search) must distinguish type
+            if params.type == "meeting" and persisted_metadata.get("ingest_result"):
                 meeting_mem = Memory(
                     id=10,
                     index_id=1,
@@ -203,14 +232,7 @@ class TestIngestIdempotency:
                     content="transcript",
                     metadata={
                         "idempotency_key": "will-be-checked",
-                        "ingest_result": {
-                            "meeting_memory_id": 10,
-                            "person_memory_ids": [20, 21],
-                            "mention_memory_ids": [],
-                            "interaction_memory_ids": [30, 31],
-                            "relationship_ids": [101, 102],
-                            "run_id": "prior-run-uuid",
-                        },
+                        **persisted_metadata,
                     },
                     priority=0.5,
                     stability="stable",
@@ -220,10 +242,12 @@ class TestIngestIdempotency:
                     updated_at="2026-01-01T00:00:00",
                 )
                 return SearchResult(results=[meeting_mem], total=1)
+            # Person search during first ingest
             return SearchResult(results=[], total=0)
 
         mock_dl.search = _search
-        # Call order for 2 attendees (no mentioned people):
+
+        # Call order for first ingest (2 attendees, no mentioned people):
         # save(meeting)=10, save(person Alice)=20, save(interaction Alice)=21,
         # save(person Bob)=22, save(interaction Bob)=23
         mock_dl.save_memory.side_effect = [
@@ -250,20 +274,20 @@ class TestIngestIdempotency:
 
             ingestor = TranscriptIngestor(data_layer=mock_dl)
 
-            # First ingest
+            # First ingest — fresh run, creates all memories
             result1 = await ingestor.ingest(text=TRANSCRIPT_TEXT, source_ref=SOURCE_REF)
-            first_call_done[0] = True
 
-            # Second ingest with same source_ref — should return same IDs
+            # Second ingest with same (source_ref, text) — must return same IDs without new saves
             result2 = await ingestor.ingest(text=TRANSCRIPT_TEXT, source_ref=SOURCE_REF)
 
         assert result1.meeting_memory_id == result2.meeting_memory_id
-        # result2 is reconstructed from stored ingest_result metadata
-        assert result2.meeting_memory_id == 10
-        assert result2.person_memory_ids == [20, 21]  # from stored ingest_result mock
-        assert result2.relationship_ids == [101, 102]  # from stored ingest_result mock
+        assert result1.meeting_memory_id == 10
+        # result2 reconstructed from persisted ingest_result
+        assert result2.person_memory_ids == result1.person_memory_ids
+        assert result2.relationship_ids == result1.relationship_ids
+        assert result2.run_id == result1.run_id
 
-        # save_memory should only have been called once (first run)
+        # save_memory should only have been called during the first run
         assert mock_dl.save_memory.call_count == 5  # only from first run
 
 
@@ -517,3 +541,160 @@ class TestRunIdPopulation:
             result2 = await ingestor2.ingest(text="Transcript B.", source_ref="ref-B")
 
         assert result1.run_id != result2.run_id
+
+
+class TestMentionedPeople:
+    """Attendees present + people mentioned but absent."""
+
+    async def test_ingest_with_mentioned_people(self):
+        """LLM returns attendees + mentioned people; both sets of memories created."""
+        # save order: meeting, person1(Alice), interaction1, person2(Bob), interaction2,
+        #             person3(Carol) as mentioned, mention1(Carol)
+        mock_dl = _make_mock_dl(
+            save_side_effects=[
+                SaveMemoryResult(id=10, message="ok"),  # meeting
+                SaveMemoryResult(id=20, message="ok"),  # person1 (Alice Smith)
+                SaveMemoryResult(id=21, message="ok"),  # interaction1
+                SaveMemoryResult(id=22, message="ok"),  # person2 (Bob Jones)
+                SaveMemoryResult(id=23, message="ok"),  # interaction2
+                SaveMemoryResult(id=24, message="ok"),  # person3 (Carol White)
+                SaveMemoryResult(id=25, message="ok"),  # mention1
+            ],
+            rel_side_effects=[101, 102, 103],  # 2 attended_by + 1 mentioned_in
+        )
+
+        with patch("open_brain.ingest.extract.llm_complete") as mock_llm:
+            mock_llm.return_value = LLM_WITH_MENTIONED
+
+            ingestor = TranscriptIngestor(data_layer=mock_dl)
+            result = await ingestor.ingest(
+                text="Alice and Bob met. They mentioned Carol White.",
+                source_ref="mentioned-test-ref",
+            )
+
+        assert isinstance(result, IngestResult)
+        assert result.meeting_memory_id == 10
+        assert len(result.person_memory_ids) == 2  # attendees only
+        assert len(result.mention_memory_ids) == 1  # Carol
+        assert len(result.interaction_memory_ids) == 2
+        assert len(result.relationship_ids) == 3  # 2 attended_by + 1 mentioned_in
+        assert len(result.follow_up_candidates) == 1
+
+
+class TestFixtureDictatedNote:
+    """AC8: dictated note fixture — no attendees, 3 mentioned people."""
+
+    async def test_ingest_fixture_dictated_note(self):
+        """Ingest dictated note fixture: 0 attendees, 3 mentioned people.
+
+        Call order:
+          1. save(meeting)
+          2. For each mentioned: save(person), save(mention)  → 3 * 2 = 6 saves
+          Total: 1 + 6 = 7 saves
+          Relationships: 0 attended_by + 3 mentioned_in = 3
+        """
+        assert TRANSCRIPT_DICTATED_NOTE.exists(), f"Fixture missing: {TRANSCRIPT_DICTATED_NOTE}"
+        transcript_text = TRANSCRIPT_DICTATED_NOTE.read_text()
+
+        mock_dl = _make_mock_dl(
+            save_side_effects=[
+                SaveMemoryResult(id=100, message="ok"),  # meeting
+                # David Park (mentioned)
+                SaveMemoryResult(id=201, message="ok"),  # person
+                SaveMemoryResult(id=202, message="ok"),  # mention
+                # Emma Torres (mentioned)
+                SaveMemoryResult(id=203, message="ok"),  # person
+                SaveMemoryResult(id=204, message="ok"),  # mention
+                # Robert Whitfield (mentioned)
+                SaveMemoryResult(id=205, message="ok"),  # person
+                SaveMemoryResult(id=206, message="ok"),  # mention
+            ],
+            rel_side_effects=[501, 502, 503],  # 3 mentioned_in
+        )
+
+        with patch("open_brain.ingest.extract.llm_complete") as mock_llm:
+            mock_llm.return_value = LLM_DICTATED_NOTE
+
+            ingestor = TranscriptIngestor(data_layer=mock_dl)
+            result = await ingestor.ingest(
+                text=transcript_text,
+                source_ref="fixture-dictated-note",
+            )
+
+        assert isinstance(result, IngestResult)
+        assert result.meeting_memory_id == 100
+        # 0 attendees → no person memories, no interaction memories
+        assert result.person_memory_ids == []
+        assert result.interaction_memory_ids == []
+        # 3 mentioned people → 3 mention memories
+        assert len(result.mention_memory_ids) == 3
+        assert set(result.mention_memory_ids) == {202, 204, 206}
+        # 3 mentioned_in relationships
+        assert len(result.relationship_ids) == 3
+        # 3 follow-up candidates
+        assert len(result.follow_up_candidates) == 3
+        assert result.run_id
+
+
+class TestFixtureLongMeeting:
+    """AC9: long meeting fixture — 4 attendees + 1 mentioned."""
+
+    async def test_ingest_fixture_long_meeting(self):
+        """Ingest long meeting fixture: 4 attendees, 1 mentioned person.
+
+        Call order:
+          1. save(meeting)
+          2. For each attendee: save(person), save(interaction) → 4 * 2 = 8 saves
+          3. For mentioned: save(person), save(mention)          → 1 * 2 = 2 saves
+          Total: 1 + 8 + 2 = 11 saves
+          Relationships: 4 attended_by + 1 mentioned_in = 5
+        """
+        assert TRANSCRIPT_LONG_MEETING.exists(), f"Fixture missing: {TRANSCRIPT_LONG_MEETING}"
+        transcript_text = TRANSCRIPT_LONG_MEETING.read_text()
+
+        mock_dl = _make_mock_dl(
+            save_side_effects=[
+                SaveMemoryResult(id=100, message="ok"),  # meeting
+                # Katharina Meier (attendee)
+                SaveMemoryResult(id=201, message="ok"),  # person
+                SaveMemoryResult(id=202, message="ok"),  # interaction
+                # Stefan Wolf (attendee)
+                SaveMemoryResult(id=203, message="ok"),  # person
+                SaveMemoryResult(id=204, message="ok"),  # interaction
+                # Annika Baum (attendee)
+                SaveMemoryResult(id=205, message="ok"),  # person
+                SaveMemoryResult(id=206, message="ok"),  # interaction
+                # Michael Torres (attendee)
+                SaveMemoryResult(id=207, message="ok"),  # person
+                SaveMemoryResult(id=208, message="ok"),  # interaction
+                # Jochen Jungbluth (mentioned)
+                SaveMemoryResult(id=209, message="ok"),  # person
+                SaveMemoryResult(id=210, message="ok"),  # mention
+            ],
+            rel_side_effects=[501, 502, 503, 504, 505],  # 4 attended_by + 1 mentioned_in
+        )
+
+        with patch("open_brain.ingest.extract.llm_complete") as mock_llm:
+            mock_llm.return_value = LLM_LONG_MEETING
+
+            ingestor = TranscriptIngestor(data_layer=mock_dl)
+            result = await ingestor.ingest(
+                text=transcript_text,
+                source_ref="fixture-long-meeting",
+            )
+
+        assert isinstance(result, IngestResult)
+        assert result.meeting_memory_id == 100
+        # 4 attendees → 4 person memories, 4 interaction memories
+        assert len(result.person_memory_ids) == 4
+        assert set(result.person_memory_ids) == {201, 203, 205, 207}
+        assert len(result.interaction_memory_ids) == 4
+        assert set(result.interaction_memory_ids) == {202, 204, 206, 208}
+        # 1 mentioned person → 1 mention memory
+        assert len(result.mention_memory_ids) == 1
+        assert set(result.mention_memory_ids) == {210}
+        # 4 attended_by + 1 mentioned_in = 5 relationships
+        assert len(result.relationship_ids) == 5
+        # 1 follow-up candidate
+        assert len(result.follow_up_candidates) == 1
+        assert result.run_id

@@ -12,15 +12,16 @@ Flow per ingest call:
 9. Return populated IngestResult.
 """
 
+import dataclasses
 import hashlib
 import logging
 import uuid
-from dataclasses import dataclass, field
 
 from open_brain.data_layer.interface import (
     DataLayer,
     SaveMemoryParams,
     SearchParams,
+    UpdateMemoryParams,
 )
 from open_brain.ingest.extract import extract_from_transcript
 from open_brain.ingest.models import IngestResult
@@ -122,9 +123,10 @@ class TranscriptIngestor:
         existing_records = await self._load_existing_persons()
 
         # --- Save meeting memory (placeholder metadata; updated with full result below) ---
+        transcript_excerpt = text[:4000]
         meeting_result = await self._dl.save_memory(
             SaveMemoryParams(
-                text=f"Meeting transcript: {source_ref}\nTopics: {', '.join(topics)}",
+                text=transcript_excerpt,
                 type="meeting",
                 project="people",
                 title=f"Meeting: {source_ref}",
@@ -232,6 +234,14 @@ class TranscriptIngestor:
             run_id=run_id,
         )
 
+        # --- Persist IngestResult for idempotency on future calls ---
+        await self._dl.update_memory(
+            UpdateMemoryParams(
+                id=meeting_id,
+                metadata={"ingest_result": dataclasses.asdict(result)},
+            )
+        )
+
         return result
 
     async def _find_prior_run(
@@ -320,7 +330,7 @@ class TranscriptIngestor:
             return decision.target.memory_id
 
         # For llm_confirm, ambiguous, or new: create a new person memory (conservative)
-        result = await self._dl.save_memory(
+        save_result = await self._dl.save_memory(
             SaveMemoryParams(
                 text=f"Person: {name}",
                 type="person",
@@ -332,4 +342,12 @@ class TranscriptIngestor:
                 },
             )
         )
-        return result.id
+        # Refresh dedup snapshot so subsequent loop iterations can match this new person
+        existing_records.append(
+            PersonRecord(
+                memory_id=save_result.id,
+                style="single",
+                members=[{"name": name, "org": None, "linkedin": None, "aliases": []}],
+            )
+        )
+        return save_result.id
