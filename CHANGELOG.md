@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(open-brain-cr3.2)* Address review findings iteration 1
+- *(open-brain-cr3.2)* Address codex adversarial findings
 - *(open-brain-cr3.1)* Correct docs inconsistency — schema count in prose vs code block
 - *(open-brain-cr3.5)* Align Protocol Shape run_id signature with run_id Contract
 - *(open-brain-cr3.15)* Fix section numbering in ADR 0002 decision block
@@ -22,6 +24,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- *(open-brain-cr3.2)* Green — people dedup library with 3-stage scorer
 - *(open-brain-cr3.1)* Green — add MentionMetadata + InteractionMetadata TypedDicts with validation
 
 ### Miscellaneous

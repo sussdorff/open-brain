@@ -1,0 +1,36 @@
+{
+  "memory_id": 18175,
+  "style": "directory",
+  "members": [
+    {
+      "name": "Elias Trewin",
+      "org": "Cinify",
+      "linkedin": "elias-trewin",
+      "aliases": []
+    },
+    {
+      "name": "Dr. Cyrus Alamouti",
+      "org": "Dental-Now",
+      "linkedin": "dr-cyrus-alamouti-73385773",
+      "aliases": ["Cyrus Amadi", "Cyrus Ahmadi", "Cyrus"]
+    },
+    {
+      "name": "Siamak Ghasemi",
+      "org": "Dental-Now",
+      "linkedin": "siamakghasemi",
+      "aliases": []
+    },
+    {
+      "name": "Jochen Jungbluth",
+      "org": "Dental-Now",
+      "linkedin": "jochen-jungbluth-a5a412152",
+      "aliases": ["Jochen Jungblut"]
+    },
+    {
+      "name": "Philipp Kuhn-Regnier",
+      "org": "Sonia",
+      "linkedin": "philipp-kuhn-regnier",
+      "aliases": ["Philip Kuhn-Regnier", "Philipp Regnier"]
+    }
+  ]
+}
