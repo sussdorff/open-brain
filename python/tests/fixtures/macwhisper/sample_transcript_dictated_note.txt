@@ -1,0 +1,7 @@
+[00:00:02] Speaker: Okay, quick follow-up note from today's call. So — David Park called around two, and we went through the proposal again. He's actually on board with the revised timeline, which is great. He mentioned that his team needs at least three weeks for internal sign-off, so we're looking at end of May realistically. I need to send him the updated contract by Thursday.
+
+[00:00:28] Speaker: Emma Torres from the operations side reached out earlier, separately. She had some concerns about the data migration scope — specifically the historical records going back more than three years. I think she has a point. I need to loop her in with David before we lock anything down. Note to self: set up a three-way call, David Park, Emma Torres, and me, sometime next week. Probably Tuesday afternoon.
+
+[00:00:58] Speaker: One more thing — Robert Whitfield sent over the vendor comparison sheet. I haven't looked at it yet, but he mentioned the pricing delta between the two options is smaller than expected. That could change the recommendation. I should review that today before the steering committee tomorrow morning. If Robert's numbers check out, I might want to revise the slide on vendor selection.
+
+[00:01:22] Speaker: Okay, that's it. Remind me: David Park by Thursday, Emma Torres call next week, Robert Whitfield vendor sheet today. Done.

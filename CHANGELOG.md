@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(open-brain-cr3.14)* Address review findings iteration 1
+- *(open-brain-cr3.14)* Address codex adversarial findings
 - *(open-brain-cr3.2)* Address review findings iteration 1
 - *(open-brain-cr3.2)* Address codex adversarial findings
 - *(open-brain-cr3.1)* Correct docs inconsistency — schema count in prose vs code block
@@ -24,6 +26,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- *(open-brain-cr3.14)* Add fixture pack — macwhisper transcripts, emails, people JSON
 - *(open-brain-cr3.2)* Green — people dedup library with 3-stage scorer
 - *(open-brain-cr3.1)* Green — add MentionMetadata + InteractionMetadata TypedDicts with validation
 
