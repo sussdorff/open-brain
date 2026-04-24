@@ -32,12 +32,13 @@ logger = logging.getLogger(__name__)
 
 
 def _compute_idempotency_key(source_ref: str, text: str) -> str:
-    """Compute a stable idempotency key from source_ref + text prefix.
+    """Compute a stable idempotency key from source_ref + full text.
 
-    Uses the spec formula:
-        sha256(source_ref.encode() + sha256(text[:500].encode()).digest())
+    Hashes the full transcript body (not just the first 500 chars) to avoid
+    false positives where different transcripts share the same prefix.
+        sha256(source_ref.encode() + sha256(text.encode()).digest())
     """
-    text_hash = hashlib.sha256(text[:500].encode()).digest()
+    text_hash = hashlib.sha256(text.encode()).digest()
     combined = source_ref.encode() + text_hash
     return hashlib.sha256(combined).hexdigest()
 
@@ -222,6 +223,14 @@ class TranscriptIngestor:
                 metadata={"run_id": run_id},
             )
             relationship_ids.append(rel_id)
+
+        # Surface mentioned people in person_memory_ids so mention-only
+        # transcripts return the person IDs they created. Done AFTER the
+        # attended_by relationship loop to avoid miscategorising mentions
+        # as attendees.
+        for person_id in mentioned_person_ids:
+            if person_id not in person_memory_ids:
+                person_memory_ids.append(person_id)
 
         # --- Build final IngestResult ---
         result = IngestResult(

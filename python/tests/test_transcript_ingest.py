@@ -485,9 +485,11 @@ class TestFixtureTranscript:
 
         assert isinstance(result, IngestResult)
         assert result.meeting_memory_id == 100
-        # 3 attendees → 3 person memory IDs
-        assert len(result.person_memory_ids) == 3
-        assert set(result.person_memory_ids) == {201, 203, 205}
+        # 3 attendees + 4 mentioned → 7 person memory IDs
+        # (mentioned people also surface in person_memory_ids so callers can
+        # discover person records created for mention-only transcripts.)
+        assert len(result.person_memory_ids) == 7
+        assert set(result.person_memory_ids) == {201, 203, 205, 207, 209, 211, 213}
         # 4 mentioned people → 4 mention memory IDs
         assert len(result.mention_memory_ids) == 4
         assert set(result.mention_memory_ids) == {208, 210, 212, 214}
@@ -574,7 +576,9 @@ class TestMentionedPeople:
 
         assert isinstance(result, IngestResult)
         assert result.meeting_memory_id == 10
-        assert len(result.person_memory_ids) == 2  # attendees only
+        # 2 attendees + 1 mentioned (Carol) → 3 person memory IDs
+        assert len(result.person_memory_ids) == 3
+        assert set(result.person_memory_ids) == {20, 22, 24}
         assert len(result.mention_memory_ids) == 1  # Carol
         assert len(result.interaction_memory_ids) == 2
         assert len(result.relationship_ids) == 3  # 2 attended_by + 1 mentioned_in
@@ -623,8 +627,9 @@ class TestFixtureDictatedNote:
 
         assert isinstance(result, IngestResult)
         assert result.meeting_memory_id == 100
-        # 0 attendees → no person memories, no interaction memories
-        assert result.person_memory_ids == []
+        # 0 attendees, 3 mentioned → 3 person memories (mention-only),
+        # 0 interaction memories (interactions only for attendees).
+        assert set(result.person_memory_ids) == {201, 203, 205}
         assert result.interaction_memory_ids == []
         # 3 mentioned people → 3 mention memories
         assert len(result.mention_memory_ids) == 3
@@ -685,9 +690,9 @@ class TestFixtureLongMeeting:
 
         assert isinstance(result, IngestResult)
         assert result.meeting_memory_id == 100
-        # 4 attendees → 4 person memories, 4 interaction memories
-        assert len(result.person_memory_ids) == 4
-        assert set(result.person_memory_ids) == {201, 203, 205, 207}
+        # 4 attendees + 1 mentioned → 5 person memories, 4 interaction memories
+        assert len(result.person_memory_ids) == 5
+        assert set(result.person_memory_ids) == {201, 203, 205, 207, 209}
         assert len(result.interaction_memory_ids) == 4
         assert set(result.interaction_memory_ids) == {202, 204, 206, 208}
         # 1 mentioned person → 1 mention memory
