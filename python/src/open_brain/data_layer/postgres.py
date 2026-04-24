@@ -48,8 +48,9 @@ from open_brain.data_layer.interface import (
     TimelineResult,
     rank_importance,
 )
-from open_brain.ingest.runs import get_current_run_id
 from open_brain.data_layer.refine import analyze_with_llm
+
+from open_brain.ingest.runs import get_current_run_id
 
 logger = logging.getLogger(__name__)
 
@@ -1803,6 +1804,7 @@ class PostgresDataLayer:
                 source_id,
                 target_id,
                 link_type,
+                # Pass NULL (not '{}') to preserve ON CONFLICT COALESCE semantics when no metadata given
                 _json.dumps(effective_metadata) if effective_metadata else None,
             )
         logger.info(
@@ -2027,12 +2029,12 @@ class PostgresDataLayer:
                     "DELETE FROM memory_relationships WHERE metadata->>'run_id' = $1",
                     run_id,
                 )
-                rel_count = int(rel_result.split()[-1])
+                rel_count = int(rel_result.split()[-1]) if rel_result else 0
                 mem_result = await conn.execute(
                     "DELETE FROM memories WHERE metadata->>'run_id' = $1",
                     run_id,
                 )
-                mem_count = int(mem_result.split()[-1])
+                mem_count = int(mem_result.split()[-1]) if mem_result else 0
         logger.info(
             "delete_by_run_id: deleted %d memories, %d relationships for run_id=%s",
             mem_count,

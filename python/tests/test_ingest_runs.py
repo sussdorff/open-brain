@@ -4,19 +4,22 @@ Tests:
 1. test_ingest_run_generates_uuid
 2. test_get_current_run_id_outside_context_returns_none
 3. test_get_current_run_id_inside_context_returns_runid
-4. test_nested_contexts_have_independent_run_ids
-5. test_run_id_cleared_after_context_exits
-6. test_delete_by_run_id_returns_correct_counts
-7. test_delete_by_run_id_nonexistent_returns_zero
-8. test_delete_by_run_id_is_transactional
-9. test_ingest_rollback_tool_returns_json
-10. test_save_memory_injects_run_id_in_metadata
+4. test_sequential_contexts_have_independent_run_ids
+5. test_nested_contexts_restore_outer_run_id
+6. test_run_id_cleared_after_context_exits
+7. test_delete_by_run_id_returns_correct_counts
+8. test_delete_by_run_id_nonexistent_returns_zero
+9. test_delete_by_run_id_is_transactional
+10. test_ingest_rollback_tool_returns_json
+11. test_save_memory_injects_run_id_in_metadata
+12. test_ingest_run_round_trip (integration)
 """
 
 from __future__ import annotations
 
 import json
 import uuid
+import warnings
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -57,7 +60,10 @@ def _make_transaction():
 
 class TestIngestRunGeneratesUUID:
     def test_ingest_run_generates_uuid(self):
-        """run_id returned by ingest_run() is a valid UUID4 string."""
+        """run_id returned by ingest_run() is a valid UUID4 string.
+
+        Note: The bead spec allows UUID or ULID; UUID4 is used (no external dep needed).
+        """
         with ingest_run() as run_id:
             parsed = uuid.UUID(run_id)
             assert parsed.version == 4
@@ -86,11 +92,11 @@ class TestGetCurrentRunIdInsideContext:
             assert run_id is not None
 
 
-# ─── 4. Sequential (nested) contexts have independent run_ids ─────────────────
+# ─── 4. Sequential contexts have independent run_ids ─────────────────────────
 
 
 class TestSequentialContextsHaveIndependentRunIds:
-    def test_nested_contexts_have_independent_run_ids(self):
+    def test_sequential_contexts_have_independent_run_ids(self):
         """Two sequential ingest_run contexts produce different run_ids."""
         with ingest_run() as run_id_1:
             first = run_id_1
@@ -101,7 +107,20 @@ class TestSequentialContextsHaveIndependentRunIds:
         assert first != second
 
 
-# ─── 5. run_id is None after context exits ────────────────────────────────────
+# ─── 5. Nested contexts restore the outer run_id on exit ─────────────────────
+
+
+class TestNestedContextsRestoreOuterRunId:
+    def test_nested_contexts_restore_outer_run_id(self):
+        """Entering a nested ingest_run restores outer run_id on exit."""
+        with ingest_run() as outer_id:
+            with ingest_run() as inner_id:
+                assert get_current_run_id() == inner_id
+                assert outer_id != inner_id
+            assert get_current_run_id() == outer_id
+
+
+# ─── 6. run_id is None after context exits ────────────────────────────────────
 
 
 class TestRunIdClearedAfterContextExits:
@@ -113,7 +132,7 @@ class TestRunIdClearedAfterContextExits:
         assert get_current_run_id() is None
 
 
-# ─── 6. delete_by_run_id returns correct counts ──────────────────────────────
+# ─── 7. delete_by_run_id returns correct counts ──────────────────────────────
 
 
 class TestDeleteByRunIdReturnsCounts:
@@ -136,7 +155,7 @@ class TestDeleteByRunIdReturnsCounts:
         assert result.memories == 5
 
 
-# ─── 7. delete_by_run_id non-existent run_id returns zero counts ──────────────
+# ─── 8. delete_by_run_id non-existent run_id returns zero counts ──────────────
 
 
 class TestDeleteByRunIdNonExistentReturnsZero:
@@ -157,7 +176,7 @@ class TestDeleteByRunIdNonExistentReturnsZero:
         assert result.memories == 0
 
 
-# ─── 8. delete_by_run_id is transactional ────────────────────────────────────
+# ─── 9. delete_by_run_id is transactional ────────────────────────────────────
 
 
 class TestDeleteByRunIdIsTransactional:
@@ -186,7 +205,7 @@ class TestDeleteByRunIdIsTransactional:
         assert transaction_entered, "delete_by_run_id must use conn.transaction()"
 
 
-# ─── 9. ingest_rollback MCP tool returns JSON ────────────────────────────────
+# ─── 10. ingest_rollback MCP tool returns JSON ───────────────────────────────
 
 
 class TestIngestRollbackToolReturnsJson:
@@ -221,7 +240,7 @@ class TestIngestRollbackToolReturnsJson:
         assert result["run_id"] == "abc-123"
 
 
-# ─── 10. save_memory injects run_id into metadata ────────────────────────────
+# ─── 11. save_memory injects run_id into metadata ────────────────────────────
 
 
 class TestSaveMemoryInjectsRunId:
@@ -257,7 +276,9 @@ class TestSaveMemoryInjectsRunId:
         with patch("open_brain.data_layer.postgres.get_pool", return_value=pool):
             with patch("open_brain.data_layer.postgres.asyncio.create_task"):
                 with ingest_run() as run_id:
-                    await dl.save_memory(SaveMemoryParams(text="test memory content"))
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore", RuntimeWarning)
+                        await dl.save_memory(SaveMemoryParams(text="test memory content"))
 
         # Verify run_id appears in the captured metadata
         assert len(captured_metadata) >= 1, "No INSERT metadata was captured"
@@ -265,3 +286,68 @@ class TestSaveMemoryInjectsRunId:
             meta = json.loads(meta_str)
             assert "run_id" in meta, f"run_id not found in metadata: {meta}"
             assert meta["run_id"] == run_id
+
+
+# ─── 12. Integration: full round-trip ingest → query → rollback ──────────────
+
+
+@pytest.mark.integration
+class TestIngestRunRoundTrip:
+    """Integration test: ingest two memories, query by run_id, rollback, verify zero rows.
+
+    Requires DATABASE_URL env var pointing to a real Postgres instance.
+
+    Note: create_relationship requires FK-valid IDs from the same DB, so we test
+    memories only (2 rows) and omit the relationship insertion to keep the test
+    self-contained. The relationship deletion path is covered by mock tests above.
+    """
+
+    @pytest.mark.asyncio
+    async def test_ingest_run_round_trip(self):
+        import os
+
+        import asyncpg
+
+        from open_brain.data_layer.postgres import PostgresDataLayer, get_pool
+        from open_brain.data_layer.interface import SaveMemoryParams
+
+        database_url = os.environ.get("DATABASE_URL", "")
+        if not database_url or database_url == "test-placeholder":
+            pytest.skip("Requires real DATABASE_URL (not test placeholder)")
+
+        dl = PostgresDataLayer()
+
+        # ── Ingest two memories inside an ingest_run context ─────────────────
+        with ingest_run() as run_id:
+            r1 = await dl.save_memory(SaveMemoryParams(text="ingest round-trip memory A"))
+            r2 = await dl.save_memory(SaveMemoryParams(text="ingest round-trip memory B"))
+
+        assert r1 is not None, "save_memory returned None for memory A"
+        assert r2 is not None, "save_memory returned None for memory B"
+
+        # ── Query: expect 2 rows in DB with this run_id ───────────────────────
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT id FROM memories WHERE metadata->>'run_id' = $1",
+                run_id,
+            )
+        assert len(rows) == 2, (
+            f"Expected 2 memories for run_id={run_id}, got {len(rows)}"
+        )
+
+        # ── Rollback ──────────────────────────────────────────────────────────
+        result = await dl.delete_by_run_id(run_id)
+        assert result.memories == 2, (
+            f"Expected 2 deleted memories, got {result.memories}"
+        )
+
+        # ── Re-query: expect 0 residual rows ──────────────────────────────────
+        async with pool.acquire() as conn:
+            remaining = await conn.fetch(
+                "SELECT id FROM memories WHERE metadata->>'run_id' = $1",
+                run_id,
+            )
+        assert len(remaining) == 0, (
+            f"Expected 0 residual memories after rollback, got {len(remaining)}"
+        )

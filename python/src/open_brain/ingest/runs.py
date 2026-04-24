@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Generator
+from collections.abc import Generator
 
 _current_run_id: ContextVar[str | None] = ContextVar("_current_run_id", default=None)
 

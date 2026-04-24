@@ -827,6 +827,8 @@ async def compact_memories(
 )
 async def ingest_rollback(run_id: str) -> str:
     """Delete all memories and relationships for the given ingest run_id."""
+    if not run_id or not run_id.strip():
+        raise ValueError("run_id must be a non-empty string")
     dl = get_dl()
     result = await dl.delete_by_run_id(run_id)
     return json.dumps({
