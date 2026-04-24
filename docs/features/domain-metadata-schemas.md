@@ -372,7 +372,7 @@ def _is_iso_datetime(value: str) -> bool:
 
 ### save_memory Tool Description
 
-The MCP tool's docstring documents all five schemas so MIRA and other LLM agents know what metadata to provide:
+The MCP tool's docstring currently documents the original five schemas (`event`, `person`, `meeting`, `decision`, `household`); `mention` and `interaction` are defined in the interface layer and documented here, pending a follow-up bead to update the server tool description. The complete target description (all seven schemas) is shown below:
 
 ```
 DOMAIN SCHEMAS — structured metadata by type:
@@ -387,7 +387,7 @@ ISO datetime format: 'YYYY-MM-DDTHH:MM:SS' (e.g. '2026-04-15T10:00:00').
 Invalid or missing required datetime fields produce a warning in the response but still save the memory.
 ```
 
-This is the primary API documentation for domain metadata.
+This is the canonical specification for domain metadata. Once `server.py` is updated in a follow-up bead, this will also serve as the primary API documentation exposed to LLM agents.
 
 ### No OpenAPI Changes
 
