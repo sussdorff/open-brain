@@ -127,12 +127,13 @@ def plan_migration(row: dict[str, Any]) -> dict[str, Any]:
             "archive_original": True,
         }
 
-    # Single-person normalisation
+    # Single-person normalisation — preserve any existing aliases
     name: str = metadata.get("name") or row.get("title") or ""
     person_ref = derive_person_ref(name, memory_id)
+    existing_aliases: list[str] = metadata.get("aliases") or []
     changes: dict[str, Any] = {
         "person_ref": person_ref,
-        "aliases": [],
+        "aliases": existing_aliases,
         "schema_version": "people-v1",
     }
     return {

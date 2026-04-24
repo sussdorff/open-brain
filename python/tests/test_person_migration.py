@@ -202,6 +202,10 @@ class TestPlanMigration:
         assert changes["person_ref"] == "person-weihe-dr-dr-stephan"
         assert "aliases" in changes
         assert isinstance(changes["aliases"], list)
+        # Existing aliases must be preserved — not overwritten with []
+        assert changes["aliases"] == ["Stephan Weihe"], (
+            "plan_migration must preserve existing aliases from metadata, not replace with []"
+        )
 
     def test_directory_plan_action(self):
         plan = mpm.plan_migration(DIRECTORY_ROW)
