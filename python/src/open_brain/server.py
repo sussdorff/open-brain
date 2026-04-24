@@ -1892,7 +1892,6 @@ async def create_relationship(
     metadata: dict | None = None,
 ) -> str:
     """Create a typed relationship between two memories."""
-    _require_scope("write")
     dl = get_dl()
     rel_id = await dl.create_relationship(
         source_id=source_id,
@@ -1920,7 +1919,6 @@ async def traverse_relationships(
     direction: str = "outbound",
 ) -> str:
     """Traverse the memory relationship graph."""
-    _require_scope("read")
     dl = get_dl()
     results = await dl.traverse(
         anchor_id=anchor_id,
@@ -1928,7 +1926,7 @@ async def traverse_relationships(
         depth=depth,
         direction=direction,
     )
-    return json.dumps(results)
+    return json.dumps({"results": results, "count": len(results)})
 
 
 @app.delete("/api/memories")

@@ -22,6 +22,8 @@ Creates a typed edge between two memories. Returns the relationship row ID.
 
 Raises `ValueError` if `link_type` is not in `VALID_LINK_TYPES`.
 
+On conflict (same source, target, relation_type), the row is updated and `confidence` is set to `1.0`. Typed relationships are considered authoritative, overriding the auto-linked cosine similarity score written by `_embed_and_link`.
+
 ```python
 rel_id = await dl.create_relationship(
     source_id=42,
@@ -76,8 +78,8 @@ edges = await dl.get_relationships(memory_id=42, link_types=["similar_to", "atte
 
 Two MCP tools are registered in `server.py`:
 
-- **`create_relationship`** — requires `write` scope. Creates a typed relationship.
-- **`traverse_relationships`** — requires `read` scope. Traverses the graph.
+- **`create_relationship`** — available to any authenticated caller. Creates a typed relationship.
+- **`traverse_relationships`** — available to any authenticated caller. Traverses the graph. Returns `{"results": [...], "count": N}`.
 
 ## Schema Migration
 

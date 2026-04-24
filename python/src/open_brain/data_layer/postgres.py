@@ -7,7 +7,7 @@ import hashlib
 import json as _json
 import logging
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 import asyncpg
 
@@ -1756,7 +1756,7 @@ class PostgresDataLayer:
         source_id: int,
         target_id: int,
         link_type: str,
-        metadata: dict | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> int:
         """Create a typed relationship between two memories.
 
@@ -1779,6 +1779,8 @@ class PostgresDataLayer:
         pool = await get_pool()
         async with pool.acquire() as conn:
             rel_id: int = await conn.fetchval(
+                # On conflict, confidence is set to 1.0 — typed relationships are
+                # considered authoritative, overriding the auto-linked similarity score.
                 """INSERT INTO memory_relationships (source_id, target_id, relation_type, link_type, confidence, metadata)
                    VALUES ($1, $2, $3, $3, 1.0, $4::jsonb)
                    ON CONFLICT (source_id, target_id, relation_type) DO UPDATE
@@ -1789,7 +1791,7 @@ class PostgresDataLayer:
                 source_id,
                 target_id,
                 link_type,
-                _json.dumps(metadata) if metadata else None,
+                _json.dumps(metadata) if metadata is not None else None,
             )
         logger.info(
             "Created relationship id=%d source=%d target=%d link_type=%s",
@@ -1802,21 +1804,31 @@ class PostgresDataLayer:
         anchor_id: int,
         link_types: list[str],
         depth: int = 1,
-        direction: str = "outbound",
-    ) -> list[dict]:
+        direction: Literal["outbound", "inbound", "both"] = "outbound",
+    ) -> list[dict[str, Any]]:
         """Traverse the relationship graph using iterative BFS.
 
         Args:
             anchor_id: Starting memory ID.
             link_types: List of link_type values to follow.
             depth: Number of hops to traverse (1 = direct neighbors only).
+                Must be between 1 and 10 inclusive.
             direction: 'outbound' (source→target), 'inbound' (target→source),
                        or 'both'.
 
         Returns:
             List of dicts with keys: id, link_type, depth, source_id, target_id.
             Each dict represents one edge found during the traversal.
+
+        Raises:
+            ValueError: If depth is not between 1 and 10, or direction is invalid.
         """
+        if not (1 <= depth <= 10):
+            raise ValueError(f"depth must be between 1 and 10, got {depth!r}")
+        if direction not in ("outbound", "inbound", "both"):
+            raise ValueError(
+                f"direction must be 'outbound', 'inbound', or 'both', got {direction!r}"
+            )
         if not link_types:
             return []
 
@@ -1865,10 +1877,11 @@ class PostgresDataLayer:
                     # For 'both': pick the node that is NOT in current_frontier
                     neighbor = tgt if src in current_frontier else src
 
-                if neighbor in visited:
-                    continue
-                visited.add(neighbor)
-                next_frontier.append(neighbor)
+                # Always report the edge — even if the neighbor is already visited.
+                # This ensures all matched edges are returned (e.g. two nodes that
+                # both point to the same already-visited neighbor). Only skip
+                # re-enqueuing already-visited neighbors into the next frontier
+                # to prevent cycles.
                 results.append({
                     "id": row["id"],
                     "link_type": row["link_type"],
@@ -1876,6 +1889,10 @@ class PostgresDataLayer:
                     "source_id": src,
                     "target_id": tgt,
                 })
+                if neighbor in visited:
+                    continue
+                visited.add(neighbor)
+                next_frontier.append(neighbor)
 
             current_frontier = next_frontier
 
@@ -1885,7 +1902,7 @@ class PostgresDataLayer:
         self,
         memory_id: int,
         link_types: list[str] | None = None,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """Return all relationship edges where memory_id is source or target.
 
         Args:

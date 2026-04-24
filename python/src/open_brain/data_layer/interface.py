@@ -591,7 +591,15 @@ class DataLayer(Protocol):
         link_types: list[str],
         depth: int = 1,
         direction: Literal["outbound", "inbound", "both"] = "outbound",
-    ) -> list[dict[str, Any]]: ...
+    ) -> list[dict[str, Any]]:
+        """Traverse the relationship graph using iterative BFS.
+
+        depth must be between 1 and 10 (inclusive). Values outside this range
+        raise ValueError.
+        direction must be 'outbound', 'inbound', or 'both'. Invalid values
+        raise ValueError.
+        """
+        ...
 
     async def get_relationships(
         self,
