@@ -552,6 +552,64 @@ async def stats() -> str:
     return json.dumps(result, default=str)
 
 
+# ── People-aware query tools ──────────────────────────────────────────────────
+
+
+@mcp.tool(
+    description=(
+        "Return meetings and mentions linked to a person memory, sorted by date desc. "
+        "Params: person_id (required), since (optional ISO date string, e.g. '2026-01-01'), "
+        "limit (default 20). "
+        "Returns list of {memory_id, title, date, link_type}."
+    )
+)
+async def people_discussed_with(
+    person_id: int,
+    since: str | None = None,
+    limit: int = 20,
+) -> str:
+    """Return meetings + mentions + interactions linking to person_id."""
+    dl = get_dl()
+    result = await dl.people_discussed_with(person_id=person_id, since=since, limit=limit)
+    return json.dumps(result, default=str)
+
+
+@mcp.tool(
+    description=(
+        "Return person memories whose last_contact is older than min_days (or is null), "
+        "sorted oldest first. "
+        "Params: min_days (default 90), limit (default 50). "
+        "Returns list of {memory_id, title, last_contact, days_stale}."
+    )
+)
+async def people_stale_contacts(
+    min_days: int = 90,
+    limit: int = 50,
+) -> str:
+    """Return person memories with stale or missing last_contact."""
+    dl = get_dl()
+    result = await dl.people_stale_contacts(min_days=min_days, limit=limit)
+    return json.dumps(result, default=str)
+
+
+@mcp.tool(
+    description=(
+        "Aggregate mention memories in the last N days, grouped by person, "
+        "filtered by minimum mention count. "
+        "Params: days (default 30), min_count (default 1). "
+        "Returns list of {person_id, mention_count, last_mentioned_at}."
+    )
+)
+async def people_mentions_window(
+    days: int = 30,
+    min_count: int = 1,
+) -> str:
+    """Aggregate mention memories in the last N days, grouped by person_ref."""
+    dl = get_dl()
+    result = await dl.people_mentions_window(days=days, min_count=min_count)
+    return json.dumps(result, default=str)
+
+
 # ── Shared health-check helpers ───────────────────────────────────────────────
 
 async def _check_db_status() -> dict:

@@ -1947,6 +1947,180 @@ class PostgresDataLayer:
             for row in rows
         ]
 
+    async def people_discussed_with(
+        self,
+        person_id: int,
+        since: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Return meetings + mentions linking to person_id, sorted by date desc.
+
+        Uses traverse() to find all inbound edges of type attended_by/mentioned_in
+        pointing to the given person memory, then fetches those source memories.
+
+        Args:
+            person_id: The person memory ID to query.
+            since: Optional ISO date string (e.g. '2026-01-01'). Filters out
+                memories created before this date.
+            limit: Maximum number of results to return (default 20).
+
+        Returns:
+            List of dicts with keys: memory_id, title, date, link_type.
+        """
+        edges = await self.traverse(
+            anchor_id=person_id,
+            link_types=["attended_by", "mentioned_in"],
+            depth=1,
+            direction="inbound",
+        )
+        if not edges:
+            return []
+
+        # Build edge_id -> link_type mapping for the source memories
+        source_link: dict[int, str] = {e["source_id"]: e["link_type"] for e in edges}
+        source_ids = list(source_link.keys())
+
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT id, title, created_at, link_type FROM memories WHERE id = ANY($1::int[])",
+                source_ids,
+            )
+
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            date_val = row["created_at"]
+            date_str = date_val.isoformat() if hasattr(date_val, "isoformat") else str(date_val)
+
+            # Filter by since if provided
+            if since is not None:
+                if date_str < since:
+                    continue
+
+            results.append({
+                "memory_id": row["id"],
+                "title": row["title"],
+                "date": date_str,
+                "link_type": source_link.get(row["id"], row["link_type"]),
+            })
+
+        # Sort by date descending, apply limit
+        results.sort(key=lambda r: r["date"], reverse=True)
+        return results[:limit]
+
+    async def people_stale_contacts(
+        self,
+        min_days: int = 90,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Return person memories whose last_contact is older than min_days or null.
+
+        Args:
+            min_days: Minimum age in days to be considered stale (default 90).
+            limit: Maximum number of results to return (default 50).
+
+        Returns:
+            List of dicts with keys: memory_id, title, last_contact, days_stale.
+            last_contact and days_stale are None when last_contact is absent.
+        """
+        from datetime import UTC, timedelta
+
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, title, created_at, metadata
+                FROM memories
+                WHERE type = 'person'
+                  AND (
+                    metadata->>'last_contact' IS NULL
+                    OR (metadata->>'last_contact')::timestamptz < NOW() - ($1 || ' days')::interval
+                  )
+                ORDER BY
+                  CASE WHEN metadata->>'last_contact' IS NULL THEN '1970-01-01'::timestamptz
+                       ELSE (metadata->>'last_contact')::timestamptz END ASC
+                LIMIT $2
+                """,
+                str(min_days),
+                limit,
+            )
+
+        now = datetime.now(UTC)
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            metadata = row["metadata"] or {}
+            last_contact_raw = metadata.get("last_contact") if isinstance(metadata, dict) else None
+            if last_contact_raw:
+                try:
+                    lc_dt = datetime.fromisoformat(last_contact_raw)
+                    if lc_dt.tzinfo is None:
+                        lc_dt = lc_dt.replace(tzinfo=UTC)
+                    days_stale = (now - lc_dt).days
+                    last_contact = last_contact_raw
+                except ValueError:
+                    last_contact = None
+                    days_stale = None
+            else:
+                last_contact = None
+                days_stale = None
+
+            results.append({
+                "memory_id": row["id"],
+                "title": row["title"],
+                "last_contact": last_contact,
+                "days_stale": days_stale,
+            })
+
+        return results
+
+    async def people_mentions_window(
+        self,
+        days: int = 30,
+        min_count: int = 1,
+    ) -> list[dict[str, Any]]:
+        """Aggregate mention memories in the last N days, grouped by person_ref.
+
+        Args:
+            days: Look-back window in days (default 30).
+            min_count: Minimum number of mentions to include (default 1).
+
+        Returns:
+            List of dicts with keys: person_id, mention_count, last_mentioned_at.
+            Sorted by mention_count descending.
+        """
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    mr.target_id AS person_id,
+                    COUNT(*) AS mention_count,
+                    MAX(m.created_at) AS last_mentioned_at
+                FROM memory_relationships mr
+                JOIN memories m ON m.id = mr.source_id
+                WHERE mr.link_type IN ('mentioned_in', 'attended_by')
+                  AND m.created_at >= NOW() - ($1 || ' days')::interval
+                GROUP BY mr.target_id
+                HAVING COUNT(*) >= $2
+                ORDER BY mention_count DESC
+                """,
+                str(days),
+                min_count,
+            )
+
+        return [
+            {
+                "person_id": row["person_id"],
+                "mention_count": row["mention_count"],
+                "last_mentioned_at": (
+                    row["last_mentioned_at"].isoformat()
+                    if hasattr(row["last_mentioned_at"], "isoformat")
+                    else str(row["last_mentioned_at"])
+                ),
+            }
+            for row in rows
+        ]
+
     async def delete_memories(self, params: DeleteParams) -> DeleteResult:
         """Delete memories by IDs or by filter (project + type + before)."""
         pool = await get_pool()
