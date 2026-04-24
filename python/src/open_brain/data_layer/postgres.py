@@ -1785,10 +1785,6 @@ class PostgresDataLayer:
             raise ValueError(
                 f"Invalid link_type: {link_type!r}. Must be one of: {sorted(VALID_LINK_TYPES)}"
             )
-        # Inject run_id into metadata if inside an ingest_run context
-        effective_metadata = dict(metadata) if metadata is not None else {}
-        if run_id := get_current_run_id():
-            effective_metadata["run_id"] = run_id
         pool = await get_pool()
         async with pool.acquire() as conn:
             rel_id: int = await conn.fetchval(
@@ -1804,8 +1800,7 @@ class PostgresDataLayer:
                 source_id,
                 target_id,
                 link_type,
-                # Pass NULL (not '{}') to preserve ON CONFLICT COALESCE semantics when no metadata given
-                _json.dumps(effective_metadata) if effective_metadata else None,
+                _json.dumps(metadata) if metadata else None,
             )
         logger.info(
             "Created relationship id=%d source=%d target=%d link_type=%s",
@@ -2024,22 +2019,40 @@ class PostgresDataLayer:
         """
         pool = await get_pool()
         async with pool.acquire() as conn:
+            # Collect memory IDs for this run_id first
+            rows = await conn.fetch(
+                "SELECT id FROM memories WHERE metadata->>'run_id' = $1",
+                run_id,
+            )
+            memory_ids: list[int] = [r["id"] for r in rows]
+
+            if not memory_ids:
+                return DeleteByRunIdResult(memories=0, relationships=0)
+
             async with conn.transaction():
+                # Delete relationships touching these memories (no CASCADE FK)
                 rel_result = await conn.execute(
-                    "DELETE FROM memory_relationships WHERE metadata->>'run_id' = $1",
-                    run_id,
+                    "DELETE FROM memory_relationships WHERE source_id = ANY($1::int[]) OR target_id = ANY($1::int[])",
+                    memory_ids,
                 )
                 rel_count = int(rel_result.split()[-1]) if rel_result else 0
+
+                # Delete usage log entries (FK constraint)
+                await conn.execute(
+                    "DELETE FROM memory_usage_log WHERE memory_id = ANY($1::int[])",
+                    memory_ids,
+                )
+
+                # Delete the memories themselves
                 mem_result = await conn.execute(
-                    "DELETE FROM memories WHERE metadata->>'run_id' = $1",
-                    run_id,
+                    "DELETE FROM memories WHERE id = ANY($1::int[])",
+                    memory_ids,
                 )
                 mem_count = int(mem_result.split()[-1]) if mem_result else 0
+
         logger.info(
             "delete_by_run_id: deleted %d memories, %d relationships for run_id=%s",
-            mem_count,
-            rel_count,
-            run_id,
+            mem_count, rel_count, run_id,
         )
         return DeleteByRunIdResult(memories=mem_count, relationships=rel_count)
 

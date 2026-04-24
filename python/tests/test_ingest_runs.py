@@ -138,10 +138,16 @@ class TestRunIdClearedAfterContextExits:
 class TestDeleteByRunIdReturnsCounts:
     @pytest.mark.asyncio
     async def test_delete_by_run_id_returns_correct_counts(self):
-        """delete_by_run_id parses DELETE command tags and returns correct counts."""
+        """delete_by_run_id parses DELETE command tags and returns correct counts.
+
+        New implementation: fetch memory IDs first, then DELETE relationships,
+        usage_log, and memories inside a transaction.
+        """
         conn = AsyncMock()
-        # asyncpg execute() returns a tag like "DELETE 3"
-        conn.execute = AsyncMock(side_effect=["DELETE 2", "DELETE 5"])
+        # fetch() returns a list of rows with 'id' keys
+        conn.fetch = AsyncMock(return_value=[{"id": 10}, {"id": 11}, {"id": 12}])
+        # execute() is called 3 times: DELETE relationships, DELETE usage_log, DELETE memories
+        conn.execute = AsyncMock(side_effect=["DELETE 2", "DELETE 3", "DELETE 3"])
         conn.transaction = MagicMock(return_value=_make_transaction())
 
         pool = _make_pool(conn)
@@ -152,7 +158,16 @@ class TestDeleteByRunIdReturnsCounts:
 
         assert isinstance(result, DeleteByRunIdResult)
         assert result.relationships == 2
-        assert result.memories == 5
+        assert result.memories == 3
+
+        # Verify the SELECT was called
+        conn.fetch.assert_called_once()
+        fetch_call_args = conn.fetch.call_args
+        assert "SELECT id FROM memories" in fetch_call_args[0][0]
+        assert fetch_call_args[0][1] == "some-run-id"
+
+        # Verify 3 execute calls: relationships, usage_log, memories
+        assert conn.execute.call_count == 3
 
 
 # ─── 8. delete_by_run_id non-existent run_id returns zero counts ──────────────
@@ -161,9 +176,15 @@ class TestDeleteByRunIdReturnsCounts:
 class TestDeleteByRunIdNonExistentReturnsZero:
     @pytest.mark.asyncio
     async def test_delete_by_run_id_nonexistent_returns_zero(self):
-        """delete_by_run_id returns zero counts for a run_id that doesn't exist."""
+        """delete_by_run_id returns zero counts when fetch returns no memory IDs.
+
+        When no memories exist for the run_id, the function returns early
+        without entering a transaction.
+        """
         conn = AsyncMock()
-        conn.execute = AsyncMock(side_effect=["DELETE 0", "DELETE 0"])
+        # fetch() returns empty list — no memories for this run_id
+        conn.fetch = AsyncMock(return_value=[])
+        conn.execute = AsyncMock()
         conn.transaction = MagicMock(return_value=_make_transaction())
 
         pool = _make_pool(conn)
@@ -175,6 +196,11 @@ class TestDeleteByRunIdNonExistentReturnsZero:
         assert result.relationships == 0
         assert result.memories == 0
 
+        # No DELETE calls should have been made
+        conn.execute.assert_not_called()
+        # No transaction should have been opened
+        conn.transaction.assert_not_called()
+
 
 # ─── 9. delete_by_run_id is transactional ────────────────────────────────────
 
@@ -182,9 +208,11 @@ class TestDeleteByRunIdNonExistentReturnsZero:
 class TestDeleteByRunIdIsTransactional:
     @pytest.mark.asyncio
     async def test_delete_by_run_id_is_transactional(self):
-        """delete_by_run_id wraps both DELETE statements in a transaction."""
+        """delete_by_run_id wraps DELETE statements in a transaction when memories exist."""
         conn = AsyncMock()
-        conn.execute = AsyncMock(side_effect=["DELETE 1", "DELETE 1"])
+        # fetch() returns one memory row so the transaction path is taken
+        conn.fetch = AsyncMock(return_value=[{"id": 42}])
+        conn.execute = AsyncMock(side_effect=["DELETE 1", "DELETE 0", "DELETE 1"])
 
         transaction_entered = False
 
@@ -202,7 +230,7 @@ class TestDeleteByRunIdIsTransactional:
         with patch("open_brain.data_layer.postgres.get_pool", return_value=pool):
             await dl.delete_by_run_id("test-run-id")
 
-        assert transaction_entered, "delete_by_run_id must use conn.transaction()"
+        assert transaction_entered, "delete_by_run_id must use conn.transaction() when memories exist"
 
 
 # ─── 10. ingest_rollback MCP tool returns JSON ───────────────────────────────
