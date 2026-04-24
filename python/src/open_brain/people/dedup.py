@@ -101,6 +101,26 @@ def _normalize_org(org: str | None) -> str:
     return " ".join(result.split())
 
 
+def _normalize_linkedin(handle_or_url: str) -> str:
+    """Extract the LinkedIn handle/path-slug from a raw handle or full URL.
+
+    Converts:
+      - "jochen-jungbluth-a5a412152"                         → "jochen-jungbluth-a5a412152"
+      - "https://www.linkedin.com/in/jochen-jungbluth-a5a412152"  → "jochen-jungbluth-a5a412152"
+      - "https://www.linkedin.com/in/jochen-jungbluth-a5a412152/" → "jochen-jungbluth-a5a412152"
+      - "linkedin.com/in/jochen-jungbluth-a5a412152"         → "jochen-jungbluth-a5a412152"
+
+    Always strips leading/trailing whitespace and trailing slash.
+    """
+    s = handle_or_url.strip().rstrip("/")
+    # If it contains "linkedin.com/in/", extract the last path component
+    marker = "linkedin.com/in/"
+    idx = s.lower().find(marker)
+    if idx != -1:
+        return s[idx + len(marker):].rstrip("/")
+    return s
+
+
 def _name_similarity(a: str, b: str) -> float:
     """Compute similarity between two raw name strings.
 
@@ -184,8 +204,10 @@ def match_person(
             member_org: str | None = member.get("org")
             aliases: list[str] = member.get("aliases") or []
 
-            # --- Stage 1: LinkedIn exact match ---
-            if new_linkedin and member_linkedin and new_linkedin == member_linkedin:
+            # --- Stage 1: LinkedIn exact match (after normalization) ---
+            norm_linkedin = _normalize_linkedin(new_linkedin) if new_linkedin else None
+            norm_member_linkedin = _normalize_linkedin(member_linkedin) if member_linkedin else None
+            if norm_linkedin and norm_member_linkedin and norm_linkedin == norm_member_linkedin:
                 candidates.append(
                     MatchCandidate(
                         memory_id=record.memory_id,
