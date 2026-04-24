@@ -36,7 +36,7 @@ Pseudocode (documentation only — not executable Python):
 Protocol IngestAdapter:
   name: str                                    # adapter identifier (unique, snake_case)
   list_recent(n: int) -> list[Ref]             # list N most recent items from the source
-  ingest(ref: Ref) -> IngestResult             # ingest a single item identified by ref
+  ingest(ref: Ref, run_id: UUID) -> IngestResult  # ingest a single item identified by ref
   credentials() -> dict  (optional/default={}) # credential requirements (key → description)
 ```
 
