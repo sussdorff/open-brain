@@ -23,7 +23,7 @@ Additionally, some ingested content (e.g. emails from unknown senders, Matrix DM
 
 ## Decision
 
-### 1Password CLI as the Single Secret Store
+### 1. 1Password CLI as the Single Secret Store
 
 All secrets are managed exclusively through the 1Password CLI (`op`). No plaintext credentials appear in:
 
