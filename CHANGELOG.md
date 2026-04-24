@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- *(cr3.9)* Green — people-aware query MCP tools (discussed_with, stale_contacts, mentions_window)
 - *(open-brain-cr3.10)* Green — typed-relationship API + backcompat migration
 
 ### Miscellaneous
