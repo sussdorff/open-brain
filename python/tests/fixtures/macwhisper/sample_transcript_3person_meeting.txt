@@ -1,0 +1,59 @@
+[00:00:05] Sarah Hoffmann: Gut, dann würde ich sagen, fangen wir an. Marcus, Priya — könnt ihr mich hören?
+
+[00:00:10] Marcus Berger: Ja, alles klar hier.
+
+[00:00:12] Priya Nair: Ja, ich bin dabei. Guten Morgen zusammen.
+
+[00:00:15] Sarah Hoffmann: Perfekt. Also, ich habe für heute folgende Agenda vorbereitet: Erstens, Status-Update zur API-Integration, zweitens, offene Punkte beim Data Mapping, und drittens, nächste Schritte. Tobias Schreiber sollte eigentlich auch dabei sein, aber er ist heute krank gemeldet. Marcus, kannst du kurz übernehmen, was er normalerweise berichtet?
+
+[00:00:38] Marcus Berger: Ja, kein Problem. Tobias hat mir gestern noch kurz Bescheid gegeben. Die Backend-Services stehen soweit, aber es gibt noch ein paar Probleme beim Authentication Flow. Er hat das Ticket schon angelegt — ich schicke euch den Link nach dem Call.
+
+[00:00:55] Sarah Hoffmann: Danke. Okay, Priya, wie ist der Status von eurer Seite? Ihr habt doch letzte Woche die neue Endpoint-Dokumentation geschickt — haben wir damit weitergearbeitet?
+
+[00:01:05] Priya Nair: Genau, die Dokumentation sollte vollständig sein. Wir haben die REST endpoints für Patient Records und Appointment Scheduling dokumentiert. Was noch fehlt, ist der Webhook-Part — das ist noch in Arbeit. Ich erwarte, dass das bis Ende der Woche fertig ist.
+
+[00:01:22] Marcus Berger: Gut. Ich habe gestern Abend noch mit Dr. Cyrus Alamouti telefoniert — er will nächste Woche eine Demo sehen. Ich glaube, wir sollten das Datum noch koordinieren, Sarah.
+
+[00:01:34] Sarah Hoffmann: Ja, auf jeden Fall. Dr. Alamouti hat auch in der letzten E-Mail erwähnt, dass er speziell den Appointment-Sync-Teil sehen möchte. Das ist ja genau der Bereich, wo wir noch hinterherhinken. Können wir das bis Donnerstag schaffen, Marcus?
+
+[00:01:50] Marcus Berger: Das ist sportlich, aber machbar — vorausgesetzt, Tobias ist dann wieder da. Wenn nicht, muss ich das selbst übernehmen. Die core logic steht ja schon, es geht nur noch um Error Handling und Logging.
+
+[00:02:05] Priya Nair: Von uns aus können wir jederzeit eine Test-Instanz bereitstellen. Wir haben eine Staging-Umgebung, die ihr jederzeit nutzen könnt. Ich schicke euch die Credentials nach dem Meeting.
+
+[00:02:15] Sarah Hoffmann: Super, danke Priya. Okay, zweiter Punkt: Data Mapping. Marcus, da hatte ich in deinem letzten Commit gesehen, dass ihr ein paar Felder umbenannt habt. Ist das mit Lisa Chen abgesprochen?
+
+[00:02:28] Marcus Berger: Ja, Lisa hat das reviewed. Sie hat auch noch ein paar Kommentare hinterlassen wegen der Budgetplanung-Daten — die Felder haben anscheinend unterschiedliche Semantik in den beiden Systemen. Das müssen wir noch klären.
+
+[00:02:42] Sarah Hoffmann: Okay, ich würde vorschlagen, dass wir dazu ein separates Meeting mit Lisa ansetzen. Ich schreibe ihr heute noch.
+
+[00:02:50] Priya Nair: Das wäre gut. Ich würde gerne dabei sein — wir haben auf unserer Seite auch ähnliche Mapping-Fragen, besonders bei den historischen Daten.
+
+[00:03:00] Marcus Berger: Noch eine Frage zum Thema Infrastruktur: Ich habe gehört, Jan Kowalski vom Rechenzentrum soll sich um die SSL-Zertifikate kümmern. Weiß jemand, ob das schon in die Wege geleitet wurde? Ich bin mir nicht sicher, ob Jan Kowalski der richtige Ansprechpartner ist — ich glaube, das läuft normalerweise über einen anderen Kollegen dort.
+
+[00:03:18] Sarah Hoffmann: Ich glaube, Jan Kowalski ist der neue Verantwortliche dafür. Ich habe seinen Namen in einer E-Mail gesehen. Ich frage nach und gebe euch Bescheid.
+
+[00:03:28] Priya Nair: Okay. Für unsere Seite ist der Infrastruktur-Teil kein Blocker — wir können auch mit einem self-signed Zertifikat in der Staging-Umgebung arbeiten.
+
+[00:03:38] Marcus Berger: Gut. Dann würde ich sagen, für die Produktion brauchen wir das aber spätestens zwei Wochen vor Go-live.
+
+[00:03:45] Sarah Hoffmann: Einverstanden. Okay, dritter Punkt: Next Steps. Ich fasse kurz zusammen: Marcus, du machst das Error Handling bis Donnerstag fertig und koordinierst mit Tobias sobald er wieder da ist. Priya, du schickst uns heute noch die Staging-Credentials und habt den Webhook bis Ende der Woche dokumentiert. Ich setze das Meeting mit Lisa Chen auf und kläre die Sache mit den SSL-Zertifikaten.
+
+[00:04:12] Marcus Berger: Klingt gut. Ich würde noch ergänzen: Können wir einen kurzen Daily-Sync einführen — 15 Minuten, jeden Morgen? Gerade in dieser heißen Phase wäre das hilfreich.
+
+[00:04:22] Sarah Hoffmann: Ja, ich finde das sinnvoll. Sagen wir, 9:30 Uhr — das sollte für alle passen. Priya?
+
+[00:04:28] Priya Nair: 9:30 geht gut. Aber ich muss an Dienstagen manchmal ein paar Minuten später kommen — wegen der Zeitzone, ich bin in Bangalore. Das sind normalerweise keine zwei Stunden Unterschied, aber an manchen Tagen bin ich erst um 9:45 da.
+
+[00:04:44] Sarah Hoffmann: Kein Problem, wir können Dienstag auf 10:00 Uhr verschieben. Okay, ich glaube, wir haben alles. Gibt es noch was?
+
+[00:04:53] Marcus Berger: Ich wollte noch kurz erwähnen: Dr. Alamouti hatte gefragt, ob wir eine technische Spezifikation als PDF liefern können — für seine interne Dokumentation. Ich denke, das ist nicht viel Aufwand, aber jemand muss das schreiben.
+
+[00:05:05] Sarah Hoffmann: Das kann ich übernehmen — ich mache das auf Basis des bestehenden Confluence-Dokuments. Ich schicke einen Draft bis Freitag.
+
+[00:05:12] Priya Nair: Falls es hilft — wir haben ein Template für solche Dokumente. Ich schicke es euch.
+
+[00:05:17] Sarah Hoffmann: Perfekt, danke Priya. Okay dann — danke an alle, bis zum Daily-Sync morgen früh!
+
+[00:05:22] Marcus Berger: Danke, tschüss!
+
+[00:05:24] Priya Nair: Danke, bye!

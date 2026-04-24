@@ -1,0 +1,137 @@
+[00:00:08] Katharina Meier: Okay, ich glaube wir sind alle drin. Kurz checken — Stefan, Michael, Annika — alle da?
+
+[00:00:14] Stefan Wolf: Ja, bin dabei.
+
+[00:00:15] Annika Baum: Ich bin auch drin, kurz noch den Ton checken... ja, geht.
+
+[00:00:20] Michael Torres: Hi, ich bin auch dabei. Habe kurz Verbindungsprobleme gehabt, aber jetzt ist alles gut.
+
+[00:00:25] Katharina Meier: Super. Dann legen wir los. Heute ist unser Q1 Review, und ich habe folgende Punkte: Erstens, die Zahlen aus Q1, zweitens, was lief gut / was nicht, drittens, kurzer Ausblick auf Q2. Und dann haben wir noch ein paar offene Punkte, die ich am Ende ansprechen möchte. Sollen wir?
+
+[00:00:45] Stefan Wolf: Ja, gerne. Ich habe mir die Zahlen vorhin noch mal angeschaut — es ist eigentlich ganz positiv, obwohl ich das Q1 von außen nicht so eingeschätzt hätte.
+
+[00:00:55] Katharina Meier: Okay, fangen wir mit Revenue an. Wir haben Q1 mit 2,3 Millionen Euro abgeschlossen — das ist 12 Prozent über Plan. Der größte Treiber war das Enterprise-Segment, das hat alleine fast 40 Prozent des Umsatzes gemacht.
+
+[00:01:10] Michael Torres: Das deckt sich mit dem, was ich aus dem Sales-Funnel gesehen habe. Wir hatten drei größere Abschlüsse im März, die eigentlich erst für Q2 geplant waren. Die sind vorgezogen worden, weil die Kunden intern Druck hatten, Budget noch im März zu verbuchen.
+
+[00:01:25] Annika Baum: Das ist ein zweischneidiges Schwert, oder? Wir haben jetzt einen starken Q1, aber Q2 wird entsprechend schwächer anfangen, weil die Pipeline ein bisschen leer ist.
+
+[00:01:35] Stefan Wolf: Genau, da habe ich auch bedenken. Jochen Jungbluth hat mich letzte Woche angerufen — er hat gefragt, ob wir das Q2-Guidance nach oben anpassen wollen. Ich habe ihm gesagt, wir schauen uns das erst nach dem heutigen Review an. Aber ich glaube, wir sollten vorsichtig sein.
+
+[00:01:52] Katharina Meier: Das ist der richtige Ansatz. Jochen sieht das immer sehr positiv — er hat eine natürliche Tendenz, die Zahlen zu optimistisch zu lesen. Ich würde vorschlagen, wir halten das Q2-Guidance erst mal stabil und kommunizieren das konservativ.
+
+[00:02:08] Michael Torres: Ich stimme zu. Was die Pipeline angeht: wir haben aktuell etwa 15 qualifizierte Leads, davon würde ich drei als "Hot" einstufen. Aber keiner davon ist so groß wie die Q1-Abschlüsse.
+
+[00:02:22] Annika Baum: Können wir kurz bei den Produktmetriken bleiben? Ich würde gerne die Usage-Zahlen kurz durchgehen, bevor wir zu den Sales-Sachen kommen.
+
+[00:02:30] Katharina Meier: Ja natürlich, sorry — ich bin kurz abgeschweift. Annika, du hast das floor.
+
+[00:02:36] Annika Baum: Danke. Also, Monthly Active Users sind von 4.200 im Januar auf 5.100 im März gestiegen. Das ist ein Wachstum von rund 21 Prozent quarter-over-quarter, was sehr solide ist. Die Retention Rate liegt bei 87 Prozent — das ist leicht unter unserem Ziel von 90 Prozent.
+
+[00:02:55] Stefan Wolf: 87 Prozent ist eigentlich nicht schlecht. Habt ihr eine Analyse, warum die 3 Prozent abgewandert sind?
+
+[00:03:03] Annika Baum: Ja, ich habe das mit dem Support-Team durchgegangen. Hauptgründe waren: erstens Usability-Probleme beim Onboarding — da haben wir eine klare Schwachstelle. Zweitens, ein paar Kunden haben sich über die Performance beim Data Export beschwert. Und drittens, eine kleinere Gruppe hat gesagt, die Preisstruktur war nicht transparent genug.
+
+[00:03:25] Michael Torres: Das Onboarding-Thema hören wir auch immer wieder im Sales-Prozess. Prospects fragen oft, wie aufwendig die Integration ist.
+
+[00:03:35] Katharina Meier: Okay, dann haben wir damit schon einen klaren Fokus für Q2: Onboarding verbessern, Performance beim Export, und Pricing-Kommunikation überarbeiten. Stefan, kannst du das ins Planning-Backlog aufnehmen?
+
+[00:03:48] Stefan Wolf: Mache ich. Ich würde das aber gerne kurz mit dem Engineering-Team besprechen, bevor ich das priorisiere — da gibt es einige Dependencies, die ich noch nicht vollständig überblicke.
+
+[00:04:00] Annika Baum: Macht Sinn. Ich kann dich da unterstützen, ich habe schon einige Gespräche mit Engineering geführt zu dem Thema.
+
+[00:04:08] Katharina Meier: Gut. Okay, ich würde jetzt kurz das Thema wechseln — wir haben noch die Roadmap für Q2 und Q3 zu besprechen. Ich weiß, das war nicht explizit auf der Agenda, aber ich denke, es passt jetzt gut.
+
+[00:04:20] Stefan Wolf: Moment, kurz — können wir vorher noch die Q1-Kostenstruktur ansprechen? Ich habe eine Frage zu den R&D-Ausgaben.
+
+[00:04:28] Katharina Meier: Ja klar, entschuldigung. Was ist deine Frage?
+
+[00:04:32] Stefan Wolf: Wir haben in Q1 deutlich mehr für externe Berater ausgegeben als geplant — fast 180.000 Euro over-budget. Ich wollte verstehen, wofür das war.
+
+[00:04:43] Michael Torres: Das war größtenteils das Security Audit im Februar. Wir hatten ursprünglich geplant, das intern zu machen, aber dann haben wir entschieden, einen externen Spezialisten zu holen. Das war die richtige Entscheidung, aber es hat halt gekostet.
+
+[00:04:58] Katharina Meier: Genau. Das Security Audit hat uns auch einen sehr guten Bericht eingebracht — wir haben jetzt SOC 2 Type I zertifiziert, was uns bei Enterprise-Kunden sehr hilft. Ich sehe das als strategische Investition, nicht als Overspend.
+
+[00:05:12] Stefan Wolf: Okay, das macht Sinn. Dann ist das für mich nachvollziehbar.
+
+[00:05:17] Katharina Meier: Gut. Jetzt zur Roadmap. Annika, du hast doch letzte Woche einen ersten Draft gemacht, oder?
+
+[00:05:24] Annika Baum: Ja, ich habe einen Draft — aber der ist noch sehr früh. Ich würde sagen, wir nutzen das heute als Input, aber die Entscheidung verschieben wir auf nächste Woche, wenn alle Zeit hatten, sich das anzuschauen.
+
+[00:05:36] Katharina Meier: Fair. Okay, dann kurz als Preview: Was sind die zwei oder drei größten Themen in deinem Draft?
+
+[00:05:43] Annika Baum: Erstens, das neue Reporting-Modul — das hat intern und extern sehr hohes Interesse. Zweitens, API-Erweiterungen für bessere Integrierbarkeit in externe Systeme. Und drittens — und das ist neu, das kam aus einem Kundengespräch letzte Woche — ein mobiler Client, zumindest eine basic App für iOS und Android.
+
+[00:06:02] Michael Torres: Oh, das ist interessant. Wer hat das angesprochen?
+
+[00:06:06] Annika Baum: Das kam von einem unserer größten Kunden — ich nenne keinen Namen, aber es ist jemand im Healthcare-Sektor. Die wollen ihren Ärzten die Möglichkeit geben, unterwegs auf Daten zuzugreifen.
+
+[00:06:18] Stefan Wolf: Eine mobile App ist schön, aber das ist auch ein erheblicher Engineering-Aufwand. Ich wäre da vorsichtig mit dem Scope.
+
+[00:06:27] Annika Baum: Da hast du Recht. Ich würde vorschlagen, wir starten mit einem Read-only-Viewer — kein Full-Feature-Client. Das ist viel überschaubarer.
+
+[00:06:36] Katharina Meier: Das klingt vernünftig. Okay, ich würde sagen, wir nehmen das als Diskussionspunkt für nächste Woche mit.
+
+[00:06:43] Michael Torres: Kurz noch eine Frage zur Roadmap — was ist mit dem Thema Zugriffsberechtigungen und Role-Based Access Control? Das fragen Kunden auch regelmäßig.
+
+[00:06:53] Stefan Wolf: Das ist schon in der Roadmap seit Q4 letzten Jahres. Das wurde immer wieder verschoben. Ich finde, wir sollten das diesmal wirklich priorisieren — das blockiert uns bei einigen Enterprise-Deals.
+
+[00:07:06] Katharina Meier: Ich stimme dir zu. Das geht in die Q2-Prioritäten — ich schreibe das auf.
+
+[00:07:14] Annika Baum: Ich bin da auch absolut dafür. RBAC ist eigentlich table stakes bei Enterprise-Kunden.
+
+[00:07:22] Michael Torres: Gut. Dann haben wir Q2-Fokus: Onboarding, Export-Performance, Pricing-Kommunikation, RBAC. Das ist schon ein voller Teller.
+
+[00:07:33] Katharina Meier: Ja, ich weiß. Deswegen müssen wir auch über Ressourcen reden. Stefan, wie sieht es bei euch in Engineering aus? Habt ihr die Kapazität, das alles in Q2 zu stemmen?
+
+[00:07:44] Stefan Wolf: Ehrlich gesagt — nein. Wir haben gerade drei offene Stellen, und der Recruitment-Prozess läuft langsamer als erhofft. Ich würde realistischerweise sagen, wir können zwei von den vier Punkten wirklich gut angehen. Die anderen zwei schieben wir auf Q3.
+
+[00:08:00] Katharina Meier: Okay, dann müssen wir priorisieren. Was würdest du rausnehmen?
+
+[00:08:06] Stefan Wolf: Ich würde Onboarding und RBAC als Priorität eins setzen. Export-Performance können wir mit einem kleineren Investment angehen — das ist eher Optimierung als Feature-Entwicklung. Und Pricing-Kommunikation ist kein Engineering-Thema, das ist eigentlich Product und Marketing.
+
+[00:08:22] Annika Baum: Das macht Sinn. Ich kann das Pricing-Thema zusammen mit Michael koordinieren — da geht es mehr um Kommunikation und Dokumentation als um Tech.
+
+[00:08:31] Michael Torres: Ja, das würde ich unterstützen. Ich kann einen Workshop mit dem Sales-Team machen, wir überarbeiten die Pricing Page und die FAQ.
+
+[00:08:41] Katharina Meier: Gut. Also: Engineering Q2 = Onboarding und RBAC. Michael und Annika übernehmen Pricing-Kommunikation als joint project. Export-Performance wird in Q2 angegangen, aber mit kleinerem Scope.
+
+[00:08:55] Stefan Wolf: Warte — ich wollte noch kurz das Team-Thema ansprechen. Katharina, ich habe gehört, dass es Gespräche über eine mögliche Umstrukturierung im Engineering-Bereich gibt. Stimmt das?
+
+[00:09:07] Katharina Meier: Ah. Ja, ich wollte das eigentlich nach dem Meeting ansprechen, aber da es jetzt auf den Tisch kommt — ja, es gibt Überlegungen. Nichts ist entschieden, aber wir schauen uns an, ob die aktuelle Team-Struktur für das Wachstum noch optimal ist.
+
+[00:09:22] Stefan Wolf: Kannst du da mehr sagen? Das verunsichert die Leute.
+
+[00:09:27] Katharina Meier: Ich verstehe das. Ich möchte aber keine Details nennen, bevor nichts entschieden ist — das wäre unfair gegenüber den Betroffenen. Was ich sagen kann: Es geht nicht um Stellenabbau. Im Gegenteil, wir wollen wachsen. Es geht eher darum, wie Teams geschnitten sind und wer welche Verantwortung hat.
+
+[00:09:46] Annika Baum: Das klingt nach einer klassischen Squad-Reorganisation.
+
+[00:09:50] Katharina Meier: So ähnlich, ja. Aber bitte nichts nach außen kommunizieren, bis wir das offiziell ankündigen.
+
+[00:09:57] Michael Torres: Verstanden. Ich habe da eh gelernt, dass solche Dinge immer länger dauern als angekündigt. Ich warte einfach ab.
+
+[00:10:04] Stefan Wolf: Ich finde es schade, dass das so vage bleibt. Ich merke, dass mein Team Fragen hat und ich keine Antworten geben kann.
+
+[00:10:13] Katharina Meier: Das ist berechtigt, Stefan. Lass uns nach dem Meeting kurz zu zweit reden — ich kann dir dann etwas mehr sagen, als ich es hier im großen Kreis tun kann.
+
+[00:10:23] Stefan Wolf: Okay, danke.
+
+[00:10:26] Katharina Meier: Gut. Ich glaube, wir haben die wichtigsten Punkte durch. Gibt es noch etwas, bevor wir schließen?
+
+[00:10:33] Annika Baum: Ich wollte noch kurz das Thema Customer Success ansprechen. Wir haben gerade nur eine Person im CS-Team, und die ist komplett überlastet. Wir brauchen da dringend Verstärkung.
+
+[00:10:46] Katharina Meier: Ja, das weiß ich. Das ist auch in der Hiring-Pipeline — wir suchen aktuell zwei CS-Rollen. Ich hoffe, wir können eine davon noch im April besetzen.
+
+[00:10:57] Michael Torres: Das wäre dringend nötig. Ich bekomme manchmal Eskalationen von Kunden, die eigentlich im CS-Bereich angesiedelt sein sollten.
+
+[00:11:06] Annika Baum: Ich auch. Letzte Woche war ich zwei Stunden in einem Call mit einem Kunden wegen eines Onboarding-Problems — das ist nicht meine Kernaufgabe.
+
+[00:11:15] Katharina Meier: Verstanden. Das ist ein temporäres Problem, das wir so schnell wie möglich lösen. Okay, dann würde ich sagen, wir schließen hier. Zusammenfassung: Q1-Zahlen positiv, 12 Prozent over plan. Q2-Fokus Engineering: Onboarding und RBAC. Pricing-Kommunikation: Michael und Annika. CS-Hiring: höchste Priorität. Roadmap-Entscheidung: nächste Woche nach Review des Drafts von Annika. Stefan und ich reden noch kurz. Alles klar?
+
+[00:11:45] Stefan Wolf: Alles klar.
+
+[00:11:46] Annika Baum: Ja, danke für das Meeting.
+
+[00:11:48] Michael Torres: Danke, bis dann!
+
+[00:11:50] Katharina Meier: Danke euch allen. Tschüss!

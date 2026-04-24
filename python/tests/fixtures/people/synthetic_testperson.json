@@ -1,0 +1,12 @@
+{
+  "canonical_name": "Alex Testmann",
+  "known_as": ["Alex", "Alexander Testmann"],
+  "role": "Senior Developer",
+  "organization": "TestCorp GmbH",
+  "email": "alex.testmann@testcorp.example",
+  "phone": "+49 30 12345678",
+  "linkedin_url": null,
+  "tags": ["test", "synthetic", "baseline"],
+  "notes": "Synthetic test person — no real-world identity. Used as clean baseline for ingest/dedup tests.",
+  "consent_status": "synthetic"
+}

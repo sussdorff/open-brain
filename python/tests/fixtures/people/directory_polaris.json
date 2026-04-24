@@ -1,0 +1,47 @@
+[
+  {
+    "canonical_name": "Elias Trewin",
+    "known_as": ["Elias"],
+    "role": "Founder / Data Management Specialist",
+    "organization": "Cinify",
+    "linkedin_url": "https://www.linkedin.com/in/elias-trewin/",
+    "notes": "Data management and data warehousing for dental workflow KPIs. Part of the Polaris network.",
+    "consent_status": "polaris_confirmed"
+  },
+  {
+    "canonical_name": "Dr. Cyrus Alamouti",
+    "known_as": ["Cyrus", "Dr. Alamouti", "Cyrus Alamouti"],
+    "role": "Zahnarzt, Co-Principal",
+    "organization": "Dental-Now",
+    "linkedin_url": "https://www.linkedin.com/in/dr-cyrus-alamouti-73385773/",
+    "notes": "Dental-Now co-principal. Malte kennt ihn aus dem Odontathon-Kontext.",
+    "consent_status": "polaris_confirmed"
+  },
+  {
+    "canonical_name": "Siamak Ghasemi",
+    "known_as": ["Siamak"],
+    "role": "Co-Principal, Enterprise IT",
+    "organization": "Dental-Now",
+    "linkedin_url": "https://www.linkedin.com/in/siamakghasemi/",
+    "notes": "Dental-Now co-principal with enterprise IT background.",
+    "consent_status": "polaris_confirmed"
+  },
+  {
+    "canonical_name": "Jochen Jungbluth",
+    "known_as": ["Jochen"],
+    "role": "Corporate and Tax Counsel",
+    "organization": "Dental-Now",
+    "linkedin_url": "https://www.linkedin.com/in/jochen-jungbluth-a5a412152/",
+    "notes": "Dental-Now corporate/tax counsel. M&A and Strukturierung background, ex-KPMG. Involved in Dental-Now Holding setup.",
+    "consent_status": "polaris_confirmed"
+  },
+  {
+    "canonical_name": "Philipp Kuhn-Regnier",
+    "known_as": ["Philipp"],
+    "role": "Founder / ex-CFO Zahn 1",
+    "organization": "Sonia (sonia.so)",
+    "linkedin_url": "https://www.linkedin.com/in/philipp-kuhn-regnier/",
+    "notes": "Founder at Sonia (sonia.so). Previously CFO at Zahn 1.",
+    "consent_status": "polaris_confirmed"
+  }
+]

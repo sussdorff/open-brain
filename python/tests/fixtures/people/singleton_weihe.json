@@ -1,0 +1,34 @@
+{
+  "canonical_name": "Dr. Dr. Stephan Weihe",
+  "known_as": ["Stephan Weihe", "Dr. Weihe"],
+  "role": "Geschäftsführender Gesellschafter",
+  "organizations": [
+    {
+      "name": "ICRD GmbH",
+      "description": "Institute for Consulting, Research and Development in Dentistry and Medicine"
+    },
+    {
+      "name": "An-Institut für Digitale Kompetenz in der Zahnmedizin an der Universität Witten/Herdecke gGmbH",
+      "description": "Sitz: Alfred-Herrhausen-Str. 45, 58455 Witten. HRB 19536 AG Bochum"
+    },
+    {
+      "name": "medworkx.digital GmbH",
+      "description": "Software product medworkx — dental workflow aggregation"
+    },
+    {
+      "name": "Dental Innovation GmbH",
+      "description": "Previous involvement"
+    },
+    {
+      "name": "DMD GmbH Digital Medical Design",
+      "description": "Previous involvement"
+    },
+    {
+      "name": "SW Digital Beteiligungs UG",
+      "description": "Beteiligungsvehikel"
+    }
+  ],
+  "location": "Mülheim a.d. Ruhr / Witten",
+  "notes": "Double doctorate. Active in dental digitalization and dental workflow software. Known through the dental innovation network.",
+  "consent_status": "polaris_confirmed"
+}
