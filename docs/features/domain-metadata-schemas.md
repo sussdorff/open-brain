@@ -1,10 +1,10 @@
 # Domain Metadata Schemas
 
-Structured metadata validation for domain-specific memory types (event, person, household, meeting, decision). Enables type-aware field validation without blocking saves.
+Structured metadata validation for domain-specific memory types (event, person, household, meeting, decision, mention, interaction). Enables type-aware field validation without blocking saves.
 
 ## Was
 
-Domain Metadata Schemas define structured field definitions for five domain-specific memory types. Each type has a TypedDict schema with optional datetime fields that are validated (but not enforced) when saving memories. The system validates datetime fields and appends warnings to the response if validation fails, but the memory is always saved successfully.
+Domain Metadata Schemas define structured field definitions for seven domain-specific memory types. Each type has a TypedDict schema with optional datetime fields that are validated (but not enforced) when saving memories. The system validates datetime fields and appends warnings to the response if validation fails, but the memory is always saved successfully.
 
 No new database tables are added — all metadata is stored in the existing `metadata` JSONB column alongside other metadata like `capture_template` and `entities`.
 
@@ -27,7 +27,7 @@ Type-aware validation enables:
 
 ### Supported Domain Types and Schemas
 
-Five domain types are predefined with TypedDict schemas:
+Seven domain types are predefined with TypedDict schemas:
 
 #### **event**
 ```python
@@ -87,6 +87,30 @@ class DecisionMetadata(TypedDict, total=False):
 ```
 
 **Validation**: No datetime fields — purely documentation of reasoning and context.
+
+#### **mention**
+```python
+class MentionMetadata(TypedDict, total=False):
+    person_ref: str        # stable identifier pointing to a person memory
+    context: str           # short snippet from source
+    source_memory_ref: str # memory id that contains the mention
+    sentiment_hint: str    # positive|neutral|negative|ambiguous|unknown
+```
+
+**Validation**: `person_ref` is recommended. If missing, a warning is appended to the response but the memory is saved. All other fields are purely informational with no validation.
+
+#### **interaction**
+```python
+class InteractionMetadata(TypedDict, total=False):
+    person_ref: str        # stable identifier pointing to a person memory
+    channel: str           # meeting|call|email|chat|unknown
+    direction: str         # inbound|outbound|bidirectional
+    summary: str
+    occurred_at: str       # ISO 8601 datetime
+    follow_up_needed: bool
+```
+
+**Validation**: `person_ref` is recommended — a warning is appended if missing. `occurred_at` is validated as ISO 8601 datetime if provided — a warning is appended if the value is not a valid datetime. Both warnings are advisory; the memory is always saved.
 
 ### Validation Flow
 
@@ -157,7 +181,7 @@ Response (if `when` is invalid):
 
 ### Unknown Types
 
-Types not in the predefined list (event, person, household, meeting, decision) pass through validation with **no warnings**:
+Types not in the predefined list (event, person, household, meeting, decision, mention, interaction) pass through validation with **no warnings**:
 
 ```python
 # Custom type not in the schema registry — no validation
@@ -357,6 +381,8 @@ person: {name: str, org: str, role: str, relationship: str, last_contact: ISO da
 meeting: {attendees: [str], topic: str, key_points: [str], action_items: [str], date: ISO datetime}.
 decision: {what: str, context: str, owner: str, alternatives: [str], rationale: str}.
 household: {category: str, item: str, location: str, details: str, warranty_expiry: ISO datetime}.
+mention: {person_ref: str (recommended), context: str, source_memory_ref: str, sentiment_hint: str}.
+interaction: {person_ref: str (recommended), channel: str, direction: str, summary: str, occurred_at: ISO datetime, follow_up_needed: bool}.
 ISO datetime format: 'YYYY-MM-DDTHH:MM:SS' (e.g. '2026-04-15T10:00:00').
 Invalid or missing required datetime fields produce a warning in the response but still save the memory.
 ```
@@ -382,9 +408,11 @@ Unit tests in `python/tests/test_domain_schemas.py` cover:
 3. **Household validation** — Valid and invalid `warranty_expiry` dates
 4. **Meeting validation** — Valid and invalid `date` fields
 5. **Decision validation** — No datetime fields, no validation (always passes)
-6. **Unknown types** — Pass through with empty warning list
-7. **None type** — Passes with empty warning list
-8. **Integration** — `save_memory` appends warnings to response JSON
+6. **Mention validation** — Missing `person_ref` produces warning; with `person_ref` passes
+7. **Interaction validation** — Missing `person_ref` produces warning; malformed `occurred_at` produces warning; valid data passes; both warnings together when both fields are invalid
+8. **Unknown types** — Pass through with empty warning list
+9. **None type** — Passes with empty warning list
+10. **Integration** — `save_memory` appends warnings to response JSON
 
 Tests mock `get_dl()` and verify:
 - Correct warnings are returned for each invalid field
