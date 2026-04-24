@@ -10,11 +10,14 @@ All notable changes to this project will be documented in this file.
 - *(cr3.12)* Address review findings iteration 1
 - *(cr3.12)* Address codex adversarial findings — preserve existing aliases in normalize
 - *(cr3.12)* Re-add --dry-run flag as documented alias for default mode (AK1 literal compliance)
+- *(open-brain-cr3.3)* Address review findings iteration 1
+- *(open-brain-cr3.3)* Address codex adversarial findings
 
 ### Features
 
 - *(open-brain-cr3.10)* Green — typed-relationship API + backcompat migration
 - *(cr3.12)* Green — person memory migration to people-v1 schema
+- *(open-brain-cr3.3)* Green — TranscriptIngestor with full TDD suite
 
 ### Miscellaneous
 
