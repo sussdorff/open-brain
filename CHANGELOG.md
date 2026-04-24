@@ -5,8 +5,31 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(open-brain-cr3.5)* Align Protocol Shape run_id signature with run_id Contract
+
+### CI/CD
+
+- Bump docker/* actions to Node 24 runtimes (#2)
+- Ignore transient cache-export errors in docker-publish (#3)
+
+### Documentation
+
+- *(open-brain-cr3.5)* Add ADR-0001 ingest-adapter interface
+
+### Miscellaneous
+
+- *(ci)* Bump actions to Node 24 runtimes (#1)
+
+## [2026.04.22] - 2026-04-22
+
+### Bug Fixes
+
 - *(open-brain-l5l)* Fix 3 regressions from Codex review
 - *(open-brain-l5l)* Update provenance_check.py docstring to safe printf pattern
+
+### Miscellaneous
+
+- *(open-brain-l5l)* Update changelog
 
 ### Refactoring
 
