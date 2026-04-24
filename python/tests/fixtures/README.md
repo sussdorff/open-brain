@@ -28,7 +28,7 @@ MacWhisper transcript format: timestamped lines like `[HH:MM:SS] Speaker Name: [
   - Tobias Schreiber (fictional) — sick, absent; owns backend Auth Flow work
   - Lisa Chen (fictional, Cognovis) — reviewed data mapping, has comments on Budgetplanung fields
   - Jan Kowalski (fictional) — Rechenzentrum, responsible for SSL certificates (name uncertain)
-- **Duration:** ~25 minutes simulated (timestamps 00:00–00:05:24)
+- **Duration:** ~5 minutes simulated (timestamps 00:00–00:05:24)
 - **Word count:** ~750 words
 - **Expected extraction hints:**
   - `meeting_type`: in_person/video, 3 active speakers
@@ -63,8 +63,7 @@ MacWhisper transcript format: timestamped lines like `[HH:MM:SS] Speaker Name: [
 - **Speakers (present):** Katharina Meier, Stefan Wolf, Annika Baum, Michael Torres
 - **Mentioned (absent):**
   - Jochen Jungbluth (Polaris, consent-confirmed) — called Stefan about Q2 guidance
-  - Dr. Naumann (fictional, brief reference) — Geschäftsführer who referred Thomas
-  - Implicit: Engineering team members not named
+  - Implicit: Engineering team members not named (no other non-attendee names appear in this transcript)
 - **Duration:** ~12 minutes simulated (timestamps 00:00–00:11:50)
 - **Word count:** ~1500 words
 - **Agenda drift pattern:**
@@ -100,17 +99,17 @@ All `.eml` files use RFC 822 format with proper headers (Message-ID, Date, MIME-
 - **Expected extraction hints:**
   - `email_type`: reply_thread, scheduling
   - `participants`: Thomas Bauer, Anna Weber
-  - `action_items`: meeting confirmed for Wed 16 Apr 2026 10:00, Katharina to send calendar invite
+  - `action_items`: meeting confirmed for Thu 16 Apr 2026 10:00, Thomas to send calendar invite
   - `personal_interaction`: True (direct scheduling between two named individuals)
   - Should NOT be filtered out — genuine person-to-person interaction
 
 ### newsletter.eml
 
 - **Content:** Monthly HTML newsletter from "FHIR Deutschland" mailing list — links to implementation guides, upcoming events (Connectathon, webinars, workshops), community tools
-- **Format:** `text/html`, multipart with proper newsletter headers
+- **Format:** `text/html` (single-part), with proper newsletter headers
 - **People:** None — no personal names, no personal interaction
 - **Sender:** `FHIR Deutschland <newsletter@fhir-community.example>` (mailing list)
-- **Recipient:** `Malte Sussdorff <malte@personal.example>` — Recipient is `malte@personal.example` (Malte's own data, consent-implicit as fixture subject)
+- **Recipient:** `Malte Sussdorff <malte@personal.example>` — **This is the fixture owner's own identity, not a third party.** Malte Sussdorff is the author of this fixture pack; his name and email alias appear here as a self-consented, consent-confirmed fixture subject (same Polaris consent scope). No third-party personal data is present.
 - **Language:** German
 - **Special headers:** `List-Unsubscribe`, `List-ID`, `Precedence: bulk`, `X-Mailer: MailChimp`
 - **Expected extraction hints:**
