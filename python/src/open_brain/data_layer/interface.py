@@ -616,3 +616,37 @@ class DataLayer(Protocol):
     ) -> list[dict[str, Any]]: ...
 
     async def delete_by_run_id(self, run_id: str) -> DeleteByRunIdResult: ...
+
+    async def people_discussed_with(
+        self,
+        person_id: int,
+        since: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Return meetings + mentions linking to person_id, sorted by date desc.
+
+        Returns list of dicts with keys: memory_id, title, date, link_type.
+        """
+        ...
+
+    async def people_stale_contacts(
+        self,
+        min_days: int = 90,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Return person memories whose last_contact is older than min_days or null.
+
+        Returns list of dicts with keys: memory_id, title, last_contact, days_stale.
+        """
+        ...
+
+    async def people_mentions_window(
+        self,
+        days: int = 30,
+        min_count: int = 1,
+    ) -> list[dict[str, Any]]:
+        """Aggregate mention memories in the last N days, grouped by person_ref.
+
+        Returns list of dicts with keys: person_id, mention_count, last_mentioned_at.
+        """
+        ...

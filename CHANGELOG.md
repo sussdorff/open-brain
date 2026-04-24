@@ -8,14 +8,19 @@ All notable changes to this project will be documented in this file.
 - *(cr3.13)* Address review findings iteration 1
 - *(cr3.13)* Address codex adversarial findings
 - *(cr3.13)* Address verification advisory items (skip guard + metadata is not None)
+- *(open-brain-cr3.9)* Address review findings iteration 1
+- *(open-brain-cr3.9)* Address codex adversarial findings
 
 ### Features
 
 - *(cr3.13)* Green — ingest run IDs + delete-by-source rollback
+- *(open-brain-cr3.9)* Green — people_discussed_with, people_stale_contacts, people_mentions_window
+- *(open-brain-cr3.9)* Add skill and docs for people-aware queries
 
 ### Miscellaneous
 
 - *(open-brain-cr3.13)* Update changelog for ingest run IDs + delete-by-source rollback release
+- *(open-brain-cr3.9)* Update changelog for people-aware queries release
 
 ## [0.16.0] - 2026-04-24
 
@@ -38,6 +43,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- *(cr3.9)* Green — people-aware query MCP tools (discussed_with, stale_contacts, mentions_window)
 - *(open-brain-cr3.10)* Green — typed-relationship API + backcompat migration
 - *(open-brain-cr3.3)* Green — TranscriptIngestor with full TDD suite
 - *(cr3.12)* Green — person memory migration to people-v1 schema
