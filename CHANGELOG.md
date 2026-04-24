@@ -5,8 +5,32 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(open-brain-cr3.14)* Address review findings iteration 1
+- *(open-brain-cr3.14)* Address codex adversarial findings
+
+### CI/CD
+
+- Bump docker/* actions to Node 24 runtimes (#2)
+- Ignore transient cache-export errors in docker-publish (#3)
+
+### Features
+
+- *(open-brain-cr3.14)* Add fixture pack — macwhisper transcripts, emails, people JSON
+
+### Miscellaneous
+
+- *(ci)* Bump actions to Node 24 runtimes (#1)
+
+## [2026.04.22] - 2026-04-22
+
+### Bug Fixes
+
 - *(open-brain-l5l)* Fix 3 regressions from Codex review
 - *(open-brain-l5l)* Update provenance_check.py docstring to safe printf pattern
+
+### Miscellaneous
+
+- *(open-brain-l5l)* Update changelog
 
 ### Refactoring
 
