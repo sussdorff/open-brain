@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 import json as _json
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 import asyncpg
@@ -1983,7 +1983,7 @@ class PostgresDataLayer:
         pool = await get_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT id, title, created_at, link_type FROM memories WHERE id = ANY($1::int[])",
+                "SELECT id, title, created_at FROM memories WHERE id = ANY($1::int[])",
                 source_ids,
             )
 
@@ -2001,7 +2001,7 @@ class PostgresDataLayer:
                 "memory_id": row["id"],
                 "title": row["title"],
                 "date": date_str,
-                "link_type": source_link.get(row["id"], row["link_type"]),
+                "link_type": source_link.get(row["id"], "unknown"),
             })
 
         # Sort by date descending, apply limit
@@ -2023,7 +2023,10 @@ class PostgresDataLayer:
             List of dicts with keys: memory_id, title, last_contact, days_stale.
             last_contact and days_stale are None when last_contact is absent.
         """
-        from datetime import UTC, timedelta
+        if min_days < 0:
+            raise ValueError(f"min_days must be >= 0, got {min_days!r}")
+        if limit <= 0:
+            raise ValueError(f"limit must be > 0, got {limit!r}")
 
         pool = await get_pool()
         async with pool.acquire() as conn:
@@ -2088,6 +2091,11 @@ class PostgresDataLayer:
             List of dicts with keys: person_id, mention_count, last_mentioned_at.
             Sorted by mention_count descending.
         """
+        if days < 0:
+            raise ValueError(f"days must be >= 0, got {days!r}")
+        if min_count < 0:
+            raise ValueError(f"min_count must be >= 0, got {min_count!r}")
+
         pool = await get_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch(

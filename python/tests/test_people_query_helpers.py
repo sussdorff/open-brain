@@ -63,11 +63,11 @@ class TestPeopleDiscussedWith:
             _make_row({"id": 2, "source_id": 11, "target_id": 100, "link_type": "attended_by"}),
             _make_row({"id": 3, "source_id": 12, "target_id": 100, "link_type": "mentioned_in"}),
         ]
-        # fetch memories for the meeting IDs
+        # fetch memories for the meeting IDs (no link_type column on memories table)
         memory_rows = [
-            _make_row({"id": 10, "title": "Meeting A", "created_at": "2026-04-01T10:00:00+00:00", "link_type": "attended_by"}),
-            _make_row({"id": 11, "title": "Meeting B", "created_at": "2026-04-10T10:00:00+00:00", "link_type": "attended_by"}),
-            _make_row({"id": 12, "title": "Mention C", "created_at": "2026-04-15T10:00:00+00:00", "link_type": "mentioned_in"}),
+            _make_row({"id": 10, "title": "Meeting A", "created_at": "2026-04-01T10:00:00+00:00"}),
+            _make_row({"id": 11, "title": "Meeting B", "created_at": "2026-04-10T10:00:00+00:00"}),
+            _make_row({"id": 12, "title": "Mention C", "created_at": "2026-04-15T10:00:00+00:00"}),
         ]
         conn.fetch = AsyncMock(side_effect=[edge_rows, memory_rows])
         pool = _make_pool(conn)
@@ -107,7 +107,7 @@ class TestPeopleDiscussedWith:
             for i in range(5)
         ]
         memory_rows = [
-            _make_row({"id": 10 + i, "title": f"M{i}", "created_at": f"2026-04-{i+1:02d}T10:00:00+00:00", "link_type": "attended_by"})
+            _make_row({"id": 10 + i, "title": f"M{i}", "created_at": f"2026-04-{i+1:02d}T10:00:00+00:00"})
             for i in range(5)
         ]
         conn.fetch = AsyncMock(side_effect=[edge_rows, memory_rows])
@@ -117,7 +117,7 @@ class TestPeopleDiscussedWith:
         with patch("open_brain.data_layer.postgres.get_pool", return_value=pool):
             result = await dl.people_discussed_with(person_id=100, limit=2)
 
-        assert len(result) <= 2
+        assert len(result) == 2
 
     @pytest.mark.asyncio
     async def test_filters_by_since_date(self):
@@ -129,8 +129,8 @@ class TestPeopleDiscussedWith:
             _make_row({"id": 2, "source_id": 11, "target_id": 100, "link_type": "attended_by"}),
         ]
         memory_rows = [
-            _make_row({"id": 10, "title": "Old Meeting", "created_at": "2026-01-01T10:00:00+00:00", "link_type": "attended_by"}),
-            _make_row({"id": 11, "title": "New Meeting", "created_at": "2026-04-15T10:00:00+00:00", "link_type": "attended_by"}),
+            _make_row({"id": 10, "title": "Old Meeting", "created_at": "2026-01-01T10:00:00+00:00"}),
+            _make_row({"id": 11, "title": "New Meeting", "created_at": "2026-04-15T10:00:00+00:00"}),
         ]
         conn.fetch = AsyncMock(side_effect=[edge_rows, memory_rows])
         pool = _make_pool(conn)
@@ -217,6 +217,20 @@ class TestPeopleStaleContacts:
         sql = conn.fetch.call_args[0][0]
         assert "person" in sql.lower()
 
+    @pytest.mark.asyncio
+    async def test_negative_min_days_raises(self):
+        """Negative min_days raises ValueError immediately (no DB call)."""
+        dl = PostgresDataLayer()
+        with pytest.raises(ValueError, match="min_days"):
+            await dl.people_stale_contacts(min_days=-1)
+
+    @pytest.mark.asyncio
+    async def test_zero_limit_raises(self):
+        """limit=0 raises ValueError immediately (no DB call)."""
+        dl = PostgresDataLayer()
+        with pytest.raises(ValueError, match="limit"):
+            await dl.people_stale_contacts(limit=0)
+
 
 # ─── Test: people_mentions_window ────────────────────────────────────────────
 
@@ -259,7 +273,7 @@ class TestPeopleMentionsWindow:
 
     @pytest.mark.asyncio
     async def test_min_count_filters_infrequent(self):
-        """min_count is applied to filter out persons below threshold."""
+        """min_count is passed as a SQL parameter so the DB does the filtering."""
         conn = AsyncMock()
         rows = [
             _make_row({"person_id": 300, "mention_count": 5, "last_mentioned_at": "2026-04-20T10:00:00+00:00"}),
@@ -271,9 +285,25 @@ class TestPeopleMentionsWindow:
         with patch("open_brain.data_layer.postgres.get_pool", return_value=pool):
             result = await dl.people_mentions_window(days=30, min_count=3)
 
-        # SQL should pass min_count; mock returns filtered result
+        # Verify the SQL was called once and min_count=3 was passed as a bound parameter
+        conn.fetch.assert_called_once()
+        call_args = conn.fetch.call_args[0]
+        assert 3 in call_args, f"min_count=3 not found in SQL params: {call_args}"
         assert len(result) == 1
-        assert result[0]["mention_count"] >= 3
+
+    @pytest.mark.asyncio
+    async def test_negative_days_raises(self):
+        """Negative days raises ValueError immediately (no DB call)."""
+        dl = PostgresDataLayer()
+        with pytest.raises(ValueError, match="days"):
+            await dl.people_mentions_window(days=-1)
+
+    @pytest.mark.asyncio
+    async def test_negative_min_count_raises(self):
+        """Negative min_count raises ValueError immediately (no DB call)."""
+        dl = PostgresDataLayer()
+        with pytest.raises(ValueError, match="min_count"):
+            await dl.people_mentions_window(min_count=-1)
 
     @pytest.mark.asyncio
     async def test_overlapping_mentions_counted_together(self):
