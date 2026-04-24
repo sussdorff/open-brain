@@ -28,6 +28,7 @@ from open_brain.data_layer.interface import (
     CompactResult,
     DecayParams,
     DecayResult,
+    DeleteByRunIdResult,
     DeleteParams,
     DeleteResult,
     MaterializeParams,
@@ -47,6 +48,7 @@ from open_brain.data_layer.interface import (
     TimelineResult,
     rank_importance,
 )
+from open_brain.ingest.runs import get_current_run_id
 from open_brain.data_layer.refine import analyze_with_llm
 
 logger = logging.getLogger(__name__)
@@ -809,6 +811,9 @@ class PostgresDataLayer:
                         base_metadata = dict(params.metadata) if params.metadata else {}
                         content_hash_replace = hashlib.sha256(params.text.encode()).hexdigest()
                         base_metadata["content_hash"] = content_hash_replace
+                        # Inject run_id if inside an ingest_run context
+                        if run_id := get_current_run_id():
+                            base_metadata["run_id"] = run_id
                         metadata_json_replace = _json.dumps(base_metadata)
                         row_replace = await conn.fetchrow(
                             """INSERT INTO memories (index_id, type, title, subtitle, narrative, content, session_ref, metadata, user_id, importance)
@@ -941,6 +946,9 @@ class PostgresDataLayer:
             # ── Normal insert path ──
             base_metadata = dict(params.metadata) if params.metadata else {}
             base_metadata["content_hash"] = content_hash
+            # Inject run_id if inside an ingest_run context
+            if run_id := get_current_run_id():
+                base_metadata["run_id"] = run_id
             metadata_json = _json.dumps(base_metadata)
             row = await conn.fetchrow(
                 """INSERT INTO memories (index_id, type, title, subtitle, narrative, content, session_ref, metadata, user_id, importance)
@@ -1776,6 +1784,10 @@ class PostgresDataLayer:
             raise ValueError(
                 f"Invalid link_type: {link_type!r}. Must be one of: {sorted(VALID_LINK_TYPES)}"
             )
+        # Inject run_id into metadata if inside an ingest_run context
+        effective_metadata = dict(metadata) if metadata is not None else {}
+        if run_id := get_current_run_id():
+            effective_metadata["run_id"] = run_id
         pool = await get_pool()
         async with pool.acquire() as conn:
             rel_id: int = await conn.fetchval(
@@ -1791,7 +1803,7 @@ class PostgresDataLayer:
                 source_id,
                 target_id,
                 link_type,
-                _json.dumps(metadata) if metadata is not None else None,
+                _json.dumps(effective_metadata) if effective_metadata else None,
             )
         logger.info(
             "Created relationship id=%d source=%d target=%d link_type=%s",
@@ -1993,6 +2005,41 @@ class PostgresDataLayer:
             logger.info("Deleted %d memories (project=%s, type=%s, before=%s)",
                         count, params.project, params.type, params.before)
             return DeleteResult(deleted=count)
+
+    async def delete_by_run_id(self, run_id: str) -> DeleteByRunIdResult:
+        """Delete all memories and relationships created in the given ingest run.
+
+        Deletion is atomic: relationships are removed first (no CASCADE FK), then memories.
+        Returns counts of deleted rows.
+        Returns DeleteByRunIdResult(memories=0, relationships=0) for a non-existent run_id
+        (not an error).
+
+        Args:
+            run_id: The run_id string stored in metadata->>'run_id'.
+
+        Returns:
+            DeleteByRunIdResult with counts of deleted memories and relationships.
+        """
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                rel_result = await conn.execute(
+                    "DELETE FROM memory_relationships WHERE metadata->>'run_id' = $1",
+                    run_id,
+                )
+                rel_count = int(rel_result.split()[-1])
+                mem_result = await conn.execute(
+                    "DELETE FROM memories WHERE metadata->>'run_id' = $1",
+                    run_id,
+                )
+                mem_count = int(mem_result.split()[-1])
+        logger.info(
+            "delete_by_run_id: deleted %d memories, %d relationships for run_id=%s",
+            mem_count,
+            rel_count,
+            run_id,
+        )
+        return DeleteByRunIdResult(memories=mem_count, relationships=rel_count)
 
 
 async def _execute_refine_actions(actions: list[RefineAction]) -> None:
