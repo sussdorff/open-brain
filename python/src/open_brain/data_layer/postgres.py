@@ -1955,8 +1955,10 @@ class PostgresDataLayer:
     ) -> list[dict[str, Any]]:
         """Return meetings + mentions linking to person_id, sorted by date desc.
 
-        Uses traverse() to find all inbound edges of type attended_by/mentioned_in
-        pointing to the given person memory, then fetches those source memories.
+        Uses traverse() to collect the related (non-person) memory on each edge,
+        then fetches those memories. Edge conventions (see VALID_LINK_TYPES):
+          - attended_by: meeting -> person   (person is target; traverse inbound)
+          - mentioned_in: person -> memory   (person is source; traverse outbound)
 
         Args:
             person_id: The person memory ID to query.
@@ -1967,24 +1969,40 @@ class PostgresDataLayer:
         Returns:
             List of dicts with keys: memory_id, title, date, link_type.
         """
-        edges = await self.traverse(
+        # attended_by: meeting -> person, so person is the target (inbound).
+        inbound_edges = await self.traverse(
             anchor_id=person_id,
-            link_types=["attended_by", "mentioned_in"],
+            link_types=["attended_by"],
             depth=1,
             direction="inbound",
         )
-        if not edges:
+        # mentioned_in: person -> memory, so person is the source (outbound).
+        outbound_edges = await self.traverse(
+            anchor_id=person_id,
+            link_types=["mentioned_in"],
+            depth=1,
+            direction="outbound",
+        )
+
+        # Map neighbor memory id -> link_type. For inbound edges the neighbor is
+        # source_id (the meeting); for outbound edges the neighbor is target_id
+        # (the memory where the person is mentioned).
+        neighbor_link: dict[int, str] = {}
+        for e in inbound_edges:
+            neighbor_link[e["source_id"]] = e["link_type"]
+        for e in outbound_edges:
+            neighbor_link[e["target_id"]] = e["link_type"]
+
+        if not neighbor_link:
             return []
 
-        # Build edge_id -> link_type mapping for the source memories
-        source_link: dict[int, str] = {e["source_id"]: e["link_type"] for e in edges}
-        source_ids = list(source_link.keys())
+        neighbor_ids = list(neighbor_link.keys())
 
         pool = await get_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 "SELECT id, title, created_at FROM memories WHERE id = ANY($1::int[])",
-                source_ids,
+                neighbor_ids,
             )
 
         results: list[dict[str, Any]] = []
@@ -2001,7 +2019,7 @@ class PostgresDataLayer:
                 "memory_id": row["id"],
                 "title": row["title"],
                 "date": date_str,
-                "link_type": source_link.get(row["id"], "unknown"),
+                "link_type": neighbor_link.get(row["id"], "unknown"),
             })
 
         # Sort by date descending, apply limit
@@ -2098,17 +2116,30 @@ class PostgresDataLayer:
 
         pool = await get_pool()
         async with pool.acquire() as conn:
+            # Edge direction conventions (see VALID_LINK_TYPES):
+            #   - attended_by:  meeting -> person   (person=target_id, dated memory=source_id)
+            #   - mentioned_in: person  -> memory   (person=source_id, dated memory=target_id)
+            # We normalize each edge to (person_id, dated_memory_id) via UNION ALL,
+            # then aggregate mention counts + last-seen timestamps per person.
             rows = await conn.fetch(
                 """
+                WITH edges AS (
+                    SELECT target_id AS person_id, source_id AS dated_id
+                    FROM memory_relationships
+                    WHERE link_type = 'attended_by'
+                    UNION ALL
+                    SELECT source_id AS person_id, target_id AS dated_id
+                    FROM memory_relationships
+                    WHERE link_type = 'mentioned_in'
+                )
                 SELECT
-                    mr.target_id AS person_id,
+                    e.person_id AS person_id,
                     COUNT(*) AS mention_count,
                     MAX(m.created_at) AS last_mentioned_at
-                FROM memory_relationships mr
-                JOIN memories m ON m.id = mr.source_id
-                WHERE mr.link_type IN ('mentioned_in', 'attended_by')
-                  AND m.created_at >= NOW() - ($1 || ' days')::interval
-                GROUP BY mr.target_id
+                FROM edges e
+                JOIN memories m ON m.id = e.dated_id
+                WHERE m.created_at >= NOW() - ($1 || ' days')::interval
+                GROUP BY e.person_id
                 HAVING COUNT(*) >= $2
                 ORDER BY mention_count DESC
                 """,

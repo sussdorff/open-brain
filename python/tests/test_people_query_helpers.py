@@ -40,8 +40,12 @@ def _make_row(data: dict) -> MagicMock:
 # ─── Fixture data ─────────────────────────────────────────────────────────────
 #
 # Person memory: id=100, title="Alice"
-# Meetings: id=10, id=11, id=12
-# Edges: 10→100 attended_by, 11→100 attended_by, 12→100 mentioned_in
+# Meetings/Memories: id=10, id=11, id=12
+# Edge conventions (see VALID_LINK_TYPES):
+#   - attended_by:  meeting -> person   (source=meeting, target=person)
+#   - mentioned_in: person  -> memory   (source=person,  target=memory)
+# So fixture edges are:
+#   10→100 attended_by, 11→100 attended_by, 100→12 mentioned_in
 #
 # Stale person: id=200, title="Bob", last_contact=None
 #
@@ -57,19 +61,23 @@ class TestPeopleDiscussedWith:
         """Returns meetings/mentions linked to a person via traverse + fetch."""
         conn = AsyncMock()
 
-        # traverse returns edges (source=meeting, target=person)
-        edge_rows = [
+        # Two separate traverse() calls:
+        #   1. inbound attended_by: meeting -> person (source=meeting, target=person)
+        #   2. outbound mentioned_in: person -> memory (source=person, target=memory)
+        attended_edges = [
             _make_row({"id": 1, "source_id": 10, "target_id": 100, "link_type": "attended_by"}),
             _make_row({"id": 2, "source_id": 11, "target_id": 100, "link_type": "attended_by"}),
-            _make_row({"id": 3, "source_id": 12, "target_id": 100, "link_type": "mentioned_in"}),
         ]
-        # fetch memories for the meeting IDs (no link_type column on memories table)
+        mentioned_edges = [
+            _make_row({"id": 3, "source_id": 100, "target_id": 12, "link_type": "mentioned_in"}),
+        ]
+        # fetch memories for the related IDs (no link_type column on memories table)
         memory_rows = [
             _make_row({"id": 10, "title": "Meeting A", "created_at": "2026-04-01T10:00:00+00:00"}),
             _make_row({"id": 11, "title": "Meeting B", "created_at": "2026-04-10T10:00:00+00:00"}),
             _make_row({"id": 12, "title": "Mention C", "created_at": "2026-04-15T10:00:00+00:00"}),
         ]
-        conn.fetch = AsyncMock(side_effect=[edge_rows, memory_rows])
+        conn.fetch = AsyncMock(side_effect=[attended_edges, mentioned_edges, memory_rows])
         pool = _make_pool(conn)
 
         dl = PostgresDataLayer()
@@ -102,7 +110,9 @@ class TestPeopleDiscussedWith:
         """Returns at most `limit` results."""
         conn = AsyncMock()
 
-        edge_rows = [
+        # All 5 edges are attended_by (meeting -> person), so they appear on the
+        # inbound traverse; the outbound (mentioned_in) traverse returns nothing.
+        attended_edges = [
             _make_row({"id": i, "source_id": 10 + i, "target_id": 100, "link_type": "attended_by"})
             for i in range(5)
         ]
@@ -110,7 +120,7 @@ class TestPeopleDiscussedWith:
             _make_row({"id": 10 + i, "title": f"M{i}", "created_at": f"2026-04-{i+1:02d}T10:00:00+00:00"})
             for i in range(5)
         ]
-        conn.fetch = AsyncMock(side_effect=[edge_rows, memory_rows])
+        conn.fetch = AsyncMock(side_effect=[attended_edges, [], memory_rows])
         pool = _make_pool(conn)
 
         dl = PostgresDataLayer()
@@ -124,7 +134,7 @@ class TestPeopleDiscussedWith:
         """Filters out results before the `since` date."""
         conn = AsyncMock()
 
-        edge_rows = [
+        attended_edges = [
             _make_row({"id": 1, "source_id": 10, "target_id": 100, "link_type": "attended_by"}),
             _make_row({"id": 2, "source_id": 11, "target_id": 100, "link_type": "attended_by"}),
         ]
@@ -132,7 +142,7 @@ class TestPeopleDiscussedWith:
             _make_row({"id": 10, "title": "Old Meeting", "created_at": "2026-01-01T10:00:00+00:00"}),
             _make_row({"id": 11, "title": "New Meeting", "created_at": "2026-04-15T10:00:00+00:00"}),
         ]
-        conn.fetch = AsyncMock(side_effect=[edge_rows, memory_rows])
+        conn.fetch = AsyncMock(side_effect=[attended_edges, [], memory_rows])
         pool = _make_pool(conn)
 
         dl = PostgresDataLayer()
