@@ -1,9 +1,8 @@
 """One-shot migration: port existing type=person memories to people-v1 schema.
 
 Usage:
-    DATABASE_URL=... python scripts/migrate_person_memories.py           # dry-run (default)
-    DATABASE_URL=... python scripts/migrate_person_memories.py --dry-run # explicit dry-run
-    DATABASE_URL=... python scripts/migrate_person_memories.py --apply   # execute migration
+    DATABASE_URL=... python scripts/migrate_person_memories.py          # dry-run (default)
+    DATABASE_URL=... python scripts/migrate_person_memories.py --apply  # execute migration
 """
 
 from __future__ import annotations
@@ -48,19 +47,20 @@ def classify_memory(row: dict[str, Any]) -> str:
     """Return 'directory' or 'single' for a person memory row.
 
     Classification rules:
-    - If metadata contains 'directory_members' key → 'directory'
-    - If title contains 'directory' or 'verzeichnis' (case-insensitive) → 'directory'
+    - If metadata contains 'members' key (list of dicts) → 'directory'
+    - If title contains 'directory' (case-insensitive) → 'directory'
     - Otherwise → 'single'
 
     Note: already-migrated detection is handled by plan_migration, not here.
     """
     metadata: dict[str, Any] = row.get("metadata") or {}
-    if "directory_members" in metadata:
+    members_val = metadata.get("members")
+    if isinstance(members_val, list) and members_val and isinstance(members_val[0], dict):
         return "directory"
 
     title: str = row.get("title") or ""
     title_lower = title.lower()
-    if "directory" in title_lower or "verzeichnis" in title_lower:
+    if "directory" in title_lower:
         return "directory"
 
     return "single"
@@ -104,18 +104,22 @@ def plan_migration(row: dict[str, Any]) -> dict[str, Any]:
     memory_id: int = row["id"]
     metadata: dict[str, Any] = row.get("metadata") or {}
 
-    # Idempotency: skip already-migrated rows
-    if metadata.get("schema_version") == "people-v1":
+    # Idempotency: skip already-migrated rows (both individual and archived)
+    already_migrated = (
+        metadata.get("schema_version") == "people-v1"
+        or metadata.get("schema_version") == "people-v1-archived"
+    )
+    if already_migrated:
         return {
             "action": "skip",
             "memory_id": memory_id,
-            "reason": "already migrated (schema_version=people-v1)",
+            "reason": f"already migrated (schema_version={metadata['schema_version']!r})",
         }
 
     kind = classify_memory(row)
 
     if kind == "directory":
-        members: list[str] = metadata.get("directory_members") or []
+        members: list[dict[str, Any]] = metadata.get("members") or []
         return {
             "action": "split_directory",
             "memory_id": memory_id,
@@ -158,7 +162,8 @@ def format_dry_run_plan(plan: dict[str, Any]) -> str:
 
     if action == "split_directory":
         members = plan.get("members", [])
-        member_list = ", ".join(members)
+        member_names = [m["name"] if isinstance(m, dict) else m for m in members]
+        member_list = ", ".join(member_names)
         return (
             f"[{memory_id}] SPLIT DIRECTORY into {len(members)} person memories "
             f"({member_list}) + archive original as curated_content"
@@ -175,7 +180,7 @@ def format_dry_run_plan(plan: dict[str, Any]) -> str:
 async def fetch_person_memories(conn: asyncpg.Connection) -> list[dict[str, Any]]:
     """Fetch all type=person memories from the database."""
     rows = await conn.fetch(
-        "SELECT id, type, title, content, metadata FROM memories WHERE type = 'person' ORDER BY id"
+        "SELECT id, index_id, type, title, content, metadata FROM memories WHERE type = 'person' ORDER BY id"
     )
     result: list[dict[str, Any]] = []
     for row in rows:
@@ -188,6 +193,7 @@ async def fetch_person_memories(conn: asyncpg.Connection) -> list[dict[str, Any]
             metadata = dict(metadata_raw)
         result.append({
             "id": row["id"],
+            "index_id": row["index_id"],
             "type": row["type"],
             "title": row["title"],
             "content": row["content"],
@@ -201,27 +207,28 @@ async def apply_normalize(conn: asyncpg.Connection, plan: dict[str, Any]) -> Non
     memory_id = plan["memory_id"]
     changes = plan["changes"]
 
-    # Fetch current metadata
-    row = await conn.fetchrow("SELECT metadata FROM memories WHERE id = $1", memory_id)
-    if row is None:
-        logger.warning(f"Memory {memory_id} not found; skipping.")
-        return
+    async with conn.transaction():
+        # Fetch current metadata
+        row = await conn.fetchrow("SELECT metadata FROM memories WHERE id = $1", memory_id)
+        if row is None:
+            logger.warning(f"Memory {memory_id} not found; skipping.")
+            return
 
-    metadata_raw = row["metadata"]
-    if isinstance(metadata_raw, str):
-        metadata: dict[str, Any] = json.loads(metadata_raw)
-    elif metadata_raw is None:
-        metadata = {}
-    else:
-        metadata = dict(metadata_raw)
+        metadata_raw = row["metadata"]
+        if isinstance(metadata_raw, str):
+            metadata: dict[str, Any] = json.loads(metadata_raw)
+        elif metadata_raw is None:
+            metadata = {}
+        else:
+            metadata = dict(metadata_raw)
 
-    metadata.update(changes)
+        metadata.update(changes)
 
-    await conn.execute(
-        "UPDATE memories SET metadata = $1 WHERE id = $2",
-        json.dumps(metadata),
-        memory_id,
-    )
+        await conn.execute(
+            "UPDATE memories SET metadata = $1 WHERE id = $2",
+            json.dumps(metadata),
+            memory_id,
+        )
     logger.info(f"  Normalized memory {memory_id}: person_ref={changes['person_ref']!r}")
 
 
@@ -231,48 +238,56 @@ async def apply_split_directory(conn: asyncpg.Connection, plan: dict[str, Any], 
     Steps:
     1. For each member: INSERT a new type=person memory with people-v1 metadata.
     2. Archive the original directory memory by changing its type to curated_content.
+
+    The entire operation is wrapped in a transaction for atomicity.
     """
     memory_id = plan["memory_id"]
-    members: list[str] = plan.get("members", [])
+    members: list[dict[str, Any]] = plan.get("members", [])
     original_metadata: dict[str, Any] = original_row.get("metadata") or {}
-    org: str = original_metadata.get("org", "")
+    index_id: int = original_row.get("index_id", 1) or 1
 
-    for member_name in members:
-        person_ref = derive_person_ref(member_name, memory_id)
-        new_metadata: dict[str, Any] = {
-            "name": member_name,
-            "org": org,
-            "person_ref": person_ref,
-            "aliases": [],
-            "schema_version": "people-v1",
-            "split_from": memory_id,
-        }
-        title = member_name
-        content = f"{member_name} works at {org}." if org else f"{member_name}."
-        await conn.execute(
-            """
-            INSERT INTO memories (type, title, content, metadata, stability, importance, priority)
-            VALUES ('person', $1, $2, $3, 'tentative', 'medium', 0.5)
-            """,
-            title,
-            content,
-            json.dumps(new_metadata),
+    async with conn.transaction():
+        for member in members:
+            member_name: str = member["name"]
+            member_org: str = member.get("org") or ""
+            aliases: list[str] = member.get("aliases") or []
+            person_ref = derive_person_ref(member_name, memory_id)
+            new_metadata: dict[str, Any] = {
+                "name": member_name,
+                "org": member_org,
+                "linkedin": member.get("linkedin"),
+                "person_ref": person_ref,
+                "aliases": aliases,
+                "schema_version": "people-v1",
+                "split_from": memory_id,
+            }
+            title = member_name
+            content = f"{member_name}, {member_org}" if member_org else member_name
+            await conn.execute(
+                """
+                INSERT INTO memories (index_id, type, title, content, metadata, stability, importance, priority)
+                VALUES ($1, 'person', $2, $3, $4, 'tentative', 'medium', 0.5)
+                """,
+                index_id,
+                title,
+                content,
+                json.dumps(new_metadata),
+            )
+            logger.info(f"  Created person memory for {member_name!r} (ref={person_ref!r})")
+
+        # Archive original as curated_content
+        archive_metadata = dict(original_metadata)
+        archive_metadata["archival_note"] = (
+            f"Original directory archived after split into {len(members)} individual person memories."
         )
-        logger.info(f"  Created person memory for {member_name!r} (ref={person_ref!r})")
+        archive_metadata["schema_version"] = "people-v1-archived"
 
-    # Archive original as curated_content
-    archive_metadata = dict(original_metadata)
-    archive_metadata["archival_note"] = (
-        f"Original Polaris directory archived after split into {len(members)} individual person memories."
-    )
-    archive_metadata["schema_version"] = "people-v1-archived"
-
-    await conn.execute(
-        "UPDATE memories SET type = 'curated_content', metadata = $1 WHERE id = $2",
-        json.dumps(archive_metadata),
-        memory_id,
-    )
-    logger.info(f"  Archived directory memory {memory_id} as curated_content")
+        await conn.execute(
+            "UPDATE memories SET type = 'curated_content', metadata = $1 WHERE id = $2",
+            json.dumps(archive_metadata),
+            memory_id,
+        )
+        logger.info(f"  Archived directory memory {memory_id} as curated_content")
 
 
 # ---------------------------------------------------------------------------
@@ -284,22 +299,14 @@ async def main() -> None:
     parser = argparse.ArgumentParser(
         description="Migrate type=person memories to people-v1 schema."
     )
-    mode_group = parser.add_mutually_exclusive_group()
-    mode_group.add_argument(
-        "--dry-run",
-        action="store_true",
-        default=False,
-        help="Print migration plan without making any changes (default behaviour).",
-    )
-    mode_group.add_argument(
+    parser.add_argument(
         "--apply",
         action="store_true",
         default=False,
-        help="Execute the migration.",
+        help="Execute the migration. Without this flag the script runs in dry-run mode.",
     )
     args = parser.parse_args()
 
-    # Default is dry-run
     apply_mode: bool = args.apply
 
     db_url = os.environ.get("DATABASE_URL")

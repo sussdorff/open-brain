@@ -16,66 +16,82 @@ import migrate_person_memories as mpm
 
 
 # ---------------------------------------------------------------------------
-# Fixtures
+# Fixtures — real data matching python/tests/fixtures/people/ shapes
 # ---------------------------------------------------------------------------
 
 SINGLE_PERSON_ROW = {
     "id": 17692,
     "type": "person",
-    "title": "Stefanie Weihe",
-    "content": "Stefanie Weihe works at Polaris GmbH as a senior consultant.",
+    "title": "Dr. Dr. Stephan Weihe",
+    "content": "Stephan Weihe — ICRD / medworkx.digital",
     "metadata": {
-        "name": "Stefanie Weihe",
-        "org": "Polaris GmbH",
-        "role": "Senior Consultant",
-        "relationship": "colleague",
-        "last_contact": "2026-03-15T10:00:00+00:00",
+        "name": "Dr. Dr. Stephan Weihe",
+        "org": "ICRD / medworkx.digital",
+        "linkedin": None,
+        "aliases": ["Stephan Weihe"],
     },
 }
 
 DIRECTORY_ROW = {
     "id": 18175,
     "type": "person",
-    "title": "Polaris GmbH Team Directory",
-    "content": (
-        "Polaris GmbH staff directory:\n"
-        "- Stefanie Weihe (Senior Consultant)\n"
-        "- Klaus Braun (CTO)\n"
-        "- Maria Schneider (Project Manager)\n"
-        "- Hans Weber (Developer)\n"
-        "- Petra Müller (Sales)"
-    ),
+    "title": "Polaris Directory",
+    "content": "Polaris team directory",
     "metadata": {
-        "org": "Polaris GmbH",
-        "directory_members": [
-            "Stefanie Weihe",
-            "Klaus Braun",
-            "Maria Schneider",
-            "Hans Weber",
-            "Petra Müller",
-        ],
+        "members": [
+            {"name": "Elias Trewin", "org": "Cinify", "linkedin": "elias-trewin", "aliases": []},
+            {
+                "name": "Dr. Cyrus Alamouti",
+                "org": "Dental-Now",
+                "linkedin": "dr-cyrus-alamouti-73385773",
+                "aliases": ["Cyrus Amadi", "Cyrus Ahmadi", "Cyrus"],
+            },
+            {"name": "Siamak Ghasemi", "org": "Dental-Now", "linkedin": "siamakghasemi", "aliases": []},
+            {
+                "name": "Jochen Jungbluth",
+                "org": "Dental-Now",
+                "linkedin": "jochen-jungbluth-a5a412152",
+                "aliases": ["Jochen Jungblut"],
+            },
+            {
+                "name": "Philipp Kuhn-Regnier",
+                "org": "Sonia",
+                "linkedin": "philipp-kuhn-regnier",
+                "aliases": ["Philip Kuhn-Regnier", "Philipp Regnier"],
+            },
+        ]
     },
 }
 
 ALREADY_MIGRATED_ROW = {
     "id": 17700,
     "type": "person",
-    "title": "Klaus Braun",
-    "content": "Klaus Braun is CTO at Polaris GmbH.",
+    "title": "Elias Trewin",
+    "content": "Elias Trewin, Cinify",
     "metadata": {
-        "name": "Klaus Braun",
-        "org": "Polaris GmbH",
-        "role": "CTO",
+        "name": "Elias Trewin",
+        "org": "Cinify",
         "schema_version": "people-v1",
-        "person_ref": "person-braun-klaus",
+        "person_ref": "person-trewin-elias",
         "aliases": [],
+    },
+}
+
+ALREADY_ARCHIVED_ROW = {
+    "id": 18175,
+    "type": "curated_content",
+    "title": "Polaris Directory",
+    "content": "Polaris team directory",
+    "metadata": {
+        "schema_version": "people-v1-archived",
+        "archival_note": "Original directory archived after split into 5 individual person memories.",
     },
 }
 
 DIRECTORY_BY_TITLE_ROW = {
     "id": 18200,
     "type": "person",
-    "title": "Acme Corp Verzeichnis",
+    "title": "Acme Corp Directory",
     "content": "Acme Corp staff listing.",
     "metadata": {
         "org": "Acme Corp",
@@ -89,17 +105,13 @@ DIRECTORY_BY_TITLE_ROW = {
 
 
 class TestClassifyMemory:
-    """classify_memory returns 'directory', 'single', or 'skip'."""
+    """classify_memory returns 'directory' or 'single'."""
 
-    def test_directory_via_metadata_key(self):
+    def test_directory_via_members_key(self):
         assert mpm.classify_memory(DIRECTORY_ROW) == "directory"
 
     def test_directory_via_title_keyword_directory(self):
         row = dict(DIRECTORY_BY_TITLE_ROW)
-        assert mpm.classify_memory(row) == "directory"
-
-    def test_directory_via_title_keyword_verzeichnis(self):
-        row = {**SINGLE_PERSON_ROW, "id": 99, "title": "Team Verzeichnis"}
         assert mpm.classify_memory(row) == "directory"
 
     def test_single_person(self):
@@ -108,6 +120,15 @@ class TestClassifyMemory:
     def test_already_migrated_is_single(self):
         # classify_memory does not check schema_version — plan_migration handles skip
         assert mpm.classify_memory(ALREADY_MIGRATED_ROW) == "single"
+
+    def test_members_key_with_empty_list_is_not_directory(self):
+        row = {**DIRECTORY_ROW, "title": "Person Record", "metadata": {"members": []}}
+        assert mpm.classify_memory(row) == "single"
+
+    def test_members_key_with_string_values_is_not_directory(self):
+        # Old shape with string list must not be mistaken for real members
+        row = {**DIRECTORY_ROW, "title": "Person Record", "metadata": {"members": ["Alice", "Bob"]}}
+        assert mpm.classify_memory(row) == "single"
 
 
 # ---------------------------------------------------------------------------
@@ -119,10 +140,10 @@ class TestDerivePersonRef:
     """derive_person_ref produces stable 'person-<last>-<first>' slugs."""
 
     def test_two_word_name(self):
-        assert mpm.derive_person_ref("Stefanie Weihe", 17692) == "person-weihe-stefanie"
+        assert mpm.derive_person_ref("Stephan Weihe", 17692) == "person-weihe-stephan"
 
     def test_two_word_name_lowercase(self):
-        assert mpm.derive_person_ref("Klaus Braun", 17700) == "person-braun-klaus"
+        assert mpm.derive_person_ref("Elias Trewin", 18175) == "person-trewin-elias"
 
     def test_single_word_name(self):
         ref = mpm.derive_person_ref("Madonna", 1)
@@ -137,13 +158,24 @@ class TestDerivePersonRef:
         ref = mpm.derive_person_ref("Petra Müller", 3)
         assert ref == "person-muller-petra"
 
-    def test_special_characters_stripped(self):
-        ref = mpm.derive_person_ref("Hans-Peter Weber", 4)
-        assert "person-" in ref
+    def test_hyphenated_surname(self):
+        # Philipp Kuhn-Regnier — hyphen stays in slug
+        ref = mpm.derive_person_ref("Philipp Kuhn-Regnier", 18175)
+        assert "kuhn" in ref
+        assert "regnier" in ref
+
+    def test_title_prefix_stripped_in_slug(self):
+        # Dr. Cyrus Alamouti — "Dr." becomes "dr" in slug, last word is family name
+        ref = mpm.derive_person_ref("Dr. Cyrus Alamouti", 18175)
+        assert ref.startswith("person-alamouti-")
 
     def test_fallback_uses_id_when_name_empty(self):
         ref = mpm.derive_person_ref("", 42)
         assert ref == "person-42"
+
+    def test_special_characters_stripped(self):
+        ref = mpm.derive_person_ref("Hans-Peter Weber", 4)
+        assert "person-" in ref
 
 
 # ---------------------------------------------------------------------------
@@ -167,7 +199,7 @@ class TestPlanMigration:
         assert "changes" in plan
         changes = plan["changes"]
         assert changes["schema_version"] == "people-v1"
-        assert changes["person_ref"] == "person-weihe-stefanie"
+        assert changes["person_ref"] == "person-weihe-dr-dr-stephan"
         assert "aliases" in changes
         assert isinstance(changes["aliases"], list)
 
@@ -179,11 +211,20 @@ class TestPlanMigration:
         plan = mpm.plan_migration(DIRECTORY_ROW)
         assert plan["memory_id"] == 18175
 
-    def test_directory_plan_members(self):
+    def test_directory_plan_members_are_dicts(self):
         plan = mpm.plan_migration(DIRECTORY_ROW)
         assert "members" in plan
         assert len(plan["members"]) == 5
-        assert "Stefanie Weihe" in plan["members"]
+        for member in plan["members"]:
+            assert isinstance(member, dict)
+            assert "name" in member
+
+    def test_directory_plan_member_names(self):
+        plan = mpm.plan_migration(DIRECTORY_ROW)
+        names = [m["name"] for m in plan["members"]]
+        assert "Elias Trewin" in names
+        assert "Philipp Kuhn-Regnier" in names
+        assert "Dr. Cyrus Alamouti" in names
 
     def test_directory_plan_archive_original(self):
         plan = mpm.plan_migration(DIRECTORY_ROW)
@@ -201,6 +242,14 @@ class TestPlanMigration:
     def test_already_migrated_plan_memory_id(self):
         plan = mpm.plan_migration(ALREADY_MIGRATED_ROW)
         assert plan["memory_id"] == 17700
+
+    def test_archived_directory_is_skipped(self):
+        plan = mpm.plan_migration(ALREADY_ARCHIVED_ROW)
+        assert plan["action"] == "skip"
+
+    def test_archived_directory_skip_reason_mentions_version(self):
+        plan = mpm.plan_migration(ALREADY_ARCHIVED_ROW)
+        assert "people-v1-archived" in plan["reason"]
 
 
 # ---------------------------------------------------------------------------
@@ -224,13 +273,13 @@ class TestFormatDryRunPlan:
     def test_normalize_output_contains_person_ref(self):
         plan = mpm.plan_migration(SINGLE_PERSON_ROW)
         text = mpm.format_dry_run_plan(plan)
-        assert "person-weihe-stefanie" in text
+        assert "person-weihe" in text
 
-    def test_split_directory_output_contains_members(self):
+    def test_split_directory_output_contains_member_names(self):
         plan = mpm.plan_migration(DIRECTORY_ROW)
         text = mpm.format_dry_run_plan(plan)
         assert "split" in text.lower()
-        assert "Stefanie Weihe" in text
+        assert "Elias Trewin" in text
 
     def test_split_directory_output_contains_archive(self):
         plan = mpm.plan_migration(DIRECTORY_ROW)
@@ -252,8 +301,12 @@ class TestFormatDryRunPlan:
 class TestIdempotency:
     """Re-running plan_migration on migrated memories returns skip."""
 
-    def test_skip_when_schema_version_set(self):
+    def test_skip_when_schema_version_people_v1(self):
         plan = mpm.plan_migration(ALREADY_MIGRATED_ROW)
+        assert plan["action"] == "skip"
+
+    def test_skip_when_schema_version_people_v1_archived(self):
+        plan = mpm.plan_migration(ALREADY_ARCHIVED_ROW)
         assert plan["action"] == "skip"
 
     def test_skip_is_no_op(self):
@@ -288,9 +341,26 @@ class TestPolarisDirectorySplit:
     def test_each_member_has_person_ref(self):
         plan = mpm.plan_migration(DIRECTORY_ROW)
         # Each member name → derive_person_ref must produce a unique slug
-        refs = [mpm.derive_person_ref(m, DIRECTORY_ROW["id"]) for m in plan["members"]]
+        refs = [mpm.derive_person_ref(m["name"], DIRECTORY_ROW["id"]) for m in plan["members"]]
         assert len(set(refs)) == 5  # all unique
 
     def test_archive_original_is_true(self):
         plan = mpm.plan_migration(DIRECTORY_ROW)
         assert plan["archive_original"] is True
+
+    def test_members_carry_aliases(self):
+        plan = mpm.plan_migration(DIRECTORY_ROW)
+        cyrus = next(m for m in plan["members"] if m["name"] == "Dr. Cyrus Alamouti")
+        assert "Cyrus" in cyrus["aliases"]
+
+    def test_members_carry_org(self):
+        plan = mpm.plan_migration(DIRECTORY_ROW)
+        elias = next(m for m in plan["members"] if m["name"] == "Elias Trewin")
+        assert elias["org"] == "Cinify"
+
+    def test_hyphenated_member_has_ref(self):
+        plan = mpm.plan_migration(DIRECTORY_ROW)
+        philipp = next(m for m in plan["members"] if "Kuhn-Regnier" in m["name"])
+        ref = mpm.derive_person_ref(philipp["name"], DIRECTORY_ROW["id"])
+        assert ref.startswith("person-")
+        assert len(ref) > len("person-")
