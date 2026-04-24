@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+## [0.16.0] - 2026-04-24
+
 ### Bug Fixes
 
 - *(open-brain-cr3.10)* Address review findings iteration 1
@@ -23,6 +25,7 @@ All notable changes to this project will be documented in this file.
 
 - Resolve CHANGELOG.md merge conflict — merge cr3.2 and main entries
 - *(open-brain-cr3.10)* Update changelog for typed-relationship API release
+- Bump version to 0.16.0
 
 ## [0.14.0] - 2026-04-24
 
