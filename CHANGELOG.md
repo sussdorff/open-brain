@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(open-brain-cr3.1)* Correct docs inconsistency — schema count in prose vs code block
 - *(open-brain-cr3.5)* Align Protocol Shape run_id signature with run_id Contract
 - *(open-brain-cr3.15)* Fix section numbering in ADR 0002 decision block
 
@@ -15,8 +16,13 @@ All notable changes to this project will be documented in this file.
 
 ### Documentation
 
+- *(open-brain-cr3.1)* Add mention + interaction schema documentation
 - *(open-brain-cr3.5)* Add ADR-0001 ingest-adapter interface
 - *(open-brain-cr3.15)* Add ADR 0002 — credentials and privacy policy
+
+### Features
+
+- *(open-brain-cr3.1)* Green — add MentionMetadata + InteractionMetadata TypedDicts with validation
 
 ### Miscellaneous
 
