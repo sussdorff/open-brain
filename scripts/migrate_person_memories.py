@@ -306,8 +306,16 @@ async def main() -> None:
         default=False,
         help="Execute the migration. Without this flag the script runs in dry-run mode.",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="Print migration plan without executing. This is the default when --apply is not given.",
+    )
     args = parser.parse_args()
 
+    # apply_mode is True only when --apply is explicitly passed.
+    # --dry-run is the default; passing it is equivalent to omitting --apply.
     apply_mode: bool = args.apply
 
     db_url = os.environ.get("DATABASE_URL")
