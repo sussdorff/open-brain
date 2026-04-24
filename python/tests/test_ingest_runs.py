@@ -340,7 +340,7 @@ class TestIngestRunRoundTrip:
         from open_brain.data_layer.interface import SaveMemoryParams
 
         database_url = os.environ.get("DATABASE_URL", "")
-        if not database_url or database_url == "test-placeholder":
+        if not database_url or database_url.startswith("postgresql://test:test@"):
             pytest.skip("Requires real DATABASE_URL (not test placeholder)")
 
         dl = PostgresDataLayer()
