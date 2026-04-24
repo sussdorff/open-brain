@@ -419,7 +419,9 @@ class TestBackfillScriptIntegration:
             pytest.skip("DATABASE_URL not set")
 
         # Locate the backfill script relative to this test file
-        scripts_dir = Path(__file__).parent.parent.parent.parent / "scripts"
+        # Path(__file__) = python/tests/test_typed_relationships.py
+        # parents[2]     = repo root (python/tests -> python -> repo root)
+        scripts_dir = Path(__file__).parents[2] / "scripts"
         script_path = scripts_dir / "migrate_relationships_backfill.py"
         assert script_path.exists(), f"Backfill script not found at {script_path}"
 

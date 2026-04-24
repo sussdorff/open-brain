@@ -1835,6 +1835,7 @@ class PostgresDataLayer:
         pool = await get_pool()
         results: list[dict] = []
         visited: set[int] = {anchor_id}
+        visited_edges: set[int] = set()
         current_frontier: list[int] = [anchor_id]
 
         placeholders_lt = ", ".join(f"${i + 2}" for i in range(len(link_types)))
@@ -1877,13 +1878,16 @@ class PostgresDataLayer:
                     # For 'both': pick the node that is NOT in current_frontier
                     neighbor = tgt if src in current_frontier else src
 
-                # Always report the edge — even if the neighbor is already visited.
-                # This ensures all matched edges are returned (e.g. two nodes that
-                # both point to the same already-visited neighbor). Only skip
-                # re-enqueuing already-visited neighbors into the next frontier
-                # to prevent cycles.
+                # Skip edges already reported at a previous depth — this
+                # prevents direction="both" from re-reporting depth-1 edges
+                # at depth-2 when the backward query returns already-traversed
+                # edges connected to the current frontier.
+                edge_id = row["id"]
+                if edge_id in visited_edges:
+                    continue
+                visited_edges.add(edge_id)
                 results.append({
-                    "id": row["id"],
+                    "id": edge_id,
                     "link_type": row["link_type"],
                     "depth": current_depth,
                     "source_id": src,
