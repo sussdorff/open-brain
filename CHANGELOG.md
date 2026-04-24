@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 ### Bug Fixes
 
 - *(open-brain-cr3.5)* Align Protocol Shape run_id signature with run_id Contract
+- *(open-brain-cr3.15)* Fix section numbering in ADR 0002 decision block
 
 ### CI/CD
 
@@ -15,6 +16,7 @@ All notable changes to this project will be documented in this file.
 ### Documentation
 
 - *(open-brain-cr3.5)* Add ADR-0001 ingest-adapter interface
+- *(open-brain-cr3.15)* Add ADR 0002 — credentials and privacy policy
 
 ### Miscellaneous
 
