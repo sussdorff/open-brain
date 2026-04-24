@@ -22,6 +22,7 @@ from open_brain.data_layer.embedding import (
 from open_brain.data_layer.reranker import rerank
 from open_brain.data_layer.interface import (
     IMPORTANCE_VALUES,
+    VALID_LINK_TYPES,
     ClusterPlan,
     CompactParams,
     CompactResult,
@@ -105,6 +106,20 @@ _compact_lifecycle_filter = (
 )
 
 _pool: asyncpg.Pool | None = None
+
+
+async def _ensure_link_type_column(conn: asyncpg.Connection) -> None:
+    """Add link_type column to memory_relationships if not present (idempotent).
+
+    The column defaults to 'similar_to' so existing rows get the correct value
+    without an explicit backfill.
+    """
+    await conn.execute(
+        "ALTER TABLE memory_relationships ADD COLUMN IF NOT EXISTS link_type text NOT NULL DEFAULT 'similar_to';"
+    )
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_memrel_linktype ON memory_relationships(link_type);"
+    )
 
 
 async def _init_conn(conn: asyncpg.Connection) -> None:
@@ -278,6 +293,8 @@ async def get_pool() -> asyncpg.Pool:
             # Importance-aware decay function: skips critical (mult=0.0), applies importance
             # multipliers (high=0.5x, medium=1.0x, low=2.0x), includes 24h race guard via
             # last_decay_at so concurrent calls are safe without advisory locks.
+            # Typed-relationship schema migration (idempotent)
+            await _ensure_link_type_column(conn)
             await conn.execute("""
                 CREATE OR REPLACE FUNCTION decay_unused_priorities(
                     p_stale_days integer,
@@ -1733,6 +1750,181 @@ class PostgresDataLayer:
                 m.project_name = row.get("project_name")
                 memories.append(m)
             return memories
+
+    async def create_relationship(
+        self,
+        source_id: int,
+        target_id: int,
+        link_type: str,
+        metadata: dict | None = None,
+    ) -> int:
+        """Create a typed relationship between two memories.
+
+        Args:
+            source_id: ID of the source memory.
+            target_id: ID of the target memory.
+            link_type: Semantic relationship type. Must be in VALID_LINK_TYPES.
+            metadata: Optional JSON metadata stored alongside the relationship.
+
+        Returns:
+            The ID of the created (or updated) relationship row.
+
+        Raises:
+            ValueError: If link_type is not in VALID_LINK_TYPES.
+        """
+        if link_type not in VALID_LINK_TYPES:
+            raise ValueError(
+                f"Invalid link_type: {link_type!r}. Must be one of: {sorted(VALID_LINK_TYPES)}"
+            )
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            rel_id: int = await conn.fetchval(
+                """INSERT INTO memory_relationships (source_id, target_id, relation_type, link_type, confidence, metadata)
+                   VALUES ($1, $2, $3, $3, 1.0, $4::jsonb)
+                   ON CONFLICT (source_id, target_id, relation_type) DO UPDATE
+                       SET link_type = EXCLUDED.link_type,
+                           metadata = COALESCE(EXCLUDED.metadata, memory_relationships.metadata),
+                           confidence = EXCLUDED.confidence
+                   RETURNING id""",
+                source_id,
+                target_id,
+                link_type,
+                _json.dumps(metadata) if metadata else None,
+            )
+        logger.info(
+            "Created relationship id=%d source=%d target=%d link_type=%s",
+            rel_id, source_id, target_id, link_type,
+        )
+        return rel_id
+
+    async def traverse(
+        self,
+        anchor_id: int,
+        link_types: list[str],
+        depth: int = 1,
+        direction: str = "outbound",
+    ) -> list[dict]:
+        """Traverse the relationship graph using iterative BFS.
+
+        Args:
+            anchor_id: Starting memory ID.
+            link_types: List of link_type values to follow.
+            depth: Number of hops to traverse (1 = direct neighbors only).
+            direction: 'outbound' (source→target), 'inbound' (target→source),
+                       or 'both'.
+
+        Returns:
+            List of dicts with keys: id, link_type, depth, source_id, target_id.
+            Each dict represents one edge found during the traversal.
+        """
+        if not link_types:
+            return []
+
+        pool = await get_pool()
+        results: list[dict] = []
+        visited: set[int] = {anchor_id}
+        current_frontier: list[int] = [anchor_id]
+
+        placeholders_lt = ", ".join(f"${i + 2}" for i in range(len(link_types)))
+
+        for current_depth in range(1, depth + 1):
+            if not current_frontier:
+                break
+
+            # Build query dynamically based on direction
+            frontier_param = "$1"
+            lt_params = list(link_types)
+
+            if direction == "outbound":
+                where_clause = f"source_id = ANY({frontier_param}::int[]) AND link_type IN ({placeholders_lt})"
+            elif direction == "inbound":
+                where_clause = f"target_id = ANY({frontier_param}::int[]) AND link_type IN ({placeholders_lt})"
+            else:  # both
+                where_clause = (
+                    f"(source_id = ANY({frontier_param}::int[]) OR target_id = ANY({frontier_param}::int[]))"
+                    f" AND link_type IN ({placeholders_lt})"
+                )
+
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    f"SELECT id, source_id, target_id, link_type FROM memory_relationships WHERE {where_clause}",
+                    current_frontier,
+                    *lt_params,
+                )
+
+            next_frontier: list[int] = []
+            for row in rows:
+                src = row["source_id"]
+                tgt = row["target_id"]
+                # Determine the "neighbor" node (the one we're moving to)
+                if direction == "inbound":
+                    neighbor = src
+                elif direction == "outbound":
+                    neighbor = tgt
+                else:
+                    # For 'both': pick the node that is NOT in current_frontier
+                    neighbor = tgt if src in current_frontier else src
+
+                if neighbor in visited:
+                    continue
+                visited.add(neighbor)
+                next_frontier.append(neighbor)
+                results.append({
+                    "id": row["id"],
+                    "link_type": row["link_type"],
+                    "depth": current_depth,
+                    "source_id": src,
+                    "target_id": tgt,
+                })
+
+            current_frontier = next_frontier
+
+        return results
+
+    async def get_relationships(
+        self,
+        memory_id: int,
+        link_types: list[str] | None = None,
+    ) -> list[dict]:
+        """Return all relationship edges where memory_id is source or target.
+
+        Args:
+            memory_id: The memory to look up edges for.
+            link_types: Optional filter — only return edges with these link_type values.
+
+        Returns:
+            List of dicts with keys: id, source_id, target_id, link_type, relation_type, confidence.
+        """
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            if link_types:
+                placeholders = ", ".join(f"${i + 2}" for i in range(len(link_types)))
+                rows = await conn.fetch(
+                    f"""SELECT id, source_id, target_id, link_type, relation_type, confidence
+                        FROM memory_relationships
+                        WHERE (source_id = $1 OR target_id = $1)
+                          AND link_type IN ({placeholders})""",
+                    memory_id,
+                    *link_types,
+                )
+            else:
+                rows = await conn.fetch(
+                    """SELECT id, source_id, target_id, link_type, relation_type, confidence
+                       FROM memory_relationships
+                       WHERE source_id = $1 OR target_id = $1""",
+                    memory_id,
+                )
+        return [
+            {
+                "id": row["id"],
+                "source_id": row["source_id"],
+                "target_id": row["target_id"],
+                "link_type": row["link_type"],
+                "relation_type": row["relation_type"],
+                "confidence": row["confidence"],
+            }
+            for row in rows
+        ]
 
     async def delete_memories(self, params: DeleteParams) -> DeleteResult:
         """Delete memories by IDs or by filter (project + type + before)."""
