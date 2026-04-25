@@ -17,7 +17,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from open_brain.config import get_config
 from open_brain.data_layer.interface import DataLayer
 from open_brain.ingest.adapters.transcript import TranscriptIngestor
 from open_brain.ingest.models import IngestResult
@@ -158,9 +157,13 @@ class MacWhisperConnector:
         tried: list[Path] = []
 
         # 1. Config override via environment variable
-        config = get_config()
-        if config.MACWHISPER_HISTORY_PATH:
-            override = Path(config.MACWHISPER_HISTORY_PATH)
+        # Use os.environ.get() directly to avoid requiring a fully valid
+        # app config (DATABASE_URL, VOYAGE_API_KEY, etc.) just to check
+        # a single env var — a Pydantic validation error from get_config()
+        # would otherwise mask the MacWhisper discovery entirely.
+        override_str = os.environ.get("MACWHISPER_HISTORY_PATH", "")
+        if override_str:
+            override = Path(override_str)
             if override.exists():
                 self._cached_path = override
                 return override
@@ -195,14 +198,16 @@ class MacWhisperConnector:
         """
         try:
             returncode, stdout, stderr = self._runner.run(["mw", "--help"])
-            # Parse stdout+stderr for path hints
+            # Parse stdout+stderr for path hints.
+            # Extract from the first '/' to end-of-line so that paths
+            # containing spaces (e.g. "Application Support/MacWhisper")
+            # are captured correctly instead of being truncated by split().
             for raw_line in (stdout + "\n" + stderr).splitlines():
                 line = raw_line.strip()
                 if "MacWhisper" in line and "/" in line:
-                    # Look for path-like tokens
-                    for token in line.split():
-                        if token.startswith("/") and "MacWhisper" in token:
-                            return Path(token)
+                    candidate = line[line.index("/"):].strip()
+                    if "MacWhisper" in candidate:
+                        return Path(candidate)
         except Exception as exc:
             logger.debug("mw --help path discovery failed: %s", exc)
 
@@ -211,9 +216,9 @@ class MacWhisperConnector:
             for raw_line in (stdout + "\n" + stderr).splitlines():
                 line = raw_line.strip()
                 if "MacWhisper" in line and "/" in line:
-                    for token in line.split():
-                        if token.startswith("/") and "MacWhisper" in token:
-                            return Path(token)
+                    candidate = line[line.index("/"):].strip()
+                    if "MacWhisper" in candidate:
+                        return Path(candidate)
         except Exception as exc:
             logger.debug("mw --version path discovery failed: %s", exc)
 
