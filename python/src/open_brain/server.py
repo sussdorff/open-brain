@@ -891,6 +891,30 @@ async def compact_memories(
 
 @mcp.tool(
     description=(
+        "Ingest a meeting transcript (text) into open-brain memory. "
+        "Extracts attendees, mentioned people, topics, and follow-up tasks via LLM, "
+        "then saves meeting + person + interaction memories with relationships. "
+        "Returns JSON with meeting_memory_id, person_memory_ids, mention_memory_ids, "
+        "interaction_memory_ids, relationship_ids, follow_up_candidates, run_id. "
+        "Idempotent: same (source_ref, text) returns the same IDs. "
+        "Params: text (str, required), source_ref (str, required — unique ID for this transcript), "
+        "medium_hint (str, optional — e.g. 'macwhisper')."
+    )
+)
+async def ingest_transcript(text: str, source_ref: str, medium_hint: str | None = None) -> str:
+    """Ingest a transcript and return IngestResult as JSON."""
+    if not text or not text.strip():
+        raise ValueError("text must not be empty or whitespace-only")
+    from open_brain.ingest.adapters.transcript import TranscriptIngestor
+    import dataclasses
+    dl = get_dl()
+    ingestor = TranscriptIngestor(data_layer=dl)
+    result = await ingestor.ingest(text=text, source_ref=source_ref, medium_hint=medium_hint)
+    return json.dumps(dataclasses.asdict(result))
+
+
+@mcp.tool(
+    description=(
         "Roll back an ingest run by deleting all memories and relationships created with the given run_id. "
         "Returns deletion counts. Non-existent run_id returns zero counts (not an error). "
         "Param: run_id (str, required — the run_id returned by ingest_run())."

@@ -85,6 +85,7 @@ class TranscriptIngestor:
         text: str,
         source_ref: str,
         medium_hint: str | None = None,
+        run_id: str | None = None,
     ) -> IngestResult:
         """Ingest a meeting transcript and return an IngestResult.
 
@@ -92,6 +93,9 @@ class TranscriptIngestor:
             text: The full transcript text.
             source_ref: Unique identifier for this transcript source.
             medium_hint: Optional hint about the medium (e.g. 'macwhisper').
+            run_id: Optional pre-generated run UUID. If provided, used as-is
+                instead of generating a new one. Allows callers to clean up
+                partial ingests even when ingest() raises mid-way.
 
         Returns:
             Populated IngestResult with all created memory IDs.
@@ -104,7 +108,7 @@ class TranscriptIngestor:
 
         ingest_start = time.monotonic()
 
-        run_id = str(uuid.uuid4())
+        run_id = run_id or str(uuid.uuid4())
         idempotency_key = _compute_idempotency_key(source_ref, text)
 
         # --- Idempotency check ---
