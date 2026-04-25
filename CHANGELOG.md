@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Added
+
+- *(open-brain-5ye)* Register IMAPEmailIngestor in ADAPTERS — add name attr, list_recent(n), Protocol-conformant ingest(ref, run_id), register() sentinel
+
 ### Documentation
 
 - *(open-brain-zdm)* Extend ADR-0001 with Helper Modules vs. Top-Level Adapters section
