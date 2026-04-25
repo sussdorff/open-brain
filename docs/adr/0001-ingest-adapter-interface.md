@@ -100,3 +100,27 @@ full observability: every memory can be traced back to the exact ingest run that
   debugging of ingest failures.
 - **Easy extensibility**: adding a new source requires only implementing the Protocol and
   calling `register()` — zero changes to the orchestrator or existing adapters.
+
+## Helper Modules vs. Top-Level Adapters
+
+Not every class in `ingest/adapters/` is a top-level `IngestAdapter`. The package also hosts
+*helper modules* — classes that process content but are composed by adapters rather than driven
+directly by the orchestrator.
+
+| Class | Category | Rationale |
+|-------|----------|-----------|
+| `MacWhisperConnector` | Top-level adapter | Represents the MacWhisper transcript *source*. Implements `IngestAdapter` Protocol. Calls `register()` at import time. |
+| `IMAPEmailIngestor` | Top-level adapter | Represents the IMAP email *source*. Intended to implement `IngestAdapter` Protocol (compliance tracked in open-brain-5ye). |
+| `TranscriptIngestor` | Helper module | Processes raw transcript text + metadata → memory records. Composed by `MacWhisperConnector`; not driven directly by the orchestrator. MUST NOT call `register()`. |
+
+### Rules
+
+- **Top-level adapter**: a class that represents an ingest *source* (MacWhisper, IMAP email,
+  Matrix, etc.). MUST implement the `IngestAdapter` Protocol and call `register()` at module
+  import time.
+- **Helper module**: a class that processes content but is composed by an adapter, not driven
+  directly by the orchestrator. MUST NOT call `register()`. MAY live in `adapters/` for
+  proximity to its primary consumer.
+
+This distinction prevents confusion about Protocol compliance requirements: only top-level
+adapters are subject to the Protocol and registry constraints in this ADR.

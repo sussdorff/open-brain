@@ -3,6 +3,18 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Documentation
+
+- *(open-brain-zdm)* Extend ADR-0001 with Helper Modules vs. Top-Level Adapters section
+
+## [0.22.3] - 2026-04-25
+
+### Miscellaneous
+
+- Bump version to 0.22.3
+
+## [0.22.2] - 2026-04-25
+
 ### Bug Fixes
 
 - *(open-brain-va9)* Pass run_id through ingest(); extract entry_id from TranscriptRef
@@ -11,6 +23,9 @@ All notable changes to this project will be documented in this file.
 
 - *(open-brain-va9)* Register MacWhisperConnector in ADAPTERS — add name attr, Protocol methods, test
 - *(open-brain-va9)* Register MacWhisperConnector in ADAPTERS per ADR-0001
+- *(open-brain-va9)* Update changelog for MacWhisperConnector ADAPTERS registration
+- *(open-brain-va9)* Register MacWhisperConnector in ADAPTERS per ADR-0001
+- Bump version to 0.22.2
 
 ## [0.22.1] - 2026-04-25
 
