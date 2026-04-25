@@ -14,6 +14,7 @@ Skip conditions:
 """
 
 import os
+import uuid
 from pathlib import Path
 
 import pytest
@@ -56,16 +57,17 @@ async def test_transcript_ingest_e2e():
     dl = PostgresDataLayer(database_url=database_url)
     ingestor = TranscriptIngestor(data_layer=dl)
 
-    # Use a unique source_ref so this test does not collide with manual ingests
-    source_ref = "e2e-test-3person-meeting-poc"
+    # Use a unique source_ref per run to avoid idempotency collisions with prior runs
+    source_ref = f"poc-e2e-test-{uuid.uuid4()}"
 
-    result = await ingestor.ingest(
-        text=transcript_text,
-        source_ref=source_ref,
-        medium_hint="macwhisper",
-    )
-
+    result = None
     try:
+        result = await ingestor.ingest(
+            text=transcript_text,
+            source_ref=source_ref,
+            medium_hint="macwhisper",
+        )
+
         # --- Assertions ---
 
         # Meeting memory must be created
@@ -105,8 +107,9 @@ async def test_transcript_ingest_e2e():
 
     finally:
         # --- Rollback: clean up all memories created by this run ---
-        rollback = await dl.delete_by_run_id(result.run_id)
-        # Basic sanity: at least the meeting memory was deleted
-        assert rollback.memories > 0, (
-            f"delete_by_run_id returned 0 deleted memories for run_id={result.run_id}"
-        )
+        if result is not None:
+            rollback = await dl.delete_by_run_id(result.run_id)
+            # Basic sanity: at least the meeting memory was deleted
+            assert rollback.memories > 0, (
+                f"delete_by_run_id returned 0 deleted memories for run_id={result.run_id}"
+            )
