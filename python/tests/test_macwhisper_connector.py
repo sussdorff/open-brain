@@ -238,6 +238,40 @@ class TestIngestEntryIdempotency:
         assert calls[1].args[1] == expected_source_ref
 
 
+# ─── AC (ingest protocol): run_id forwarded, TranscriptRef entry_id extracted ─
+
+
+class TestIngestProtocol:
+    async def test_ingest_forwards_run_id_and_extracts_entry_id(self, fs):
+        """ingest(ref, run_id) extracts entry_id from TranscriptRef and passes run_id to ingestor."""
+        fs.create_dir(str(APP_SUPPORT_PATH))
+        entry_path = APP_SUPPORT_PATH / f"{SAMPLE_ENTRY['id']}.json"
+        fs.create_file(str(entry_path), contents=json.dumps(SAMPLE_ENTRY))
+
+        supplied_run_id = "test-run-id-1234"
+        mock_result = MagicMock()
+        mock_result.run_id = supplied_run_id
+        mock_ingestor = MagicMock()
+        mock_ingestor.ingest = AsyncMock(return_value=mock_result)
+
+        connector = _make_connector(ingestor=mock_ingestor)
+        ref = TranscriptRef(
+            entry_id=SAMPLE_ENTRY["id"],
+            created_at=SAMPLE_ENTRY["created_at"],
+            text_preview=SAMPLE_ENTRY["text"][:200],
+        )
+
+        result = await connector.ingest(ref, supplied_run_id)
+
+        mock_ingestor.ingest.assert_called_once_with(
+            SAMPLE_ENTRY["text"],
+            f"macwhisper:{SAMPLE_ENTRY['id']}",
+            medium_hint=None,
+            run_id=supplied_run_id,
+        )
+        assert result.run_id == supplied_run_id
+
+
 # ─── AC (registry): MacWhisperConnector registered in ADAPTERS ───────────────
 
 

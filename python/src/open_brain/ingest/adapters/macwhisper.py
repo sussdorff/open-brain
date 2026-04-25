@@ -324,16 +324,30 @@ class MacWhisperConnector:
     async def ingest(self, ref: Any, run_id: str) -> IngestResult:
         """ADR-0001 Protocol method: ingest a single item identified by ref.
 
-        Delegates to ingest_entry, treating ref as an entry_id string.
+        Extracts the entry_id from a TranscriptRef or coerces ref to str, then
+        reads the entry and delegates directly to TranscriptIngestor so that the
+        orchestrator-supplied run_id is forwarded.
 
         Args:
-            ref: The entry ID (str or coercible to str) to ingest.
+            ref: A TranscriptRef (from list_recent) or an entry_id string.
             run_id: UUID string created by the orchestrator for this ingest run.
 
         Returns:
-            IngestResult from TranscriptIngestor.
+            IngestResult from TranscriptIngestor with the supplied run_id embedded.
+
+        Raises:
+            RuntimeError: If this is a sentinel instance (data_layer not provided).
         """
-        return await self.ingest_entry(str(ref))
+        if self._ingestor is None:
+            raise RuntimeError(
+                "Sentinel instance cannot ingest — provide data_layer"
+            )
+        entry_id = ref.entry_id if isinstance(ref, TranscriptRef) else str(ref)
+        text, meta = self.read_entry(entry_id)
+        source_ref = f"macwhisper:{entry_id}"
+        return await self._ingestor.ingest(
+            text, source_ref, medium_hint=meta.get("medium"), run_id=run_id
+        )
 
 
 # ─── Module-level registration (ADR-0001) ────────────────────────────────────
