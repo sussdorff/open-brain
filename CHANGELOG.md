@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- *(open-brain-cr3.4)* **Email ingestion from IMAP** — person-scoped backfill via IMAPEmailIngestor, source_ref tracking, Haiku-extracted summaries, idempotent dedup
 - *(open-brain-cr3.16)* **Ingest observability metrics** — track ingests, LLM calls, dedup decisions, relationships, and memory writes with `people_ingest_stats()` MCP tool
 - *(open-brain-cr3.11)* Green — MacWhisperConnector with TDD (all ACs pass)
 - *(open-brain-cr3.8)* Expose ingest_transcript MCP tool + PoC e2e test + findings doc
