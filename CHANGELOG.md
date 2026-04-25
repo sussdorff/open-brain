@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- *(open-brain-353)* Wire **IMAPEmailIngestor** into MCP tool (`ingest_email_inbox`) and CLI (`ob ingest email --config`)
 - *(open-brain-cr3.4)* Green — IMAPEmailIngestor with CommandRunner DI, idempotency, Haiku extraction
 
 ### Testing
