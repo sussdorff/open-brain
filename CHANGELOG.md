@@ -3,9 +3,20 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Bug Fixes
+
+- *(open-brain-5ye)* Address review findings iteration 1
+- *(open-brain-5ye)* Address codex adversarial findings
+
 ### Documentation
 
 - *(open-brain-zdm)* Extend ADR-0001 with Helper Modules vs. Top-Level Adapters section
+- *(open-brain-zdm)* Update CHANGELOG for ADR-0001 helper-vs-adapter documentation
+- *(open-brain-5ye)* Update CHANGELOG for IMAPEmailIngestor Protocol compliance
+
+### Features
+
+- *(open-brain-5ye)* Green — IMAPEmailIngestor ADR-0001 protocol compliance
 
 ## [0.22.3] - 2026-04-25
 
