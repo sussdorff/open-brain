@@ -113,7 +113,6 @@ def test_get_credentials_returns_empty_dict_when_not_implemented():
 
 
 def test_protocol_has_name_attribute():
-    assert hasattr(IngestAdapter, "__protocol_attrs__") or True  # Protocol marker
     adapter = _MinimalAdapter()
     assert isinstance(adapter.name, str)
 

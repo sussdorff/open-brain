@@ -2,13 +2,14 @@
 
 Note on ADAPTERS registry
 --------------------------
-``ADAPTERS`` is populated lazily at *registration time*, not at import time.
-Each adapter module must call ``register(MyAdapter())`` at its own import time
-to appear in the registry. The imports of ``MacWhisperConnector`` and
-``TranscriptIngestor`` below do NOT auto-register those adapters — registration
-is intentionally deferred to each adapter's own module per ADR-0001. Until an
-adapter module calls ``register()``, ``ADAPTERS`` will be empty (or contain only
-adapters registered by previously imported modules).
+The submodule imports below ARE the auto-registration mechanism per ADR-0001.
+Each adapter module is expected to call ``register(MyAdapter())`` at import time;
+importing this package triggers those calls and populates ``ADAPTERS``.
+
+``MacWhisperConnector`` and ``TranscriptIngestor`` have not yet been retrofitted
+to call ``register()`` at module bottom, so ``ADAPTERS`` is currently empty after
+importing this package. Once each adapter module adds its ``register()`` call,
+it will appear in ``ADAPTERS`` automatically.
 """
 
 from open_brain.ingest.adapters.base import ADAPTERS, IngestAdapter, get_credentials, register

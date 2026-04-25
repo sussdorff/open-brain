@@ -84,7 +84,7 @@ def register(adapter: "IngestAdapter") -> None:
     ADAPTERS[adapter.name] = adapter
 
 
-def get_credentials(adapter: "IngestAdapter") -> dict:
+def get_credentials(adapter: "IngestAdapter") -> dict[str, str]:
     """Return the credential requirements for *adapter*.
 
     This helper calls ``adapter.credentials()`` when the method exists and
