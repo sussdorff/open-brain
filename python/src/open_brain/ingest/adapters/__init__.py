@@ -11,7 +11,8 @@ module import time for adapter discovery. The sentinel raises ``RuntimeError`` i
 ``ingest_entry`` or ``ingest`` is called without a real ``DataLayer``; callers that
 need to ingest must construct their own instance with ``data_layer`` provided.
 ``TranscriptIngestor`` is a low-level helper, not a top-level adapter, and is not
-registered.
+registered. See ADR-0001 § "Helper Modules vs. Top-Level Adapters" for the full
+distinction and rules.
 """
 
 from open_brain.ingest.adapters.base import ADAPTERS, IngestAdapter, get_credentials, register
