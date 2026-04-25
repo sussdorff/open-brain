@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- *(open-brain-cr3.16)* **Ingest observability metrics** — track ingests, LLM calls, dedup decisions, relationships, and memory writes with `people_ingest_stats()` MCP tool
 - *(open-brain-cr3.11)* Green — MacWhisperConnector with TDD (all ACs pass)
 
 ### Testing
