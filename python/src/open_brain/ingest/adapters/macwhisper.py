@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from open_brain.data_layer.interface import DataLayer
+from open_brain.ingest.adapters.base import register
 from open_brain.ingest.adapters.transcript import TranscriptIngestor
 from open_brain.ingest.models import IngestResult
 
@@ -123,7 +124,7 @@ class MacWhisperConnector:
 
     def __init__(
         self,
-        data_layer: DataLayer,
+        data_layer: DataLayer | None = None,
         command_runner: CommandRunner | None = None,
         ingestor: TranscriptIngestor | None = None,
         *,
@@ -136,7 +137,9 @@ class MacWhisperConnector:
             )
         self._dl = data_layer
         self._runner = command_runner or DefaultCommandRunner()
-        self._ingestor = ingestor if ingestor is not None else TranscriptIngestor(data_layer=data_layer)
+        self._ingestor = ingestor if ingestor is not None else (
+            TranscriptIngestor(data_layer=data_layer) if data_layer is not None else None
+        )
         self._cached_path: Path | None = None
 
     def discover_history_path(self) -> Path:
@@ -305,9 +308,15 @@ class MacWhisperConnector:
             IngestResult from TranscriptIngestor.
 
         Raises:
+            RuntimeError: If data_layer was not provided at construction time.
             FileNotFoundError: If the entry does not exist.
             MacWhisperNotFoundError: If the history directory cannot be found.
         """
+        if self._ingestor is None:
+            raise RuntimeError(
+                "data_layer is required for ingest; "
+                "use MacWhisperConnector(data_layer=dl)"
+            )
         text, meta = self.read_entry(entry_id)
         source_ref = f"macwhisper:{entry_id}"
         return await self._ingestor.ingest(text, source_ref, medium_hint=meta.get("medium"))
@@ -325,3 +334,11 @@ class MacWhisperConnector:
             IngestResult from TranscriptIngestor.
         """
         return await self.ingest_entry(str(ref))
+
+
+# ─── Module-level registration (ADR-0001) ────────────────────────────────────
+# Register a sentinel instance for adapter discovery. The sentinel uses
+# data_layer=None; real ingest calls require a properly constructed instance
+# with data_layer provided. skip_platform_check=True allows registration on
+# non-macOS platforms (e.g. CI, Docker).
+register(MacWhisperConnector(skip_platform_check=True))

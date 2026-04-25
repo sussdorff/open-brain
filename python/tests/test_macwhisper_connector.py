@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from open_brain.data_layer.interface import DataLayer
-from open_brain.ingest.adapters.base import ADAPTERS, register
+from open_brain.ingest.adapters.base import ADAPTERS
 from open_brain.ingest.adapters.macwhisper import (
     MacWhisperConnector,
     MacWhisperNotFoundError,
@@ -243,20 +243,11 @@ class TestIngestEntryIdempotency:
 
 class TestMacWhisperRegisteredInAdapters:
     def test_macwhisper_registered_in_adapters(self):
-        """AC: MacWhisperConnector registers correctly in ADAPTERS under 'macwhisper'."""
-        # Snapshot registry state for cleanup
-        snapshot = dict(ADAPTERS)
-        try:
-            mock_dl = MagicMock(spec=DataLayer)
-            connector = MacWhisperConnector(
-                data_layer=mock_dl,
-                skip_platform_check=True,
-            )
-            register(connector)
-            assert "macwhisper" in ADAPTERS, (
-                "ADAPTERS must contain 'macwhisper' after register(connector)"
-            )
-            assert ADAPTERS["macwhisper"] is connector
-        finally:
-            ADAPTERS.clear()
-            ADAPTERS.update(snapshot)
+        """AC: MacWhisperConnector is registered in ADAPTERS under 'macwhisper' at import time."""
+        # The module-level register() call in macwhisper.py ensures the adapter
+        # is discoverable as soon as the module is imported — no manual register()
+        # call is needed.
+        assert "macwhisper" in ADAPTERS, (
+            "ADAPTERS must contain 'macwhisper' after importing macwhisper module"
+        )
+        assert ADAPTERS["macwhisper"].name == "macwhisper"
