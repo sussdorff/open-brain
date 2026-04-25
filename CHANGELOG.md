@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 
 - *(open-brain-353)* Address review findings iteration 1
 - *(open-brain-353)* Address codex adversarial findings
+- *(open-brain-p6e)* Skip integration tests in CI environments
 
 ### Documentation
 
@@ -15,6 +16,10 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - *(open-brain-353)* Green — wire IMAPEmailIngestor into CLI + MCP tool
+
+### Testing
+
+- *(open-brain-p6e)* Add real-device integration tests for MacWhisperConnector
 
 ## [2026.04.23] - 2026-04-25
 
