@@ -12,8 +12,10 @@ All counters are module-level dicts protected by a single threading.Lock.
 Call reset_all() between tests for isolation.
 """
 
+import dataclasses
 import threading
 from collections import defaultdict
+from dataclasses import dataclass, field
 
 _lock = threading.Lock()
 
@@ -72,18 +74,30 @@ def reset_all() -> None:
         _ingest_duration_seconds.clear()
 
 
-def get_stats() -> dict:
-    """Return a snapshot of all six metric families as a plain dict.
+@dataclass(slots=True, kw_only=True)
+class IngestStats:
+    """Structured snapshot of all six ingest metric families."""
+
+    ingests_total: dict[str, int] = field(default_factory=dict)
+    llm_calls_total: dict[str, int] = field(default_factory=dict)
+    dedup_decisions_total: dict[str, int] = field(default_factory=dict)
+    relationships_written_total: dict[str, int] = field(default_factory=dict)
+    memories_written_total: dict[str, int] = field(default_factory=dict)
+    ingest_duration_seconds: dict[str, list[float]] = field(default_factory=dict)
+
+
+def get_stats() -> IngestStats:
+    """Return a snapshot of all six metric families as an IngestStats dataclass.
 
     Returns a consistent JSON-serialisable structure regardless of which
     counters are zero — missing keys simply map to empty dicts/lists.
     """
     with _lock:
-        return {
-            "ingests_total": dict(_ingests_total),
-            "llm_calls_total": dict(_llm_calls_total),
-            "dedup_decisions_total": dict(_dedup_decisions_total),
-            "relationships_written_total": dict(_relationships_written_total),
-            "memories_written_total": dict(_memories_written_total),
-            "ingest_duration_seconds": {k: list(v) for k, v in _ingest_duration_seconds.items()},
-        }
+        return IngestStats(
+            ingests_total=dict(_ingests_total),
+            llm_calls_total=dict(_llm_calls_total),
+            dedup_decisions_total=dict(_dedup_decisions_total),
+            relationships_written_total=dict(_relationships_written_total),
+            memories_written_total=dict(_memories_written_total),
+            ingest_duration_seconds={k: list(v) for k, v in _ingest_duration_seconds.items()},
+        )

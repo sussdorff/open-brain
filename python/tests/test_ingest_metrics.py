@@ -9,8 +9,6 @@ Acceptance criteria:
 import json
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
 from open_brain.data_layer.interface import SaveMemoryResult, SearchResult
 
 
@@ -73,7 +71,7 @@ class TestCounterIncrements:
             )
 
         stats = metrics.get_stats()
-        assert stats["ingests_total"]["transcript"] == 1
+        assert stats.ingests_total["transcript"] == 1
 
     async def test_llm_calls_total_increments_on_extract(self):
         """llm_calls_total[purpose=extract] should be 1 after one ingest."""
@@ -97,7 +95,7 @@ class TestCounterIncrements:
             )
 
         stats = metrics.get_stats()
-        assert stats["llm_calls_total"]["extract"] == 1
+        assert stats.llm_calls_total["extract"] == 1
 
     async def test_memories_written_meeting_increments(self):
         """memories_written_total[type=meeting] increments once per ingest."""
@@ -121,7 +119,7 @@ class TestCounterIncrements:
             )
 
         stats = metrics.get_stats()
-        assert stats["memories_written_total"]["meeting"] == 1
+        assert stats.memories_written_total["meeting"] == 1
 
     async def test_memories_written_person_increments_per_person(self):
         """memories_written_total[type=person] increments once per new person."""
@@ -145,7 +143,7 @@ class TestCounterIncrements:
             )
 
         stats = metrics.get_stats()
-        assert stats["memories_written_total"]["person"] == 2
+        assert stats.memories_written_total["person"] == 2
 
     async def test_dedup_decisions_auto_merge_increments(self):
         """dedup_decisions_total[action=auto_merge] increments for exact name match."""
@@ -203,7 +201,7 @@ class TestCounterIncrements:
             )
 
         stats = metrics.get_stats()
-        assert stats["dedup_decisions_total"]["auto_merge"] == 1
+        assert stats.dedup_decisions_total["auto_merge"] == 1
 
     async def test_dedup_decisions_new_increments(self):
         """dedup_decisions_total[action=new] increments when no existing person found."""
@@ -227,7 +225,7 @@ class TestCounterIncrements:
             )
 
         stats = metrics.get_stats()
-        assert stats["dedup_decisions_total"]["new"] == 1
+        assert stats.dedup_decisions_total["new"] == 1
 
     async def test_relationships_written_increments(self):
         """relationships_written_total[link_type] increments per relationship."""
@@ -252,8 +250,8 @@ class TestCounterIncrements:
 
         stats = metrics.get_stats()
         # 1 attended_by, 1 mentioned_in
-        assert stats["relationships_written_total"]["attended_by"] == 1
-        assert stats["relationships_written_total"]["mentioned_in"] == 1
+        assert stats.relationships_written_total["attended_by"] == 1
+        assert stats.relationships_written_total["mentioned_in"] == 1
 
     async def test_ingest_duration_recorded(self):
         """ingest_duration_seconds[adapter=transcript] contains one entry after one ingest."""
@@ -277,10 +275,66 @@ class TestCounterIncrements:
             )
 
         stats = metrics.get_stats()
-        durations = stats["ingest_duration_seconds"]["transcript"]
+        durations = stats.ingest_duration_seconds["transcript"]
         assert isinstance(durations, list)
         assert len(durations) == 1
         assert durations[0] >= 0.0
+
+    async def test_dedup_decisions_ambiguous_increments(self):
+        """dedup_decisions_total[action=ambiguous] increments when match_person returns ambiguous."""
+        from open_brain.ingest import metrics
+        from open_brain.ingest.adapters.transcript import TranscriptIngestor
+        from open_brain.people.models import MatchDecision
+
+        LLM_RESPONSE = json.dumps({
+            "attendees": ["Ambiguous Person"],
+            "mentioned_people": [],
+            "topics": [],
+            "follow_up_tasks": [],
+        })
+        mock_dl = _make_mock_dl()
+
+        ambiguous_decision = MatchDecision(action="ambiguous", target=None)
+
+        with patch("open_brain.ingest.extract.llm_complete") as mock_llm, \
+             patch("open_brain.ingest.adapters.transcript.match_person", return_value=ambiguous_decision):
+            mock_llm.return_value = LLM_RESPONSE
+            ingestor = TranscriptIngestor(data_layer=mock_dl)
+            await ingestor.ingest(
+                text="Ambiguous person attended.",
+                source_ref="metrics-test-ambiguous",
+            )
+
+        stats = metrics.get_stats()
+        assert stats.dedup_decisions_total["ambiguous"] == 1
+
+    async def test_llm_calls_dedup_confirm_increments_on_llm_confirm(self):
+        """llm_calls_total[purpose=dedup_confirm] increments when match_person returns llm_confirm."""
+        from open_brain.ingest import metrics
+        from open_brain.ingest.adapters.transcript import TranscriptIngestor
+        from open_brain.people.models import MatchDecision
+
+        LLM_RESPONSE = json.dumps({
+            "attendees": ["Uncertain Person"],
+            "mentioned_people": [],
+            "topics": [],
+            "follow_up_tasks": [],
+        })
+        mock_dl = _make_mock_dl()
+
+        llm_confirm_decision = MatchDecision(action="llm_confirm", target=None)
+
+        with patch("open_brain.ingest.extract.llm_complete") as mock_llm, \
+             patch("open_brain.ingest.adapters.transcript.match_person", return_value=llm_confirm_decision):
+            mock_llm.return_value = LLM_RESPONSE
+            ingestor = TranscriptIngestor(data_layer=mock_dl)
+            await ingestor.ingest(
+                text="Uncertain person was at the meeting.",
+                source_ref="metrics-test-llm-confirm",
+            )
+
+        stats = metrics.get_stats()
+        assert stats.llm_calls_total["dedup_confirm"] == 1
 
     async def test_fixture_ingest_all_counters(self):
         """Fixture ingest: 1 transcript, 2 attendees, 2 relationships, 3 memories written."""
@@ -306,18 +360,19 @@ class TestCounterIncrements:
         stats = metrics.get_stats()
 
         # 1 ingest (label=transcript)
-        assert stats["ingests_total"]["transcript"] == 1
+        assert stats.ingests_total["transcript"] == 1
         # 1 LLM call (label=extract)
-        assert stats["llm_calls_total"]["extract"] == 1
+        assert stats.llm_calls_total["extract"] == 1
         # 2 attendees → 2 dedup decisions (both "new" since empty search)
-        assert stats["dedup_decisions_total"]["new"] == 2
+        assert stats.dedup_decisions_total["new"] == 2
         # 2 relationships (attended_by)
-        assert stats["relationships_written_total"]["attended_by"] == 2
-        # 3 memories: 1 meeting + 2 persons
-        assert stats["memories_written_total"]["meeting"] == 1
-        assert stats["memories_written_total"]["person"] == 2
+        assert stats.relationships_written_total["attended_by"] == 2
+        # 5 memories: 1 meeting + 2 persons + 2 interactions
+        assert stats.memories_written_total["meeting"] == 1
+        assert stats.memories_written_total["person"] == 2
+        assert stats.memories_written_total["interaction"] == 2
         # 1 duration entry
-        assert len(stats["ingest_duration_seconds"]["transcript"]) == 1
+        assert len(stats.ingest_duration_seconds["transcript"]) == 1
 
 
 # ─── Criterion 2: people_ingest_stats MCP tool ───────────────────────────────
@@ -331,17 +386,19 @@ class TestPeopleIngestStatsTool:
         metrics.reset_all()
 
     async def test_get_stats_returns_all_six_families(self):
-        """get_stats() returns dict with all 6 required metric families."""
+        """get_stats() returns IngestStats with all 6 required metric families."""
         from open_brain.ingest import metrics
+        from open_brain.ingest.metrics import IngestStats
 
         result = metrics.get_stats()
 
-        assert "ingests_total" in result
-        assert "llm_calls_total" in result
-        assert "dedup_decisions_total" in result
-        assert "relationships_written_total" in result
-        assert "memories_written_total" in result
-        assert "ingest_duration_seconds" in result
+        assert isinstance(result, IngestStats)
+        assert hasattr(result, "ingests_total")
+        assert hasattr(result, "llm_calls_total")
+        assert hasattr(result, "dedup_decisions_total")
+        assert hasattr(result, "relationships_written_total")
+        assert hasattr(result, "memories_written_total")
+        assert hasattr(result, "ingest_duration_seconds")
 
     async def test_get_stats_returns_empty_dicts_when_no_ingests(self):
         """get_stats() returns empty dicts/lists for all families when counters are 0."""
@@ -349,12 +406,12 @@ class TestPeopleIngestStatsTool:
 
         result = metrics.get_stats()
 
-        assert result["ingests_total"] == {}
-        assert result["llm_calls_total"] == {}
-        assert result["dedup_decisions_total"] == {}
-        assert result["relationships_written_total"] == {}
-        assert result["memories_written_total"] == {}
-        assert result["ingest_duration_seconds"] == {}
+        assert result.ingests_total == {}
+        assert result.llm_calls_total == {}
+        assert result.dedup_decisions_total == {}
+        assert result.relationships_written_total == {}
+        assert result.memories_written_total == {}
+        assert result.ingest_duration_seconds == {}
 
     async def test_people_ingest_stats_mcp_tool_returns_json(self):
         """people_ingest_stats() MCP tool returns valid JSON string with all 6 families."""
@@ -416,8 +473,8 @@ class TestPeopleIngestStatsTool:
         metrics.record_ingest("email")
 
         stats = metrics.get_stats()
-        assert stats["ingests_total"]["transcript"] == 2
-        assert stats["ingests_total"]["email"] == 1
+        assert stats.ingests_total["transcript"] == 2
+        assert stats.ingests_total["email"] == 1
 
 
 # ─── Criterion 3: Reset functionality ────────────────────────────────────────
@@ -436,10 +493,10 @@ class TestResetFunctionality:
         from open_brain.ingest import metrics
 
         metrics.record_ingest("transcript")
-        assert metrics.get_stats()["ingests_total"]["transcript"] == 1
+        assert metrics.get_stats().ingests_total["transcript"] == 1
 
         metrics.reset_all()
-        assert metrics.get_stats()["ingests_total"] == {}
+        assert metrics.get_stats().ingests_total == {}
 
     async def test_reset_clears_all_families(self):
         """reset_all() clears all six metric families."""
@@ -455,20 +512,20 @@ class TestResetFunctionality:
 
         # Verify populated
         stats_before = metrics.get_stats()
-        assert stats_before["ingests_total"]["transcript"] == 1
-        assert stats_before["llm_calls_total"]["extract"] == 1
+        assert stats_before.ingests_total["transcript"] == 1
+        assert stats_before.llm_calls_total["extract"] == 1
 
         # Reset
         metrics.reset_all()
 
         # Verify all empty
         stats_after = metrics.get_stats()
-        assert stats_after["ingests_total"] == {}
-        assert stats_after["llm_calls_total"] == {}
-        assert stats_after["dedup_decisions_total"] == {}
-        assert stats_after["relationships_written_total"] == {}
-        assert stats_after["memories_written_total"] == {}
-        assert stats_after["ingest_duration_seconds"] == {}
+        assert stats_after.ingests_total == {}
+        assert stats_after.llm_calls_total == {}
+        assert stats_after.dedup_decisions_total == {}
+        assert stats_after.relationships_written_total == {}
+        assert stats_after.memories_written_total == {}
+        assert stats_after.ingest_duration_seconds == {}
 
     async def test_reset_allows_fresh_accumulation(self):
         """After reset_all(), counters accumulate fresh values."""
@@ -481,7 +538,7 @@ class TestResetFunctionality:
         metrics.record_ingest("transcript")
 
         stats = metrics.get_stats()
-        assert stats["ingests_total"]["transcript"] == 2
+        assert stats.ingests_total["transcript"] == 2
 
     async def test_reset_provides_test_isolation(self):
         """Each test method gets a clean counter slate via reset_all()."""
@@ -494,4 +551,5 @@ class TestResetFunctionality:
 
         # After reset, all families are empty
         stats = metrics.get_stats()
-        assert not any(stats[key] for key in stats)
+        import dataclasses
+        assert not any(v for v in dataclasses.asdict(stats).values())

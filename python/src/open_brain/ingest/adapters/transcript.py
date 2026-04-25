@@ -102,8 +102,7 @@ class TranscriptIngestor:
         if not text or not text.strip():
             raise ValueError("text must not be empty or whitespace-only")
 
-        _ingest_start = time.monotonic()
-        metrics.record_ingest("transcript")
+        ingest_start = time.monotonic()
 
         run_id = str(uuid.uuid4())
         idempotency_key = _compute_idempotency_key(source_ref, text)
@@ -112,6 +111,8 @@ class TranscriptIngestor:
         prior = await self._find_prior_run(idempotency_key, source_ref)
         if prior is not None:
             return prior
+
+        metrics.record_ingest("transcript")
 
         # --- LLM extraction ---
         metrics.record_llm_call("extract")
@@ -177,6 +178,7 @@ class TranscriptIngestor:
                     },
                 )
             )
+            metrics.record_memory_written("interaction")
             interaction_memory_ids.append(interaction_result.id)
 
         # --- Process mentioned people (absent from meeting) ---
@@ -206,6 +208,7 @@ class TranscriptIngestor:
                     },
                 )
             )
+            metrics.record_memory_written("mention")
             mention_memory_ids.append(mention_result.id)
 
         # --- Create relationships ---
@@ -260,7 +263,7 @@ class TranscriptIngestor:
             )
         )
 
-        metrics.record_ingest_duration("transcript", time.monotonic() - _ingest_start)
+        metrics.record_ingest_duration("transcript", time.monotonic() - ingest_start)
         return result
 
     async def _find_prior_run(
@@ -346,6 +349,9 @@ class TranscriptIngestor:
         )
 
         metrics.record_dedup_decision(decision.action)
+
+        if decision.action == "llm_confirm":
+            metrics.record_llm_call("dedup_confirm")
 
         if decision.action == "auto_merge" and decision.target is not None:
             return decision.target.memory_id

@@ -48,6 +48,7 @@ from open_brain.data_layer.interface import (
     validate_domain_metadata,
 )
 from open_brain.capture_router import classify_and_extract
+from open_brain.ingest import metrics as ingest_metrics
 from open_brain.data_layer.llm import LlmMessage, llm_complete
 from open_brain.utils import parse_llm_json
 from open_brain.data_layer.postgres import PostgresDataLayer, close_pool, get_pool
@@ -555,8 +556,7 @@ async def stats() -> str:
 @mcp.tool(description="Get ingest observability stats: counters for ingests, LLM calls, dedup decisions, relationships, memories written, and ingest durations.")
 async def people_ingest_stats() -> str:
     """Return in-process ingest metrics for all six metric families."""
-    from open_brain.ingest import metrics
-    return json.dumps(metrics.get_stats(), indent=2)
+    return json.dumps(asdict(ingest_metrics.get_stats()), indent=2)
 
 
 # ── People-aware query tools ──────────────────────────────────────────────────
