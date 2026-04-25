@@ -5,17 +5,37 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(open-brain-353)* Address review findings iteration 1
+- *(open-brain-353)* Address codex adversarial findings
+
+### Documentation
+
+- *(open-brain-353)* Add changelog entry for email ingest CLI/MCP tool
+
+### Features
+
+- *(open-brain-353)* Green — wire IMAPEmailIngestor into CLI + MCP tool
+
+## [2026.04.23] - 2026-04-25
+
+### Bug Fixes
+
 - *(open-brain-cr3.4)* Address review findings iteration 1
 - *(open-brain-cr3.4)* Address codex adversarial findings
 
 ### Documentation
 
 - *(open-brain-cr3.8)* Update changelog for ingest_transcript MCP tool release
+- *(open-brain-cr3.4)* Pre-stage changelog entry for email IMAP ingestor
+- *(open-brain-cr3.4)* Update changelog for email IMAP ingestor release
 
 ### Features
 
-- *(open-brain-353)* Wire **IMAPEmailIngestor** into MCP tool (`ingest_email_inbox`) and CLI (`ob ingest email --config`)
 - *(open-brain-cr3.4)* Green — IMAPEmailIngestor with CommandRunner DI, idempotency, Haiku extraction
+
+### Miscellaneous
+
+- Bump version to 0.21.0
 
 ### Testing
 
@@ -41,11 +61,9 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
-- *(open-brain-cr3.4)* **Email ingestion from IMAP** — person-scoped backfill via IMAPEmailIngestor, source_ref tracking, Haiku-extracted summaries, idempotent dedup
-- *(open-brain-cr3.16)* **Ingest observability metrics** — track ingests, LLM calls, dedup decisions, relationships, and memory writes with `people_ingest_stats()` MCP tool
-- *(open-brain-cr3.11)* Green — MacWhisperConnector with TDD (all ACs pass)
 - *(open-brain-cr3.8)* Expose ingest_transcript MCP tool + PoC e2e test + findings doc
 - *(open-brain-cr3.16)* Green — ingest observability metrics
+- *(open-brain-cr3.11)* Green — MacWhisperConnector with TDD (all ACs pass)
 
 ### Miscellaneous
 
