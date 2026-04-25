@@ -15,6 +15,7 @@ Flow per ingest call:
 import dataclasses
 import hashlib
 import logging
+import time
 import uuid
 
 from open_brain.data_layer.interface import (
@@ -23,6 +24,7 @@ from open_brain.data_layer.interface import (
     SearchParams,
     UpdateMemoryParams,
 )
+from open_brain.ingest import metrics
 from open_brain.ingest.extract import extract_from_transcript
 from open_brain.ingest.models import IngestResult
 from open_brain.people.dedup import match_person
@@ -100,6 +102,9 @@ class TranscriptIngestor:
         if not text or not text.strip():
             raise ValueError("text must not be empty or whitespace-only")
 
+        _ingest_start = time.monotonic()
+        metrics.record_ingest("transcript")
+
         run_id = str(uuid.uuid4())
         idempotency_key = _compute_idempotency_key(source_ref, text)
 
@@ -109,6 +114,7 @@ class TranscriptIngestor:
             return prior
 
         # --- LLM extraction ---
+        metrics.record_llm_call("extract")
         extracted = await extract_from_transcript(text)
         attendees: list[str] = extracted.get("attendees") or []
         mentioned: list[str] = extracted.get("mentioned_people") or []
@@ -140,6 +146,7 @@ class TranscriptIngestor:
                 },
             )
         )
+        metrics.record_memory_written("meeting")
         meeting_id = meeting_result.id
 
         # --- Process attendees (present people) ---
@@ -213,6 +220,7 @@ class TranscriptIngestor:
                 metadata={"run_id": run_id},
             )
             relationship_ids.append(rel_id)
+            metrics.record_relationship_written("attended_by")
 
         # person → meeting: mentioned_in (for each mentioned person, cached)
         for person_id in mentioned_person_ids:
@@ -223,6 +231,7 @@ class TranscriptIngestor:
                 metadata={"run_id": run_id},
             )
             relationship_ids.append(rel_id)
+            metrics.record_relationship_written("mentioned_in")
 
         # Surface mentioned people in person_memory_ids so mention-only
         # transcripts return the person IDs they created. Done AFTER the
@@ -251,6 +260,7 @@ class TranscriptIngestor:
             )
         )
 
+        metrics.record_ingest_duration("transcript", time.monotonic() - _ingest_start)
         return result
 
     async def _find_prior_run(
@@ -335,6 +345,8 @@ class TranscriptIngestor:
             existing=existing_records,
         )
 
+        metrics.record_dedup_decision(decision.action)
+
         if decision.action == "auto_merge" and decision.target is not None:
             return decision.target.memory_id
 
@@ -351,6 +363,7 @@ class TranscriptIngestor:
                 },
             )
         )
+        metrics.record_memory_written("person")
         # Refresh dedup snapshot so subsequent loop iterations can match this new person
         existing_records.append(
             PersonRecord(

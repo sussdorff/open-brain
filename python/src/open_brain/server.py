@@ -552,6 +552,13 @@ async def stats() -> str:
     return json.dumps(result, default=str)
 
 
+@mcp.tool(description="Get ingest observability stats: counters for ingests, LLM calls, dedup decisions, relationships, memories written, and ingest durations.")
+async def people_ingest_stats() -> str:
+    """Return in-process ingest metrics for all six metric families."""
+    from open_brain.ingest import metrics
+    return json.dumps(metrics.get_stats(), indent=2)
+
+
 # ── People-aware query tools ──────────────────────────────────────────────────
 
 
