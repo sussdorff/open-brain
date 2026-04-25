@@ -17,6 +17,10 @@ All notable changes to this project will be documented in this file.
 - *(open-brain-cr3.9)* Green — people_discussed_with, people_stale_contacts, people_mentions_window
 - *(open-brain-cr3.9)* Add skill and docs for people-aware queries
 
+### Documentation
+
+- *(open-brain-cr3.17)* Add people-aware-memory.md hub: ASCII diagram, feature/ADR cross-links, contributor guide
+
 ### Miscellaneous
 
 - *(open-brain-cr3.13)* Update changelog for ingest run IDs + delete-by-source rollback release
