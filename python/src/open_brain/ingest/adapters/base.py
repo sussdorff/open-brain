@@ -66,9 +66,9 @@ ADAPTERS: dict[str, "IngestAdapter"] = {}
 def register(adapter: "IngestAdapter") -> None:
     """Register *adapter* in the global ``ADAPTERS`` registry.
 
-    Each adapter module should call ``register(MyAdapter())`` at import time.
-    The package ``__init__`` imports every adapter submodule, which triggers
-    all registrations automatically.
+    Each adapter module must call ``register(MyAdapter())`` explicitly at
+    import time. Registrations are NOT automatic — adapters are responsible
+    for calling this function; the package ``__init__`` does not do it for them.
 
     Args:
         adapter: An object that satisfies the ``IngestAdapter`` Protocol.
