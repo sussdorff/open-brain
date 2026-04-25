@@ -60,12 +60,13 @@ async def test_transcript_ingest_e2e():
     # Use a unique source_ref per run to avoid idempotency collisions with prior runs
     source_ref = f"poc-e2e-test-{uuid.uuid4()}"
 
-    result = None
+    run_id = str(uuid.uuid4())
     try:
         result = await ingestor.ingest(
             text=transcript_text,
             source_ref=source_ref,
             medium_hint="macwhisper",
+            run_id=run_id,
         )
 
         # --- Assertions ---
@@ -107,9 +108,7 @@ async def test_transcript_ingest_e2e():
 
     finally:
         # --- Rollback: clean up all memories created by this run ---
-        if result is not None:
-            rollback = await dl.delete_by_run_id(result.run_id)
-            # Basic sanity: at least the meeting memory was deleted
-            assert rollback.memories > 0, (
-                f"delete_by_run_id returned 0 deleted memories for run_id={result.run_id}"
-            )
+        # Always delete using the pre-generated run_id — delete_by_run_id is a
+        # no-op if nothing was persisted for that run_id, so this is safe even
+        # when ingest() raised before persisting anything.
+        await dl.delete_by_run_id(run_id)
