@@ -5,23 +5,46 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(open-brain-cr3.11)* Address review findings iteration 1
+- *(open-brain-cr3.11)* Address codex adversarial findings
+
+### Features
+
+- *(open-brain-cr3.16)* **Ingest observability metrics** — track ingests, LLM calls, dedup decisions, relationships, and memory writes with `people_ingest_stats()` MCP tool
+- *(open-brain-cr3.11)* Green — MacWhisperConnector with TDD (all ACs pass)
+
+### Testing
+
+- *(open-brain-cr3.11)* Red — MacWhisperConnector tests (all ACs)
+
+## [0.18.0] - 2026-04-24
+
+### Miscellaneous
+
+- *(open-brain-cr3.9)* Update changelog for people-aware queries release
+- Bump version to 0.18.0
+
+## [0.17.0] - 2026-04-24
+
+### Bug Fixes
+
 - *(cr3.13)* Address review findings iteration 1
 - *(cr3.13)* Address codex adversarial findings
 - *(cr3.13)* Address verification advisory items (skip guard + metadata is not None)
-- *(open-brain-cr3.9)* Address review findings iteration 1
-- *(open-brain-cr3.9)* Address codex adversarial findings
 
 ### Features
 
 - *(open-brain-cr3.16)* **Ingest observability metrics** — track ingests, LLM calls, dedup decisions, relationships, and memory writes with `people_ingest_stats()` MCP tool
 - *(cr3.13)* Green — ingest run IDs + delete-by-source rollback
-- *(open-brain-cr3.9)* Green — people_discussed_with, people_stale_contacts, people_mentions_window
-- *(open-brain-cr3.9)* Add skill and docs for people-aware queries
+
+### Documentation
+
+- *(open-brain-cr3.17)* Add people-aware-memory.md hub: ASCII diagram, feature/ADR cross-links, contributor guide
 
 ### Miscellaneous
 
 - *(open-brain-cr3.13)* Update changelog for ingest run IDs + delete-by-source rollback release
-- *(open-brain-cr3.9)* Update changelog for people-aware queries release
+- Bump version to 0.17.0
 
 ## [0.16.0] - 2026-04-24
 
@@ -36,6 +59,8 @@ All notable changes to this project will be documented in this file.
 
 - *(open-brain-cr3.10)* Address review findings iteration 1
 - *(open-brain-cr3.10)* Address codex adversarial findings
+- *(open-brain-cr3.9)* Address review findings iteration 1
+- *(open-brain-cr3.9)* Address codex adversarial findings
 - *(open-brain-cr3.3)* Address review findings iteration 1
 - *(open-brain-cr3.3)* Address codex adversarial findings
 - *(cr3.12)* Address review findings iteration 1
@@ -44,8 +69,9 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
-- *(cr3.9)* Green — people-aware query MCP tools (discussed_with, stale_contacts, mentions_window)
 - *(open-brain-cr3.10)* Green — typed-relationship API + backcompat migration
+- *(open-brain-cr3.9)* Green — people_discussed_with, people_stale_contacts, people_mentions_window
+- *(open-brain-cr3.9)* Add skill and docs for people-aware queries
 - *(open-brain-cr3.3)* Green — TranscriptIngestor with full TDD suite
 - *(cr3.12)* Green — person memory migration to people-v1 schema
 
@@ -53,6 +79,7 @@ All notable changes to this project will be documented in this file.
 
 - Resolve CHANGELOG.md merge conflict — merge cr3.2 and main entries
 - *(open-brain-cr3.10)* Update changelog for typed-relationship API release
+- *(open-brain-cr3.9)* Update changelog for people-aware queries release
 - *(open-brain-cr3.12)* Update changelog for person memory migration release
 - Bump version to 0.15.0
 
