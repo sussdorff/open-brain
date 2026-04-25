@@ -950,11 +950,14 @@ async def ingest_email_inbox(config_ref: str, max_messages: int = 50) -> str:
 
     Returns JSON with keys: ingested (int), skipped (int), run_id (str | None).
     """
-    if max_messages == 0:
-        return json.dumps({"ingested": 0, "skipped": 0, "run_id": None})
-
     if not config_ref or not config_ref.strip():
         raise ValueError("config_ref must be a non-empty 1Password op:// reference")
+
+    if max_messages < 0:
+        raise ValueError("max_messages must be >= 0")
+
+    if max_messages == 0:
+        return json.dumps({"ingested": 0, "skipped": 0, "run_id": None})
 
     from open_brain.ingest.adapters.email_imap import IMAPEmailIngestor
     from open_brain.ingest.runs import ingest_run

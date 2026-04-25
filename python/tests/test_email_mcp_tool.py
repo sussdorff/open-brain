@@ -549,7 +549,7 @@ class TestCliExitOnSuccess:
     """AC2: CLI prints JSON and exits 0 on successful email ingest."""
 
     def test_cli_ingest_email_exits_0_on_success(self, capsys):
-        """CLI ingest email exits 0 and prints JSON result when tool succeeds."""
+        """CLI ingest email prints JSON result when tool succeeds (main returns normally)."""
         from open_brain.cli.main import main
 
         with (
@@ -557,15 +557,7 @@ class TestCliExitOnSuccess:
             patch("open_brain.cli.main.call_tool") as mock_call,
         ):
             mock_call.return_value = {"ingested": 3, "skipped": 1, "run_id": "abc123"}
-
-            with pytest.raises(SystemExit) as exc_info:
-                # main() calls sys.exit only on error; on success it just returns
-                # We'll test it doesn't call _error
-                try:
-                    main()
-                    raise SystemExit(0)
-                except SystemExit:
-                    raise
+            main()
 
         captured = capsys.readouterr()
         # Output should be valid JSON

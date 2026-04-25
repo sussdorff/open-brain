@@ -524,19 +524,25 @@ class IMAPEmailIngestor:
     async def ingest_inbox(self, max_messages: int = 50) -> tuple[int, int]:
         """Ingest the most recent N emails from the configured IMAP folder (INBOX by default).
 
-        Connects to the IMAP server, searches for all messages, takes the
+        Connects to the IMAP server once, searches for all messages, takes the
         last `max_messages` UIDs (sorted ascending → most recent are highest),
-        then delegates to ingest_uids() for fetching and ingesting.
+        then fetches their RFC822 data in the same connection and ingests each one.
+        Using a single connection avoids a second TCP/TLS handshake and a second
+        call to _fetch_password() (op CLI).
 
         Args:
             max_messages: Maximum number of emails to fetch (default 50).
                 Pass 0 to skip entirely and return (0, 0).
+                Must be >= 0; negative values raise ValueError.
 
         Returns:
             Tuple of (ingested_count, skipped_count) where:
             - ingested_count: number of newly saved memories
             - skipped_count: number of already-existing memories (idempotency hits)
         """
+        if max_messages < 0:
+            raise ValueError("max_messages must be >= 0")
+
         if max_messages == 0:
             return (0, 0)
 
@@ -548,20 +554,43 @@ class IMAPEmailIngestor:
 
         password = self._fetch_password()
 
+        # Single IMAP session: search for UIDs then fetch RFC822 data in one connection.
         with IMAPClient(host=self._server, port=self._port, ssl=True) as client:
             client.login(self._user, password)
             client.select_folder(self._folder)
             all_uids = client.search(["ALL"])
 
-        # Take the most recent N UIDs (UIDs are in ascending order; highest = newest)
-        uids = sorted(all_uids)[-max_messages:]
+            # Take the most recent N UIDs (UIDs are in ascending order; highest = newest)
+            uids = sorted(all_uids)[-max_messages:]
 
-        if not uids:
-            return (0, 0)
+            if not uids:
+                return (0, 0)
 
-        result = await self.ingest_uids(uids=uids)
-        ingested = len(result.interaction_memory_ids) - result.skipped_count
-        return (ingested, result.skipped_count)
+            fetch_data = client.fetch(uids, [b"RFC822"])
+
+        interaction_memory_ids: list[int] = []
+        skipped_count = 0
+
+        for uid in uids:
+            uid_data = fetch_data.get(uid) or {}
+            raw = uid_data.get(b"RFC822")
+            if raw is None:
+                logger.warning("No RFC822 data for UID %d — skipping", uid)
+                continue
+
+            is_new = await self._ingest_single_email(
+                uid=uid,
+                raw=raw,
+                person_memory_id=None,
+                interaction_memory_ids=interaction_memory_ids,
+            )
+            if not is_new:
+                skipped_count += 1
+
+        # Both newly ingested and skipped IDs are appended to interaction_memory_ids,
+        # so subtracting skipped_count gives the count of newly saved memories.
+        ingested = len(interaction_memory_ids) - skipped_count
+        return (ingested, skipped_count)
 
     async def _ingest_single_email(
         self,
