@@ -615,9 +615,11 @@ class IMAPEmailIngestor:
         Raises:
             RuntimeError: If this is a sentinel instance (server not configured).
         """
-        if self._server == "":
+        if IMAPClient is None:  # pragma: no cover
+            raise ImportError("imapclient is required for email ingestion. Install it with: pip install imapclient")
+        if self._dl is None:
             raise RuntimeError(
-                "Sentinel instance cannot list — provide server config"
+                "Sentinel instance cannot list — provide data_layer and server config"
             )
 
         password = self._fetch_password()
@@ -655,7 +657,8 @@ class IMAPEmailIngestor:
                             else f"{f.mailbox}@{f.host}"
                         )
                     refs.append(MessageRef(uid=uid, subject=subject, date=date_str, from_addr=from_addr))
-                except Exception:
+                except (UnicodeDecodeError, AttributeError, TypeError) as exc:
+                    logger.warning("Failed to decode envelope for UID %d: %s", uid, exc)
                     refs.append(MessageRef(uid=uid))
             else:
                 refs.append(MessageRef(uid=uid))
@@ -683,7 +686,12 @@ class IMAPEmailIngestor:
             raise RuntimeError(
                 "Sentinel instance cannot ingest — provide data_layer"
             )
-        uid = ref.uid if isinstance(ref, MessageRef) else int(ref)
+        if isinstance(ref, MessageRef):
+            uid = ref.uid
+        elif isinstance(ref, int):
+            uid = ref
+        else:
+            raise TypeError(f"ingest() requires MessageRef or int, got {type(ref).__name__}")
         result = await self.ingest_uids(uids=[uid])
         result.run_id = run_id
         return result

@@ -126,6 +126,7 @@ async def test_email_imap_ingest_sets_run_id():
         result = await ingestor.ingest(ref, "run-abc-123")
 
     assert result.run_id == "run-abc-123"
+    assert len(result.interaction_memory_ids) >= 1  # ingestion actually created a memory
 
 
 # ---------------------------------------------------------------------------
