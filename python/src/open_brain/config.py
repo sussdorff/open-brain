@@ -33,6 +33,15 @@ class Config(BaseSettings):
     # If empty, MacWhisperConnector auto-discovers the path.
     MACWHISPER_HISTORY_PATH: str = ""
 
+    # IMAP email ingest settings (cr3.4)
+    IMAP_SERVER: str = ""
+    IMAP_PORT: int = 993
+    IMAP_USER: str = ""
+    # op reference for IMAP password, e.g. "op://Private/email/app-password"
+    IMAP_PASSWORD_OP: str = ""
+    EMAIL_STORE_RAW_BODIES: bool = False
+    EMAIL_EXTRACTION_MODEL: str = "claude-haiku-4-5-20251001"
+
     # Daily ingestion guard: reject save_memory calls beyond this threshold per day
     MAX_MEMORIES_PER_DAY: int = 500
 
