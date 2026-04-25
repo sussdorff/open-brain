@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(open-brain-672)* Remove credentials() from Protocol (optional per ADR-0001), clarify registry note
+- *(open-brain-672)* Correct register() docstring — registrations are not automatic
 - *(open-brain-353)* Address review findings iteration 1
 - *(open-brain-353)* Address codex adversarial findings
 - *(open-brain-p6e)* Skip integration tests in CI environments
@@ -16,6 +18,10 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - *(open-brain-353)* Green — wire IMAPEmailIngestor into CLI + MCP tool
+
+### Refactoring
+
+- *(open-brain-672)* Reconcile IngestAdapter Protocol with ADR-0001 and add ADAPTERS registry
 
 ### Testing
 
