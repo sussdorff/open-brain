@@ -13,15 +13,19 @@ class IngestAdapter(Protocol):
     interface. Adapters use structural subtyping (duck-typing) — no ABC
     inheritance is required.
 
-    Attributes:
+    Required members:
         name: Unique snake_case identifier for this adapter. Used as the key
             in the ``ADAPTERS`` registry.
+        list_recent: Return the N most recent items from the source.
+        ingest: Ingest a single item into open-brain.
 
-    Notes:
-        ``credentials()`` is optional per ADR-0001. Adapters that require no
-        credentials do not need to implement it. Use the module-level helper
-        ``get_credentials(adapter)`` rather than calling ``adapter.credentials()``
-        directly — it falls back to ``{}`` when the method is absent.
+    Optional convention (NOT a Protocol member):
+        ``credentials()`` is an optional convention per ADR-0001. Adapters that
+        require no credentials do not need to implement it. Use the module-level
+        helper ``get_credentials(adapter)`` rather than calling
+        ``adapter.credentials()`` directly — it falls back to ``{}`` when the
+        method is absent. Because it is optional it is intentionally NOT
+        declared in this Protocol body.
     """
 
     name: str
@@ -48,20 +52,6 @@ class IngestAdapter(Protocol):
 
         Returns:
             An ``IngestResult`` with all created memory IDs and the ``run_id``.
-        """
-        ...
-
-    def credentials(self) -> dict:
-        """Return credential requirements for this adapter.
-
-        The returned dict maps credential key names (env-var names or
-        1Password op-paths) to human-readable descriptions.  Adapters that
-        need no credentials do not have to implement this method — the
-        module-level helper ``get_credentials()`` handles the missing-method
-        case gracefully.
-
-        Returns:
-            A dict mapping credential key → description.
         """
         ...
 

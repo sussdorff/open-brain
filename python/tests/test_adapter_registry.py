@@ -139,11 +139,38 @@ async def test_protocol_shape_ingest():
 
 
 def test_protocol_shape_credentials_optional():
-    """Adapters without credentials() still satisfy the protocol shape via get_credentials."""
+    """credentials() is NOT a Protocol member — get_credentials() absorbs its absence."""
     adapter = _MinimalAdapter()
-    # Direct call would raise AttributeError; the helper must absorb it
+    # _MinimalAdapter has no credentials() method; get_credentials must return {}
+    assert not hasattr(adapter, "credentials"), (
+        "_MinimalAdapter must not have credentials() to test the fallback path"
+    )
     creds = get_credentials(adapter)
     assert creds == {}
+
+
+def test_minimal_adapter_satisfies_protocol_without_credentials():
+    """An adapter without credentials() must still be accepted by the Protocol.
+
+    credentials() was intentionally removed from IngestAdapter (ADR-0001: it is
+    optional). This test guards against re-introducing it as a required member by
+    verifying it is not listed in the Protocol's declared members.
+    """
+    # Collect the members declared in the Protocol body.
+    # __protocol_attrs__ is set by typing.Protocol on Python 3.12+.
+    protocol_members = getattr(IngestAdapter, "__protocol_attrs__", None)
+    if protocol_members is not None:
+        assert "credentials" not in protocol_members, (
+            "credentials() must NOT be a Protocol member (it is optional per ADR-0001)"
+        )
+
+    # Verify that _MinimalAdapter (no credentials()) can be registered and used
+    # without any AttributeError — the registry and get_credentials helper must
+    # handle it gracefully.
+    adapter = _MinimalAdapter()
+    register(adapter)
+    assert "test_minimal" in ADAPTERS
+    assert get_credentials(adapter) == {}
 
 
 def test_full_adapter_credentials():
