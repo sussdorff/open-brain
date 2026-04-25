@@ -8,40 +8,40 @@ to the system or want to understand how person-centric data flows through the st
 ## Architecture Overview
 
 ```
- ┌──────────────────────────────────────────────────────────────┐
- │  Sources                                                       │
- │  (MacWhisper transcripts · Emails · Matrix/WhatsApp)          │
- └─────────────────────────┬────────────────────────────────────┘
-                           │ raw content
-                           ▼
- ┌──────────────────────────────────────────────────────────────┐
- │  Ingest Adapters  (ADR-0001)                                  │
- │  IngestAdapter Protocol: list_recent() · ingest()             │
- │  Credential access via 1Password CLI  (ADR-0002)              │
- └─────────────────────────┬────────────────────────────────────┘
-                           │ IngestResult
-                           ▼
- ┌──────────────────────────────────────────────────────────────┐
- │  Ingest Pipeline                                              │
- │  save_memory() → embed → metadata extraction (Haiku 4.5)     │
- └─────────┬──────────────────────────────────┬────────────────┘
-           │ memory row                        │ relationship edges
-           ▼                                   ▼
- ┌─────────────────────┐         ┌────────────────────────────┐
- │  Domain Schemas     │         │  Typed Relationships       │
- │  (cr3.1)            │         │  (cr3.10)                  │
- │  event · person ·   │         │  attended_by · mentioned_in│
- │  meeting · decision │         │  spawned_task · supersedes │
- └─────────────────────┘         └────────────────────────────┘
-           │                                   │
-           └──────────────────┬────────────────┘
-                              ▼
- ┌──────────────────────────────────────────────────────────────┐
- │  People-Aware Query Layer  (cr3.9)                            │
- │  MCP tools: people_discussed_with · people_stale_contacts ·  │
- │             people_mentions_window                            │
- │  Skill: people-query (Claude Code presentation layer)         │
- └──────────────────────────────────────────────────────────────┘
+ +--------------------------------------------------------------+
+ |  Sources                                                      |
+ |  (MacWhisper transcripts, Emails, Matrix/WhatsApp)            |
+ +---------------------------+----------------------------------+
+                             | raw content
+                             v
+ +--------------------------------------------------------------+
+ |  Ingest Adapters  (ADR-0001)                                  |
+ |  IngestAdapter Protocol: list_recent(), ingest()              |
+ |  Credential access via 1Password CLI  (ADR-0002)              |
+ +---------------------------+----------------------------------+
+                             | IngestResult
+                             v
+ +--------------------------------------------------------------+
+ |  Ingest Pipeline                                              |
+ |  save_memory() -> embed -> metadata extraction (Haiku 4.5)   |
+ +-----------+----------------------------------+---------------+
+             | memory row                       | relationship edges
+             v                                  v
+ +---------------------+         +----------------------------+
+ |  Domain Schemas     |         |  Typed Relationships       |
+ |  (cr3.1)            |         |  (cr3.10)                  |
+ |  event, person,     |         |  attended_by, mentioned_in |
+ |  meeting, decision  |         |  spawned_task, supersedes  |
+ +---------------------+         +----------------------------+
+             |                                  |
+             +------------------+---------------+
+                                v
+ +--------------------------------------------------------------+
+ |  People-Aware Query Layer  (cr3.9)                            |
+ |  MCP tools: people_discussed_with, people_stale_contacts,    |
+ |             people_mentions_window                            |
+ |  Skill: people-query (Claude Code presentation layer)         |
+ +--------------------------------------------------------------+
 ```
 
 ---
