@@ -14,13 +14,16 @@ Flow per ingest_for_person call:
 
 import email
 import email.parser
+import email.utils
 import html
+import json
 import logging
 import re
 import subprocess
 from dataclasses import dataclass
+from datetime import date
 from email.header import decode_header
-from typing import Protocol
+from typing import Any, Protocol
 
 from open_brain.data_layer.interface import DataLayer, SaveMemoryParams, SearchParams
 from open_brain.data_layer.llm import LlmMessage, llm_complete
@@ -169,36 +172,37 @@ def _parse_rfc822(raw: bytes) -> tuple[str, str, str, str]:
 
 def _build_imap_search_criteria(
     email_addresses: list[str],
-    since: str | None,
-) -> list:
+    since: date | str | None,
+) -> list[Any]:
     """Build IMAP SEARCH criteria for emails matching FROM/TO/CC of given addresses.
 
     Uses OR to combine multiple addresses. Adds SINCE if provided.
 
     Args:
         email_addresses: List of email addresses to search for.
-        since: Optional IMAP date string (e.g. "01-Jan-2026") to filter by.
+        since: Optional date (Python date object or IMAP "DD-Mon-YYYY" string) to filter by.
 
     Returns:
         IMAP search criteria list compatible with imapclient.
     """
     if not email_addresses:
-        return ["NONE"]
+        return []
 
-    def addr_criteria(addr: str) -> list:
+    def addr_criteria(addr: str) -> list[Any]:
         """Build OR FROM addr (OR TO addr CC addr) for a single address."""
-        return ["OR", f"FROM {addr}", ["OR", f"TO {addr}", f"CC {addr}"]]
+        return ["OR", ["FROM", addr], ["OR", ["TO", addr], ["CC", addr]]]
 
     if len(email_addresses) == 1:
-        criteria = addr_criteria(email_addresses[0])
+        criteria: list[Any] = addr_criteria(email_addresses[0])
     else:
         # Chain multiple addresses with OR
         criteria = addr_criteria(email_addresses[0])
         for addr in email_addresses[1:]:
-            criteria = ["OR"] + [criteria] + [addr_criteria(addr)]
+            criteria = ["OR", criteria, addr_criteria(addr)]
 
     if since:
-        criteria = ["SINCE", since] + [criteria]
+        # Wrap with SINCE: imapclient treats a list-of-lists as AND
+        criteria = [["SINCE", since], criteria]
 
     return criteria
 
@@ -252,16 +256,20 @@ class IMAPEmailIngestor:
         logger.info("IMAP credentials loaded for user=%r", self._user)
         return password
 
-    async def list_for_person(
+    async def _list_by_addresses(
         self,
         email_addresses: list[str],
-        since: str | None = None,
+        since: date | str | None = None,
+        until: date | str | None = None,
     ) -> list[int]:
         """Return IMAP UIDs for emails matching FROM/TO/CC of given addresses.
 
+        Internal helper used by list_for_person and ingest_for_person.
+
         Args:
             email_addresses: List of email addresses to search for.
-            since: Optional IMAP date string (e.g. "01-Jan-2026") to restrict results.
+            since: Optional date to restrict results (inclusive lower bound).
+            until: Optional date to restrict results (inclusive upper bound).
 
         Returns:
             Sorted list of matching IMAP UIDs.
@@ -271,6 +279,11 @@ class IMAPEmailIngestor:
 
         password = self._fetch_password()
         criteria = _build_imap_search_criteria(email_addresses, since)
+        if until:
+            if isinstance(criteria, list) and criteria:
+                criteria = [["BEFORE", until], criteria]
+            else:
+                criteria = [["BEFORE", until]]
 
         with IMAPClient(host=self._server, port=self._port, ssl=True) as client:
             client.login(self._user, password)
@@ -279,26 +292,77 @@ class IMAPEmailIngestor:
 
         return list(uids)
 
-    async def ingest_for_person(
+    async def list_for_person(
         self,
         person_memory_id: int,
-        since: str | None = None,
-    ) -> IngestResult:
-        """Ingest all emails matching a person's email addresses.
+        since: date | None = None,
+        until: date | None = None,
+        max_results: int = 100,
+    ) -> list[MessageRef]:
+        """Return MessageRefs for emails matching FROM/TO/CC of a known person.
 
-        Reads the person memory to extract email addresses, then searches IMAP,
-        and ingests each matching email as an interaction memory.
+        Looks up the person memory by ID to obtain email addresses, then
+        searches IMAP for matching messages.
 
         Args:
             person_memory_id: ID of the person memory record.
-            since: Optional IMAP date filter (e.g. "01-Jan-2026").
+            since: Optional date to restrict results (inclusive lower bound).
+            until: Optional date to restrict results (inclusive upper bound).
+            max_results: Maximum number of results to return (default 100).
 
         Returns:
-            IngestResult with created interaction memory IDs.
+            List of MessageRef objects (up to max_results).
         """
-        # Load person memory to get email addresses
+        # Load person memory
+        email_addresses = await self._get_email_addresses_for_person(person_memory_id)
+        if not email_addresses:
+            return []
+
+        uids = await self._list_by_addresses(email_addresses, since=since, until=until)
+        uids = uids[:max_results]
+
+        if not uids:
+            return []
+
+        password = self._fetch_password()
+        refs: list[MessageRef] = []
+
+        with IMAPClient(host=self._server, port=self._port, ssl=True) as client:
+            client.login(self._user, password)
+            client.select_folder(self._folder)
+            fetch_data = client.fetch(uids, [b"ENVELOPE"])
+
+        for uid in uids:
+            uid_data = fetch_data.get(uid) or {}
+            envelope = uid_data.get(b"ENVELOPE")
+            if envelope is not None:
+                try:
+                    subject = _decode_header_value(envelope.subject.decode() if isinstance(envelope.subject, bytes) else (envelope.subject or ""))
+                    date_str = str(envelope.date) if envelope.date else None
+                    from_list = envelope.from_
+                    from_addr = ""
+                    if from_list:
+                        f = from_list[0]
+                        from_addr = f"{f.mailbox.decode()}@{f.host.decode()}" if isinstance(f.mailbox, bytes) else f"{f.mailbox}@{f.host}"
+                    refs.append(MessageRef(uid=uid, subject=subject, date=date_str, from_addr=from_addr))
+                except Exception:
+                    refs.append(MessageRef(uid=uid))
+            else:
+                refs.append(MessageRef(uid=uid))
+
+        return refs
+
+    async def _get_email_addresses_for_person(self, person_memory_id: int) -> list[str]:
+        """Load person memory by ID and extract all email addresses.
+
+        Args:
+            person_memory_id: ID of the person memory record.
+
+        Returns:
+            Deduplicated list of email address strings.
+        """
         search_result = await self._dl.search(
-            SearchParams(type="person", limit=1)
+            SearchParams(type="person", limit=500)
         )
         person_memory = None
         for mem in search_result.results:
@@ -327,8 +391,29 @@ class IMAPEmailIngestor:
                     deduped.append(addr)
             email_addresses = deduped
 
+        return email_addresses
+
+    async def ingest_for_person(
+        self,
+        person_memory_id: int,
+        since: date | str | None = None,
+    ) -> IngestResult:
+        """Ingest all emails matching a person's email addresses.
+
+        Reads the person memory to extract email addresses, then searches IMAP,
+        and ingests each matching email as an interaction memory.
+
+        Args:
+            person_memory_id: ID of the person memory record.
+            since: Optional date to restrict results (inclusive lower bound).
+
+        Returns:
+            IngestResult with created interaction memory IDs.
+        """
+        email_addresses = await self._get_email_addresses_for_person(person_memory_id)
+
         # Find matching UIDs
-        uids = await self.list_for_person(email_addresses=email_addresses, since=since)
+        uids = await self._list_by_addresses(email_addresses=email_addresses, since=since)
 
         if not uids:
             return IngestResult(
@@ -415,7 +500,7 @@ class IMAPEmailIngestor:
             return
 
         # Parse email
-        subject, date, from_addr, body = _parse_rfc822(raw)
+        subject, date_raw, from_addr, body = _parse_rfc822(raw)
 
         # Build the text to save
         if self._store_raw_bodies:
@@ -424,16 +509,26 @@ class IMAPEmailIngestor:
             text = await self._extract_summary(
                 subject=subject,
                 from_addr=from_addr,
-                date=date,
+                date=date_raw,
                 body=body,
             )
 
+        # Parse RFC2822 date to ISO 8601 for metadata
+        try:
+            dt = email.utils.parsedate_to_datetime(date_raw)
+            occurred_at = dt.isoformat()
+        except Exception:
+            occurred_at = date_raw  # keep raw on parse failure
+
+        # Determine direction by comparing sender against the IMAP user
+        direction = "outbound" if self._user.lower() in from_addr.lower() else "inbound"
+
         # Build metadata
-        metadata: dict = {
+        metadata: dict[str, Any] = {
             "source_ref": source_ref,
             "channel": "email",
-            "direction": "inbound",
-            "occurred_at": date,
+            "direction": direction,
+            "occurred_at": occurred_at,
         }
         if person_memory_id is not None:
             metadata["person_ref"] = str(person_memory_id)
@@ -466,9 +561,6 @@ class IMAPEmailIngestor:
 
         Returns the summary string; falls back to a simple description on error.
         """
-        import json
-        import re
-
         prompt = (
             f"{EMAIL_EXTRACTION_PROMPT}\n\n"
             f"Email:\n"
@@ -492,7 +584,9 @@ class IMAPEmailIngestor:
             summary = data.get("summary") or ""
             if summary:
                 return summary
+        except json.JSONDecodeError as exc:
+            logger.warning("Failed to parse LLM extraction response: %s", exc)
         except Exception as exc:
-            logger.warning("LLM extraction failed for email: %s — using fallback", exc)
+            logger.warning("LLM extraction failed: %s", exc, exc_info=True)
 
         return f"Email from {from_addr}: {subject or '(no subject)'}"

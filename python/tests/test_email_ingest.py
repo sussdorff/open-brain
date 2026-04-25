@@ -13,9 +13,7 @@ Acceptance criteria covered:
 import json
 import logging
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch, call
-
-import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from open_brain.data_layer.interface import Memory, SaveMemoryResult, SearchResult
 
@@ -91,20 +89,26 @@ def _make_mock_imap(
 
 
 class TestListForPerson:
-    """AC1: list_for_person returns UIDs matching FROM/TO/CC of person addresses."""
+    """AC1: list_for_person returns MessageRefs matching FROM/TO/CC of person addresses."""
 
     async def test_list_for_person_returns_matching_uids(self):
-        """UIDs 101 and 103 match alice@example.com; UID 102 does not."""
-        from open_brain.ingest.adapters.email_imap import IMAPEmailIngestor
-        from open_brain.ingest.adapters.email_imap import CommandRunner
+        """UIDs 101 and 103 match alice@example.com; MessageRefs are returned."""
+        from open_brain.ingest.adapters.email_imap import IMAPEmailIngestor, CommandRunner, MessageRef
 
         mock_runner = MagicMock(spec=CommandRunner)
         mock_runner.run.return_value = "secret-password"
 
+        person_mem = _make_person_memory(id=1, email_addresses=["alice@example.com"])
+
+        # IMAP search returns UIDs; fetch returns ENVELOPE data for list_for_person
         mock_imap = _make_mock_imap(search_result=[101, 103])
+        mock_imap.fetch.return_value = {
+            101: {b"ENVELOPE": None},
+            103: {b"ENVELOPE": None},
+        }
 
         mock_dl = AsyncMock()
-        mock_dl.search.return_value = SearchResult(results=[], total=0)
+        mock_dl.search.return_value = SearchResult(results=[person_mem], total=1)
 
         with patch("open_brain.ingest.adapters.email_imap.IMAPClient") as mock_cls:
             mock_cls.return_value.__enter__ = MagicMock(return_value=mock_imap)
@@ -118,24 +122,24 @@ class TestListForPerson:
                 password_op_ref="op://Private/email/app-password",
                 runner=mock_runner,
             )
-            uids = await ingestor.list_for_person(
-                email_addresses=["alice@example.com"],
-                since=None,
-            )
+            refs = await ingestor.list_for_person(person_memory_id=1)
 
-        assert uids == [101, 103]
+        assert [r.uid for r in refs] == [101, 103]
+        assert all(isinstance(r, MessageRef) for r in refs)
 
     async def test_list_for_person_returns_empty_when_no_match(self):
         """Returns empty list when no emails match."""
-        from open_brain.ingest.adapters.email_imap import IMAPEmailIngestor
-        from open_brain.ingest.adapters.email_imap import CommandRunner
+        from open_brain.ingest.adapters.email_imap import IMAPEmailIngestor, CommandRunner
 
         mock_runner = MagicMock(spec=CommandRunner)
         mock_runner.run.return_value = "secret-password"
+
+        person_mem = _make_person_memory(id=2, email_addresses=["nobody@nowhere.example"])
 
         mock_imap = _make_mock_imap(search_result=[])
 
         mock_dl = AsyncMock()
+        mock_dl.search.return_value = SearchResult(results=[person_mem], total=1)
 
         with patch("open_brain.ingest.adapters.email_imap.IMAPClient") as mock_cls:
             mock_cls.return_value.__enter__ = MagicMock(return_value=mock_imap)
@@ -149,24 +153,25 @@ class TestListForPerson:
                 password_op_ref="op://Private/email/app-password",
                 runner=mock_runner,
             )
-            uids = await ingestor.list_for_person(
-                email_addresses=["nobody@nowhere.example"],
-                since=None,
-            )
+            refs = await ingestor.list_for_person(person_memory_id=2)
 
-        assert uids == []
+        assert refs == []
 
     async def test_list_for_person_with_since_date(self):
         """Since date is passed to IMAP SEARCH criterion."""
-        from open_brain.ingest.adapters.email_imap import IMAPEmailIngestor
-        from open_brain.ingest.adapters.email_imap import CommandRunner
+        from datetime import date as date_type
+        from open_brain.ingest.adapters.email_imap import IMAPEmailIngestor, CommandRunner
 
         mock_runner = MagicMock(spec=CommandRunner)
         mock_runner.run.return_value = "pw"
 
+        person_mem = _make_person_memory(id=3, email_addresses=["alice@example.com"])
+
         mock_imap = _make_mock_imap(search_result=[105])
+        mock_imap.fetch.return_value = {105: {b"ENVELOPE": None}}
 
         mock_dl = AsyncMock()
+        mock_dl.search.return_value = SearchResult(results=[person_mem], total=1)
 
         with patch("open_brain.ingest.adapters.email_imap.IMAPClient") as mock_cls:
             mock_cls.return_value.__enter__ = MagicMock(return_value=mock_imap)
@@ -180,13 +185,13 @@ class TestListForPerson:
                 password_op_ref="op://Private/email/app-password",
                 runner=mock_runner,
             )
-            uids = await ingestor.list_for_person(
-                email_addresses=["alice@example.com"],
-                since="01-Jan-2026",
+            refs = await ingestor.list_for_person(
+                person_memory_id=3,
+                since=date_type(2026, 1, 1),
             )
 
-        assert uids == [105]
-        # Verify search was called with some criterion (IMAP search call happened)
+        assert [r.uid for r in refs] == [105]
+        # Verify IMAP search was called (SINCE criterion was passed)
         assert mock_imap.search.called
 
 
@@ -569,9 +574,8 @@ class TestNoNetworkCalls:
     """AC6: All IMAP and LLM calls are mocked — no real network connections."""
 
     async def test_imapclient_is_always_mocked(self):
-        """Verify that when IMAPClient is NOT mocked, the test correctly fails.
-        This test proves that the patch in other tests actually prevents real connections.
-        We only verify the import path is what we'd mock.
+        """Verify that IMAPClient is importable from the email_imap module at the expected
+        attribute name, so that patch() in other tests correctly intercepts it.
         """
         from open_brain.ingest.adapters import email_imap as module
         assert hasattr(module, "IMAPClient"), \
@@ -765,3 +769,125 @@ class TestSubprocessCommandRunner:
             ["op", "read", "op://Private/email/app-password"]
         )
         assert result == "my-secret"
+
+
+# ─── _build_imap_search_criteria unit tests ──────────────────────────────────
+
+
+class TestBuildImapSearchCriteria:
+    """Unit tests for the _build_imap_search_criteria helper."""
+
+    def test_single_address_uses_list_form(self):
+        """Criteria for a single address must use separate keyword/value lists."""
+        from open_brain.ingest.adapters.email_imap import _build_imap_search_criteria
+
+        criteria = _build_imap_search_criteria(["alice@example.com"], since=None)
+        criteria_str = str(criteria)
+        # Must NOT use "FROM alice@example.com" as a single string
+        assert "FROM alice@example.com" not in criteria_str
+        # Must contain ["FROM", "alice@example.com"] style (separate elements)
+        assert "'FROM'" in criteria_str or '"FROM"' in criteria_str
+        assert "alice@example.com" in criteria_str
+
+    def test_addr_criteria_structure_single(self):
+        """addr_criteria produces the correct nested list structure."""
+        from open_brain.ingest.adapters.email_imap import _build_imap_search_criteria
+
+        criteria = _build_imap_search_criteria(["alice@example.com"], since=None)
+        # Should be: ["OR", ["FROM", addr], ["OR", ["TO", addr], ["CC", addr]]]
+        assert criteria[0] == "OR"
+        assert criteria[1] == ["FROM", "alice@example.com"]
+        assert criteria[2][0] == "OR"
+        assert criteria[2][1] == ["TO", "alice@example.com"]
+        assert criteria[2][2] == ["CC", "alice@example.com"]
+
+    def test_since_wraps_criteria_as_list_of_lists(self):
+        """SINCE wraps the criteria as a list-of-lists (imapclient AND form)."""
+        from open_brain.ingest.adapters.email_imap import _build_imap_search_criteria
+
+        criteria = _build_imap_search_criteria(["alice@example.com"], since="01-Jan-2026")
+        # Should be: [["SINCE", "01-Jan-2026"], <addr_criteria>]
+        assert criteria[0] == ["SINCE", "01-Jan-2026"]
+        # Second element is the OR address criteria
+        assert criteria[1][0] == "OR"
+
+    def test_empty_addresses_returns_empty_list(self):
+        """Empty address list returns an empty list (not ['NONE'])."""
+        from open_brain.ingest.adapters.email_imap import _build_imap_search_criteria
+
+        criteria = _build_imap_search_criteria([], since=None)
+        assert criteria == []
+
+    def test_multiple_addresses_chained_with_or(self):
+        """Multiple addresses are chained with OR at the top level."""
+        from open_brain.ingest.adapters.email_imap import _build_imap_search_criteria
+
+        criteria = _build_imap_search_criteria(
+            ["alice@example.com", "bob@example.com"], since=None
+        )
+        # Top-level must be OR combining the two address groups
+        assert criteria[0] == "OR"
+
+
+# ─── Newsletter fixture ingest test ──────────────────────────────────────────
+
+
+class TestNewsletterIngest:
+    """Tests that ingesting the newsletter.eml fixture works correctly."""
+
+    async def test_ingest_newsletter_eml(self):
+        """newsletter.eml is ingested as an interaction memory without errors."""
+        from open_brain.ingest.adapters.email_imap import IMAPEmailIngestor, CommandRunner
+
+        mock_runner = MagicMock(spec=CommandRunner)
+        mock_runner.run.return_value = "pw"
+
+        person_mem = _make_person_memory(
+            id=77,
+            email_addresses=["subscriber@example.com"],
+            name="Newsletter Subscriber",
+        )
+
+        eml_bytes = _raw_eml(EML_NEWSLETTER)
+
+        mock_imap = _make_mock_imap(
+            search_result=[401],
+            fetch_result={401: {b"RFC822": eml_bytes}},
+        )
+
+        mock_dl = AsyncMock()
+
+        async def _search(params):
+            if params.type == "person":
+                return SearchResult(results=[person_mem], total=1)
+            if params.metadata_filter and "source_ref" in params.metadata_filter:
+                return SearchResult(results=[], total=0)
+            return SearchResult(results=[], total=0)
+
+        mock_dl.search = _search
+        mock_dl.save_memory.return_value = SaveMemoryResult(id=401, message="ok")
+
+        with patch("open_brain.ingest.adapters.email_imap.IMAPClient") as mock_cls, \
+             patch("open_brain.ingest.adapters.email_imap.llm_complete") as mock_llm:
+            mock_cls.return_value.__enter__ = MagicMock(return_value=mock_imap)
+            mock_cls.return_value.__exit__ = MagicMock(return_value=False)
+            mock_llm.return_value = json.dumps({
+                "summary": "Monthly newsletter with product updates.",
+                "topics": ["newsletter", "product updates"],
+            })
+
+            ingestor = IMAPEmailIngestor(
+                data_layer=mock_dl,
+                server="mail.example.com",
+                port=993,
+                user="me@example.com",
+                password_op_ref="op://Private/email/app-password",
+                runner=mock_runner,
+            )
+            result = await ingestor.ingest_for_person(person_memory_id=77)
+
+        assert len(result.interaction_memory_ids) >= 1
+        # Verify source_ref uses the newsletter UID
+        save_calls = mock_dl.save_memory.call_args_list
+        source_refs = [c.args[0].metadata.get("source_ref") for c in save_calls]
+        assert any("imap:mail.example.com:401" in str(sr) for sr in source_refs)
