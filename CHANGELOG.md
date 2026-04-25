@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(open-brain-cr3.16)* Address review findings iteration 1
+- *(open-brain-cr3.16)* Address codex adversarial findings
 - *(open-brain-cr3.11)* Address review findings iteration 1
 - *(open-brain-cr3.11)* Address codex adversarial findings
 
@@ -34,7 +36,6 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
-- *(open-brain-cr3.16)* **Ingest observability metrics** — track ingests, LLM calls, dedup decisions, relationships, and memory writes with `people_ingest_stats()` MCP tool
 - *(cr3.13)* Green — ingest run IDs + delete-by-source rollback
 
 ### Documentation
