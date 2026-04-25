@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- *(open-brain-cr3.16)* **Ingest observability metrics** — track ingests, LLM calls, dedup decisions, relationships, and memory writes with `people_ingest_stats()` MCP tool
 - *(cr3.13)* Green — ingest run IDs + delete-by-source rollback
 - *(open-brain-cr3.9)* Green — people_discussed_with, people_stale_contacts, people_mentions_window
 - *(open-brain-cr3.9)* Add skill and docs for people-aware queries
