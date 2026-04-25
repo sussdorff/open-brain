@@ -5,22 +5,69 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(open-brain-cr3.4)* Address review findings iteration 1
+- *(open-brain-cr3.4)* Address codex adversarial findings
+
+### Documentation
+
+- *(open-brain-cr3.8)* Update changelog for ingest_transcript MCP tool release
+
+### Features
+
+- *(open-brain-cr3.4)* Green — IMAPEmailIngestor with CommandRunner DI, idempotency, Haiku extraction
+
+### Testing
+
+- *(open-brain-cr3.4)* Red — email IMAP ingestor tests (all 7 ACs, 16 failing tests)
+
+## [0.20.0] - 2026-04-25
+
+### Miscellaneous
+
+- *(open-brain-cr3.16)* Resolve CHANGELOG merge conflict after first merge from main
+- Bump version to 0.20.0
+
+## [0.19.0] - 2026-04-25
+
+### Bug Fixes
+
+- *(open-brain-cr3.8)* Unique source_ref + try/finally cleanup in e2e integration test
+- *(open-brain-cr3.8)* Allow external run_id injection for safe integration test cleanup
 - *(open-brain-cr3.16)* Address review findings iteration 1
 - *(open-brain-cr3.16)* Address codex adversarial findings
 - *(open-brain-cr3.11)* Address review findings iteration 1
 - *(open-brain-cr3.11)* Address codex adversarial findings
-- *(open-brain-cr3.8)* Unique source_ref + try/finally cleanup in e2e integration test
-- *(open-brain-cr3.8)* Allow external run_id injection for safe integration test cleanup
 
 ### Features
 
-- *(open-brain-cr3.16)* **Ingest observability metrics** — track ingests, LLM calls, dedup decisions, relationships, and memory writes with `people_ingest_stats()` MCP tool
-- *(open-brain-cr3.11)* Green — MacWhisperConnector with TDD (all ACs pass)
 - *(open-brain-cr3.8)* Expose ingest_transcript MCP tool + PoC e2e test + findings doc
+- *(open-brain-cr3.16)* Green — ingest observability metrics
+- *(open-brain-cr3.11)* Green — MacWhisperConnector with TDD (all ACs pass)
+
+### Miscellaneous
+
+- *(open-brain-cr3.16)* Update changelog for ingest observability metrics
+- *(open-brain-cr3.11)* Update changelog for MacWhisper CLI + history connector release
+- Bump version to 0.19.0
 
 ### Testing
 
 - *(open-brain-cr3.11)* Red — MacWhisperConnector tests (all ACs)
+
+## [0.17.1] - 2026-04-25
+
+### Bug Fixes
+
+- *(open-brain-cr3.17)* Replace Unicode box-drawing chars with pure ASCII in diagram
+
+### Documentation
+
+- *(open-brain-cr3.17)* Add people-aware-memory.md hub document
+- *(open-brain-cr3.17)* Update changelog for people-aware-memory hub release
+
+### Miscellaneous
+
+- Bump version to 0.17.1
 
 ## [0.18.0] - 2026-04-24
 
@@ -40,10 +87,6 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - *(cr3.13)* Green — ingest run IDs + delete-by-source rollback
-
-### Documentation
-
-- *(open-brain-cr3.17)* Add people-aware-memory.md hub: ASCII diagram, feature/ADR cross-links, contributor guide
 
 ### Miscellaneous
 
