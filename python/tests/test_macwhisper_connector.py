@@ -20,6 +20,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from open_brain.data_layer.interface import DataLayer
+from open_brain.ingest.adapters.base import ADAPTERS, register
 from open_brain.ingest.adapters.macwhisper import (
     MacWhisperConnector,
     MacWhisperNotFoundError,
@@ -156,7 +157,7 @@ class TestDiscoverHistoryPathMwCliFallback:
 
 
 class TestListRecentReturnsEntries:
-    def test_returns_three_entries(self, fs):
+    async def test_returns_three_entries(self, fs):
         """AC2 (list_recent): list_recent returns at least 1 entry when history exists."""
         fs.create_dir(str(APP_SUPPORT_PATH))
         entries = [
@@ -168,7 +169,7 @@ class TestListRecentReturnsEntries:
             fs.create_file(str(path), contents=json.dumps(entry))
 
         connector = _make_connector()
-        results = connector.list_recent(limit=3)
+        results = await connector.list_recent(n=3)
 
         assert len(results) == 3
         assert all(isinstance(r, TranscriptRef) for r in results)
@@ -177,11 +178,11 @@ class TestListRecentReturnsEntries:
 
 
 class TestListRecentEmptyDir:
-    def test_empty_dir_returns_empty_list(self, fs):
+    async def test_empty_dir_returns_empty_list(self, fs):
         """AC2 (list_recent): empty directory returns empty list."""
         fs.create_dir(str(APP_SUPPORT_PATH))
         connector = _make_connector()
-        results = connector.list_recent()
+        results = await connector.list_recent()
         assert results == []
 
 
@@ -235,3 +236,27 @@ class TestIngestEntryIdempotency:
         expected_source_ref = f"macwhisper:{SAMPLE_ENTRY['id']}"
         assert calls[0].args[1] == expected_source_ref
         assert calls[1].args[1] == expected_source_ref
+
+
+# ─── AC (registry): MacWhisperConnector registered in ADAPTERS ───────────────
+
+
+class TestMacWhisperRegisteredInAdapters:
+    def test_macwhisper_registered_in_adapters(self):
+        """AC: MacWhisperConnector registers correctly in ADAPTERS under 'macwhisper'."""
+        # Snapshot registry state for cleanup
+        snapshot = dict(ADAPTERS)
+        try:
+            mock_dl = MagicMock(spec=DataLayer)
+            connector = MacWhisperConnector(
+                data_layer=mock_dl,
+                skip_platform_check=True,
+            )
+            register(connector)
+            assert "macwhisper" in ADAPTERS, (
+                "ADAPTERS must contain 'macwhisper' after register(connector)"
+            )
+            assert ADAPTERS["macwhisper"] is connector
+        finally:
+            ADAPTERS.clear()
+            ADAPTERS.update(snapshot)

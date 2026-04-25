@@ -15,7 +15,7 @@ import platform
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from open_brain.data_layer.interface import DataLayer
 from open_brain.ingest.adapters.transcript import TranscriptIngestor
@@ -107,6 +107,8 @@ class MacWhisperConnector:
     Uses instance-level caching for discovered path (not module-level, to
     allow test isolation).
 
+    Implements the IngestAdapter Protocol (ADR-0001).
+
     Args:
         data_layer: DataLayer implementation for persistence.
         command_runner: Optional CommandRunner for subprocess calls.
@@ -116,6 +118,8 @@ class MacWhisperConnector:
         skip_platform_check: If True, skip the macOS platform check.
             Use in tests running on non-macOS platforms.
     """
+
+    name = "macwhisper"
 
     def __init__(
         self,
@@ -224,14 +228,14 @@ class MacWhisperConnector:
 
         return None
 
-    def list_recent(self, limit: int = 10) -> list[TranscriptRef]:
-        """List the most recent limit transcript entries.
+    async def list_recent(self, n: int = 10) -> list[TranscriptRef]:
+        """List the most recent n transcript entries (ADR-0001 Protocol method).
 
         Reads JSON files from the history directory, sorted by created_at
         descending.
 
         Args:
-            limit: Maximum number of entries to return.
+            n: Maximum number of entries to return.
 
         Returns:
             List of TranscriptRef objects, newest first.
@@ -251,7 +255,7 @@ class MacWhisperConnector:
 
         # Sort by created_at descending (newest first)
         entries.sort(key=lambda e: e.get("created_at", ""), reverse=True)
-        entries = entries[:limit]
+        entries = entries[:n]
 
         return [
             TranscriptRef(
@@ -307,3 +311,17 @@ class MacWhisperConnector:
         text, meta = self.read_entry(entry_id)
         source_ref = f"macwhisper:{entry_id}"
         return await self._ingestor.ingest(text, source_ref, medium_hint=meta.get("medium"))
+
+    async def ingest(self, ref: Any, run_id: str) -> IngestResult:
+        """ADR-0001 Protocol method: ingest a single item identified by ref.
+
+        Delegates to ingest_entry, treating ref as an entry_id string.
+
+        Args:
+            ref: The entry ID (str or coercible to str) to ingest.
+            run_id: UUID string created by the orchestrator for this ingest run.
+
+        Returns:
+            IngestResult from TranscriptIngestor.
+        """
+        return await self.ingest_entry(str(ref))

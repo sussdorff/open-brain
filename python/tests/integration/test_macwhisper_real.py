@@ -67,15 +67,15 @@ class TestMacWhisperConnectorReal:
         )
         assert isinstance(discovered, Path)
 
-    def test_list_recent_real(self):
-        """Call list_recent(limit=5) and verify it returns a list of TranscriptRef objects.
+    async def test_list_recent_real(self):
+        """Call list_recent(n=5) and verify it returns a list of TranscriptRef objects.
 
         An empty list is acceptable (no transcripts yet), but the return type
         must be a list. If any entries are present, they must be TranscriptRef
         instances.
         """
         connector = self._make_connector()
-        results = connector.list_recent(limit=5)
+        results = await connector.list_recent(n=5)
 
         print(f"\nlist_recent returned {len(results)} entries")
 
@@ -96,7 +96,7 @@ class TestMacWhisperConnectorReal:
         Skips if no transcript entries are found in the history directory.
         """
         connector = self._make_connector()
-        entries = connector.list_recent(limit=1)
+        entries = await connector.list_recent(n=1)
 
         if not entries:
             pytest.skip("No MacWhisper transcript entries found — cannot test ingest_entry")

@@ -6,10 +6,10 @@ The submodule imports below ARE the auto-registration mechanism per ADR-0001.
 Each adapter module is expected to call ``register(MyAdapter())`` at import time;
 importing this package triggers those calls and populates ``ADAPTERS``.
 
-``MacWhisperConnector`` and ``TranscriptIngestor`` have not yet been retrofitted
-to call ``register()`` at module bottom, so ``ADAPTERS`` is currently empty after
-importing this package. Once each adapter module adds its ``register()`` call,
-it will appear in ``ADAPTERS`` automatically.
+``MacWhisperConnector`` requires a ``DataLayer`` at construction time and therefore
+cannot register itself at module import. Callers must instantiate the connector and
+call ``register(connector)`` explicitly after construction. ``TranscriptIngestor``
+is a low-level helper, not a top-level adapter, and is not registered.
 """
 
 from open_brain.ingest.adapters.base import ADAPTERS, IngestAdapter, get_credentials, register
