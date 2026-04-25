@@ -177,3 +177,18 @@ def test_full_adapter_credentials():
     creds = get_credentials(adapter)
     assert "SOME_API_KEY" in creds
     assert isinstance(creds["SOME_API_KEY"], str)
+
+
+# ---------------------------------------------------------------------------
+# MacWhisperConnector registry test
+# ---------------------------------------------------------------------------
+
+
+def test_macwhisper_registered_in_adapters():
+    """MacWhisperConnector must be discoverable via ADAPTERS['macwhisper']."""
+    # Importing the adapters package triggers module-level register() calls.
+    import open_brain.ingest.adapters  # noqa: F401 — side-effect import for registration
+    from open_brain.ingest.adapters import ADAPTERS
+
+    assert "macwhisper" in ADAPTERS
+    assert ADAPTERS["macwhisper"].name == "macwhisper"

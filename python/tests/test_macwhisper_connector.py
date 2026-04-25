@@ -20,6 +20,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from open_brain.data_layer.interface import DataLayer
+from open_brain.ingest.adapters.base import ADAPTERS
 from open_brain.ingest.adapters.macwhisper import (
     MacWhisperConnector,
     MacWhisperNotFoundError,
@@ -156,7 +157,7 @@ class TestDiscoverHistoryPathMwCliFallback:
 
 
 class TestListRecentReturnsEntries:
-    def test_returns_three_entries(self, fs):
+    async def test_returns_three_entries(self, fs):
         """AC2 (list_recent): list_recent returns at least 1 entry when history exists."""
         fs.create_dir(str(APP_SUPPORT_PATH))
         entries = [
@@ -168,7 +169,7 @@ class TestListRecentReturnsEntries:
             fs.create_file(str(path), contents=json.dumps(entry))
 
         connector = _make_connector()
-        results = connector.list_recent(limit=3)
+        results = await connector.list_recent(n=3)
 
         assert len(results) == 3
         assert all(isinstance(r, TranscriptRef) for r in results)
@@ -177,11 +178,11 @@ class TestListRecentReturnsEntries:
 
 
 class TestListRecentEmptyDir:
-    def test_empty_dir_returns_empty_list(self, fs):
+    async def test_empty_dir_returns_empty_list(self, fs):
         """AC2 (list_recent): empty directory returns empty list."""
         fs.create_dir(str(APP_SUPPORT_PATH))
         connector = _make_connector()
-        results = connector.list_recent()
+        results = await connector.list_recent()
         assert results == []
 
 
@@ -235,3 +236,52 @@ class TestIngestEntryIdempotency:
         expected_source_ref = f"macwhisper:{SAMPLE_ENTRY['id']}"
         assert calls[0].args[1] == expected_source_ref
         assert calls[1].args[1] == expected_source_ref
+
+
+# ─── AC (ingest protocol): run_id forwarded, TranscriptRef entry_id extracted ─
+
+
+class TestIngestProtocol:
+    async def test_ingest_forwards_run_id_and_extracts_entry_id(self, fs):
+        """ingest(ref, run_id) extracts entry_id from TranscriptRef and passes run_id to ingestor."""
+        fs.create_dir(str(APP_SUPPORT_PATH))
+        entry_path = APP_SUPPORT_PATH / f"{SAMPLE_ENTRY['id']}.json"
+        fs.create_file(str(entry_path), contents=json.dumps(SAMPLE_ENTRY))
+
+        supplied_run_id = "test-run-id-1234"
+        mock_result = MagicMock()
+        mock_result.run_id = supplied_run_id
+        mock_ingestor = MagicMock()
+        mock_ingestor.ingest = AsyncMock(return_value=mock_result)
+
+        connector = _make_connector(ingestor=mock_ingestor)
+        ref = TranscriptRef(
+            entry_id=SAMPLE_ENTRY["id"],
+            created_at=SAMPLE_ENTRY["created_at"],
+            text_preview=SAMPLE_ENTRY["text"][:200],
+        )
+
+        result = await connector.ingest(ref, supplied_run_id)
+
+        mock_ingestor.ingest.assert_called_once_with(
+            SAMPLE_ENTRY["text"],
+            f"macwhisper:{SAMPLE_ENTRY['id']}",
+            medium_hint=None,
+            run_id=supplied_run_id,
+        )
+        assert result.run_id == supplied_run_id
+
+
+# ─── AC (registry): MacWhisperConnector registered in ADAPTERS ───────────────
+
+
+class TestMacWhisperRegisteredInAdapters:
+    def test_macwhisper_registered_in_adapters(self):
+        """AC: MacWhisperConnector is registered in ADAPTERS under 'macwhisper' at import time."""
+        # The module-level register() call in macwhisper.py ensures the adapter
+        # is discoverable as soon as the module is imported — no manual register()
+        # call is needed.
+        assert "macwhisper" in ADAPTERS, (
+            "ADAPTERS must contain 'macwhisper' after importing macwhisper module"
+        )
+        assert ADAPTERS["macwhisper"].name == "macwhisper"
