@@ -4,7 +4,7 @@ Discovery order for history path:
 1. MACWHISPER_HISTORY_PATH config field (env var override)
 2. ~/Library/Containers/com.goodsnooze.MacWhisper/Data/Library/Application Support/MacWhisper/
 3. ~/Library/Application Support/MacWhisper/
-4. mw transcribe --persist + parse stderr for path hint (via CommandRunner)
+4. mw --help / mw --version + parse stdout+stderr for path hint (via CommandRunner)
 5. Raise MacWhisperNotFoundError(tried_paths=[...])
 """
 
@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from open_brain.config import get_config
 from open_brain.data_layer.interface import DataLayer
 from open_brain.ingest.adapters.transcript import TranscriptIngestor
 from open_brain.ingest.models import IngestResult
@@ -46,31 +47,19 @@ class DefaultCommandRunner:
         """Run a command via subprocess.
 
         Uses a safe env allowlist (PATH + HOME only).
+        Returns (124, "", "timeout") if the command takes too long.
         """
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            env=_SAFE_SUBPROCESS_ENV,
-        )
-        return result.returncode, result.stdout, result.stderr
-
-
-class MockCommandRunner:
-    """CommandRunner for tests that returns pre-configured responses."""
-
-    def __init__(
-        self,
-        responses: dict[str, tuple[int, str, str]] | None = None,
-        default: tuple[int, str, str] = (0, "", ""),
-    ) -> None:
-        self._responses = responses or {}
-        self._default = default
-
-    def run(self, cmd: list[str]) -> tuple[int, str, str]:
-        """Return the pre-configured response for the command, or the default."""
-        key = " ".join(cmd)
-        return self._responses.get(key, self._default)
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                env=_SAFE_SUBPROCESS_ENV,
+                timeout=5,
+            )
+            return result.returncode, result.stdout, result.stderr
+        except subprocess.TimeoutExpired:
+            return 124, "", "timeout"
 
 
 # ─── Data models ─────────────────────────────────────────────────────────────
@@ -123,6 +112,8 @@ class MacWhisperConnector:
         data_layer: DataLayer implementation for persistence.
         command_runner: Optional CommandRunner for subprocess calls.
             Defaults to DefaultCommandRunner.
+        ingestor: Optional TranscriptIngestor. Defaults to creating one from
+            data_layer. Inject in tests to avoid patching.
         skip_platform_check: If True, skip the macOS platform check.
             Use in tests running on non-macOS platforms.
     """
@@ -131,6 +122,7 @@ class MacWhisperConnector:
         self,
         data_layer: DataLayer,
         command_runner: CommandRunner | None = None,
+        ingestor: TranscriptIngestor | None = None,
         *,
         skip_platform_check: bool = False,
     ) -> None:
@@ -141,6 +133,7 @@ class MacWhisperConnector:
             )
         self._dl = data_layer
         self._runner = command_runner or DefaultCommandRunner()
+        self._ingestor = ingestor if ingestor is not None else TranscriptIngestor(data_layer=data_layer)
         self._cached_path: Path | None = None
 
     def discover_history_path(self) -> Path:
@@ -150,7 +143,7 @@ class MacWhisperConnector:
         1. MACWHISPER_HISTORY_PATH env var / config field
         2. Container sandbox path
         3. Application Support path
-        4. mw CLI stderr parse
+        4. mw CLI stdout+stderr parse
         5. Raise MacWhisperNotFoundError
 
         Returns:
@@ -165,15 +158,13 @@ class MacWhisperConnector:
         tried: list[Path] = []
 
         # 1. Config override via environment variable
-        from open_brain.config import get_config
         config = get_config()
         if config.MACWHISPER_HISTORY_PATH:
             override = Path(config.MACWHISPER_HISTORY_PATH)
             if override.exists():
                 self._cached_path = override
                 return override
-            # If override is set but doesn't exist, still respect it as a signal
-            # but continue looking (don't add to tried yet — user explicitly set it)
+            # If override is set but doesn't exist, add to tried and fall through
             tried.append(override)
 
         # 2 & 3. Standard candidate paths
@@ -183,7 +174,7 @@ class MacWhisperConnector:
                 return candidate
             tried.append(candidate)
 
-        # 4. Try mw CLI to get a hint from stderr
+        # 4. Try mw CLI to get a hint from stdout+stderr
         mw_path = self._try_mw_cli_path()
         if mw_path is not None and mw_path.exists():
             self._cached_path = mw_path
@@ -194,35 +185,48 @@ class MacWhisperConnector:
         raise MacWhisperNotFoundError(tried_paths=tried)
 
     def _try_mw_cli_path(self) -> Path | None:
-        """Try to discover history path by running the mw CLI and parsing stderr.
+        """Try to discover history path by running the mw CLI and parsing stdout+stderr.
+
+        Uses safe introspection commands (--help or --version) rather than
+        production commands.
 
         Returns:
             Discovered path or None if not found.
         """
         try:
-            returncode, stdout, stderr = self._runner.run(
-                ["mw", "transcribe", "--persist"]
-            )
-            # Parse stderr for path hints
-            for line in (stdout + "\n" + stderr).splitlines():
-                line = line.strip()
+            returncode, stdout, stderr = self._runner.run(["mw", "--help"])
+            # Parse stdout+stderr for path hints
+            for raw_line in (stdout + "\n" + stderr).splitlines():
+                line = raw_line.strip()
                 if "MacWhisper" in line and "/" in line:
                     # Look for path-like tokens
                     for token in line.split():
                         if token.startswith("/") and "MacWhisper" in token:
                             return Path(token)
         except Exception as exc:
-            logger.debug("mw CLI path discovery failed: %s", exc)
+            logger.debug("mw --help path discovery failed: %s", exc)
+
+        try:
+            returncode, stdout, stderr = self._runner.run(["mw", "--version"])
+            for raw_line in (stdout + "\n" + stderr).splitlines():
+                line = raw_line.strip()
+                if "MacWhisper" in line and "/" in line:
+                    for token in line.split():
+                        if token.startswith("/") and "MacWhisper" in token:
+                            return Path(token)
+        except Exception as exc:
+            logger.debug("mw --version path discovery failed: %s", exc)
+
         return None
 
-    def list_recent(self, n: int = 10) -> list[TranscriptRef]:
-        """List the most recent n transcript entries.
+    def list_recent(self, limit: int = 10) -> list[TranscriptRef]:
+        """List the most recent limit transcript entries.
 
         Reads JSON files from the history directory, sorted by created_at
         descending.
 
         Args:
-            n: Maximum number of entries to return.
+            limit: Maximum number of entries to return.
 
         Returns:
             List of TranscriptRef objects, newest first.
@@ -235,14 +239,14 @@ class MacWhisperConnector:
 
         for json_file in history_dir.glob("*.json"):
             try:
-                data = json.loads(json_file.read_text())
+                data = json.loads(json_file.read_text(encoding="utf-8"))
                 entries.append(data)
-            except Exception as exc:
+            except (json.JSONDecodeError, OSError) as exc:
                 logger.warning("Failed to parse %s: %s", json_file, exc)
 
         # Sort by created_at descending (newest first)
         entries.sort(key=lambda e: e.get("created_at", ""), reverse=True)
-        entries = entries[:n]
+        entries = entries[:limit]
 
         return [
             TranscriptRef(
@@ -274,7 +278,7 @@ class MacWhisperConnector:
                 f"MacWhisper entry not found: {entry_path}"
             )
 
-        data = json.loads(entry_path.read_text())
+        data = json.loads(entry_path.read_text(encoding="utf-8"))
         text = data.get("text", "")
         metadata = {k: v for k, v in data.items() if k != "text"}
         return text, metadata
@@ -295,7 +299,6 @@ class MacWhisperConnector:
             FileNotFoundError: If the entry does not exist.
             MacWhisperNotFoundError: If the history directory cannot be found.
         """
-        text, _ = self.read_entry(entry_id)
+        text, meta = self.read_entry(entry_id)
         source_ref = f"macwhisper:{entry_id}"
-        ingestor = TranscriptIngestor(data_layer=self._dl)
-        return await ingestor.ingest(text, source_ref, medium_hint="macwhisper")
+        return await self._ingestor.ingest(text, source_ref, medium_hint=meta.get("medium"))

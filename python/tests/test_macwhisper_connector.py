@@ -5,24 +5,27 @@ Acceptance criteria covered:
 2. test_discover_history_path_finds_app_support_path — container missing, app support exists → finds it
 3. test_discover_history_path_config_override — MACWHISPER_HISTORY_PATH set → uses it
 4. test_discover_history_path_no_macwhisper_raises — no paths exist, mw fails → MacWhisperNotFoundError
+4b. test_discover_history_path_mw_cli_fallback — mw --help reports a path, fake fs has it → finds it
 5. test_list_recent_returns_entries — fake fs with 3 JSON files → list_recent(3) returns 3 refs
 6. test_list_recent_empty_dir — empty dir → returns []
-7. test_ingest_entry_delegates_to_transcript_ingestor — mock TranscriptIngestor → verifies delegation
+7. test_ingest_entry_delegates_to_transcript_ingestor — injected ingestor → verifies delegation
+8. test_ingest_entry_idempotency — calling ingest_entry twice uses same source_ref format
 """
 
 import json
 import os
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from open_brain.data_layer.interface import DataLayer
 from open_brain.ingest.adapters.macwhisper import (
     MacWhisperConnector,
     MacWhisperNotFoundError,
-    MockCommandRunner,
     TranscriptRef,
 )
+from tests._fakes import MockCommandRunner
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -41,23 +44,26 @@ SAMPLE_ENTRY = {
 
 
 def _make_data_layer() -> MagicMock:
-    """Return a minimal mock DataLayer."""
-    dl = MagicMock()
-    return dl
+    """Return a minimal mock DataLayer with spec."""
+    return MagicMock(spec=DataLayer)
 
 
 def _make_connector(
     *,
     history_path: str = "",
     command_runner=None,
+    ingestor=None,
 ) -> MacWhisperConnector:
     """Build a MacWhisperConnector with test defaults."""
     dl = _make_data_layer()
     runner = command_runner or MockCommandRunner(default=(1, "", "mw not found"))
-    with patch.dict(os.environ, {"MACWHISPER_HISTORY_PATH": history_path}):
+    with __import__("unittest.mock", fromlist=["patch"]).patch.dict(
+        os.environ, {"MACWHISPER_HISTORY_PATH": history_path}
+    ):
         return MacWhisperConnector(
             data_layer=dl,
             command_runner=runner,
+            ingestor=ingestor,
             skip_platform_check=True,
         )
 
@@ -96,7 +102,9 @@ class TestDiscoverHistoryPathConfigOverride:
         fs.create_dir(str(custom_path))
         dl = _make_data_layer()
         runner = MockCommandRunner(default=(1, "", ""))
-        with patch.dict(os.environ, {"MACWHISPER_HISTORY_PATH": str(custom_path)}):
+        with __import__("unittest.mock", fromlist=["patch"]).patch.dict(
+            os.environ, {"MACWHISPER_HISTORY_PATH": str(custom_path)}
+        ):
             connector = MacWhisperConnector(
                 data_layer=dl,
                 command_runner=runner,
@@ -123,6 +131,27 @@ class TestDiscoverHistoryPathNoMacWhisperRaises:
         assert APP_SUPPORT_PATH in error.tried_paths
 
 
+# ─── AC4b: discover_history_path — mw CLI fallback ───────────────────────────
+
+
+class TestDiscoverHistoryPathMwCliFallback:
+    def test_discover_history_path_mw_cli_fallback(self, fs):
+        """AK4: mw --help reports path in stdout/stderr and the path exists → found."""
+        custom_path = Path("/tmp/CustomMW/MacWhisper")
+        fs.create_dir(str(custom_path))
+
+        # mw --help returns persist dir info on stderr
+        runner = MockCommandRunner(
+            responses={
+                "mw --help": (0, "", f"Persist dir: {custom_path}\n"),
+            },
+            default=(1, "", ""),
+        )
+        connector = _make_connector(command_runner=runner)
+        result = connector.discover_history_path()
+        assert result == custom_path
+
+
 # ─── AC2 (list_recent): returns entries ──────────────────────────────────────
 
 
@@ -139,7 +168,7 @@ class TestListRecentReturnsEntries:
             fs.create_file(str(path), contents=json.dumps(entry))
 
         connector = _make_connector()
-        results = connector.list_recent(3)
+        results = connector.list_recent(limit=3)
 
         assert len(results) == 3
         assert all(isinstance(r, TranscriptRef) for r in results)
@@ -161,33 +190,48 @@ class TestListRecentEmptyDir:
 
 class TestIngestEntryDelegates:
     async def test_ingest_entry_delegates_to_transcript_ingestor(self, fs):
-        """AC3 (ingest_entry): ingest_entry calls TranscriptIngestor.ingest with correct args."""
+        """AC3 (ingest_entry): ingest_entry calls injected TranscriptIngestor.ingest with correct args."""
         fs.create_dir(str(APP_SUPPORT_PATH))
         entry_path = APP_SUPPORT_PATH / f"{SAMPLE_ENTRY['id']}.json"
         fs.create_file(str(entry_path), contents=json.dumps(SAMPLE_ENTRY))
 
-        dl = _make_data_layer()
-        runner = MockCommandRunner(default=(1, "", ""))
-
         mock_result = MagicMock()
-        mock_ingest = AsyncMock(return_value=mock_result)
+        mock_ingestor = MagicMock()
+        mock_ingestor.ingest = AsyncMock(return_value=mock_result)
 
-        with patch("open_brain.ingest.adapters.macwhisper.TranscriptIngestor") as mock_cls:
-            mock_instance = MagicMock()
-            mock_instance.ingest = mock_ingest
-            mock_cls.return_value = mock_instance
+        connector = _make_connector(ingestor=mock_ingestor)
+        result = await connector.ingest_entry(SAMPLE_ENTRY["id"])
 
-            connector = MacWhisperConnector(
-                data_layer=dl,
-                command_runner=runner,
-                skip_platform_check=True,
-            )
-            result = await connector.ingest_entry(SAMPLE_ENTRY["id"])
-
-        mock_cls.assert_called_once_with(data_layer=dl)
-        mock_ingest.assert_called_once_with(
+        mock_ingestor.ingest.assert_called_once_with(
             SAMPLE_ENTRY["text"],
             f"macwhisper:{SAMPLE_ENTRY['id']}",
-            medium_hint="macwhisper",
+            medium_hint=None,  # SAMPLE_ENTRY has no "medium" field
         )
         assert result is mock_result
+
+
+# ─── AC (idempotency): same source_ref format used on repeated calls ──────────
+
+
+class TestIngestEntryIdempotency:
+    async def test_ingest_entry_idempotency(self, fs):
+        """Calling ingest_entry twice with the same entry_id uses consistent source_ref."""
+        fs.create_dir(str(APP_SUPPORT_PATH))
+        entry_path = APP_SUPPORT_PATH / f"{SAMPLE_ENTRY['id']}.json"
+        fs.create_file(str(entry_path), contents=json.dumps(SAMPLE_ENTRY))
+
+        mock_result = MagicMock()
+        mock_ingestor = MagicMock()
+        mock_ingestor.ingest = AsyncMock(return_value=mock_result)
+
+        connector = _make_connector(ingestor=mock_ingestor)
+
+        await connector.ingest_entry(SAMPLE_ENTRY["id"])
+        await connector.ingest_entry(SAMPLE_ENTRY["id"])
+
+        assert mock_ingestor.ingest.call_count == 2
+        calls = mock_ingestor.ingest.call_args_list
+        # Both calls must use the same source_ref format: macwhisper:{entry_id}
+        expected_source_ref = f"macwhisper:{SAMPLE_ENTRY['id']}"
+        assert calls[0].args[1] == expected_source_ref
+        assert calls[1].args[1] == expected_source_ref
