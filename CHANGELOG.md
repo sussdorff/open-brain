@@ -35,6 +35,10 @@ All notable changes to this project will be documented in this file.
 
 - *(cr3.13)* Green — ingest run IDs + delete-by-source rollback
 
+### Documentation
+
+- *(open-brain-cr3.17)* Add people-aware-memory.md hub: ASCII diagram, feature/ADR cross-links, contributor guide
+
 ### Miscellaneous
 
 - *(open-brain-cr3.13)* Update changelog for ingest run IDs + delete-by-source rollback release
