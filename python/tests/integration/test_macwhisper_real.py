@@ -11,6 +11,7 @@ Observed sandbox path on Malte's dev machine:
 (as of 2026-04-25). Update this docstring and related ADRs if the path changes.
 """
 
+import os
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -27,7 +28,7 @@ from open_brain.ingest.models import IngestResult
 _MACWHISPER_APP = Path("/Applications/MacWhisper.app")
 
 _SKIP_REASON = "MacWhisper not installed or not running on macOS"
-_SKIP_CONDITION = sys.platform != "darwin" or not _MACWHISPER_APP.exists()
+_SKIP_CONDITION = sys.platform != "darwin" or not _MACWHISPER_APP.exists() or bool(os.environ.get("CI"))
 
 
 @pytest.mark.integration
