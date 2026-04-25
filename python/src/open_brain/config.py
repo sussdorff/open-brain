@@ -29,6 +29,10 @@ class Config(BaseSettings):
     # API key auth for plugin hooks (comma-separated list of valid keys)
     API_KEYS: str = ""
 
+    # Optional override for MacWhisper history directory path.
+    # If empty, MacWhisperConnector auto-discovers the path.
+    MACWHISPER_HISTORY_PATH: str = ""
+
     # Daily ingestion guard: reject save_memory calls beyond this threshold per day
     MAX_MEMORIES_PER_DAY: int = 500
 
