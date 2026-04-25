@@ -256,6 +256,7 @@ class IMAPEmailIngestor:
         cls,
         data_layer: DataLayer,
         runner: CommandRunner | None = None,
+        password_op_ref_override: str | None = None,
     ) -> "IMAPEmailIngestor":
         """Construct an IMAPEmailIngestor from application config.
 
@@ -267,6 +268,9 @@ class IMAPEmailIngestor:
         Args:
             data_layer: DataLayer implementation for persistence.
             runner: Optional CommandRunner override. Defaults to SubprocessCommandRunner.
+            password_op_ref_override: Optional 1Password op:// reference to override
+                the config value IMAP_PASSWORD_OP. Useful when the caller provides
+                a custom credential reference (e.g. from the MCP tool config_ref param).
 
         Returns:
             A fully configured IMAPEmailIngestor instance.
@@ -277,7 +281,7 @@ class IMAPEmailIngestor:
             server=cfg.IMAP_SERVER,
             port=cfg.IMAP_PORT,
             user=cfg.IMAP_USER,
-            password_op_ref=cfg.IMAP_PASSWORD_OP,
+            password_op_ref=password_op_ref_override or cfg.IMAP_PASSWORD_OP,
             runner=runner,
             store_raw_bodies=cfg.EMAIL_STORE_RAW_BODIES,
             extraction_model=cfg.EMAIL_EXTRACTION_MODEL,
@@ -492,6 +496,7 @@ class IMAPEmailIngestor:
             client.select_folder(self._folder)
             fetch_data = client.fetch(uids, [b"RFC822"])
 
+        skipped_count = 0
         for uid in uids:
             uid_data = fetch_data.get(uid) or {}
             raw = uid_data.get(b"RFC822")
@@ -499,19 +504,64 @@ class IMAPEmailIngestor:
                 logger.warning("No RFC822 data for UID %d — skipping", uid)
                 continue
 
-            await self._ingest_single_email(
+            is_new = await self._ingest_single_email(
                 uid=uid,
                 raw=raw,
                 person_memory_id=person_memory_id,
                 interaction_memory_ids=interaction_memory_ids,
             )
+            if not is_new:
+                skipped_count += 1
 
         person_ids = [person_memory_id] if person_memory_id is not None else []
         return IngestResult(
             meeting_memory_id=0,
             person_memory_ids=person_ids,
             interaction_memory_ids=interaction_memory_ids,
+            skipped_count=skipped_count,
         )
+
+    async def ingest_inbox(self, max_messages: int = 50) -> tuple[int, int]:
+        """Ingest the most recent N emails from the configured IMAP folder (INBOX by default).
+
+        Connects to the IMAP server, searches for all messages, takes the
+        last `max_messages` UIDs (sorted ascending → most recent are highest),
+        then delegates to ingest_uids() for fetching and ingesting.
+
+        Args:
+            max_messages: Maximum number of emails to fetch (default 50).
+                Pass 0 to skip entirely and return (0, 0).
+
+        Returns:
+            Tuple of (ingested_count, skipped_count) where:
+            - ingested_count: number of newly saved memories
+            - skipped_count: number of already-existing memories (idempotency hits)
+        """
+        if max_messages == 0:
+            return (0, 0)
+
+        if IMAPClient is None:  # pragma: no cover
+            raise ImportError(
+                "imapclient is required for email ingestion. "
+                "Install it with: pip install imapclient"
+            )
+
+        password = self._fetch_password()
+
+        with IMAPClient(host=self._server, port=self._port, ssl=True) as client:
+            client.login(self._user, password)
+            client.select_folder(self._folder)
+            all_uids = client.search(["ALL"])
+
+        # Take the most recent N UIDs (UIDs are in ascending order; highest = newest)
+        uids = sorted(all_uids)[-max_messages:]
+
+        if not uids:
+            return (0, 0)
+
+        result = await self.ingest_uids(uids=uids)
+        ingested = len(result.interaction_memory_ids) - result.skipped_count
+        return (ingested, result.skipped_count)
 
     async def _ingest_single_email(
         self,
@@ -519,10 +569,13 @@ class IMAPEmailIngestor:
         raw: bytes,
         person_memory_id: int | None,
         interaction_memory_ids: list[int],
-    ) -> None:
+    ) -> bool:
         """Ingest a single email by UID.
 
         Checks idempotency before saving. Updates interaction_memory_ids in-place.
+
+        Returns:
+            True if the email was newly ingested, False if it was skipped (already exists).
         """
         source_ref = f"imap:{self._server}:{uid}"
 
@@ -537,7 +590,7 @@ class IMAPEmailIngestor:
         if existing.results:
             logger.debug("Skipping UID %d — already ingested as source_ref=%r", uid, source_ref)
             interaction_memory_ids.append(existing.results[0].id)
-            return
+            return False
 
         # Parse email
         subject, date_raw, from_addr, body = _parse_rfc822(raw)
@@ -589,6 +642,7 @@ class IMAPEmailIngestor:
             source_ref,
             save_result.id,
         )
+        return True
 
     async def _extract_summary(
         self,
