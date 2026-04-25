@@ -718,6 +718,113 @@ class TestIngestUids:
         assert len(result.interaction_memory_ids) == 2
 
 
+# ─── REGRESSION: BEFORE date is until+1 (inclusive upper bound) ──────────────
+
+
+class TestBeforeDateInclusive:
+    """REGRESSION: IMAP BEFORE is exclusive — until must be shifted +1 day."""
+
+    async def test_until_date_before_criterion_is_plus_one_day(self):
+        """When until=date(2026,4,25) is passed, BEFORE criterion is date(2026,4,26)."""
+        from datetime import date as date_type
+        from open_brain.ingest.adapters.email_imap import IMAPEmailIngestor, CommandRunner
+
+        mock_runner = MagicMock(spec=CommandRunner)
+        mock_runner.run.return_value = "pw"
+
+        person_mem = _make_person_memory(id=5, email_addresses=["alice@example.com"])
+
+        mock_imap = _make_mock_imap(search_result=[])
+        mock_dl = AsyncMock()
+        mock_dl.search.return_value = SearchResult(results=[person_mem], total=1)
+
+        with patch("open_brain.ingest.adapters.email_imap.IMAPClient") as mock_cls:
+            mock_cls.return_value.__enter__ = MagicMock(return_value=mock_imap)
+            mock_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+            ingestor = IMAPEmailIngestor(
+                data_layer=mock_dl,
+                server="mail.example.com",
+                port=993,
+                user="me@example.com",
+                password_op_ref="op://Private/email/app-password",
+                runner=mock_runner,
+            )
+            await ingestor.list_for_person(
+                person_memory_id=5,
+                until=date_type(2026, 4, 25),
+            )
+
+        # Extract the criteria passed to imapclient.search
+        assert mock_imap.search.called
+        criteria = mock_imap.search.call_args[0][0]
+        criteria_str = str(criteria)
+
+        # BEFORE must use until+1 day (2026-04-26), not the original date (2026-04-25).
+        # The criteria is a nested list structure; find the BEFORE sub-list.
+        before_entry = None
+        for item in criteria:
+            if isinstance(item, list) and len(item) == 2 and item[0] == "BEFORE":
+                before_entry = item
+                break
+        assert before_entry is not None, f"No BEFORE entry found in criteria: {criteria}"
+        expected_before = date_type(2026, 4, 26)
+        assert before_entry[1] == expected_before, (
+            f"BEFORE date must be until+1 ({expected_before}), got: {before_entry[1]}"
+        )
+
+
+# ─── REGRESSION: from_config wires EMAIL_STORE_RAW_BODIES from Config ────────
+
+
+class TestFromConfig:
+    """REGRESSION: IMAPEmailIngestor.from_config reads config fields correctly."""
+
+    def test_from_config_reads_email_store_raw_bodies(self):
+        """from_config constructs ingestor with store_raw_bodies from config."""
+        from unittest.mock import patch as _patch
+        from open_brain.ingest.adapters.email_imap import IMAPEmailIngestor
+
+        mock_dl = AsyncMock()
+
+        with _patch("open_brain.ingest.adapters.email_imap.get_config") as mock_cfg:
+            cfg = MagicMock()
+            cfg.IMAP_SERVER = "imap.example.com"
+            cfg.IMAP_PORT = 993
+            cfg.IMAP_USER = "user@example.com"
+            cfg.IMAP_PASSWORD_OP = "op://Private/mail/pw"
+            cfg.EMAIL_STORE_RAW_BODIES = True
+            cfg.EMAIL_EXTRACTION_MODEL = "claude-haiku-4-5-20251001"
+            mock_cfg.return_value = cfg
+
+            ingestor = IMAPEmailIngestor.from_config(data_layer=mock_dl)
+
+        assert ingestor._store_raw_bodies is True
+        assert ingestor._server == "imap.example.com"
+        assert ingestor._user == "user@example.com"
+
+    def test_from_config_store_raw_bodies_false_by_default(self):
+        """from_config with EMAIL_STORE_RAW_BODIES=False passes False to constructor."""
+        from unittest.mock import patch as _patch
+        from open_brain.ingest.adapters.email_imap import IMAPEmailIngestor
+
+        mock_dl = AsyncMock()
+
+        with _patch("open_brain.ingest.adapters.email_imap.get_config") as mock_cfg:
+            cfg = MagicMock()
+            cfg.IMAP_SERVER = "mail.example.com"
+            cfg.IMAP_PORT = 993
+            cfg.IMAP_USER = "me@example.com"
+            cfg.IMAP_PASSWORD_OP = "op://Private/email/app-password"
+            cfg.EMAIL_STORE_RAW_BODIES = False
+            cfg.EMAIL_EXTRACTION_MODEL = "claude-haiku-4-5-20251001"
+            mock_cfg.return_value = cfg
+
+            ingestor = IMAPEmailIngestor.from_config(data_layer=mock_dl)
+
+        assert ingestor._store_raw_bodies is False
+
+
 # ─── MessageRef dataclass smoke test ─────────────────────────────────────────
 
 

@@ -21,16 +21,17 @@ import logging
 import re
 import subprocess
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from email.header import decode_header
 from typing import Any, Protocol
 
+from open_brain.config import get_config
 from open_brain.data_layer.interface import DataLayer, SaveMemoryParams, SearchParams
 from open_brain.data_layer.llm import LlmMessage, llm_complete
 from open_brain.ingest.models import IngestResult
 
 try:
-    from imapclient import IMAPClient
+    from imapclient import IMAPClient  # type: ignore[import-untyped]
 except ImportError:  # pragma: no cover
     IMAPClient = None  # type: ignore[assignment,misc]
 
@@ -250,6 +251,38 @@ class IMAPEmailIngestor:
         self._extraction_model = extraction_model
         self._folder = folder
 
+    @classmethod
+    def from_config(
+        cls,
+        data_layer: DataLayer,
+        runner: CommandRunner | None = None,
+    ) -> "IMAPEmailIngestor":
+        """Construct an IMAPEmailIngestor from application config.
+
+        Reads IMAP_SERVER, IMAP_PORT, IMAP_USER, IMAP_PASSWORD_OP,
+        EMAIL_STORE_RAW_BODIES, and EMAIL_EXTRACTION_MODEL from Config.
+        This is the canonical wiring point — callers in server.py should
+        use this factory rather than constructing with hard-coded defaults.
+
+        Args:
+            data_layer: DataLayer implementation for persistence.
+            runner: Optional CommandRunner override. Defaults to SubprocessCommandRunner.
+
+        Returns:
+            A fully configured IMAPEmailIngestor instance.
+        """
+        cfg = get_config()
+        return cls(
+            data_layer=data_layer,
+            server=cfg.IMAP_SERVER,
+            port=cfg.IMAP_PORT,
+            user=cfg.IMAP_USER,
+            password_op_ref=cfg.IMAP_PASSWORD_OP,
+            runner=runner,
+            store_raw_bodies=cfg.EMAIL_STORE_RAW_BODIES,
+            extraction_model=cfg.EMAIL_EXTRACTION_MODEL,
+        )
+
     def _fetch_password(self) -> str:
         """Fetch the IMAP password via the CommandRunner. Never logged."""
         password = self._runner.run(self._password_op_ref)
@@ -280,10 +313,17 @@ class IMAPEmailIngestor:
         password = self._fetch_password()
         criteria = _build_imap_search_criteria(email_addresses, since)
         if until:
-            if isinstance(criteria, list) and criteria:
-                criteria = [["BEFORE", until], criteria]
+            # IMAP BEFORE is exclusive: "BEFORE date" matches messages BEFORE that date.
+            # To make `until` inclusive (messages on that date are included), add 1 day.
+            if isinstance(until, date):
+                before_date: date | str = until + timedelta(days=1)
             else:
-                criteria = [["BEFORE", until]]
+                # String form: caller is responsible for correct value; pass through as-is.
+                before_date = until
+            if isinstance(criteria, list) and criteria:
+                criteria = [["BEFORE", before_date], criteria]
+            else:
+                criteria = [["BEFORE", before_date]]
 
         with IMAPClient(host=self._server, port=self._port, ssl=True) as client:
             client.login(self._user, password)
