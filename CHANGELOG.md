@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(open-brain-va9)* Pass run_id through ingest(); extract entry_id from TranscriptRef
+
+### Miscellaneous
+
+- *(open-brain-va9)* Register MacWhisperConnector in ADAPTERS — add name attr, Protocol methods, test
+- *(open-brain-va9)* Register MacWhisperConnector in ADAPTERS per ADR-0001
+
+## [0.22.1] - 2026-04-25
+
+### Bug Fixes
+
+- *(open-brain-672)* Address review findings — dict[str,str] type, tautological assertion, docstring clarity
+
+### Miscellaneous
+
+- Bump version to 0.22.1
+
+## [0.23.0] - 2026-04-25
+
+### Miscellaneous
+
+- Bump version to 0.23.0
+
+## [2026.04.24] - 2026-04-25
+
+### Miscellaneous
+
+- Bump version to 0.22.0
+
+## [0.21.1] - 2026-04-25
+
+### Miscellaneous
+
+- Bump version to 0.21.1
+
+## [0.22.0] - 2026-04-25
+
+### Bug Fixes
+
 - *(open-brain-672)* Remove credentials() from Protocol (optional per ADR-0001), clarify registry note
 - *(open-brain-672)* Correct register() docstring — registrations are not automatic
 - *(open-brain-353)* Address review findings iteration 1
@@ -13,11 +52,18 @@ All notable changes to this project will be documented in this file.
 
 ### Documentation
 
+- *(open-brain-672)* Update changelog for Protocol reconciliation
 - *(open-brain-353)* Add changelog entry for email ingest CLI/MCP tool
 
 ### Features
 
 - *(open-brain-353)* Green — wire IMAPEmailIngestor into CLI + MCP tool
+- *(open-brain-353)* Wire IMAPEmailIngestor into CLI and MCP tool
+
+### Miscellaneous
+
+- *(open-brain-bbt)* Upgrade Python dependencies — resolve pytest CVE-2025-71176
+- Bump version to 0.22.0
 
 ### Refactoring
 
@@ -26,6 +72,7 @@ All notable changes to this project will be documented in this file.
 ### Testing
 
 - *(open-brain-p6e)* Add real-device integration tests for MacWhisperConnector
+- *(open-brain-p6e)* Add MacWhisperConnector integration tests with CI guards
 
 ## [2026.04.23] - 2026-04-25
 
