@@ -351,6 +351,9 @@ class TranscriptIngestor:
         metrics.record_dedup_decision(decision.action)
 
         if decision.action == "llm_confirm":
+            # Records that this dedup decision required LLM assistance (the LLM call is
+            # made internally by match_person). This tracks LLM-assisted dedup decisions,
+            # not a direct LLM call from the adapter.
             metrics.record_llm_call("dedup_confirm")
 
         if decision.action == "auto_merge" and decision.target is not None:

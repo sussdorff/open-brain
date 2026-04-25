@@ -555,7 +555,13 @@ async def stats() -> str:
 
 @mcp.tool(description="Get ingest observability stats: counters for ingests, LLM calls, dedup decisions, relationships, memories written, and ingest durations.")
 async def people_ingest_stats() -> str:
-    """Return in-process ingest metrics for all six metric families."""
+    """Return in-process ingest metrics for all six metric families.
+
+    Returns a JSON-encoded IngestStats dict (pretty-printed, indent=2) with keys:
+    ingests_total, llm_calls_total, dedup_decisions_total, relationships_written_total,
+    memories_written_total, ingest_duration_seconds — each mapping label→count/list.
+    MCP tools always return strings; callers should json.loads() to get the structured dict.
+    """
     return json.dumps(asdict(ingest_metrics.get_stats()), indent=2)
 
 

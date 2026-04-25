@@ -34,7 +34,15 @@ def record_ingest(adapter: str) -> None:
 
 
 def record_llm_call(purpose: str) -> None:
-    """Increment llm_calls_total for the given purpose (extract|dedup_confirm|relationship_classify)."""
+    """Increment llm_calls_total for the given purpose.
+
+    Known purposes:
+    - "extract": LLM call for metadata extraction during ingest.
+    - "dedup_confirm": Dedup decision that required LLM assistance (the actual LLM call
+      is made internally by match_person; this counter tracks LLM-assisted dedup
+      decisions, not a direct call from the caller).
+    - "relationship_classify": LLM call for relationship classification.
+    """
     with _lock:
         _llm_calls_total[purpose] += 1
 
