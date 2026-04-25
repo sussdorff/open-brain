@@ -24,3 +24,4 @@ class IngestResult:
     relationship_ids: list[int] = field(default_factory=list)
     follow_up_candidates: list[dict] = field(default_factory=list)
     run_id: str = ""
+    skipped_count: int = 0

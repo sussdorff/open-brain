@@ -7,10 +7,25 @@ All notable changes to this project will be documented in this file.
 
 - *(open-brain-672)* Remove credentials() from Protocol (optional per ADR-0001), clarify registry note
 - *(open-brain-672)* Correct register() docstring — registrations are not automatic
+- *(open-brain-353)* Address review findings iteration 1
+- *(open-brain-353)* Address codex adversarial findings
+- *(open-brain-p6e)* Skip integration tests in CI environments
+
+### Documentation
+
+- *(open-brain-353)* Add changelog entry for email ingest CLI/MCP tool
+
+### Features
+
+- *(open-brain-353)* Green — wire IMAPEmailIngestor into CLI + MCP tool
 
 ### Refactoring
 
 - *(open-brain-672)* Reconcile IngestAdapter Protocol with ADR-0001 and add ADAPTERS registry
+
+### Testing
+
+- *(open-brain-p6e)* Add real-device integration tests for MacWhisperConnector
 
 ## [2026.04.23] - 2026-04-25
 

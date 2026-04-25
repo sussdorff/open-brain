@@ -933,6 +933,47 @@ async def ingest_rollback(run_id: str) -> str:
     })
 
 
+@mcp.tool(
+    description=(
+        "Ingest emails from an IMAP inbox into open-brain memory. "
+        "Fetches the most recent `max_messages` emails, stores each as an interaction memory, "
+        "and returns a summary of ingested vs skipped (already-ingested) messages. "
+        "run_id is auto-injected via the ingest_run context manager so all memories "
+        "from this call share the same run_id (use ingest_rollback to undo). "
+        "Credentials are resolved via 1Password CLI using config_ref as the op:// reference. "
+        "Params: config_ref (str, required — 1Password op:// reference for IMAP password), "
+        "max_messages (int, optional, default 50)."
+    )
+)
+async def ingest_email_inbox(config_ref: str, max_messages: int = 50) -> str:
+    """Ingest IMAP inbox emails and return a summary as JSON.
+
+    Returns JSON with keys: ingested (int), skipped (int), run_id (str | None).
+    """
+    if not config_ref or not config_ref.strip():
+        raise ValueError("config_ref must be a non-empty 1Password op:// reference")
+
+    if max_messages < 0:
+        raise ValueError("max_messages must be >= 0")
+
+    if max_messages == 0:
+        return json.dumps({"ingested": 0, "skipped": 0, "run_id": None})
+
+    from open_brain.ingest.adapters.email_imap import IMAPEmailIngestor
+    from open_brain.ingest.runs import ingest_run
+
+    dl = get_dl()
+    ingestor = IMAPEmailIngestor.from_config(
+        data_layer=dl,
+        password_op_ref_override=config_ref,
+    )
+
+    with ingest_run() as run_id:
+        ingested, skipped = await ingestor.ingest_inbox(max_messages=max_messages)
+
+    return json.dumps({"ingested": ingested, "skipped": skipped, "run_id": run_id})
+
+
 # ─── FastAPI App ──────────────────────────────────────────────────────────────
 
 # Build the MCP sub-app first so session_manager is available

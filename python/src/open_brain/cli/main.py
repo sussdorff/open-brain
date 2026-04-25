@@ -173,6 +173,37 @@ async def _cmd_update(args: argparse.Namespace) -> Any:
     return await call_tool("update_memory", kwargs)
 
 
+async def _cmd_ingest_email(args: argparse.Namespace) -> Any:
+    """Ingest emails from an IMAP inbox.
+
+    Args:
+        args: Parsed CLI arguments. Must have 'config' (op:// reference)
+            and 'max_messages' (int).
+
+    Returns:
+        Ingest summary from MCP tool: {"ingested": N, "skipped": M, "run_id": "..."}.
+    """
+    kwargs: dict[str, Any] = {
+        "config_ref": args.config,
+        "max_messages": args.max_messages,
+    }
+    return await call_tool("ingest_email_inbox", kwargs)
+
+
+async def _cmd_ingest(args: argparse.Namespace) -> Any:
+    """Dispatch ingest subcommands.
+
+    Args:
+        args: Parsed CLI arguments. Must have 'ingest_command' set by argparse.
+
+    Returns:
+        Result from the dispatched ingest subcommand.
+    """
+    if args.ingest_command == "email":
+        return await _cmd_ingest_email(args)
+    raise ValueError(f"Unknown ingest command: {args.ingest_command}")
+
+
 def _build_parser() -> argparse.ArgumentParser:
     """Build the CLI argument parser.
 
@@ -274,6 +305,33 @@ def _build_parser() -> argparse.ArgumentParser:
     p_update.add_argument("--project", help="New project")
     p_update.add_argument("--title", help="New title")
 
+    # ingest
+    p_ingest = subparsers.add_parser(
+        "ingest",
+        help="Ingest data from external sources",
+    )
+    ingest_sub = p_ingest.add_subparsers(dest="ingest_command", metavar="SOURCE")
+    ingest_sub.required = True
+
+    # ingest email
+    p_ingest_email = ingest_sub.add_parser(
+        "email",
+        help="Ingest emails from an IMAP inbox",
+    )
+    p_ingest_email.add_argument(
+        "--config",
+        required=True,
+        metavar="OP_REF",
+        help="1Password op:// reference for IMAP app password",
+    )
+    p_ingest_email.add_argument(
+        "--max-messages",
+        type=int,
+        default=50,
+        dest="max_messages",
+        help="Maximum number of emails to fetch (default: 50)",
+    )
+
     return parser
 
 
@@ -286,6 +344,7 @@ _COMMAND_MAP = {
     "context": _cmd_context,
     "stats": _cmd_stats,
     "update": _cmd_update,
+    "ingest": _cmd_ingest,
 }
 
 

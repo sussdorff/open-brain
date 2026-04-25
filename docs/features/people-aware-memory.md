@@ -99,6 +99,99 @@ to the system or want to understand how person-centric data flows through the st
 
 ---
 
+## Email Ingest CLI / MCP Tool
+
+The `ingest_email_inbox` MCP tool and `ob ingest email` CLI command let you pull emails
+directly from an IMAP inbox into open-brain memory.
+
+### MCP Tool: `ingest_email_inbox`
+
+Registers as a standard MCP tool on the server. Fetches the most recent N emails from
+the configured IMAP INBOX, saves each as an `interaction` memory (with idempotency),
+and returns a run summary.
+
+```
+ingest_email_inbox(
+    config_ref: str,       # 1Password op:// reference for the IMAP password
+    max_messages: int = 50 # How many recent emails to process (default 50)
+) -> JSON
+```
+
+**Response:**
+```json
+{
+  "ingested": 12,
+  "skipped": 3,
+  "run_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+- `ingested`: number of newly saved memories
+- `skipped`: emails already ingested (idempotency hits)
+- `run_id`: use with `ingest_rollback(run_id=...)` to undo the entire batch
+
+**Example (in Claude):**
+```
+ingest_email_inbox(
+    config_ref="op://Private/email-account/app-password",
+    max_messages=100
+)
+```
+
+### CLI Command: `ob ingest email`
+
+```bash
+ob ingest email --config <OP_REF> [--max-messages <N>]
+```
+
+**Arguments:**
+- `--config OP_REF` (required): 1Password op:// reference for the IMAP password
+- `--max-messages N` (optional, default 50): how many recent emails to process
+- `--pretty` (global flag): pretty-print the JSON output
+
+**Examples:**
+```bash
+# Ingest the last 50 emails (default)
+ob ingest email --config "op://Private/email-account/app-password"
+
+# Ingest the last 200 emails with pretty output
+ob --pretty ingest email --config "op://Private/email-account/app-password" \
+    --max-messages 200
+```
+
+**Output:**
+```json
+{
+  "ingested": 15,
+  "skipped": 5,
+  "run_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+### How It Works
+
+1. Connects to the IMAP server using credentials from the 1Password op:// reference.
+2. Lists all UIDs in INBOX, takes the `max_messages` most recent.
+3. For each UID: checks if `source_ref=imap:{server}:{uid}` already exists (idempotency).
+4. New emails are summarized via Claude Haiku 4.5 (or stored raw if `EMAIL_STORE_RAW_BODIES=true`).
+5. Each email is saved as an `interaction` memory in the `people` project.
+6. All memories share the same `run_id` (auto-injected via `ingest_run` context manager).
+
+### Configuration
+
+The following environment variables control IMAP behavior:
+
+| Variable | Description |
+|----------|-------------|
+| `IMAP_SERVER` | IMAP hostname (e.g. `imap.gmail.com`) |
+| `IMAP_PORT` | IMAP port (default `993`) |
+| `IMAP_USER` | IMAP login address |
+| `IMAP_PASSWORD_OP` | Default 1Password op:// reference (overridden by `config_ref`) |
+| `EMAIL_STORE_RAW_BODIES` | If `true`, skip LLM summarization and store raw body |
+| `EMAIL_EXTRACTION_MODEL` | LLM model for summarization (default: `claude-haiku-4-5-20251001`) |
+
+---
+
 ## Related Docs
 
 - [Architecture Overview](../architecture.md) — system-wide context
