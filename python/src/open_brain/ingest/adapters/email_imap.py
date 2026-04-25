@@ -478,12 +478,15 @@ class IMAPEmailIngestor:
         self,
         uids: list[int],
         person_memory_id: int | None = None,
+        run_id: str = "",
     ) -> IngestResult:
         """Fetch and ingest a specific list of IMAP UIDs.
 
         Args:
             uids: List of IMAP UIDs to fetch and ingest.
             person_memory_id: Optional person memory ID to associate interactions with.
+            run_id: Optional run identifier to embed in memory metadata (enables
+                query-by-run-id). Defaults to empty string (no run_id in metadata).
 
         Returns:
             IngestResult with created or found interaction memory IDs.
@@ -515,17 +518,20 @@ class IMAPEmailIngestor:
                 raw=raw,
                 person_memory_id=person_memory_id,
                 interaction_memory_ids=interaction_memory_ids,
+                run_id=run_id,
             )
             if not is_new:
                 skipped_count += 1
 
         person_ids = [person_memory_id] if person_memory_id is not None else []
-        return IngestResult(
+        result = IngestResult(
             meeting_memory_id=0,
             person_memory_ids=person_ids,
             interaction_memory_ids=interaction_memory_ids,
             skipped_count=skipped_count,
         )
+        result.run_id = run_id
+        return result
 
     async def ingest_inbox(self, max_messages: int = 50) -> tuple[int, int]:
         """Ingest the most recent N emails from the configured IMAP folder (INBOX by default).
@@ -622,13 +628,16 @@ class IMAPEmailIngestor:
                 "Sentinel instance cannot list — provide data_layer and server config"
             )
 
+        if n <= 0:
+            return []
+
         password = self._fetch_password()
 
         with IMAPClient(host=self._server, port=self._port, ssl=True) as client:
             client.login(self._user, password)
             client.select_folder(self._folder)
             all_uids = client.search(["ALL"])
-            uids = sorted(all_uids)[-n:]
+            uids = sorted(all_uids, reverse=True)[:n]
 
             if not uids:
                 return []
@@ -692,8 +701,7 @@ class IMAPEmailIngestor:
             uid = ref
         else:
             raise TypeError(f"ingest() requires MessageRef or int, got {type(ref).__name__}")
-        result = await self.ingest_uids(uids=[uid])
-        result.run_id = run_id
+        result = await self.ingest_uids(uids=[uid], run_id=run_id)
         return result
 
     async def _ingest_single_email(
@@ -702,6 +710,7 @@ class IMAPEmailIngestor:
         raw: bytes,
         person_memory_id: int | None,
         interaction_memory_ids: list[int],
+        run_id: str = "",
     ) -> bool:
         """Ingest a single email by UID.
 
@@ -758,6 +767,8 @@ class IMAPEmailIngestor:
         }
         if person_memory_id is not None:
             metadata["person_ref"] = str(person_memory_id)
+        if run_id:
+            metadata["run_id"] = run_id
 
         save_result = await self._dl.save_memory(
             SaveMemoryParams(
