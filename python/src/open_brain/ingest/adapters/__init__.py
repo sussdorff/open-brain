@@ -16,11 +16,13 @@ distinction and rules.
 """
 
 from open_brain.ingest.adapters.base import ADAPTERS, IngestAdapter, get_credentials, register
+from open_brain.ingest.adapters.email_imap import IMAPEmailIngestor
 from open_brain.ingest.adapters.macwhisper import MacWhisperConnector
 from open_brain.ingest.adapters.transcript import TranscriptIngestor
 
 __all__ = [
     "ADAPTERS",
+    "IMAPEmailIngestor",
     "IngestAdapter",
     "MacWhisperConnector",
     "TranscriptIngestor",

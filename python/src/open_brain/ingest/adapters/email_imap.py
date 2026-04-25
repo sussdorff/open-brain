@@ -28,6 +28,7 @@ from typing import Any, Protocol
 from open_brain.config import get_config
 from open_brain.data_layer.interface import DataLayer, SaveMemoryParams, SearchParams
 from open_brain.data_layer.llm import LlmMessage, llm_complete
+from open_brain.ingest.adapters.base import register
 from open_brain.ingest.models import IngestResult
 
 try:
@@ -217,9 +218,12 @@ class IMAPEmailIngestor:
     Idempotent: re-running with the same inputs produces no new memories.
     Credentials are fetched at runtime via CommandRunner (never logged).
 
+    Implements the IngestAdapter Protocol (ADR-0001).
+
     Args:
-        data_layer: DataLayer implementation for persistence.
-        server: IMAP server hostname.
+        data_layer: DataLayer implementation for persistence. Optional — pass
+            None to create a sentinel instance for adapter discovery.
+        server: IMAP server hostname. Defaults to "" (sentinel only).
         port: IMAP server port (default 993 for SSL).
         user: IMAP username (login address).
         password_op_ref: 1Password op:// reference for the IMAP password.
@@ -229,10 +233,12 @@ class IMAPEmailIngestor:
         folder: IMAP folder/mailbox to search (default "INBOX").
     """
 
+    name = "email_imap"
+
     def __init__(
         self,
-        data_layer: DataLayer,
-        server: str,
+        data_layer: DataLayer | None = None,
+        server: str = "",
         port: int = 993,
         user: str = "",
         password_op_ref: str = "",
@@ -592,6 +598,96 @@ class IMAPEmailIngestor:
         ingested = len(interaction_memory_ids) - skipped_count
         return (ingested, skipped_count)
 
+    # ─── ADR-0001 IngestAdapter Protocol methods ─────────────────────────────
+
+    async def list_recent(self, n: int) -> list[MessageRef]:
+        """Return the N most recent messages from the configured IMAP folder.
+
+        Connects to IMAP, searches ALL messages, takes the N highest UIDs
+        (ascending sort → highest = newest), then fetches ENVELOPE for each.
+
+        Args:
+            n: Maximum number of MessageRef items to return.
+
+        Returns:
+            List of MessageRef instances (up to n), newest first.
+
+        Raises:
+            RuntimeError: If this is a sentinel instance (server not configured).
+        """
+        if self._server == "":
+            raise RuntimeError(
+                "Sentinel instance cannot list — provide server config"
+            )
+
+        password = self._fetch_password()
+
+        with IMAPClient(host=self._server, port=self._port, ssl=True) as client:
+            client.login(self._user, password)
+            client.select_folder(self._folder)
+            all_uids = client.search(["ALL"])
+            uids = sorted(all_uids)[-n:]
+
+            if not uids:
+                return []
+
+            fetch_data = client.fetch(uids, [b"ENVELOPE"])
+
+        refs: list[MessageRef] = []
+        for uid in uids:
+            uid_data = fetch_data.get(uid) or {}
+            envelope = uid_data.get(b"ENVELOPE")
+            if envelope is not None:
+                try:
+                    subject = _decode_header_value(
+                        envelope.subject.decode()
+                        if isinstance(envelope.subject, bytes)
+                        else (envelope.subject or "")
+                    )
+                    date_str = str(envelope.date) if envelope.date else None
+                    from_list = envelope.from_
+                    from_addr = ""
+                    if from_list:
+                        f = from_list[0]
+                        from_addr = (
+                            f"{f.mailbox.decode()}@{f.host.decode()}"
+                            if isinstance(f.mailbox, bytes)
+                            else f"{f.mailbox}@{f.host}"
+                        )
+                    refs.append(MessageRef(uid=uid, subject=subject, date=date_str, from_addr=from_addr))
+                except Exception:
+                    refs.append(MessageRef(uid=uid))
+            else:
+                refs.append(MessageRef(uid=uid))
+
+        return refs
+
+    async def ingest(self, ref: Any, run_id: str) -> "IngestResult":
+        """ADR-0001 Protocol method: ingest a single message identified by ref.
+
+        Extracts the UID from a MessageRef or coerces ref to int, calls
+        ingest_uids(), then sets run_id on the result.
+
+        Args:
+            ref: A MessageRef (from list_recent) or a UID integer/string.
+            run_id: UUID string created by the orchestrator for this ingest run.
+                Embedded in the returned IngestResult.
+
+        Returns:
+            IngestResult with all created memory IDs and the supplied run_id.
+
+        Raises:
+            RuntimeError: If this is a sentinel instance (data_layer not provided).
+        """
+        if self._dl is None:
+            raise RuntimeError(
+                "Sentinel instance cannot ingest — provide data_layer"
+            )
+        uid = ref.uid if isinstance(ref, MessageRef) else int(ref)
+        result = await self.ingest_uids(uids=[uid])
+        result.run_id = run_id
+        return result
+
     async def _ingest_single_email(
         self,
         uid: int,
@@ -713,3 +809,10 @@ class IMAPEmailIngestor:
             logger.warning("LLM extraction failed: %s", exc, exc_info=True)
 
         return f"Email from {from_addr}: {subject or '(no subject)'}"
+
+
+# ─── Module-level registration (ADR-0001) ────────────────────────────────────
+# Register a sentinel instance for adapter discovery. The sentinel uses
+# data_layer=None and server="" (defaults); real ingest/list_recent calls require
+# a properly constructed instance with data_layer and server provided.
+register(IMAPEmailIngestor())
