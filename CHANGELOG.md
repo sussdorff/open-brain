@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(open-brain-cr3.16)* Address review findings iteration 1
+- *(open-brain-cr3.16)* Address codex adversarial findings
 - *(open-brain-cr3.11)* Address review findings iteration 1
 - *(open-brain-cr3.11)* Address codex adversarial findings
 
