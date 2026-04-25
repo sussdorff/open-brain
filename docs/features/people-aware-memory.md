@@ -155,8 +155,8 @@ ob ingest email --config <OP_REF> [--max-messages <N>]
 ob ingest email --config "op://Private/email-account/app-password"
 
 # Ingest the last 200 emails with pretty output
-ob ingest email --config "op://Private/email-account/app-password" \
-    --max-messages 200 --pretty
+ob --pretty ingest email --config "op://Private/email-account/app-password" \
+    --max-messages 200
 ```
 
 **Output:**
