@@ -128,6 +128,10 @@ async def compact_project(
             metadata->>'status' IS NULL
             OR metadata->>'status' NOT IN ({status_placeholders})
           )
+          AND (
+            metadata->>'do_not_compact' IS NULL
+            OR metadata->>'do_not_compact' != 'true'
+          )
         ORDER BY id
     """
     rows_raw = await conn.fetch(query, index_id, *_LIFECYCLE_EXCLUDE)
@@ -169,6 +173,10 @@ async def compact_project(
                OR a.metadata->>'status' NOT IN ('materialized', 'discarded', 'archived'))
           AND (b.metadata->>'status' IS NULL
                OR b.metadata->>'status' NOT IN ('materialized', 'discarded', 'archived'))
+          AND (a.metadata->>'do_not_compact' IS NULL
+               OR a.metadata->>'do_not_compact' != 'true')
+          AND (b.metadata->>'do_not_compact' IS NULL
+               OR b.metadata->>'do_not_compact' != 'true')
     """
     pair_rows = await conn.fetch(pairs_query, index_id, threshold)
     edges = [(r["id_a"], r["id_b"]) for r in pair_rows]

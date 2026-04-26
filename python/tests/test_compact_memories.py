@@ -466,3 +466,44 @@ class TestCompactMemoriesScope:
             )
 
         assert result.clusters_found == 1
+
+
+class TestCompactMemoriesDoNotCompact:
+    """Memories with do_not_compact=True metadata must be excluded from compaction."""
+
+    @pytest.mark.asyncio
+    async def test_do_not_compact_memory_excluded_from_candidates(self):
+        """A memory with do_not_compact=True should not appear in compaction candidates.
+
+        The SQL filter is applied at the DB layer, so we test that the filter string
+        contains the do_not_compact exclusion clause.
+        """
+        from open_brain.data_layer.postgres import _compact_lifecycle_filter
+        assert "do_not_compact" in _compact_lifecycle_filter, (
+            "_compact_lifecycle_filter must exclude memories with do_not_compact=true"
+        )
+        assert "'true'" in _compact_lifecycle_filter, (
+            "_compact_lifecycle_filter must use string 'true' for JSONB ->> text comparison"
+        )
+
+    @pytest.mark.asyncio
+    async def test_do_not_compact_memory_not_deleted_when_near_duplicate(self):
+        """A do_not_compact memory should NOT be deleted even if a near-duplicate exists.
+
+        Scenario: memory 1 (do_not_compact=True) and memory 2 (normal) are near-dupes.
+        The DB query excludes memory 1, so only memory 2 is fetched. No cluster forms
+        (only 1 candidate), so nothing is deleted.
+        """
+        conn = AsyncMock()
+        # Only memory 2 returned (memory 1 excluded by SQL do_not_compact filter)
+        rows = [_make_memory_row(2, access_count=5)]
+        conn.fetch = AsyncMock(return_value=rows)
+        pool = _make_pool(conn)
+
+        dl = PostgresDataLayer()
+        with patch("open_brain.data_layer.postgres.get_pool", return_value=pool):
+            result = await dl.compact_memories(CompactParams(dry_run=True))
+
+        assert result.clusters_found == 0
+        assert result.memories_deleted == 0
+        assert 2 in result.memories_kept

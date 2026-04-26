@@ -105,7 +105,9 @@ def _select_canonical(members: list[int], rows: dict[int, Any], strategy: str) -
 # because compaction should only touch actively-managed memories.
 _compact_lifecycle_filter = (
     "AND (metadata->>'status' IS NULL "
-    "OR metadata->>'status' NOT IN ('materialized', 'discarded', 'archived'))"
+    "OR metadata->>'status' NOT IN ('materialized', 'discarded', 'archived')) "
+    "AND (metadata->>'do_not_compact' IS NULL "
+    "OR metadata->>'do_not_compact' != 'true')"
 )
 
 _pool: asyncpg.Pool | None = None
@@ -1465,7 +1467,9 @@ class PostgresDataLayer:
         # Exclude memories already processed (materialized/discarded)
         _lifecycle_filter = (
             "AND (metadata->>'status' IS NULL "
-            "OR metadata->>'status' NOT IN ('materialized', 'discarded'))"
+            "OR metadata->>'status' NOT IN ('materialized', 'discarded')) "
+            "AND (metadata->>'do_not_compact' IS NULL "
+            "OR metadata->>'do_not_compact' != 'true')"
         )
 
         async with pool.acquire() as conn:
