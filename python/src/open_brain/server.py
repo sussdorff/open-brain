@@ -10,11 +10,13 @@ import logging
 import re
 import secrets
 import time
+import uuid
 from collections import deque
 from dataclasses import asdict
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
@@ -78,6 +80,50 @@ _current_scopes: ContextVar[tuple[str, ...]] = ContextVar("current_scopes", defa
 # ContextVar set to True when the request was authenticated via x-api-key header.
 # Token management endpoints accept either admin OAuth scope OR direct API key auth.
 _is_api_key_auth: ContextVar[bool] = ContextVar("is_api_key_auth", default=False)
+
+# ContextVar to propagate a unique request_id through all logs within a single tool call.
+_request_id: ContextVar[str | None] = ContextVar("request_id", default=None)
+
+
+def logged_tool(fn):
+    """Wrap an MCP tool function with structured logging (start/end/error).
+
+    Emits:
+    - tool_start: tool name, arg keys, user_id, request_id
+    - tool_end: tool name, duration_ms, status=ok, request_id
+    - tool_error: tool name, duration_ms, status=error, request_id (with traceback via exc_info)
+
+    Sets _request_id ContextVar to a fresh UUID for the duration of each call.
+    """
+    @wraps(fn)
+    async def wrapper(*args, **kwargs):
+        rid = str(uuid.uuid4())
+        _request_id.set(rid)
+        tool_name = fn.__name__
+        user_id = _current_user_id.get()
+        args_keys = list(kwargs.keys())
+        args_size = len(str(kwargs))
+        logger.info(
+            "tool_start tool=%s args_keys=%s args_size_bytes=%d user_id=%s request_id=%s",
+            tool_name, args_keys, args_size, user_id, rid,
+        )
+        t0 = time.monotonic()
+        try:
+            result = await fn(*args, **kwargs)
+            duration_ms = int((time.monotonic() - t0) * 1000)
+            logger.info(
+                "tool_end tool=%s duration_ms=%d status=ok request_id=%s",
+                tool_name, duration_ms, rid,
+            )
+            return result
+        except Exception:
+            duration_ms = int((time.monotonic() - t0) * 1000)
+            logger.exception(
+                "tool_error tool=%s duration_ms=%d status=error request_id=%s",
+                tool_name, duration_ms, rid,
+            )
+            raise
+    return wrapper
 
 # Evolution tools require the `evolution` OAuth scope
 _EVOLUTION_TOOLS: frozenset[str] = frozenset({
@@ -227,6 +273,7 @@ def get_dl() -> PostgresDataLayer:
         "NEVER fetch full details without filtering first. 10x token savings."
     )
 )
+@logged_tool
 async def __IMPORTANT() -> str:  # noqa: N802
     """Workflow reminder tool."""
     return "This is a workflow reminder tool. Use search -> timeline -> get_observations for efficient memory access."
@@ -237,6 +284,7 @@ async def __IMPORTANT() -> str:  # noqa: N802
     "Browse mode: omit query (or use '*') to list memories with filters only. "
     "Params: query, limit, project, type, obs_type, dateStart, dateEnd, offset, orderBy, filePath, metadata_filter, author"
 )
+@logged_tool
 async def search(
     query: str | None = None,
     limit: int | None = None,
@@ -281,6 +329,7 @@ async def search(
     "(b) Date window mode: date_start and/or date_end (ISO format), browse memories in that time range. "
     "Params: anchor, query, depth_before, depth_after, project, date_start, date_end"
 )
+@logged_tool
 async def timeline(
     anchor: int | None = None,
     query: str | None = None,
@@ -316,6 +365,7 @@ async def timeline(
     description="Step 3: Fetch full details for filtered IDs. "
     "Params: ids (array of observation IDs, required)"
 )
+@logged_tool
 async def get_observations(ids: list[int]) -> str:
     """Step 3: Bulk fetch memories by IDs."""
     dl = get_dl()
@@ -347,6 +397,7 @@ async def get_observations(ids: list[int]) -> str:
     "importance: optional retention class (critical|high|medium|low, default medium). "
     "dedup_mode: 'skip' (default) or 'merge' — if 'merge', returns existing id when vector similarity >= DEDUP_THRESHOLD instead of inserting."
 )
+@logged_tool
 async def save_memory(
     text: str,
     type: str | None = None,
@@ -478,6 +529,7 @@ async def save_memory(
     "metadata: JSONB-merged into existing metadata (use to add/update keys without overwriting others). "
     "Params: id (required), text, type, project, title, subtitle, narrative, metadata"
 )
+@logged_tool
 async def update_memory(
     id: int,
     text: str | None = None,
@@ -509,6 +561,7 @@ async def update_memory(
     description="Semantic search across memories using vector embeddings. "
     "Params: query (required), limit, project"
 )
+@logged_tool
 async def search_by_concept(
     query: str,
     limit: int | None = None,
@@ -523,6 +576,7 @@ async def search_by_concept(
 
 
 @mcp.tool(description="Get recent session context. Params: limit, project")
+@logged_tool
 async def get_context(limit: int | None = None, project: str | None = None) -> str:
     """Get recent sessions."""
     dl = get_dl()
@@ -537,6 +591,7 @@ async def get_context(limit: int | None = None, project: str | None = None) -> s
         "Params: token_budget (default 500), project (optional filter by project name)"
     )
 )
+@logged_tool
 async def get_wake_up_pack(token_budget: int = 500, project: str | None = None) -> str:
     """Get categorized memory context optimized for session start injection."""
     from open_brain.wake_up import build_wake_up_pack
@@ -546,6 +601,7 @@ async def get_wake_up_pack(token_budget: int = 500, project: str | None = None) 
 
 
 @mcp.tool(description="Get database statistics (memory count, sessions, DB size, type taxonomy with counts)")
+@logged_tool
 async def stats() -> str:
     """Get DB statistics."""
     dl = get_dl()
@@ -554,6 +610,7 @@ async def stats() -> str:
 
 
 @mcp.tool(description="Get ingest observability stats: counters for ingests, LLM calls, dedup decisions, relationships, memories written, and ingest durations.")
+@logged_tool
 async def people_ingest_stats() -> str:
     """Return in-process ingest metrics for all six metric families.
 
@@ -576,6 +633,7 @@ async def people_ingest_stats() -> str:
         "Returns list of {memory_id, title, date, link_type}."
     )
 )
+@logged_tool
 async def people_discussed_with(
     person_id: int,
     since: str | None = None,
@@ -595,6 +653,7 @@ async def people_discussed_with(
         "Returns list of {memory_id, title, last_contact, days_stale}."
     )
 )
+@logged_tool
 async def people_stale_contacts(
     min_days: int = 90,
     limit: int = 50,
@@ -613,6 +672,7 @@ async def people_stale_contacts(
         "Returns list of {person_id, mention_count, last_mentioned_at}."
     )
 )
+@logged_tool
 async def people_mentions_window(
     days: int = 30,
     min_count: int = 1,
@@ -677,6 +737,7 @@ async def _check_voyage_api_status() -> str:
 
 
 @mcp.tool(description="Run diagnostic health check: DB latency, Voyage API status, memory stats, uptime")
+@logged_tool
 async def doctor() -> str:
     """Return a structured diagnostic report for operational health monitoring.
 
@@ -712,6 +773,7 @@ async def doctor() -> str:
     description="Consolidate, deduplicate, and refine memories. "
     "Uses configured LLM for intelligent analysis. Params: scope, limit, dry_run"
 )
+@logged_tool
 async def refine_memories(
     scope: str | None = None,
     limit: int | None = None,
@@ -736,6 +798,7 @@ async def refine_memories(
     "Uses LLM with type-aware logic: learning→promote, session_summary→archive, observation→keep/merge. "
     "Params: scope (recent|project:<name>|type:<name>|low-priority|session_ref:<prefix>), limit, dry_run"
 )
+@logged_tool
 async def triage_memories(
     scope: str | None = None,
     limit: int | None = None,
@@ -764,6 +827,7 @@ async def triage_memories(
     "keep→no-op. "
     "Params: triage_actions (list of {action, memory_id, reason, memory_type, memory_title}), dry_run"
 )
+@logged_tool
 async def materialize_memories(
     triage_actions: list[dict],
     dry_run: bool = False,
@@ -801,6 +865,7 @@ async def materialize_memories(
     "Returns a structured report with triage summary, actions taken, and materialization results. "
     "Params: scope, dry_run"
 )
+@logged_tool
 async def run_lifecycle_pipeline(
     scope: str | None = None,
     dry_run: bool = False,
@@ -858,6 +923,7 @@ async def run_lifecycle_pipeline(
     "Strategies: keep_highest_access (default), keep_latest, keep_most_comprehensive. "
     "Params: scope (project:X, type:Y, or None=all), threshold, strategy, dry_run"
 )
+@logged_tool
 async def compact_memories(
     scope: str | None = None,
     threshold: float = 0.87,
@@ -901,6 +967,7 @@ async def compact_memories(
         "medium_hint (str, optional — e.g. 'macwhisper')."
     )
 )
+@logged_tool
 async def ingest_transcript(text: str, source_ref: str, medium_hint: str | None = None) -> str:
     """Ingest a transcript and return IngestResult as JSON."""
     if not text or not text.strip():
@@ -920,6 +987,7 @@ async def ingest_transcript(text: str, source_ref: str, medium_hint: str | None 
         "Param: run_id (str, required — the run_id returned by ingest_run())."
     )
 )
+@logged_tool
 async def ingest_rollback(run_id: str) -> str:
     """Delete all memories and relationships for the given ingest run_id."""
     if not run_id or not run_id.strip():
@@ -945,6 +1013,7 @@ async def ingest_rollback(run_id: str) -> str:
         "max_messages (int, optional, default 50)."
     )
 )
+@logged_tool
 async def ingest_email_inbox(config_ref: str, max_messages: int = 50) -> str:
     """Ingest IMAP inbox emails and return a summary as JSON.
 
@@ -1863,6 +1932,7 @@ If nothing worth remembering happened, return: {{"observations": [], "session_su
     "open loops (unresolved action items), cross-project connections, and decay warnings (stale memories). "
     "Params: weeks_back (default 1), project (optional filter)"
 )
+@logged_tool
 async def weekly_briefing(
     weeks_back: int = 1,
     project: str | None = None,
@@ -1879,6 +1949,7 @@ async def weekly_briefing(
 
 
 @mcp.tool(description="Analyze briefing engagement: response rates by type over last N days. Returns EngagementReport.")
+@logged_tool
 async def analyze_briefing_engagement(
     days_back: int = 7,
     project: str | None = None,
@@ -1908,6 +1979,7 @@ async def analyze_briefing_engagement(
 
 
 @mcp.tool(description="Generate ONE self-improvement suggestion based on engagement (rate-limited to 1 per 7 days). Returns suggestion or null.")
+@logged_tool
 async def generate_evolution_suggestion(
     days_back: int = 7,
     project: str | None = None,
@@ -1935,6 +2007,7 @@ async def generate_evolution_suggestion(
 
 
 @mcp.tool(description="Log approval/rejection of an evolution suggestion. Approved changes saved as type=evolution. briefing_type, if provided, enables 30-day rejection suppression so the same briefing type is not re-proposed within 30 days.")
+@logged_tool
 async def log_evolution_approval(
     suggestion_id: int,
     approved: bool,
@@ -1954,6 +2027,7 @@ async def log_evolution_approval(
 
 
 @mcp.tool(description="Query evolution history: past suggestions and approvals.")
+@logged_tool
 async def query_evolution_history_tool(
     limit: int = 20,
     project: str | None = None,
@@ -1990,6 +2064,7 @@ async def query_evolution_history_tool(
         "Returns JSON with regenerated_count, orphan_count, transcript_missing_list, new_summary_ids."
     )
 )
+@logged_tool
 async def regenerate_summaries_from_transcripts(
     scope: str | None = None,
     transcript_root: str = "~/.claude/projects/",
@@ -2041,6 +2116,7 @@ async def regenerate_summaries_from_transcripts(
         "Params: source_id (int), target_id (int), link_type (str), metadata (dict, optional)"
     )
 )
+@logged_tool
 async def create_relationship(
     source_id: int,
     target_id: int,
@@ -2068,6 +2144,7 @@ async def create_relationship(
         "Returns list of {id, link_type, depth, source_id, target_id}."
     )
 )
+@logged_tool
 async def traverse_relationships(
     anchor_id: int,
     link_types: list[str],
