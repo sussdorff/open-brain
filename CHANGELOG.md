@@ -1,7 +1,7 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
-## [unreleased]
+## [0.25.0] - 2026-04-29
 
 ### Bug Fixes
 
@@ -21,8 +21,10 @@ All notable changes to this project will be documented in this file.
 ### Bug Fixes
 
 - *(compact)* Honour do_not_compact metadata flag in compaction and triage
+- *(open-brain-47f)* Drop legacy CHECK on relation_type to allow all VALID_LINK_TYPES
 - *(open-brain-bt9)* Address review findings iteration 1
 - *(open-brain-bt9)* Address codex adversarial findings
+- *(open-brain-eip)* Compute duration_ms before error path to enable slow-WARNING on failed LLM calls
 
 ### Documentation
 
@@ -31,6 +33,7 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - *(open-brain-bt9)* Green — structured logging + MCP tool instrumentation
+- *(open-brain-eip)* Granular phase-boundary logging in TranscriptIngestor, extract.py, and llm.py — log timeline with ingest_start/end, LLM extract phases, meeting saved, dedup decisions (DEBUG), mentions/relationships counts; WARNING when LLM call takes >5s
 
 ### Miscellaneous
 

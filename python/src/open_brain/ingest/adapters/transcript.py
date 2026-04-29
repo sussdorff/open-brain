@@ -126,10 +126,11 @@ class TranscriptIngestor:
             )
             return prior
 
+        logger.info("idempotency_miss source_ref=%r", source_ref)
         metrics.record_ingest("transcript")
 
         # --- LLM extraction ---
-        llm_start = time.monotonic()
+        llm_extract_start = time.monotonic()
         logger.info("llm_extract_start source_ref=%r", source_ref)
         metrics.record_llm_call("extract")
         extracted = await extract_from_transcript(text)
@@ -137,16 +138,20 @@ class TranscriptIngestor:
         mentioned: list[str] = extracted.get("mentioned_people") or []
         topics: list[str] = extracted.get("topics") or []
         follow_up_tasks: list[str] = extracted.get("follow_up_tasks") or []
-
-        llm_duration_ms = int((time.monotonic() - llm_start) * 1000)
+        llm_extract_ms = int((time.monotonic() - llm_extract_start) * 1000)
         logger.info(
-            "llm_extract_end source_ref=%r duration_ms=%d attendees=%d mentioned=%d topics=%d tasks=%d",
-            source_ref, llm_duration_ms, len(attendees), len(mentioned), len(topics), len(follow_up_tasks),
+            "llm_extract_end source_ref=%r attendees=%d mentioned=%d topics=%d tasks=%d duration_ms=%d",
+            source_ref,
+            len(attendees),
+            len(mentioned),
+            len(topics),
+            len(follow_up_tasks),
+            llm_extract_ms,
         )
-        if llm_duration_ms > 5000:
+        if llm_extract_ms > 5000:
             logger.warning(
                 "slow_llm_extract source_ref=%r duration_ms=%d",
-                source_ref, llm_duration_ms,
+                source_ref, llm_extract_ms,
             )
 
         # Build follow_up_candidates list (never auto-created as bd issues)
