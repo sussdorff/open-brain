@@ -25,13 +25,20 @@ from open_brain.data_layer.postgres import PostgresDataLayer, close_pool
 from open_brain.ingest.adapters.transcript import TranscriptIngestor
 
 
-def _load_database_url() -> str:
+def load_database_url() -> str:
     """Load DATABASE_URL from environment or .env file in the current directory.
 
     Priority:
       1. DATABASE_URL environment variable
       2. DATABASE_URL line in ./.env file
       3. Empty string if neither is set
+
+    .env file support is limited to lines of the form:
+        DATABASE_URL=value
+        DATABASE_URL="value"
+        DATABASE_URL='value'
+    Lines starting with # are skipped. Inline comments, export prefix, and
+    multiline values are not supported.
 
     Returns:
         The DATABASE_URL value, or an empty string if not found.
@@ -54,7 +61,7 @@ def _load_database_url() -> str:
     return ""
 
 
-def _prepare_direct_env(database_url: str) -> None:
+def prepare_direct_env(database_url: str) -> None:
     """Set environment variables so Config can load in direct mode.
 
     Config (pydantic-settings) requires several fields that are not needed
@@ -68,6 +75,10 @@ def _prepare_direct_env(database_url: str) -> None:
         database_url: The DATABASE_URL to inject into the environment.
     """
     os.environ["DATABASE_URL"] = database_url
+    # These server-only fields are required by pydantic-settings Config but not used in
+    # direct mode. Set harmless defaults so Config.__init__ does not raise a
+    # ValidationError. TODO: refactor Config to make server-only fields optional when
+    # DATABASE_URL is the only credential needed (see follow-up bead after open-brain-c5e).
     os.environ.setdefault("MCP_SERVER_URL", "http://localhost:8091")
     os.environ.setdefault("AUTH_USER", "direct-mode")
     os.environ.setdefault("AUTH_PASSWORD", "direct-mode-local-placeholder")

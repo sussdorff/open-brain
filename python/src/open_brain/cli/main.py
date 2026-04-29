@@ -215,16 +215,16 @@ async def _cmd_ingest_transcript(args: argparse.Namespace) -> Any:
     if getattr(args, "direct", False) or os.environ.get("OB_DIRECT") == "1":
         import open_brain.cli.direct as _direct
 
-        database_url = _direct._load_database_url()
+        database_url = _direct.load_database_url()
         if not database_url:
             _error(
                 "--direct requires DATABASE_URL env var or DATABASE_URL in .env file"
             )
-        _direct._prepare_direct_env(database_url)
+        _direct.prepare_direct_env(database_url)
         return await _direct.run_ingest_transcript_direct(
             text=text,
             source_ref=args.source_ref,
-            medium_hint=args.medium_hint if args.medium_hint else None,
+            medium_hint=args.medium_hint,
         )
 
     kwargs: dict[str, Any] = {

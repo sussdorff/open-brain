@@ -322,6 +322,42 @@ volumes:
   - ./clients.json:/app/clients.json:ro
 ```
 
+## CLI Usage
+
+The `ob` command provides a thin CLI wrapper over the open-brain MCP tools:
+
+```bash
+ob search "what did I decide about X?"
+ob save "Decided to use asyncpg for lower overhead" --type decision
+ob ingest transcript --source-ref meeting-2026-04-29 --file transcript.txt
+```
+
+### `ob ingest transcript`
+
+Ingests a transcript file (or stdin) into open-brain memory.
+
+```bash
+# Via MCP server (default — suitable for agents and multi-user setups)
+ob ingest transcript --source-ref meeting-2026-04-29 --file transcript.txt
+
+# Direct mode — bypass MCP, call PostgresDataLayer in-process
+ob ingest transcript --source-ref meeting-2026-04-29 --file transcript.txt --direct
+```
+
+**When to use `--direct`:**
+- Local operator scripts with direct database access (`DATABASE_URL` available)
+- Batch ingestion pipelines where MCP transport latency adds up
+- Dev/test environments without a running open-brain server
+
+**When NOT to use `--direct`:**
+- Multi-user setups (bypasses all MCP-layer auth and rate limiting)
+- Sandboxed agents that should not have direct DB access
+- When you do not control `DATABASE_URL` (rely on MCP auth instead)
+
+`--direct` requires `DATABASE_URL` to be set (env var or `DATABASE_URL=...` line in a `.env` file in the current directory). `VOYAGE_API_KEY` must also be set for embedding calls.
+
+You can also set `OB_DIRECT=1` as an environment variable instead of passing `--direct` on every invocation.
+
 ## Documentation
 
 - [Architecture & Diagrams](docs/architecture.md) — system design, hybrid search, memory lifecycle, auth flow

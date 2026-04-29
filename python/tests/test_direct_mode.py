@@ -6,9 +6,6 @@ has the same shape as IngestResult produced by the MCP path.
 """
 
 import dataclasses
-import os
-from io import StringIO
-from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -51,9 +48,9 @@ class TestLoadDatabaseUrl:
     def test_reads_from_env(self, monkeypatch):
         """DATABASE_URL in environment is returned directly."""
         monkeypatch.setenv("DATABASE_URL", "postgres://user:pass@localhost/db")
-        from open_brain.cli.direct import _load_database_url
+        from open_brain.cli.direct import load_database_url
 
-        result = _load_database_url()
+        result = load_database_url()
         assert result == "postgres://user:pass@localhost/db"
 
     def test_reads_from_env_file(self, tmp_path, monkeypatch):
@@ -64,18 +61,18 @@ class TestLoadDatabaseUrl:
 
         # Change cwd so .env lookup finds the file
         monkeypatch.chdir(tmp_path)
-        from open_brain.cli.direct import _load_database_url
+        from open_brain.cli.direct import load_database_url
 
-        result = _load_database_url()
+        result = load_database_url()
         assert result == "postgres://from-file/testdb"
 
     def test_returns_empty_string_when_neither_set(self, tmp_path, monkeypatch):
         """Returns empty string when DATABASE_URL is absent in env and .env."""
         monkeypatch.delenv("DATABASE_URL", raising=False)
         monkeypatch.chdir(tmp_path)  # no .env file here
-        from open_brain.cli.direct import _load_database_url
+        from open_brain.cli.direct import load_database_url
 
-        result = _load_database_url()
+        result = load_database_url()
         assert result == ""
 
     def test_env_takes_priority_over_file(self, tmp_path, monkeypatch):
@@ -84,9 +81,9 @@ class TestLoadDatabaseUrl:
         env_file = tmp_path / ".env"
         env_file.write_text("DATABASE_URL=postgres://from-file/db\n")
         monkeypatch.chdir(tmp_path)
-        from open_brain.cli.direct import _load_database_url
+        from open_brain.cli.direct import load_database_url
 
-        result = _load_database_url()
+        result = load_database_url()
         assert result == "postgres://from-env/db"
 
     def test_ignores_commented_lines_in_env_file(self, tmp_path, monkeypatch):
@@ -95,10 +92,29 @@ class TestLoadDatabaseUrl:
         env_file = tmp_path / ".env"
         env_file.write_text("# DATABASE_URL=postgres://commented/db\n")
         monkeypatch.chdir(tmp_path)
-        from open_brain.cli.direct import _load_database_url
+        from open_brain.cli.direct import load_database_url
 
-        result = _load_database_url()
+        result = load_database_url()
         assert result == ""
+
+    def test_load_database_url_from_dotenv_file_handles_quoted_values(
+        self, tmp_path, monkeypatch
+    ):
+        """Double-quoted and single-quoted DATABASE_URL values in .env are stripped correctly."""
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+        from open_brain.cli.direct import load_database_url
+
+        # Double-quoted value
+        env_file = tmp_path / ".env"
+        env_file.write_text('DATABASE_URL="postgres://quoted"\n')
+        monkeypatch.chdir(tmp_path)
+        result = load_database_url()
+        assert result == "postgres://quoted"
+
+        # Single-quoted value
+        env_file.write_text("DATABASE_URL='postgres://single-quoted'\n")
+        result = load_database_url()
+        assert result == "postgres://single-quoted"
 
 
 # ---------------------------------------------------------------------------
@@ -216,8 +232,8 @@ class TestCmdIngestTranscriptDirectRouting:
         expected_result = {"meeting_memory_id": 99, "run_id": "r1"}
 
         with patch("open_brain.cli.main.call_tool", new_callable=AsyncMock) as mock_call_tool:
-            with patch("open_brain.cli.direct._load_database_url", return_value="postgres://localhost/test"):
-                with patch("open_brain.cli.direct._prepare_direct_env"):
+            with patch("open_brain.cli.direct.load_database_url", return_value="postgres://localhost/test"):
+                with patch("open_brain.cli.direct.prepare_direct_env"):
                     with patch(
                         "open_brain.cli.direct.run_ingest_transcript_direct",
                         new_callable=AsyncMock,
@@ -250,8 +266,8 @@ class TestCmdIngestTranscriptDirectRouting:
         expected_result = {"meeting_memory_id": 77, "run_id": "r2"}
 
         with patch("open_brain.cli.main.call_tool", new_callable=AsyncMock) as mock_call_tool:
-            with patch("open_brain.cli.direct._load_database_url", return_value="postgres://localhost/test"):
-                with patch("open_brain.cli.direct._prepare_direct_env"):
+            with patch("open_brain.cli.direct.load_database_url", return_value="postgres://localhost/test"):
+                with patch("open_brain.cli.direct.prepare_direct_env"):
                     with patch(
                         "open_brain.cli.direct.run_ingest_transcript_direct",
                         new_callable=AsyncMock,
@@ -284,6 +300,7 @@ class TestCmdIngestTranscriptDirectRouting:
             "ingest_transcript",
             {"text": "Normal MCP transcript.", "source_ref": "normalref"},
         )
+        assert result == {"status": "ok"}
 
     @pytest.mark.asyncio
     async def test_direct_flag_missing_database_url_exits_with_error(

@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Added
+
+- `ob ingest transcript --direct`: bypass MCP transport for local operator workflows; reads DATABASE_URL from env or `.env` and calls PostgresDataLayer in-process.
+
 ### Features
 
 - *(open-brain-57q)* Add ob ingest transcript CLI subcommand
