@@ -1,7 +1,7 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
-## [unreleased]
+## [0.25.0] - 2026-04-29
 
 ### Bug Fixes
 
