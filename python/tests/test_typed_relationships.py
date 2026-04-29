@@ -107,6 +107,7 @@ class TestCreateRelationship:
         sql = call_args[0][0]
         assert "memory_relationships" in sql
         assert "link_type" in sql
+        assert "relation_type" in sql
 
     @pytest.mark.asyncio
     async def test_all_valid_link_types_accepted(self):
@@ -121,6 +122,56 @@ class TestCreateRelationship:
                     source_id=1, target_id=2, link_type=link_type
                 )
                 assert isinstance(result, int)
+
+
+# ─── Check constraint fix: all 7 VALID_LINK_TYPES must write relation_type ───
+
+
+class TestCheckConstraintFix:
+    """All 7 VALID_LINK_TYPES must succeed — verifying that the legacy CHECK constraint
+    on relation_type does not block these insertions (fix for open-brain-47f)."""
+
+    @pytest.mark.asyncio
+    async def test_each_link_type_generates_correct_insert_sql(self):
+        """Loop over all 7 VALID_LINK_TYPES and verify the INSERT SQL writes
+        relation_type and that link_type is passed as $3 (the value used for
+        both columns — the constraint must allow all 7 values after the migration)."""
+        for link_type in sorted(VALID_LINK_TYPES):
+            conn = AsyncMock()
+            conn.fetchval = AsyncMock(return_value=1)
+            pool = _make_pool(conn)
+
+            dl = PostgresDataLayer()
+            with patch("open_brain.data_layer.postgres.get_pool", return_value=pool):
+                result = await dl.create_relationship(
+                    source_id=1, target_id=2, link_type=link_type
+                )
+
+            assert isinstance(result, int), (
+                f"create_relationship returned non-int for link_type={link_type!r}"
+            )
+
+            conn.fetchval.assert_called_once()
+            call_args = conn.fetchval.call_args
+            sql = call_args[0][0]
+            positional_args = call_args[0]  # (sql, source_id, target_id, link_type, ...)
+
+            # The INSERT must write the relation_type column
+            assert "relation_type" in sql, (
+                f"SQL does not write relation_type column for link_type={link_type!r}. "
+                "After the migration drops the CHECK constraint, all values must be accepted."
+            )
+
+            # link_type is passed as the third positional arg ($3 in SQL)
+            # positional_args: [sql, source_id, target_id, link_type, metadata]
+            assert len(positional_args) >= 4, (
+                f"Expected at least 4 positional args (sql, source_id, target_id, link_type), "
+                f"got {len(positional_args)} for link_type={link_type!r}"
+            )
+            assert positional_args[3] == link_type, (
+                f"Expected link_type={link_type!r} as $3 positional arg, "
+                f"got {positional_args[3]!r}"
+            )
 
 
 # ─── AC3: traverse depth=1 returns direct neighbors ─────────────────────────
