@@ -7,6 +7,7 @@ and follow-up tasks.
 import json
 import logging
 import re
+import time
 
 from open_brain.data_layer.llm import LlmMessage, llm_complete
 
@@ -43,9 +44,20 @@ async def extract_from_transcript(text: str) -> dict:
         Falls back to empty lists on parse error.
     """
     prompt = f"{EXTRACTION_PROMPT}\n\nTranscript:\n{text}"
+    _extract_start = time.monotonic()
+    logger.info(
+        "llm_complete_start prompt_chars=%d",
+        len(prompt),
+    )
     response = await llm_complete(
         messages=[LlmMessage(role="user", content=prompt)],
         max_tokens=1024,
+    )
+    _extract_duration_ms = int((time.monotonic() - _extract_start) * 1000)
+    logger.info(
+        "llm_complete_end response_chars=%d duration_ms=%d",
+        len(response),
+        _extract_duration_ms,
     )
 
     try:

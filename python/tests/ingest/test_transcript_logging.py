@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import logging
 from contextvars import ContextVar
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -569,10 +569,9 @@ class TestLlmProviderLogs:
     @pytest.mark.asyncio
     async def test_llm_http_start_logged_at_debug(self, caplog):
         """AC2: llm.py logs llm_http_start at DEBUG before HTTP call."""
-        import httpx
         from open_brain.data_layer.llm import _call_anthropic, LlmMessage
 
-        mock_response = AsyncMock()
+        mock_response = MagicMock()
         mock_response.is_success = True
         mock_response.json.return_value = {
             "content": [{"text": "response text"}]
@@ -605,10 +604,9 @@ class TestLlmProviderLogs:
     @pytest.mark.asyncio
     async def test_llm_slow_call_emits_warning(self, caplog):
         """AC2: llm.py emits WARNING with duration_ms when call > 5 seconds."""
-        import httpx
         from open_brain.data_layer.llm import _call_anthropic, LlmMessage
 
-        mock_response = AsyncMock()
+        mock_response = MagicMock()
         mock_response.is_success = True
         mock_response.json.return_value = {
             "content": [{"text": "slow response"}]
@@ -654,10 +652,9 @@ class TestLlmProviderLogs:
     @pytest.mark.asyncio
     async def test_llm_http_error_logged_at_error(self, caplog):
         """AC2: llm.py emits ERROR log on HTTP failure."""
-        import httpx
         from open_brain.data_layer.llm import _call_anthropic, LlmMessage
 
-        mock_response = AsyncMock()
+        mock_response = MagicMock()
         mock_response.is_success = False
         mock_response.status_code = 500
         mock_response.text = "Internal Server Error"
@@ -691,7 +688,7 @@ class TestLlmProviderLogs:
         """AC2: llm_http_end log includes duration_ms."""
         from open_brain.data_layer.llm import _call_anthropic, LlmMessage
 
-        mock_response = AsyncMock()
+        mock_response = MagicMock()
         mock_response.is_success = True
         mock_response.json.return_value = {"content": [{"text": "ok"}]}
         mock_response.content = b'{"content": [{"text": "ok"}]}'
