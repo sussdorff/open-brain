@@ -127,6 +127,13 @@ async def _ensure_link_type_column(conn: asyncpg.Connection) -> None:
     )
 
 
+async def _ensure_metadata_column(conn: asyncpg.Connection) -> None:
+    """Add metadata jsonb column to memory_relationships if not present (idempotent)."""
+    await conn.execute(
+        "ALTER TABLE memory_relationships ADD COLUMN IF NOT EXISTS metadata jsonb;"
+    )
+
+
 async def _init_conn(conn: asyncpg.Connection) -> None:
     """Register JSONB codec so asyncpg returns dicts instead of raw JSON strings."""
     await conn.set_type_codec(
@@ -300,6 +307,7 @@ async def get_pool() -> asyncpg.Pool:
             # last_decay_at so concurrent calls are safe without advisory locks.
             # Typed-relationship schema migration (idempotent)
             await _ensure_link_type_column(conn)
+            await _ensure_metadata_column(conn)
             await conn.execute("""
                 CREATE OR REPLACE FUNCTION decay_unused_priorities(
                     p_stale_days integer,

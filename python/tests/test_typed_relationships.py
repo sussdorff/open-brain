@@ -450,6 +450,87 @@ class TestMCPToolRegistration:
             _current_scopes.reset(token)
 
 
+# ─── open-brain-95v: _ensure_metadata_column migration + create_relationship ──
+
+
+class TestEnsureMetadataColumn:
+    """Verify _ensure_metadata_column is wired into get_pool init and that
+    create_relationship works with metadata=None and metadata={"x": 1}."""
+
+    @pytest.mark.asyncio
+    async def test_ensure_metadata_column_called_during_pool_init(self):
+        """_ensure_metadata_column must be called when a new pool is created."""
+        import open_brain.data_layer.postgres as pg_module
+
+        # Reset the module-level pool so get_pool() re-runs initialization
+        original_pool = pg_module._pool
+        pg_module._pool = None
+        try:
+            conn = AsyncMock()
+            conn.fetchval = AsyncMock(return_value=None)
+            conn.execute = AsyncMock(return_value=None)
+            conn.fetch = AsyncMock(return_value=[])
+
+            pool = _make_pool(conn)
+
+            # asyncpg.create_pool is a coroutine — use AsyncMock so it can be awaited
+            with patch(
+                "open_brain.data_layer.postgres.asyncpg.create_pool",
+                new_callable=AsyncMock,
+                return_value=pool,
+            ):
+                with patch(
+                    "open_brain.data_layer.postgres._ensure_link_type_column", new_callable=AsyncMock
+                ) as mock_link_type, patch(
+                    "open_brain.data_layer.postgres._ensure_metadata_column", new_callable=AsyncMock
+                ) as mock_metadata:
+                    await pg_module.get_pool()
+
+            mock_link_type.assert_called_once()
+            mock_metadata.assert_called_once()
+        finally:
+            pg_module._pool = original_pool
+
+    @pytest.mark.asyncio
+    async def test_create_relationship_with_metadata_none(self):
+        """create_relationship succeeds when metadata=None."""
+        conn = AsyncMock()
+        conn.fetchval = AsyncMock(return_value=1)
+        pool = _make_pool(conn)
+
+        dl = PostgresDataLayer()
+        with patch("open_brain.data_layer.postgres.get_pool", return_value=pool):
+            result = await dl.create_relationship(
+                source_id=1, target_id=2, link_type="similar_to", metadata=None
+            )
+
+        assert isinstance(result, int)
+        conn.fetchval.assert_called_once()
+        # metadata arg in positional args should be None
+        call_args = conn.fetchval.call_args[0]
+        # call_args: (sql, source_id, target_id, link_type, metadata)
+        assert call_args[4] is None
+
+    @pytest.mark.asyncio
+    async def test_create_relationship_with_metadata_dict(self):
+        """create_relationship succeeds when metadata={"x": 1}."""
+        conn = AsyncMock()
+        conn.fetchval = AsyncMock(return_value=2)
+        pool = _make_pool(conn)
+
+        dl = PostgresDataLayer()
+        with patch("open_brain.data_layer.postgres.get_pool", return_value=pool):
+            result = await dl.create_relationship(
+                source_id=10, target_id=20, link_type="similar_to", metadata={"x": 1}
+            )
+
+        assert isinstance(result, int)
+        conn.fetchval.assert_called_once()
+        call_args = conn.fetchval.call_args[0]
+        # metadata is serialised to JSON string for $4::jsonb — verify it is not None
+        assert call_args[4] is not None
+
+
 # ─── AC7: Integration test for backfill script ────────────────────────────────
 
 
