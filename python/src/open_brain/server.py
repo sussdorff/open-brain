@@ -96,6 +96,12 @@ def logged_tool(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[An
 
     Sets _request_id ContextVar to a fresh UUID for the duration of each call,
     then resets it in the finally block to avoid leaking state across requests.
+
+    NOTE: This wrapper only covers errors that occur inside the tool function body.
+    Pydantic argument-validation failures are caught by FastMCP's Tool.run() layer
+    *before* this wrapper is invoked.  Those cases are handled by
+    ScopedFastMCP.call_tool(), which emits a tool_error log at that level so that
+    AK3 coverage is complete.
     """
     @wraps(fn)
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -238,6 +244,30 @@ class ScopedFastMCP(FastMCP):
                 continue
             filtered.append(tool)
         return filtered
+
+    async def call_tool(self, name: str, arguments: dict) -> Any:
+        """Dispatch a tool call and log argument-validation failures.
+
+        FastMCP validates arguments via Pydantic inside Tool.run() *before*
+        invoking the registered function.  This means that when validation
+        fails the logged_tool wrapper is never reached and no tool_error log
+        is emitted.  This override catches those pre-invocation ToolErrors and
+        logs them so that AK3 (tool_error on every failed MCP call) is satisfied
+        for the full call path.
+        """
+        t0 = time.monotonic()
+        try:
+            return await super().call_tool(name, arguments)
+        except Exception:
+            duration_ms = int((time.monotonic() - t0) * 1000)
+            user_id = _current_user_id.get()
+            rid = _request_id.get()
+            logger.exception(
+                "tool_error tool=%s duration_ms=%d status=error request_id=%s user_id=%s"
+                " (pre-invocation: argument validation or dispatch failure)",
+                name, duration_ms, rid, user_id,
+            )
+            raise
 
 
 # MCP server (ScopedFastMCP for scope-gated tool listing)
