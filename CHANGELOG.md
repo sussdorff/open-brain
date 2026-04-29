@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(compact)* Honour do_not_compact metadata flag in compaction and triage
+- *(open-brain-47f)* Drop legacy CHECK on relation_type to allow all VALID_LINK_TYPES
+
+## [0.23.0] - 2026-04-25
+
+### Bug Fixes
+
 - *(open-brain-5ye)* Address review findings iteration 1
 - *(open-brain-5ye)* Address codex adversarial findings
 
@@ -17,6 +24,11 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - *(open-brain-5ye)* Green — IMAPEmailIngestor ADR-0001 protocol compliance
+
+### Miscellaneous
+
+- *(open-brain-5ye)* Session close — IMAPEmailIngestor ADR-0001 compliance
+- Bump version to 0.23.0
 
 ## [0.22.3] - 2026-04-25
 
@@ -46,13 +58,8 @@ All notable changes to this project will be documented in this file.
 
 ### Miscellaneous
 
-- Bump version to 0.22.1
-
-## [0.23.0] - 2026-04-25
-
-### Miscellaneous
-
 - Bump version to 0.23.0
+- Bump version to 0.22.1
 
 ## [2026.04.24] - 2026-04-25
 
