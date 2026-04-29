@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -197,9 +198,11 @@ async def _cmd_ingest_transcript(args: argparse.Namespace) -> Any:
     Args:
         args: Parsed CLI arguments. Must have 'source_ref' (str), optionally
             'file' (str path) or 'stdin' (bool), and optionally 'medium_hint' (str).
+            Pass '--direct' (or set OB_DIRECT=1) to bypass MCP transport and
+            call PostgresDataLayer in-process. Requires DATABASE_URL to be set.
 
     Returns:
-        Ingest summary from MCP tool.
+        Ingest summary from MCP tool (or direct-mode equivalent dict).
     """
     if args.file:
         text = Path(args.file).read_text(encoding="utf-8")
@@ -208,6 +211,21 @@ async def _cmd_ingest_transcript(args: argparse.Namespace) -> Any:
 
     if not text.strip():
         _error("Empty input: transcript text must not be empty")
+
+    if getattr(args, "direct", False) or os.environ.get("OB_DIRECT") == "1":
+        import open_brain.cli.direct as _direct
+
+        database_url = _direct.load_database_url()
+        if not database_url:
+            _error(
+                "--direct requires DATABASE_URL env var or DATABASE_URL in .env file"
+            )
+        _direct.prepare_direct_env(database_url)
+        return await _direct.run_ingest_transcript_direct(
+            text=text,
+            source_ref=args.source_ref,
+            medium_hint=args.medium_hint,
+        )
 
     kwargs: dict[str, Any] = {
         "text": text,
@@ -390,6 +408,17 @@ def _build_parser() -> argparse.ArgumentParser:
         "--stdin",
         action="store_true",
         help="Read transcript from stdin (default when --file is not given)",
+    )
+    p_ingest_transcript.add_argument(
+        "--direct",
+        action="store_true",
+        help=(
+            "Bypass MCP transport: call PostgresDataLayer directly in-process. "
+            "Equivalent to setting OB_DIRECT=1 env var. "
+            "Requires DATABASE_URL env var (or DATABASE_URL in .env). "
+            "Use for local operator workflows. "
+            "Not suitable for multi-user or sandboxed setups."
+        ),
     )
 
     return parser
