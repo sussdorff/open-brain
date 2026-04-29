@@ -324,3 +324,37 @@ class TestExistingToolsWrapped:
         assert any("tool_end" in m and "search" in m for m in messages), (
             f"Expected tool_end for search, got: {messages}"
         )
+
+
+# ─── AK1 pipeline: env → config → dictConfig ────────────────────────────────
+
+class TestConfigurePipeline:
+    """AK1: env var → Config → _configure_logging → logger level applied."""
+
+    def test_configure_logging_applies_debug_level(self, reset_config_singleton):
+        """AK1: _configure_logging('DEBUG', 'human') sets open_brain logger to DEBUG."""
+        from open_brain.__main__ import _configure_logging
+
+        _configure_logging("DEBUG", "human")
+
+        assert logging.getLogger("open_brain").isEnabledFor(logging.DEBUG), (
+            "Expected open_brain logger to be enabled for DEBUG after _configure_logging('DEBUG', 'human')"
+        )
+
+    def test_configure_logging_json_format_uses_json_formatter(self, reset_config_singleton):
+        """AK5: _configure_logging with log_format='json' installs JsonFormatter on console handler."""
+        from open_brain.__main__ import _configure_logging
+        from open_brain.logging_config import JsonFormatter
+
+        _configure_logging("INFO", "json")
+
+        root_logger = logging.getLogger()
+        console_handlers = [
+            h for h in root_logger.handlers
+            if isinstance(h, logging.StreamHandler)
+        ]
+        assert console_handlers, "Expected at least one StreamHandler on root logger"
+        json_handlers = [h for h in console_handlers if isinstance(h.formatter, JsonFormatter)]
+        assert json_handlers, (
+            f"Expected a handler with JsonFormatter, got: {[type(h.formatter).__name__ for h in console_handlers]}"
+        )

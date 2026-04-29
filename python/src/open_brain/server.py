@@ -18,6 +18,7 @@ from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from functools import wraps
 from pathlib import Path
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import asyncpg
@@ -85,7 +86,7 @@ _is_api_key_auth: ContextVar[bool] = ContextVar("is_api_key_auth", default=False
 _request_id: ContextVar[str | None] = ContextVar("request_id", default=None)
 
 
-def logged_tool(fn):
+def logged_tool(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
     """Wrap an MCP tool function with structured logging (start/end/error).
 
     Emits:
@@ -93,19 +94,20 @@ def logged_tool(fn):
     - tool_end: tool name, duration_ms, status=ok, request_id
     - tool_error: tool name, duration_ms, status=error, request_id (with traceback via exc_info)
 
-    Sets _request_id ContextVar to a fresh UUID for the duration of each call.
+    Sets _request_id ContextVar to a fresh UUID for the duration of each call,
+    then resets it in the finally block to avoid leaking state across requests.
     """
     @wraps(fn)
-    async def wrapper(*args, **kwargs):
+    async def wrapper(*args: Any, **kwargs: Any) -> Any:
         rid = str(uuid.uuid4())
-        _request_id.set(rid)
+        token = _request_id.set(rid)
         tool_name = fn.__name__
         user_id = _current_user_id.get()
         args_keys = list(kwargs.keys())
-        args_size = len(str(kwargs))
+        args_text_chars = sum(len(v) for v in kwargs.values() if isinstance(v, str))
         logger.info(
-            "tool_start tool=%s args_keys=%s args_size_bytes=%d user_id=%s request_id=%s",
-            tool_name, args_keys, args_size, user_id, rid,
+            "tool_start tool=%s args_keys=%s args_text_chars=%d user_id=%s request_id=%s",
+            tool_name, args_keys, args_text_chars, user_id, rid,
         )
         t0 = time.monotonic()
         try:
@@ -123,6 +125,8 @@ def logged_tool(fn):
                 tool_name, duration_ms, rid,
             )
             raise
+        finally:
+            _request_id.reset(token)
     return wrapper
 
 # Evolution tools require the `evolution` OAuth scope

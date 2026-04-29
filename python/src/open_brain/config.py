@@ -43,7 +43,7 @@ class Config(BaseSettings):
     EMAIL_EXTRACTION_MODEL: str = "claude-haiku-4-5-20251001"
 
     # Logging configuration
-    LOG_LEVEL: str = "INFO"
+    LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     LOG_FORMAT: Literal["human", "json"] = "human"
 
     # Daily ingestion guard: reject save_memory calls beyond this threshold per day
