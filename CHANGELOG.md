@@ -3,13 +3,25 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
-### Added
+### Bug Fixes
 
-- `ob ingest transcript --direct`: bypass MCP transport for local operator workflows; reads DATABASE_URL from env or `.env` and calls PostgresDataLayer in-process.
+- *(open-brain-c5e)* Address review findings iteration 1
+- *(open-brain-c5e)* Address codex adversarial findings
+
+### Features
+
+- *(open-brain-c5e)* Green — direct-mode for ob ingest transcript --direct
+
+## [0.26.0] - 2026-04-29
 
 ### Features
 
 - *(open-brain-57q)* Add ob ingest transcript CLI subcommand
+
+### Miscellaneous
+
+- *(open-brain-57q)* Update changelog for ob ingest transcript
+- Bump version to 0.26.0
 
 ## [0.25.0] - 2026-04-29
 
