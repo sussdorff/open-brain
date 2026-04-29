@@ -1,10 +1,14 @@
 """LLM provider abstraction: Anthropic and OpenRouter."""
 
+import logging
+import time
 from dataclasses import dataclass
 
 import httpx
 
 from open_brain.config import get_config
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -50,6 +54,13 @@ async def _call_anthropic(
     if not config.ANTHROPIC_API_KEY:
         raise ValueError("ANTHROPIC_API_KEY required when LLM_PROVIDER=anthropic")
 
+    logger.debug(
+        "llm_call_start provider=anthropic model=%s max_tokens=%d msg_count=%d",
+        model,
+        max_tokens,
+        len(messages),
+    )
+    t0 = time.monotonic()
     async with httpx.AsyncClient() as client:
         response = await client.post(
             "https://api.anthropic.com/v1/messages",
@@ -67,7 +78,20 @@ async def _call_anthropic(
         )
 
     if not response.is_success:
+        logger.error("llm_call_error provider=anthropic status=%d", response.status_code)
         raise RuntimeError(f"Anthropic API error {response.status_code}: {response.text}")
+
+    duration_ms = int((time.monotonic() - t0) * 1000)
+    logger.info(
+        "llm_call_success provider=anthropic status=%d duration_ms=%d response_size=%d",
+        response.status_code,
+        duration_ms,
+        len(response.content),
+    )
+    if duration_ms > 5000:
+        logger.warning(
+            "llm_call_slow provider=anthropic model=%s duration_ms=%d", model, duration_ms
+        )
 
     data = response.json()
     content = data.get("content", [])
@@ -84,6 +108,13 @@ async def _call_openrouter(
     if not config.OPENROUTER_API_KEY:
         raise ValueError("OPENROUTER_API_KEY required when LLM_PROVIDER=openrouter")
 
+    logger.debug(
+        "llm_call_start provider=openrouter model=%s max_tokens=%d msg_count=%d",
+        model,
+        max_tokens,
+        len(messages),
+    )
+    t0 = time.monotonic()
     async with httpx.AsyncClient() as client:
         response = await client.post(
             "https://openrouter.ai/api/v1/chat/completions",
@@ -100,7 +131,20 @@ async def _call_openrouter(
         )
 
     if not response.is_success:
+        logger.error("llm_call_error provider=openrouter status=%d", response.status_code)
         raise RuntimeError(f"OpenRouter API error {response.status_code}: {response.text}")
+
+    duration_ms = int((time.monotonic() - t0) * 1000)
+    logger.info(
+        "llm_call_success provider=openrouter status=%d duration_ms=%d response_size=%d",
+        response.status_code,
+        duration_ms,
+        len(response.content),
+    )
+    if duration_ms > 5000:
+        logger.warning(
+            "llm_call_slow provider=openrouter model=%s duration_ms=%d", model, duration_ms
+        )
 
     data = response.json()
     choices = data.get("choices", [])

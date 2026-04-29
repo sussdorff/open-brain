@@ -111,20 +111,39 @@ class TranscriptIngestor:
         run_id = run_id or str(uuid.uuid4())
         idempotency_key = _compute_idempotency_key(source_ref, text)
 
+        logger.info(
+            "ingest_start source_ref=%r text_len=%d idempotency_key=%.16s...",
+            source_ref,
+            len(text),
+            idempotency_key,
+        )
+
         # --- Idempotency check ---
         prior = await self._find_prior_run(idempotency_key, source_ref)
         if prior is not None:
             return prior
 
+        logger.info("idempotency_miss source_ref=%r", source_ref)
         metrics.record_ingest("transcript")
 
         # --- LLM extraction ---
         metrics.record_llm_call("extract")
+        llm_extract_start = time.monotonic()
+        logger.info("llm_extract_start source_ref=%r", source_ref)
         extracted = await extract_from_transcript(text)
         attendees: list[str] = extracted.get("attendees") or []
         mentioned: list[str] = extracted.get("mentioned_people") or []
         topics: list[str] = extracted.get("topics") or []
         follow_up_tasks: list[str] = extracted.get("follow_up_tasks") or []
+        llm_extract_ms = int((time.monotonic() - llm_extract_start) * 1000)
+        logger.info(
+            "llm_extract_end source_ref=%r attendees=%d mentioned=%d topics=%d duration_ms=%d",
+            source_ref,
+            len(attendees),
+            len(mentioned),
+            len(topics),
+            llm_extract_ms,
+        )
 
         # Build follow_up_candidates list (never auto-created as bd issues)
         follow_up_candidates: list[dict] = [
@@ -153,6 +172,7 @@ class TranscriptIngestor:
         )
         metrics.record_memory_written("meeting")
         meeting_id = meeting_result.id
+        logger.info("meeting_saved meeting_id=%d source_ref=%r", meeting_id, source_ref)
 
         # --- Process attendees (present people) ---
         person_memory_ids: list[int] = []
@@ -215,6 +235,8 @@ class TranscriptIngestor:
             metrics.record_memory_written("mention")
             mention_memory_ids.append(mention_result.id)
 
+        logger.info("mentions_saved count=%d", len(mention_memory_ids))
+
         # --- Create relationships ---
         relationship_ids: list[int] = []
 
@@ -239,6 +261,12 @@ class TranscriptIngestor:
             )
             relationship_ids.append(rel_id)
             metrics.record_relationship_written("mentioned_in")
+
+        logger.info(
+            "relationships_created attended_by=%d mentioned_in=%d",
+            len(person_memory_ids),
+            len(mentioned_person_ids),
+        )
 
         # Surface mentioned people in person_memory_ids so mention-only
         # transcripts return the person IDs they created. Done AFTER the
@@ -267,7 +295,17 @@ class TranscriptIngestor:
             )
         )
 
+        total_ms = int((time.monotonic() - ingest_start) * 1000)
         metrics.record_ingest_duration("transcript", time.monotonic() - ingest_start)
+        logger.info(
+            "ingest_end source_ref=%r meeting_id=%d persons=%d mentions=%d relationships=%d duration_ms=%d",
+            source_ref,
+            meeting_id,
+            len(person_memory_ids),
+            len(mention_memory_ids),
+            len(relationship_ids),
+            total_ms,
+        )
         return result
 
     async def _find_prior_run(
@@ -353,6 +391,7 @@ class TranscriptIngestor:
         )
 
         metrics.record_dedup_decision(decision.action)
+        logger.debug("dedup_decision action=%s name=%r", decision.action, name)
 
         if decision.action == "llm_confirm":
             # Records that this dedup decision required LLM assistance (the LLM call is

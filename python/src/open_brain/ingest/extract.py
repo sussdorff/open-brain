@@ -7,6 +7,7 @@ and follow-up tasks.
 import json
 import logging
 import re
+import time
 
 from open_brain.data_layer.llm import LlmMessage, llm_complete
 
@@ -43,10 +44,14 @@ async def extract_from_transcript(text: str) -> dict:
         Falls back to empty lists on parse error.
     """
     prompt = f"{EXTRACTION_PROMPT}\n\nTranscript:\n{text}"
+    logger.info("llm_extract_call model=haiku prompt_chars=%d", len(prompt))
+    extract_t0 = time.monotonic()
     response = await llm_complete(
         messages=[LlmMessage(role="user", content=prompt)],
         max_tokens=1024,
     )
+    extract_ms = int((time.monotonic() - extract_t0) * 1000)
+    logger.info("llm_extract_response response_chars=%d duration_ms=%d", len(response), extract_ms)
 
     try:
         # Strip potential markdown code fences
