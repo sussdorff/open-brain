@@ -280,8 +280,13 @@ class TestCmdIngestTranscriptDirectRouting:
         assert result == expected_result
 
     @pytest.mark.asyncio
-    async def test_without_direct_flag_uses_mcp_path(self, tmp_path, monkeypatch):
-        """Without --direct, the normal MCP call_tool path is used."""
+    async def test_without_direct_flag_or_env_var_uses_mcp_path(
+        self, tmp_path, monkeypatch
+    ):
+        """AK2: When NEITHER --direct flag NOR OB_DIRECT=1 env var is set,
+        the normal MCP call_tool path is used (behaviour unchanged)."""
+        # Explicitly unset OB_DIRECT to document the "neither flag nor env var"
+        # case required by AK2 of bead open-brain-c5e.
         monkeypatch.delenv("OB_DIRECT", raising=False)
 
         transcript_file = tmp_path / "t.txt"
@@ -291,6 +296,8 @@ class TestCmdIngestTranscriptDirectRouting:
             "--source-ref=normalref",
             f"--file={transcript_file}",
         ])
+        # Sanity assertion: --direct flag is not set on parsed args.
+        assert args.direct is False
 
         with patch("open_brain.cli.main.call_tool", new_callable=AsyncMock) as mock_call_tool:
             mock_call_tool.return_value = {"status": "ok"}

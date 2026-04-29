@@ -414,6 +414,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Bypass MCP transport: call PostgresDataLayer directly in-process. "
+            "Equivalent to setting OB_DIRECT=1 env var. "
             "Requires DATABASE_URL env var (or DATABASE_URL in .env). "
             "Use for local operator workflows. "
             "Not suitable for multi-user or sandboxed setups."
