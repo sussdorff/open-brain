@@ -1,16 +1,54 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
-## [0.25.0] - 2026-04-29
+## [unreleased]
+
+### Bug Fixes
+
+- *(open-brain-95v)* Add _ensure_metadata_column migration for memory_relationships
+
+## [2026.04.29] - 2026-04-29
+
+### Bug Fixes
+
+- *(open-brain-eip)* Address codex adversarial findings — compute duration_ms before error path to enable slow-WARNING on failed calls
+
+### Documentation
+
+- *(open-brain-eip)* Update CHANGELOG for granular logging in TranscriptIngestor + LLM extraction
+
+### Features
+
+- *(open-brain-eip)* Green — granular phase-boundary logging in TranscriptIngestor, extract.py, llm.py
+
+### Miscellaneous
+
+- Bump version to 0.25.0
+
+### Testing
+
+- *(open-brain-eip)* Red — granular logging tests for TranscriptIngestor, extract.py, llm.py
+
+## [0.24.1] - 2026-04-29
 
 ### Bug Fixes
 
 - *(open-brain-eip)* Address review findings iteration 1
 - *(open-brain-eip)* Address codex adversarial findings
+- *(open-brain-47f)* Drop legacy CHECK on relation_type to allow all VALID_LINK_TYPES
+
+### Documentation
+
+- *(open-brain-47f)* Update CHANGELOG for schema drift fix
 
 ### Features
 
 - *(open-brain-eip)* Green — granular logging in TranscriptIngestor + LLM extraction
+- *(open-brain-eip)* Granular logging in TranscriptIngestor + LLM extraction
+
+### Miscellaneous
+
+- Bump version to 0.24.1
 
 ### Testing
 
@@ -21,10 +59,8 @@ All notable changes to this project will be documented in this file.
 ### Bug Fixes
 
 - *(compact)* Honour do_not_compact metadata flag in compaction and triage
-- *(open-brain-47f)* Drop legacy CHECK on relation_type to allow all VALID_LINK_TYPES
 - *(open-brain-bt9)* Address review findings iteration 1
 - *(open-brain-bt9)* Address codex adversarial findings
-- *(open-brain-eip)* Compute duration_ms before error path to enable slow-WARNING on failed LLM calls
 
 ### Documentation
 
@@ -33,7 +69,6 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - *(open-brain-bt9)* Green — structured logging + MCP tool instrumentation
-- *(open-brain-eip)* Granular phase-boundary logging in TranscriptIngestor, extract.py, and llm.py — log timeline with ingest_start/end, LLM extract phases, meeting saved, dedup decisions (DEBUG), mentions/relationships counts; WARNING when LLM call takes >5s
 
 ### Miscellaneous
 
