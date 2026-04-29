@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 ### Bug Fixes
 
 - *(compact)* Honour do_not_compact metadata flag in compaction and triage
+- *(open-brain-47f)* Drop legacy CHECK on relation_type to allow all VALID_LINK_TYPES
 - *(open-brain-bt9)* Address review findings iteration 1
 - *(open-brain-bt9)* Address codex adversarial findings
 
