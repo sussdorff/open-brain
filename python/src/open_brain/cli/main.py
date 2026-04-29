@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import sys
+from pathlib import Path
 from typing import Any
 
 from open_brain.cli.client import MCPError, call_tool
@@ -190,6 +191,33 @@ async def _cmd_ingest_email(args: argparse.Namespace) -> Any:
     return await call_tool("ingest_email_inbox", kwargs)
 
 
+async def _cmd_ingest_transcript(args: argparse.Namespace) -> Any:
+    """Ingest a transcript from a file or stdin.
+
+    Args:
+        args: Parsed CLI arguments. Must have 'source_ref' (str), optionally
+            'file' (str path) or 'stdin' (bool), and optionally 'medium_hint' (str).
+
+    Returns:
+        Ingest summary from MCP tool.
+    """
+    if args.file:
+        text = Path(args.file).read_text(encoding="utf-8")
+    else:
+        text = sys.stdin.read()
+
+    if not text.strip():
+        _error("Empty input: transcript text must not be empty")
+
+    kwargs: dict[str, Any] = {
+        "text": text,
+        "source_ref": args.source_ref,
+    }
+    if args.medium_hint:
+        kwargs["medium_hint"] = args.medium_hint
+    return await call_tool("ingest_transcript", kwargs)
+
+
 async def _cmd_ingest(args: argparse.Namespace) -> Any:
     """Dispatch ingest subcommands.
 
@@ -201,6 +229,8 @@ async def _cmd_ingest(args: argparse.Namespace) -> Any:
     """
     if args.ingest_command == "email":
         return await _cmd_ingest_email(args)
+    if args.ingest_command == "transcript":
+        return await _cmd_ingest_transcript(args)
     raise ValueError(f"Unknown ingest command: {args.ingest_command}")
 
 
@@ -330,6 +360,36 @@ def _build_parser() -> argparse.ArgumentParser:
         default=50,
         dest="max_messages",
         help="Maximum number of emails to fetch (default: 50)",
+    )
+
+    # ingest transcript
+    p_ingest_transcript = ingest_sub.add_parser(
+        "transcript",
+        help="Ingest a transcript from a file or stdin",
+    )
+    p_ingest_transcript.add_argument(
+        "--source-ref",
+        required=True,
+        dest="source_ref",
+        metavar="SOURCE_REF",
+        help="Unique identifier for the transcript",
+    )
+    p_ingest_transcript.add_argument(
+        "--medium-hint",
+        dest="medium_hint",
+        metavar="MEDIUM",
+        help="Optional medium hint (e.g. macwhisper, dictation)",
+    )
+    _transcript_input = p_ingest_transcript.add_mutually_exclusive_group()
+    _transcript_input.add_argument(
+        "--file",
+        metavar="PATH",
+        help="Read transcript from file (default: read from stdin)",
+    )
+    _transcript_input.add_argument(
+        "--stdin",
+        action="store_true",
+        help="Read transcript from stdin (default when --file is not given)",
     )
 
     return parser

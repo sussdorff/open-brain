@@ -3,9 +3,20 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Features
+
+- *(open-brain-57q)* Add ob ingest transcript CLI subcommand
+
+## [0.25.0] - 2026-04-29
+
 ### Bug Fixes
 
 - *(open-brain-95v)* Add _ensure_metadata_column migration for memory_relationships
+
+### Miscellaneous
+
+- *(open-brain-95v)* Update changelog for metadata column migration
+- Bump version to 0.25.0
 
 ## [2026.04.29] - 2026-04-29
 
