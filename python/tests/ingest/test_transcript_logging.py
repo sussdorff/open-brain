@@ -241,47 +241,6 @@ class TestSlowLlmWarning:
     """AC2: LLM calls > 5 seconds emit WARNING with duration_ms."""
 
     @pytest.mark.asyncio
-    async def test_slow_llm_warning_emitted_when_over_5_seconds(self, caplog):
-        """AC2: WARNING emitted with duration_ms when LLM takes > 5 seconds."""
-        mock_dl = _make_mock_dl()
-
-        # Simulate slow LLM by mocking time.monotonic in llm.py
-        # We need the llm.py timing to return > 5 seconds
-        call_count = [0]
-        real_monotonic_vals = [0.0, 6000.0]  # start=0, end=6000ms → 6s
-
-        def _fake_monotonic_llm():
-            idx = min(call_count[0], len(real_monotonic_vals) - 1)
-            val = real_monotonic_vals[idx]
-            call_count[0] += 1
-            return val
-
-        with patch("open_brain.ingest.extract.llm_complete") as mock_llm:
-            mock_llm.return_value = LLM_NO_ATTENDEES
-
-            # Patch time.monotonic in llm.py to simulate slow HTTP call
-            with patch("open_brain.data_layer.llm.time") as mock_time:
-                mock_time.monotonic.side_effect = _fake_monotonic_llm
-
-                ingestor = TranscriptIngestor(data_layer=mock_dl)
-
-                with caplog.at_level(logging.WARNING, logger="open_brain"):
-                    await ingestor.ingest(
-                        text="Transcript with slow LLM.",
-                        source_ref="slow-llm-test",
-                    )
-
-        # Since we mocked llm_complete directly (not the HTTP layer), this tests
-        # that the slow_llm_call warning is emitted. For this to work we need
-        # the timing to be > 5s in transcript.py's llm measurement.
-        # Let's patch time in transcript.py instead.
-        # (See the companion test below using transcript.py time mock)
-        warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
-        # This test verifies the WARNING infrastructure exists; the transcript.py test
-        # will verify the actual threshold trigger.
-        _ = warning_records  # placeholder — real assertion in test below
-
-    @pytest.mark.asyncio
     async def test_slow_llm_warning_from_transcript_timing(self, caplog):
         """AC2: WARNING emitted when LLM phase takes > 5 seconds (measured in transcript.py)."""
         mock_dl = _make_mock_dl()

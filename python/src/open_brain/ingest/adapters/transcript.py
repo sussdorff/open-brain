@@ -119,6 +119,11 @@ class TranscriptIngestor:
         # --- Idempotency check ---
         prior = await self._find_prior_run(idempotency_key, source_ref)
         if prior is not None:
+            idempotency_duration_ms = int((time.monotonic() - ingest_start) * 1000)
+            logger.info(
+                "ingest_end source_ref=%r duration_ms=%d idempotent=true",
+                source_ref, idempotency_duration_ms,
+            )
             return prior
 
         metrics.record_ingest("transcript")
@@ -176,17 +181,17 @@ class TranscriptIngestor:
         # --- Process attendees (present people) ---
         person_memory_ids: list[int] = []
         interaction_memory_ids: list[int] = []
+        pre_loop_ids = {r.memory_id for r in existing_records}
         persons_new = 0
         persons_reused = 0
 
         for name in attendees:
-            existing_ids_before = {r.memory_id for r in existing_records}
             person_id = await self._resolve_person(
                 name=name,
                 existing_records=existing_records,
                 run_id=run_id,
             )
-            if person_id in existing_ids_before:
+            if person_id in pre_loop_ids:
                 persons_reused += 1
             else:
                 persons_new += 1
