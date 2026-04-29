@@ -78,14 +78,20 @@ async def _call_anthropic(
             timeout=60.0,
         )
 
+    duration_ms = int((time.monotonic() - t0) * 1000)
+
     if not response.is_success:
+        if duration_ms > _SLOW_LLM_THRESHOLD_MS:
+            logger.warning(
+                "slow_llm_call provider=anthropic model=%r duration_ms=%d",
+                model, duration_ms,
+            )
         logger.error(
             "llm_http_error provider=anthropic status=%d body=%r",
             response.status_code, response.text[:200],
         )
         raise RuntimeError(f"Anthropic API error {response.status_code}: {response.text}")
 
-    duration_ms = int((time.monotonic() - t0) * 1000)
     logger.info(
         "llm_http_end provider=anthropic status=%d duration_ms=%d response_bytes=%d",
         response.status_code, duration_ms, len(response.content),
@@ -132,14 +138,20 @@ async def _call_openrouter(
             timeout=60.0,
         )
 
+    duration_ms = int((time.monotonic() - t0) * 1000)
+
     if not response.is_success:
+        if duration_ms > _SLOW_LLM_THRESHOLD_MS:
+            logger.warning(
+                "slow_llm_call provider=openrouter model=%r duration_ms=%d",
+                model, duration_ms,
+            )
         logger.error(
             "llm_http_error provider=openrouter status=%d body=%r",
             response.status_code, response.text[:200],
         )
         raise RuntimeError(f"OpenRouter API error {response.status_code}: {response.text}")
 
-    duration_ms = int((time.monotonic() - t0) * 1000)
     logger.info(
         "llm_http_end provider=openrouter status=%d duration_ms=%d response_bytes=%d",
         response.status_code, duration_ms, len(response.content),
