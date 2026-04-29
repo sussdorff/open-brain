@@ -44,14 +44,21 @@ async def extract_from_transcript(text: str) -> dict:
         Falls back to empty lists on parse error.
     """
     prompt = f"{EXTRACTION_PROMPT}\n\nTranscript:\n{text}"
-    logger.info("llm_extract_call model=haiku prompt_chars=%d", len(prompt))
-    extract_t0 = time.monotonic()
+    extract_start = time.monotonic()
+    logger.info(
+        "llm_complete_start prompt_chars=%d",
+        len(prompt),
+    )
     response = await llm_complete(
         messages=[LlmMessage(role="user", content=prompt)],
         max_tokens=1024,
     )
-    extract_ms = int((time.monotonic() - extract_t0) * 1000)
-    logger.info("llm_extract_response response_chars=%d duration_ms=%d", len(response), extract_ms)
+    extract_duration_ms = int((time.monotonic() - extract_start) * 1000)
+    logger.info(
+        "llm_complete_end response_chars=%d duration_ms=%d",
+        len(response),
+        extract_duration_ms,
+    )
 
     try:
         # Strip potential markdown code fences

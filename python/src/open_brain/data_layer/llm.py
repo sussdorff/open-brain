@@ -10,6 +10,8 @@ from open_brain.config import get_config
 
 logger = logging.getLogger(__name__)
 
+_SLOW_LLM_THRESHOLD_MS = 5000
+
 
 @dataclass
 class LlmMessage:
@@ -54,13 +56,12 @@ async def _call_anthropic(
     if not config.ANTHROPIC_API_KEY:
         raise ValueError("ANTHROPIC_API_KEY required when LLM_PROVIDER=anthropic")
 
-    logger.debug(
-        "llm_call_start provider=anthropic model=%s max_tokens=%d msg_count=%d",
-        model,
-        max_tokens,
-        len(messages),
-    )
     t0 = time.monotonic()
+    logger.debug(
+        "llm_http_start provider=anthropic model=%r max_tokens=%d messages=%d",
+        model, max_tokens, len(messages),
+    )
+
     async with httpx.AsyncClient() as client:
         response = await client.post(
             "https://api.anthropic.com/v1/messages",
@@ -78,23 +79,27 @@ async def _call_anthropic(
         )
 
     duration_ms = int((time.monotonic() - t0) * 1000)
+
     if not response.is_success:
-        if duration_ms > 5000:
+        if duration_ms > _SLOW_LLM_THRESHOLD_MS:
             logger.warning(
-                "llm_call_slow provider=anthropic model=%s duration_ms=%d", model, duration_ms
+                "slow_llm_call provider=anthropic model=%r duration_ms=%d",
+                model, duration_ms,
             )
-        logger.error("llm_call_error provider=anthropic status=%d", response.status_code)
+        logger.error(
+            "llm_http_error provider=anthropic status=%d body=%r",
+            response.status_code, response.text[:200],
+        )
         raise RuntimeError(f"Anthropic API error {response.status_code}: {response.text}")
 
     logger.info(
-        "llm_call_success provider=anthropic status=%d duration_ms=%d response_size=%d",
-        response.status_code,
-        duration_ms,
-        len(response.content),
+        "llm_http_end provider=anthropic status=%d duration_ms=%d response_bytes=%d",
+        response.status_code, duration_ms, len(response.content),
     )
-    if duration_ms > 5000:
+    if duration_ms > _SLOW_LLM_THRESHOLD_MS:
         logger.warning(
-            "llm_call_slow provider=anthropic model=%s duration_ms=%d", model, duration_ms
+            "slow_llm_call provider=anthropic model=%r duration_ms=%d",
+            model, duration_ms,
         )
 
     data = response.json()
@@ -112,13 +117,12 @@ async def _call_openrouter(
     if not config.OPENROUTER_API_KEY:
         raise ValueError("OPENROUTER_API_KEY required when LLM_PROVIDER=openrouter")
 
-    logger.debug(
-        "llm_call_start provider=openrouter model=%s max_tokens=%d msg_count=%d",
-        model,
-        max_tokens,
-        len(messages),
-    )
     t0 = time.monotonic()
+    logger.debug(
+        "llm_http_start provider=openrouter model=%r max_tokens=%d messages=%d",
+        model, max_tokens, len(messages),
+    )
+
     async with httpx.AsyncClient() as client:
         response = await client.post(
             "https://openrouter.ai/api/v1/chat/completions",
@@ -135,23 +139,27 @@ async def _call_openrouter(
         )
 
     duration_ms = int((time.monotonic() - t0) * 1000)
+
     if not response.is_success:
-        if duration_ms > 5000:
+        if duration_ms > _SLOW_LLM_THRESHOLD_MS:
             logger.warning(
-                "llm_call_slow provider=openrouter model=%s duration_ms=%d", model, duration_ms
+                "slow_llm_call provider=openrouter model=%r duration_ms=%d",
+                model, duration_ms,
             )
-        logger.error("llm_call_error provider=openrouter status=%d", response.status_code)
+        logger.error(
+            "llm_http_error provider=openrouter status=%d body=%r",
+            response.status_code, response.text[:200],
+        )
         raise RuntimeError(f"OpenRouter API error {response.status_code}: {response.text}")
 
     logger.info(
-        "llm_call_success provider=openrouter status=%d duration_ms=%d response_size=%d",
-        response.status_code,
-        duration_ms,
-        len(response.content),
+        "llm_http_end provider=openrouter status=%d duration_ms=%d response_bytes=%d",
+        response.status_code, duration_ms, len(response.content),
     )
-    if duration_ms > 5000:
+    if duration_ms > _SLOW_LLM_THRESHOLD_MS:
         logger.warning(
-            "llm_call_slow provider=openrouter model=%s duration_ms=%d", model, duration_ms
+            "slow_llm_call provider=openrouter model=%r duration_ms=%d",
+            model, duration_ms,
         )
 
     data = response.json()
