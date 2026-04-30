@@ -1,7 +1,41 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [unreleased]
+
+### Bug Fixes
+
+- *(open-brain-3lr)* Address review findings iteration 1
+- *(open-brain-3lr)* Address codex adversarial findings
+
+### Features
+
+- *(open-brain-3lr)* Green — implement people enrichment pipeline
+
+## [2026.04.31] - 2026-04-30
+
+### Bug Fixes
+
+- *(transcript-dedup)* Improve LLM-confirm prompt with PKM context
+- *(merge-persons)* Add explicit type casts on jsonb_build_object params
+- *(merge-persons)* Handle directory-style person records in --list
+
+### Features
+
+- *(merge-persons)* Add --list discovery mode + fix alias double-encoding
+
+### Miscellaneous
+
+- Bump VERSION to 0.29.0 and release changelog for person-dedup wave
+
 ## [0.29.0] - 2026-04-30
+
+### Miscellaneous
+
+- Resolve CHANGELOG merge conflict — merge 8yh and mx1 unreleased entries
+- Bump version to 0.29.0
+
+## [0.28.0] - 2026-04-30
 
 ### Bug Fixes
 
@@ -10,25 +44,21 @@ All notable changes to this project will be documented in this file.
 - *(open-brain-8yh)* Address codex adversarial findings
 - *(open-brain-mx1)* Address review findings iteration 1
 - *(open-brain-mx1)* Address codex adversarial findings
-- *(transcript-dedup)* Improve LLM-confirm prompt with PKM context, target aliases/org, and likelihood framing — replaces overly conservative "if uncertain, say false" wording that was rejecting clear matches like `Malte` → `Malte Sussdorff`
-- *(merge-persons)* Add explicit type casts on `jsonb_build_object` parameters in `repoint_person_refs` (`$2::text`) and `soft_delete_source` (`$2::int`, `$3::text`). Without casts, asyncpg raises `IndeterminateDatatypeError` because Postgres cannot infer types for the polymorphic value parameters. Unit tests with mocked connections did not catch this — only real Postgres execution exposed it.
-- *(merge-persons)* Stop double-encoding aliases in `update_target_aliases`. The script registers a JSONB codec (`encoder=json.dumps`) on the connection but then also called `json.dumps()` manually on the alias list, producing a JSONB *string* like `"[\"Malte\"]"` instead of a JSONB array. Same bug class as open-brain-8i5. Fix: pass the Python list directly and let the codec handle encoding.
-
-### Features
-
-- *(merge-persons)* Add `--list` mode for discovery: shows ID, name, org, ref-count, relationship-count, aliases, and merge status for every person record. Supports `--include-merged` (also show soft-deleted) and `--collisions` (only first-token collision groups, the candidates for manual merging). Mutually exclusive with `--source/--target`.
-- *(merge-persons)* `--list` now correctly handles directory-style person records (those with `metadata.companies`/`linkedin_urls` containing multiple people). The primary person is read from `metadata.person` and prefixed with `[dir]` in the display, so e.g. memory 18175 shows as `[dir] Elias Trewin` instead of being blank. Mentioned-people from `metadata.entities.people` are intentionally **not** added as aliases — they are referenced contacts, not alternative names for the primary.
 
 ### Features
 
 - *(open-brain-8yh)* Green — one-shot person-merge CLI tool with full test suite
-- *(open-brain-8yh)* Add `merge_persons.py` utility for one-shot person deduplication with transactional safety and dry-run mode
+- *(open-brain-8yh)* One-shot person-merge tool for pre-existing duplicate pairs
 - *(open-brain-mx1)* Green — wire llm_confirm callback in _resolve_person
+- *(open-brain-mx1)* Wire llm_confirm callback in transcript _resolve_person
+- *(open-brain-mx1)* Wire llm_confirm callback in transcript _resolve_person
 
 ### Miscellaneous
 
 - *(open-brain-8yh)* Update changelog
+- Merge CHANGELOG entries from concurrent beads (pre-merge mx1)
 - *(open-brain-mx1)* Update changelog
+- Bump version to 0.28.0
 
 ## [0.27.0] - 2026-04-30
 
@@ -37,18 +67,10 @@ All notable changes to this project will be documented in this file.
 - *(open-brain-3bm)* Green — name-containment auto_merge for first-name/full-name dedup
 - *(open-brain-3bm)* Address review findings iteration 1
 - *(open-brain-3bm)* Address codex adversarial findings
-- *(open-brain-mx1)* Address review findings iteration 1
-- *(open-brain-mx1)* Address codex adversarial findings
-
-### Features
-
-- *(open-brain-8yh)* Add `merge_persons.py` utility for one-shot person deduplication with transactional safety and dry-run mode
-- *(open-brain-mx1)* Green — wire llm_confirm callback in _resolve_person
 
 ### Miscellaneous
 
 - *(open-brain-3bm)* Update changelog for person dedup name-variation fix
-- *(open-brain-mx1)* Update changelog
 - *(open-brain-3bm)* Session close — person dedup name-variation fix
 - Bump version to 0.27.0
 
