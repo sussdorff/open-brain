@@ -174,12 +174,12 @@ class TestIngestMacWhisperHandlers:
             mock_call.return_value = {
                 "items": [
                     {
-                        "source_ref": "macwhisper:session:abc123",
+                        "source_ref": "macwhisper:abc123",
                         "ingested": True,
                         "memory_id": 42,
                         "run_id": "run-123",
                         "ingested_at": "2026-04-30T12:00:00",
-                        "title": "Meeting: macwhisper:session:abc123",
+                        "title": "Meeting: macwhisper:abc123",
                     }
                 ]
             }
@@ -187,11 +187,12 @@ class TestIngestMacWhisperHandlers:
 
         mock_call.assert_awaited_once_with(
             "ingest_status",
-            {"source_refs": ["macwhisper:session:abc123"]},
+            {"source_refs": ["macwhisper:session:abc123", "macwhisper:abc123"]},
         )
         assert result["scanned_count"] == 1
         assert result["items"][0]["title"] == "Local MacWhisper Title"
-        assert result["items"][0]["ingested_title"] == "Meeting: macwhisper:session:abc123"
+        assert result["items"][0]["ingested_title"] == "Meeting: macwhisper:abc123"
+        assert result["items"][0]["source_ref"] == "macwhisper:abc123"
         assert result["items"][0]["ingested"] is True
         assert result["items"][0]["memory_id"] == 42
 
@@ -244,6 +245,17 @@ class TestIngestMacWhisperHandlers:
             result = await _cmd_ingest_macwhisper_list(args)
 
         connector.list_recent.assert_awaited_once_with(n=2)
+        mock_call.assert_awaited_once_with(
+            "ingest_status",
+            {
+                "source_refs": [
+                    "macwhisper:session:old",
+                    "macwhisper:old",
+                    "macwhisper:session:new",
+                    "macwhisper:new",
+                ]
+            },
+        )
         assert result["count"] == 1
         assert result["scanned_count"] == 2
         assert result["items"][0]["entry_id"] == "session:new"

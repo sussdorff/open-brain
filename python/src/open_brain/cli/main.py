@@ -498,18 +498,30 @@ async def _attach_ingest_status(items: list[dict[str, Any]]) -> list[dict[str, A
     if not items:
         return items
 
-    source_refs = [f"macwhisper:{item.get('entry_id', '')}" for item in items]
-    payload = await call_tool("ingest_status", {"source_refs": source_refs})
-    statuses = {
-        item.get("source_ref"): item
-        for item in (payload.get("items") or [])
-        if isinstance(item, dict)
-    }
+    source_ref_candidates = [
+        _macwhisper_source_ref_candidates(str(item.get("entry_id", "")))
+        for item in items
+    ]
+    source_refs = _dedupe_preserve_order(
+        ref
+        for candidates in source_ref_candidates
+        for ref in candidates
+    )
+    statuses = await _fetch_ingest_statuses(source_refs)
 
     enriched: list[dict[str, Any]] = []
-    for item, source_ref in zip(items, source_refs):
-        status = statuses.get(source_ref) or {
-            "source_ref": source_ref,
+    for item, candidates in zip(items, source_ref_candidates):
+        status = next(
+            (
+                statuses.get(source_ref)
+                for source_ref in candidates
+                if (statuses.get(source_ref) or {}).get("ingested")
+            ),
+            None,
+        )
+        primary_ref = candidates[0] if candidates else ""
+        status = status or statuses.get(primary_ref) or {
+            "source_ref": primary_ref,
             "ingested": False,
             "memory_id": None,
             "run_id": None,
@@ -524,6 +536,50 @@ async def _attach_ingest_status(items: list[dict[str, Any]]) -> list[dict[str, A
             updated["ingested_title"] = ingested_title
         enriched.append(updated)
     return enriched
+
+
+async def _fetch_ingest_statuses(source_refs: list[str]) -> dict[str, dict[str, Any]]:
+    """Fetch ingest statuses in server-sized chunks."""
+    statuses: dict[str, dict[str, Any]] = {}
+    chunk_size = 500
+    for start in range(0, len(source_refs), chunk_size):
+        chunk = source_refs[start: start + chunk_size]
+        payload = await call_tool("ingest_status", {"source_refs": chunk})
+        statuses.update(
+            {
+                item.get("source_ref"): item
+                for item in (payload.get("items") or [])
+                if isinstance(item, dict)
+            }
+        )
+    return statuses
+
+
+def _macwhisper_source_ref_candidates(entry_id: str) -> list[str]:
+    """Return canonical and legacy source_ref candidates for a MacWhisper entry."""
+    normalized = entry_id.strip()
+    if not normalized:
+        return []
+
+    candidates = [f"macwhisper:{normalized}"]
+    if ":" in normalized:
+        _prefix, raw_id = normalized.split(":", 1)
+        if raw_id:
+            candidates.append(f"macwhisper:{raw_id}")
+    return _dedupe_preserve_order(candidates)
+
+
+def _dedupe_preserve_order(values: Any) -> list[str]:
+    """Return non-empty unique strings in input order."""
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result
 
 
 async def _cmd_ingest_macwhisper_ingest(args: argparse.Namespace) -> Any:
