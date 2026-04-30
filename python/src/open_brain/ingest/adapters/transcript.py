@@ -427,6 +427,7 @@ class TranscriptIngestor:
         if cache_key in self._dedup_confirm_cache:
             return self._dedup_confirm_cache[cache_key]
 
+        metrics.record_llm_call("dedup_confirm")
         target_name = target.member_name
         runners_up_names = (
             ", ".join(r.member_name for r in preliminary.runners_up)
@@ -454,7 +455,8 @@ class TranscriptIngestor:
             if fence_match:
                 cleaned = fence_match.group(1)
             data = json.loads(cleaned)
-            confirmed: bool = bool(data.get("confirmed", False))
+            raw = data.get("confirmed", False)
+            confirmed: bool = raw is True  # only accept JSON boolean true, not string "true" or "false"
         except Exception as e:
             logger.warning("llm_dedup_confirm_error name=%r error=%r", incoming_name, e)
             confirmed = False
@@ -494,7 +496,6 @@ class TranscriptIngestor:
         # (avoids a redundant second call to match_person with all its scoring).
         decision = preliminary
         if preliminary.action == "llm_confirm":
-            metrics.record_llm_call("dedup_confirm")
             confirmed = await self._llm_dedup_confirm(name, preliminary)
             decision = MatchDecision(
                 action="auto_merge" if confirmed else "new",

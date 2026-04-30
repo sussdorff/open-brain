@@ -309,24 +309,34 @@ class TestCounterIncrements:
         assert stats.dedup_decisions_total["ambiguous"] == 1
 
     async def test_llm_calls_dedup_confirm_increments_on_llm_confirm(self):
-        """llm_calls_total[purpose=dedup_confirm] increments when match_person returns llm_confirm."""
+        """llm_calls_total[purpose=dedup_confirm] increments only when an actual LLM call is made."""
         from open_brain.ingest import metrics
         from open_brain.ingest.adapters.transcript import TranscriptIngestor
-        from open_brain.people.models import MatchDecision
+        from open_brain.people.models import MatchCandidate, MatchDecision
 
-        LLM_RESPONSE = json.dumps({
+        EXTRACT_RESPONSE = json.dumps({
             "attendees": ["Uncertain Person"],
             "mentioned_people": [],
             "topics": [],
             "follow_up_tasks": [],
         })
+        DEDUP_CONFIRM_RESPONSE = '{"confirmed": true}'
         mock_dl = _make_mock_dl()
 
-        llm_confirm_decision = MatchDecision(action="llm_confirm", target=None)
+        # Provide a real target so _llm_dedup_confirm proceeds past the target=None guard
+        candidate = MatchCandidate(
+            memory_id=42,
+            member_name="Uncertain P.",
+            member_org=None,
+            confidence=0.7,
+        )
+        llm_confirm_decision = MatchDecision(action="llm_confirm", target=candidate)
 
-        with patch("open_brain.ingest.extract.llm_complete") as mock_llm, \
+        with patch("open_brain.ingest.extract.llm_complete") as mock_extract_llm, \
+             patch("open_brain.ingest.adapters.transcript.llm_complete") as mock_dedup_llm, \
              patch("open_brain.ingest.adapters.transcript.match_person", return_value=llm_confirm_decision):
-            mock_llm.return_value = LLM_RESPONSE
+            mock_extract_llm.return_value = EXTRACT_RESPONSE
+            mock_dedup_llm.return_value = DEDUP_CONFIRM_RESPONSE
             ingestor = TranscriptIngestor(data_layer=mock_dl)
             await ingestor.ingest(
                 text="Uncertain person was at the meeting.",
