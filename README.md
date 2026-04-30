@@ -160,14 +160,25 @@ The CLI follows XDG config conventions. The primary config file is:
 
 Use `server_url` for the public base URL (`/mcp` is appended automatically) or `mcp_url` for an explicit MCP endpoint.
 
+If you use the plugin setup, your existing config may contain an `api_key` instead of a URL token. The CLI supports that too:
+
+```json
+{
+  "server_url": "https://your-server.example.com",
+  "api_key": "YOUR_API_KEY"
+}
+```
+
 Environment variables override config:
 
 ```bash
 export OB_URL="https://your-server.example.com/mcp"
 export OB_URL_TOKEN="TOKEN_FROM_STEP_2"
+# or:
+export OB_API_KEY="YOUR_API_KEY"
 ```
 
-OAuth bearer tokens are also supported via `OB_TOKEN` or `"token"` in the config file. URL tokens use `OB_URL_TOKEN`, `"url_token"` in the config file, or an explicit `?token=...` in `OB_URL`. Legacy `~/.open-brain/config.json`, `~/.open-brain/token`, and `~/.open-brain/url-token` files still work as fallback.
+OAuth bearer tokens are also supported via `OB_TOKEN` or `"token"` in the config file. URL tokens use `OB_URL_TOKEN`, `"url_token"` in the config file, or an explicit `?token=...` in `OB_URL`. API keys use `OB_API_KEY` or `"api_key"` in the config file. Legacy `~/.open-brain/config.json`, `~/.open-brain/token`, and `~/.open-brain/url-token` files still work as fallback.
 
 ### 4. Connect Claude Code
 

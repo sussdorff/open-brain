@@ -115,6 +115,14 @@ def _load_url_token() -> str | None:
     return None
 
 
+def _load_api_key() -> str | None:
+    """Load API key from env var or config file."""
+    api_key = os.environ.get("OB_API_KEY")
+    if api_key:
+        return api_key
+    return _config_str(_load_client_config(), "api_key")
+
+
 def _get_server_url() -> str:
     """Get server URL from env var or default.
 
@@ -167,10 +175,13 @@ async def call_tool(tool_name: str, arguments: dict[str, Any]) -> Any:
     """
     url = _get_server_url()
     token = _load_token()
+    api_key = None
     if not token:
-        url_token = _load_url_token()
-        if url_token:
-            url = _with_url_token(url, url_token)
+        api_key = _load_api_key()
+        if not api_key:
+            url_token = _load_url_token()
+            if url_token:
+                url = _with_url_token(url, url_token)
 
     headers: dict[str, str] = {
         "Content-Type": "application/json",
@@ -178,6 +189,8 @@ async def call_tool(tool_name: str, arguments: dict[str, Any]) -> Any:
     }
     if token:
         headers["Authorization"] = f"Bearer {token}"
+    elif api_key:
+        headers["X-API-Key"] = api_key
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:

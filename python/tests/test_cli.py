@@ -13,6 +13,7 @@ from open_brain.cli.client import (
     call_tool,
     _extract_result,
     _get_server_url,
+    _load_api_key,
     _load_token,
     _load_url_token,
     _parse_sse_response,
@@ -408,6 +409,34 @@ class TestLoadUrlToken:
         assert result is None
 
 
+class TestLoadApiKey:
+    def test_env_var_takes_priority(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("OB_API_KEY", "env-api-key")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        config_file = tmp_path / "xdg" / "open-brain" / "config.json"
+        config_file.parent.mkdir(parents=True)
+        config_file.write_text(json.dumps({"api_key": "xdg-api-key"}))
+
+        assert _load_api_key() == "env-api-key"
+
+    def test_reads_xdg_config_api_key(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("OB_API_KEY", raising=False)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        config_file = tmp_path / "xdg" / "open-brain" / "config.json"
+        config_file.parent.mkdir(parents=True)
+        config_file.write_text(json.dumps({"api_key": "xdg-api-key"}))
+
+        with patch("open_brain.cli.client.LEGACY_CONFIG_FILE", tmp_path / "legacy.json"):
+            assert _load_api_key() == "xdg-api-key"
+
+    def test_returns_none_when_no_api_key(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("OB_API_KEY", raising=False)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+
+        with patch("open_brain.cli.client.LEGACY_CONFIG_FILE", tmp_path / "legacy.json"):
+            assert _load_api_key() is None
+
+
 class TestGetServerUrl:
     def test_env_var_takes_priority(self, tmp_path, monkeypatch):
         monkeypatch.setenv("OB_URL", "https://env.example.com/mcp")
@@ -476,6 +505,36 @@ class TestWithUrlToken:
     def test_does_not_override_existing_token(self):
         url = "https://brain.example.com/mcp?token=existing"
         assert _with_url_token(url, "new") == url
+
+
+class TestCallToolAuth:
+    @pytest.mark.asyncio
+    async def test_uses_api_key_header_when_configured(self, monkeypatch):
+        monkeypatch.setenv("OB_URL", "https://brain.example.com/mcp")
+        monkeypatch.delenv("OB_TOKEN", raising=False)
+        monkeypatch.delenv("OB_URL_TOKEN", raising=False)
+        monkeypatch.setenv("OB_API_KEY", "api-key")
+
+        init_resp = MagicMock()
+        init_resp.headers = {"mcp-session-id": "session-1"}
+        init_resp.raise_for_status.return_value = None
+        notif_resp = MagicMock()
+        call_resp = MagicMock()
+        call_resp.headers = {"content-type": "application/json"}
+        call_resp.json.return_value = {"result": {"content": [{"type": "text", "text": "{}"}]}}
+        call_resp.raise_for_status.return_value = None
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(side_effect=[init_resp, notif_resp, call_resp])
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("open_brain.cli.client.httpx.AsyncClient", return_value=mock_client):
+            await call_tool("stats", {})
+
+        first_headers = mock_client.post.call_args_list[0].kwargs["headers"]
+        assert first_headers["X-API-Key"] == "api-key"
+        assert "Authorization" not in first_headers
 
 
 # ---------------------------------------------------------------------------
