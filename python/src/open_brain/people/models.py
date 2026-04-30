@@ -50,6 +50,7 @@ class MatchCandidate:
         member_org: The organisation of the matched person, if any.
         confidence: Score in [0, 1]; higher = more certain it's the same person.
         reasons: Human-readable list describing why this confidence was assigned.
+        aliases: Known aliases from the matched member record.
     """
 
     memory_id: int
@@ -57,6 +58,7 @@ class MatchCandidate:
     member_org: str | None
     confidence: float
     reasons: list[str] = field(default_factory=list)
+    aliases: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)

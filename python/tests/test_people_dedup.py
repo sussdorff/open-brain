@@ -46,12 +46,12 @@ SCENARIOS: list[tuple[str, str | None, str | None, str]] = [
     ("Jochen Jungbluth", "Dental-Now", None, "auto_merge"),         # 1: exact name
     ("Cyrus Amadi", "Dental-Now", None, "auto_merge"),              # 2: alias match
     ("Jochen Jungblut", "Dental-Now", None, "auto_merge"),          # 3: alias (no h)
-    ("Dr. Alamouti", "Dental-Now", None, "llm_confirm"),            # 4: last-name only + org
+    ("Dr. Alamouti", "Dental-Now", None, "auto_merge"),              # 4: containment → auto_merge (single Alamouti)
     ("Stephan Weihe", "ICRD", None, "auto_merge"),                  # 5: alias match singleton
     ("Reza Mollaei", "HeyDonto", None, "new"),                      # 6: new person
-    ("Siamak", "Dental-Now", None, "llm_confirm"),                  # 7: first-name + org boost
+    ("Siamak", "Dental-Now", None, "auto_merge"),                   # 7: containment → auto_merge (single Siamak)
     ("J. Jungbluth", None, "jochen-jungbluth-a5a412152", "auto_merge"),  # 8: linkedin beats name diff
-    ("Philipp", "Sonia", None, "llm_confirm"),                      # 9: single first name + org
+    ("Philipp", "Sonia", None, "auto_merge"),                        # 9: containment → auto_merge (single Philipp@Sonia)
     ("Thomas Müller", None, None, "new"),                           # 10: unknown person with diacritic
 ]
 
@@ -98,16 +98,20 @@ def test_directory_members_iterated(existing_records: list[PersonRecord]) -> Non
 
 
 def test_subset_cap_below_auto_merge(existing_records: list[PersonRecord]) -> None:
-    """Subset-bonus candidates must be capped below AUTO_MERGE_T when sim < 1.0."""
-    # "Siamak" is a strict subset of "Siamak Ghasemi" tokens — should never auto_merge
+    """Containment path supersedes the old subset-cap rule for unambiguous single matches.
+
+    With the name-containment fix, 'Siamak' vs 'Siamak Ghasemi' (the only Siamak
+    in the fixture) is now auto_merge at CONTAINMENT_SCORE (0.93).
+    The subset-cap rule still applies to fuzzy-path candidates (non-containment).
+    """
     decision = match_person("Siamak", "Dental-Now", None, existing_records)
-    assert decision.action != "auto_merge", (
-        "Subset partial-name match must not auto_merge; must go through llm_confirm"
+    # Single unambiguous Siamak → containment path → auto_merge
+    assert decision.action == "auto_merge", (
+        "Unambiguous containment match should auto_merge; got: "
+        f"{decision.action} (rationale: {decision.rationale})"
     )
-    if decision.target is not None:
-        assert decision.target.confidence < 0.92, (
-            f"Subset-match confidence {decision.target.confidence} must be < 0.92"
-        )
+    assert decision.target is not None
+    assert "name-containment" in decision.target.reasons
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +124,16 @@ def test_llm_confirm_callable_invoked_and_returns_true(
 ) -> None:
     """When decision is llm_confirm and llm_confirm callable returns True → auto_merge."""
     mock_llm = MagicMock(return_value=True)
-    decision = match_person("Siamak", "Dental-Now", None, existing_records, llm_confirm=mock_llm)
+    # "Stefan Weihe" (slight name variation, no org) scores in the llm_confirm band
+    # vs "Stephan Weihe" — sim ~0.88, no containment, no org boost
+    existing = [
+        PersonRecord(
+            memory_id=999,
+            style="single",
+            members=[{"name": "Stephan Weihe", "org": None, "linkedin": None, "aliases": []}],
+        )
+    ]
+    decision = match_person("Stefan Weihe", None, None, existing, llm_confirm=mock_llm)
     mock_llm.assert_called_once()
     assert decision.action == "auto_merge"
 
@@ -130,7 +143,14 @@ def test_llm_confirm_callable_invoked_and_returns_false(
 ) -> None:
     """When decision is llm_confirm and llm_confirm callable returns False → new."""
     mock_llm = MagicMock(return_value=False)
-    decision = match_person("Siamak", "Dental-Now", None, existing_records, llm_confirm=mock_llm)
+    existing = [
+        PersonRecord(
+            memory_id=999,
+            style="single",
+            members=[{"name": "Stephan Weihe", "org": None, "linkedin": None, "aliases": []}],
+        )
+    ]
+    decision = match_person("Stefan Weihe", None, None, existing, llm_confirm=mock_llm)
     mock_llm.assert_called_once()
     assert decision.action == "new"
 
@@ -153,3 +173,98 @@ def test_llm_confirm_not_called_for_new(
     decision = match_person("Reza Mollaei", "HeyDonto", None, existing_records, llm_confirm=mock_llm)
     assert decision.action == "new"
     mock_llm.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# AK tests: name-containment / first-name-vs-full-name (open-brain-3bm)
+# ---------------------------------------------------------------------------
+
+
+def test_first_name_matches_full_name_auto_merge() -> None:
+    """AK2: 'Malte' matches existing 'Malte Sussdorff' → auto_merge."""
+    existing = [
+        PersonRecord(
+            memory_id=100,
+            style="single",
+            members=[{"name": "Malte Sussdorff", "org": None, "linkedin": None, "aliases": []}],
+        )
+    ]
+    decision = match_person("Malte", None, None, existing)
+    assert decision.action == "auto_merge"
+    assert decision.target is not None
+    assert decision.target.memory_id == 100
+
+
+def test_first_name_umlauts_auto_merge() -> None:
+    """AK3: 'Andreas' matches 'Andreas Müller' → auto_merge."""
+    existing = [
+        PersonRecord(
+            memory_id=200,
+            style="single",
+            members=[{"name": "Andreas Müller", "org": None, "linkedin": None, "aliases": []}],
+        )
+    ]
+    decision = match_person("Andreas", None, None, existing)
+    assert decision.action == "auto_merge"
+    assert decision.target is not None
+    assert decision.target.memory_id == 200
+
+
+def test_ambiguous_first_name_two_records() -> None:
+    """AK4: 'Anna' matches both 'Anna Schmidt' and 'Anna Meyer' → ambiguous or llm_confirm."""
+    existing = [
+        PersonRecord(
+            memory_id=300,
+            style="single",
+            members=[{"name": "Anna Schmidt", "org": None, "linkedin": None, "aliases": []}],
+        ),
+        PersonRecord(
+            memory_id=301,
+            style="single",
+            members=[{"name": "Anna Meyer", "org": None, "linkedin": None, "aliases": []}],
+        ),
+    ]
+    decision = match_person("Anna", None, None, existing)
+    assert decision.action in {"ambiguous", "llm_confirm"}
+
+
+def test_conflicting_org_no_containment_merge() -> None:
+    """Org conflict prevents name-containment auto_merge."""
+    existing = [
+        PersonRecord(
+            memory_id=400,
+            style="single",
+            members=[{"name": "Anna Schmidt", "org": "Acme Corp", "linkedin": None, "aliases": []}],
+        )
+    ]
+    # "Widget Inc" shares no tokens with "Acme Corp" → org conflict guard fires
+    decision = match_person("Anna", "Widget Inc", None, existing)
+    assert decision.action != "auto_merge"
+
+
+def test_no_overlap_new() -> None:
+    """No token overlap → new."""
+    existing = [
+        PersonRecord(
+            memory_id=500,
+            style="single",
+            members=[{"name": "Thomas Müller", "org": None, "linkedin": None, "aliases": []}],
+        )
+    ]
+    decision = match_person("Anna Schmidt", None, None, existing)
+    assert decision.action == "new"
+
+
+def test_superset_new_name_auto_merge() -> None:
+    """'Malte Sussdorff' (new) vs existing 'Malte' → also auto_merge."""
+    existing = [
+        PersonRecord(
+            memory_id=600,
+            style="single",
+            members=[{"name": "Malte", "org": None, "linkedin": None, "aliases": []}],
+        )
+    ]
+    decision = match_person("Malte Sussdorff", None, None, existing)
+    assert decision.action == "auto_merge"
+    assert decision.target is not None
+    assert decision.target.memory_id == 600

@@ -426,6 +426,25 @@ class TranscriptIngestor:
             metrics.record_llm_call("dedup_confirm")
 
         if decision.action == "auto_merge" and decision.target is not None:
+            # Persist alias when name containment was the matching signal
+            if "name-containment" in (decision.target.reasons or []):
+                existing_aliases = list(decision.target.aliases)
+                if name not in existing_aliases and name != decision.target.member_name:
+                    existing_aliases.append(name)
+                    await self._dl.update_memory(
+                        UpdateMemoryParams(
+                            id=decision.target.memory_id,
+                            metadata={"aliases": existing_aliases},
+                        )
+                    )
+                    # Refresh in-memory snapshot so later loop iterations see updated aliases
+                    for rec in existing_records:
+                        if rec.memory_id == decision.target.memory_id:
+                            for m in rec.members:
+                                if m["name"] == decision.target.member_name:
+                                    m["aliases"] = existing_aliases
+                                    break
+                            break
             return decision.target.memory_id
 
         # For llm_confirm, ambiguous, or new: create a new person memory (conservative)

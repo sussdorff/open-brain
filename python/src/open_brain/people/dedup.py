@@ -9,11 +9,16 @@ a list of existing PersonRecords:
                 + token-subset bonus    (+0.25)
                 + org-boost             (+0.05 / +0.10 with subset)
 
+    Name-containment fast path (within Stage 3): when the incoming name tokens
+    are a strict subset/superset of the existing member's tokens (e.g. "Malte"
+    vs "Malte Sussdorff"), and there is no org conflict, skip fuzzy scoring and
+    assign CONTAINMENT_SCORE (0.93) directly → auto_merge.
+
 Thresholds: auto_merge >= 0.92, llm_confirm >= 0.85.
 
 Critical rule: if a subset bonus was applied AND name_similarity < 1.0, cap
 confidence below auto_merge (0.92). Partial references must always go through
-the LLM-confirm gate.
+the LLM-confirm gate. (This rule does NOT apply when containment_applied.)
 """
 
 import re
@@ -49,6 +54,11 @@ ORG_BOOST_SUBSET: float = 0.10  # used combined with subset
 
 # Minimum score to even keep a fuzzy candidate
 MIN_FUZZY_SCORE: float = 0.4
+
+# Containment score: assigned when incoming name tokens are a strict subset/superset
+# of the existing member's tokens and there is no org conflict.
+# Set above AUTO_MERGE_T to produce auto_merge without the subset-cap rule.
+CONTAINMENT_SCORE: float = 0.93
 
 # Title prefixes to strip during normalisation.
 # Dotless forms: punctuation is stripped before tokenization,
@@ -239,9 +249,35 @@ def match_person(
                 continue
 
             # --- Stage 3: Fuzzy name similarity ---
-            sim = _name_similarity(new_name, member_name)
             new_tokens = set(_normalize_name(new_name).split())
             member_tokens = set(_normalize_name(member_name).split())
+
+            # Name-containment fast path: one name's tokens are a strict subset of
+            # the other's (e.g. "Malte" ⊂ "Malte Sussdorff"). Bypass fuzzy scoring
+            # and assign CONTAINMENT_SCORE directly — unless org conflict exists.
+            containment_applied = False
+            if new_tokens and member_tokens and new_tokens != member_tokens:
+                if new_tokens.issubset(member_tokens) or member_tokens.issubset(new_tokens):
+                    # Guard: if both sides have an org and they conflict, fall through
+                    if new_org and member_org and _org_overlap(new_org, member_org) == 0.0:
+                        pass  # org conflict — fall through to fuzzy scoring
+                    else:
+                        containment_applied = True
+
+            if containment_applied:
+                candidates.append(
+                    MatchCandidate(
+                        memory_id=record.memory_id,
+                        member_name=member_name,
+                        member_org=member_org,
+                        confidence=CONTAINMENT_SCORE,
+                        reasons=["name-containment"],
+                        aliases=aliases,
+                    )
+                )
+                continue
+
+            sim = _name_similarity(new_name, member_name)
 
             subset_applied = False
             subset_bonus_val = 0.0
