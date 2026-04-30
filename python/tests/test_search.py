@@ -369,10 +369,10 @@ class TestMetadataFilterPreCondition:
             "metadata_filter must be passed as $6 to hybrid_search(), not applied as a post-filter"
         )
 
-        # The metadata JSONB value must appear in the positional values (as the 6th value, index 5)
-        expected_jsonb = json.dumps({"source": "claude"})
-        assert values[5] == expected_jsonb, (
-            f"Expected metadata JSONB '{expected_jsonb}' as the 6th positional value, got: {values[5]!r}"
+        # The metadata JSONB value must appear as a dict in the positional values (index 5)
+        # asyncpg handles JSONB encoding — dicts are passed directly, not pre-serialized
+        assert values[5] == {"source": "claude"}, (
+            f"Expected metadata dict as the 6th positional value, got: {values[5]!r}"
         )
 
         # The outer WHERE clause must NOT contain metadata key/value conditions
