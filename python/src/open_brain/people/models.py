@@ -51,6 +51,8 @@ class MatchCandidate:
         confidence: Score in [0, 1]; higher = more certain it's the same person.
         reasons: Human-readable list describing why this confidence was assigned.
         aliases: Known aliases from the matched member record.
+            Note: populated only for name-containment matches; empty for other
+            match types (linkedin-exact, alias-match, fuzzy).
     """
 
     memory_id: int

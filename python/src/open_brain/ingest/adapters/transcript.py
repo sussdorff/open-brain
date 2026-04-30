@@ -429,8 +429,12 @@ class TranscriptIngestor:
             # Persist alias when name containment was the matching signal
             if "name-containment" in (decision.target.reasons or []):
                 existing_aliases = list(decision.target.aliases)
-                if name not in existing_aliases and name != decision.target.member_name:
-                    existing_aliases.append(name)
+                name_norm = name.strip()
+                member_norm = decision.target.member_name.strip()
+                # Only add alias if different (case-insensitive) AND not already in list
+                if (name_norm.lower() != member_norm.lower() and
+                        name_norm.lower() not in {a.lower() for a in existing_aliases}):
+                    existing_aliases.append(name_norm)
                     await self._dl.update_memory(
                         UpdateMemoryParams(
                             id=decision.target.memory_id,

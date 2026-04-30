@@ -6,7 +6,7 @@ Verifies: 3-stage scoring, directory iteration, subset-cap, llm_confirm invocati
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -268,3 +268,43 @@ def test_superset_new_name_auto_merge() -> None:
     assert decision.action == "auto_merge"
     assert decision.target is not None
     assert decision.target.memory_id == 600
+
+
+# ---------------------------------------------------------------------------
+# AK4 alias-persistence: update_memory called with new alias after containment
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_alias_persisted_after_containment_auto_merge() -> None:
+    """AK4: _resolve_person() calls update_memory with the short name as alias.
+
+    When 'Malte' matches existing 'Malte Sussdorff' via name-containment, the
+    ingestor must persist 'Malte' as an alias on memory_id=100.
+    """
+    from open_brain.data_layer.interface import SaveMemoryResult, SearchResult
+    from open_brain.ingest.adapters.transcript import TranscriptIngestor
+
+    # Pre-load an existing person record for "Malte Sussdorff"
+    existing_person_record = PersonRecord(
+        memory_id=100,
+        style="single",
+        members=[{"name": "Malte Sussdorff", "org": None, "linkedin": None, "aliases": []}],
+    )
+
+    mock_dl = AsyncMock()
+    mock_dl.update_memory.return_value = SaveMemoryResult(id=100, message="ok")
+
+    ingestor = TranscriptIngestor(data_layer=mock_dl)
+
+    await ingestor._resolve_person(
+        name="Malte",
+        existing_records=[existing_person_record],
+        run_id="test-run-id",
+    )
+
+    # update_memory must have been called exactly once with the alias list
+    mock_dl.update_memory.assert_called_once()
+    call_kwargs = mock_dl.update_memory.call_args[0][0]  # UpdateMemoryParams positional arg
+    assert call_kwargs.id == 100
+    assert call_kwargs.metadata == {"aliases": ["Malte"]}

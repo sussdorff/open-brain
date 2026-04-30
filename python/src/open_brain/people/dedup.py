@@ -12,13 +12,11 @@ a list of existing PersonRecords:
     Name-containment fast path (within Stage 3): when the incoming name tokens
     are a strict subset/superset of the existing member's tokens (e.g. "Malte"
     vs "Malte Sussdorff"), and there is no org conflict, skip fuzzy scoring and
-    assign CONTAINMENT_SCORE (0.93) directly → auto_merge.
+    assign CONTAINMENT_SCORE (0.93) directly → auto_merge.  The containment
+    path bypasses the old subset-cap rule; only the org-conflict guard can
+    prevent containment from producing auto_merge.
 
 Thresholds: auto_merge >= 0.92, llm_confirm >= 0.85.
-
-Critical rule: if a subset bonus was applied AND name_similarity < 1.0, cap
-confidence below auto_merge (0.92). Partial references must always go through
-the LLM-confirm gate. (This rule does NOT apply when containment_applied.)
 """
 
 import re
@@ -40,14 +38,14 @@ from open_brain.people.models import (
 AUTO_MERGE_T: float = 0.92
 LLM_CONFIRM_T: float = 0.85
 
-# Maximum confidence allowed for a subset-capped candidate (must stay below AUTO_MERGE_T)
-SUBSET_CAP_MAX: float = AUTO_MERGE_T - 0.01
-
 # Stage-specific scores
 LINKEDIN_EXACT_SCORE: float = 0.99
 ALIAS_MATCH_SCORE: float = 0.96
 
 # Fuzzy scoring constants
+# Note: SUBSET_BONUS is used in the fuzzy scoring path; the old subset-cap rule
+# has been removed because the containment fast path fires before fuzzy scoring
+# for strict token-subset/superset pairs.
 SUBSET_BONUS: float = 0.25
 ORG_BOOST_BASE: float = 0.05    # used without subset
 ORG_BOOST_SUBSET: float = 0.10  # used combined with subset
@@ -188,9 +186,14 @@ def match_person(
     1. LinkedIn URL exact match (confidence 0.99)
     2. Alias exact match on normalised name (confidence 0.96)
     3. Fuzzy name similarity with optional subset bonus and org boost.
-
-    If a subset bonus was applied and name similarity < 1.0, confidence is
-    capped below *AUTO_MERGE_T* to force the LLM-confirm gate.
+       Within Stage 3, a name-containment sub-path fires first:
+       - Containment check: if one name's token set strictly contains the
+         other (e.g. "Malte" ⊂ "Malte Sussdorff"), assign
+         CONTAINMENT_SCORE (0.93) directly → auto_merge.
+       - Org-conflict guard: if both parties have non-overlapping orgs,
+         the containment check is skipped and fuzzy scoring proceeds.
+       - Critical rule: containment bypasses the old subset-cap; only the
+         org-conflict guard can prevent containment auto_merge.
 
     If *llm_confirm* is provided and the decision is "llm_confirm", it is
     invoked once. A True return changes action to "auto_merge"; False to "new".
@@ -256,6 +259,7 @@ def match_person(
             # the other's (e.g. "Malte" ⊂ "Malte Sussdorff"). Bypass fuzzy scoring
             # and assign CONTAINMENT_SCORE directly — unless org conflict exists.
             containment_applied = False
+            # Skip equal token sets: Stage-3 fuzzy with sim=1.0 handles exact token matches correctly.
             if new_tokens and member_tokens and new_tokens != member_tokens:
                 if new_tokens.issubset(member_tokens) or member_tokens.issubset(new_tokens):
                     # Guard: if both sides have an org and they conflict, fall through
@@ -302,11 +306,6 @@ def match_person(
                     reasons.append(f"org-overlap:{ov:.2f}")
 
             confidence = min(1.0, score)
-
-            # Subset-cap rule: partial references must not auto_merge
-            if subset_applied and sim < 1.0 and confidence >= AUTO_MERGE_T:
-                confidence = SUBSET_CAP_MAX
-                reasons.append("capped:subset-below-auto-merge")
 
             candidates.append(
                 MatchCandidate(
