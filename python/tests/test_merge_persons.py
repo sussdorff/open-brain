@@ -507,6 +507,72 @@ class TestFormatDryRunReportAbsorbText:
 
 
 # ---------------------------------------------------------------------------
+# TestNullMetadataHandling: regression — NULL metadata must not break logic
+# ---------------------------------------------------------------------------
+
+
+class TestNullMetadataHandling:
+    """Pure-logic helpers must tolerate rows where metadata is None.
+
+    The DB-side fix wraps `metadata || ...` in `COALESCE(metadata, '{}'::jsonb)`
+    so writes succeed when a row has NULL metadata. These tests cover the
+    Python-side helpers that read metadata before/after the merge.
+    """
+
+    def test_is_already_merged_with_null_metadata_returns_false(self):
+        source_row = {"id": 1, "type": "person", "metadata": None}
+        assert mp.is_already_merged(source_row, 17700) is False
+
+    def test_is_already_merged_with_missing_metadata_key_returns_false(self):
+        source_row = {"id": 1, "type": "person"}
+        assert mp.is_already_merged(source_row, 17700) is False
+
+    def test_compute_merged_aliases_source_metadata_none(self):
+        source = {"id": 1, "type": "person", "title": "Alice", "metadata": None}
+        target = {
+            "id": 2,
+            "type": "person",
+            "title": "Alice T",
+            "metadata": {"name": "Alice T", "aliases": ["AT"]},
+        }
+        aliases = mp.compute_merged_aliases(source, target)
+        # Source falls back to title="Alice" since metadata is None
+        assert "Alice" in aliases
+        assert "AT" in aliases
+
+    def test_compute_merged_aliases_target_metadata_none(self):
+        source = {
+            "id": 1,
+            "type": "person",
+            "title": "Alice",
+            "metadata": {"name": "Alice", "aliases": ["A."]},
+        }
+        target = {"id": 2, "type": "person", "title": "Alice T", "metadata": None}
+        aliases = mp.compute_merged_aliases(source, target)
+        # Target had no aliases (metadata None) — source name + source aliases come through
+        assert "Alice" in aliases
+        assert "A." in aliases
+
+    def test_compute_merged_aliases_both_metadata_none(self):
+        source = {"id": 1, "type": "person", "title": "Alice", "metadata": None}
+        target = {"id": 2, "type": "person", "title": "Bob", "metadata": None}
+        aliases = mp.compute_merged_aliases(source, target)
+        # Falls back to titles for source name; target had no aliases
+        assert "Alice" in aliases
+
+    def test_display_name_with_null_metadata(self):
+        row = {"id": 1, "type": "person", "title": "Fallback Title", "metadata": None}
+        assert mp.display_name(row) == "Fallback Title"
+
+    def test_validate_pair_with_null_metadata(self):
+        # validate_pair only inspects type and id — must not crash on None metadata
+        source = {"id": 1, "type": "person", "metadata": None}
+        target = {"id": 2, "type": "person", "metadata": None}
+        errors = mp.validate_pair(source, target)
+        assert errors == []
+
+
+# ---------------------------------------------------------------------------
 # TestRepointRelationships: B2 — UNIQUE constraint safe repoint
 # ---------------------------------------------------------------------------
 
