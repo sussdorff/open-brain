@@ -271,6 +271,71 @@ def test_superset_new_name_auto_merge() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Regression tests (open-brain-3bm adversarial review)
+# ---------------------------------------------------------------------------
+
+
+def test_org_conflict_fuzzy_not_auto_merge() -> None:
+    """Regression 1: org conflict + subset bonus must NOT produce auto_merge.
+
+    'John Smith' vs 'John Smith Jr @ Widget' — new_tokens ⊂ member_tokens,
+    but orgs conflict → containment fast path is skipped.  In the fuzzy path
+    the subset bonus must be capped to SUBSET_CAP_MAX so confidence stays
+    below AUTO_MERGE_T.
+    """
+    from open_brain.people.dedup import SUBSET_CAP_MAX
+
+    existing = [
+        PersonRecord(
+            memory_id=1,
+            style="single",
+            members=[{"name": "John Smith Jr", "org": "Widget", "linkedin": None, "aliases": []}],
+        )
+    ]
+    decision = match_person("John Smith", "Acme", None, existing)
+    assert decision.action != "auto_merge", (
+        f"Org-conflict fuzzy match must not auto_merge; got: {decision.action} "
+        f"(confidence={decision.target.confidence if decision.target else 'N/A'}, "
+        f"reasons={decision.target.reasons if decision.target else 'N/A'})"
+    )
+    if decision.target is not None:
+        assert decision.target.confidence < SUBSET_CAP_MAX + 0.001, (
+            f"Confidence {decision.target.confidence} should be <= SUBSET_CAP_MAX {SUBSET_CAP_MAX}"
+        )
+
+
+def test_exact_name_auto_merge_with_containment_runner_up() -> None:
+    """Regression 2: a perfect fuzzy match (sim=1.0) must auto_merge even when
+    a containment runner-up (confidence=0.93) exists.
+
+    'Malte' exact match vs PersonRecord(1,'Malte') should be auto_merge;
+    the runner-up PersonRecord(2,'Malte Sussdorff') at containment-score must
+    not trigger the ambiguity gate.
+    """
+    existing = [
+        PersonRecord(
+            memory_id=1,
+            style="single",
+            members=[{"name": "Malte", "org": None, "linkedin": None, "aliases": []}],
+        ),
+        PersonRecord(
+            memory_id=2,
+            style="single",
+            members=[{"name": "Malte Sussdorff", "org": None, "linkedin": None, "aliases": []}],
+        ),
+    ]
+    decision = match_person("Malte", None, None, existing)
+    assert decision.action == "auto_merge", (
+        f"Perfect name match must auto_merge even with containment runner-up; "
+        f"got: {decision.action} (rationale: {decision.rationale})"
+    )
+    assert decision.target is not None
+    assert decision.target.memory_id == 1, (
+        f"Should match the exact 'Malte' record (id=1), got id={decision.target.memory_id}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # AK4 alias-persistence: update_memory called with new alias after containment
 # ---------------------------------------------------------------------------
 

@@ -13,8 +13,10 @@ a list of existing PersonRecords:
     are a strict subset/superset of the existing member's tokens (e.g. "Malte"
     vs "Malte Sussdorff"), and there is no org conflict, skip fuzzy scoring and
     assign CONTAINMENT_SCORE (0.93) directly → auto_merge.  The containment
-    path bypasses the old subset-cap rule; only the org-conflict guard can
-    prevent containment from producing auto_merge.
+    path bypasses the subset-cap rule; only the org-conflict guard can prevent
+    containment from producing auto_merge.  The fuzzy scoring fallthrough path
+    (used when containment is skipped due to org conflict) applies SUBSET_CAP_MAX
+    to prevent high fuzzy-sim + subset bonus combinations from crossing AUTO_MERGE_T.
 
 Thresholds: auto_merge >= 0.92, llm_confirm >= 0.85.
 """
@@ -43,10 +45,11 @@ LINKEDIN_EXACT_SCORE: float = 0.99
 ALIAS_MATCH_SCORE: float = 0.96
 
 # Fuzzy scoring constants
-# Note: SUBSET_BONUS is used in the fuzzy scoring path; the old subset-cap rule
-# has been removed because the containment fast path fires before fuzzy scoring
-# for strict token-subset/superset pairs.
 SUBSET_BONUS: float = 0.25
+# When subset bonus is applied in the fuzzy path (not the containment fast path),
+# cap confidence just below AUTO_MERGE_T so that a high fuzzy sim + subset bonus
+# cannot auto_merge when there is no clear containment signal (e.g. org conflict).
+SUBSET_CAP_MAX: float = AUTO_MERGE_T - 0.01
 ORG_BOOST_BASE: float = 0.05    # used without subset
 ORG_BOOST_SUBSET: float = 0.10  # used combined with subset
 
@@ -307,6 +310,14 @@ def match_person(
 
             confidence = min(1.0, score)
 
+            # Subset bonus can push past AUTO_MERGE_T — cap it to prevent
+            # unintended auto_merge on partial names in the fuzzy path.
+            # (The containment fast path above, which correctly yields 0.93, is
+            # NOT subject to this cap — it never reaches this code.)
+            if subset_applied and sim < 1.0 and confidence >= AUTO_MERGE_T:
+                confidence = SUBSET_CAP_MAX
+                reasons.append("capped:subset-below-auto-merge")
+
             candidates.append(
                 MatchCandidate(
                     memory_id=record.memory_id,
@@ -330,7 +341,9 @@ def match_person(
     # If the top candidate has a hard signal (linkedin-exact or alias-match),
     # skip the ambiguity gate — hard signals are unambiguous.
     has_hard_signal = top.reasons and any(
-        r.startswith("linkedin-exact") or r.startswith("alias-match:")
+        r.startswith("linkedin-exact")
+        or r.startswith("alias-match:")
+        or r.startswith("name-sim:1.00")  # perfect fuzzy match is unambiguous
         for r in top.reasons
     )
     if (
