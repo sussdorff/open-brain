@@ -27,6 +27,27 @@ def _output(data: Any, pretty: bool) -> None:
         print(json.dumps(data, ensure_ascii=False))
 
 
+def _should_render_people_list(args: argparse.Namespace) -> bool:
+    """Return True when people list should use terminal-oriented output."""
+    return (
+        args.command == "people"
+        and args.people_command == "list"
+        and not getattr(args, "json_output", False)
+        and not args.pretty
+    )
+
+
+def _output_result(data: Any, args: argparse.Namespace) -> None:
+    """Print command result using the command's default presentation."""
+    if _should_render_people_list(args) and isinstance(data, dict):
+        from open_brain.people.merge import render_persons_payload
+
+        print(render_persons_payload(data), end="")
+        return
+
+    _output(data, pretty=args.pretty)
+
+
 def _error(msg: str) -> None:
     """Print error message to stderr and exit.
 
@@ -405,6 +426,12 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Output pretty-printed JSON",
     )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="Output machine-readable JSON where commands have human defaults",
+    )
 
     subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")
     subparsers.required = True
@@ -666,6 +693,13 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Show only first-token collision groups for manual merge review",
     )
+    p_people_list.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        default=argparse.SUPPRESS,
+        help="Output machine-readable JSON instead of the terminal display",
+    )
 
     p_people_merge = people_sub.add_parser(
         "merge",
@@ -732,7 +766,7 @@ def main() -> None:
 
     try:
         result = asyncio.run(handler(args))
-        _output(result, pretty=args.pretty)
+        _output_result(result, args)
     except MCPError as e:
         _error(str(e))
     except KeyboardInterrupt:

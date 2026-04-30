@@ -20,7 +20,7 @@ from open_brain.cli.client import (
     _normalize_mcp_url,
     _with_url_token,
 )
-from open_brain.cli.main import _build_parser, _output
+from open_brain.cli.main import _build_parser, _output, _output_result
 
 
 # ---------------------------------------------------------------------------
@@ -183,11 +183,20 @@ class TestPeopleCommand:
         assert args.people_command == "list"
         assert args.include_merged is False
         assert args.collisions is False
+        assert args.json_output is False
 
     def test_list_flags(self):
         args = parse(["people", "list", "--include-merged", "--collisions"])
         assert args.include_merged is True
         assert args.collisions is True
+
+    def test_list_json_flag_after_subcommand(self):
+        args = parse(["people", "list", "--json"])
+        assert args.json_output is True
+
+    def test_list_json_flag_before_subcommand(self):
+        args = parse(["--json", "people", "list"])
+        assert args.json_output is True
 
     def test_merge_required_args(self):
         args = parse(["people", "merge", "--source", "10", "--target", "20"])
@@ -243,6 +252,48 @@ class TestOutput:
         _output({"text": "Ümlauts and émojis"}, pretty=False)
         captured = capsys.readouterr()
         assert "Ümlauts" in captured.out
+
+    def test_people_list_uses_terminal_display_by_default(self, capsys):
+        args = parse(["people", "list"])
+        _output_result(
+            {
+                "mode": "list",
+                "total": 1,
+                "active": 1,
+                "merged": 0,
+                "persons": [
+                    {
+                        "id": 10,
+                        "name": "Ada Lovelace",
+                        "org": "Analytical Engines",
+                        "aliases": ["A. Lovelace"],
+                        "refs": 3,
+                        "rels": 1,
+                        "merged_into": None,
+                    }
+                ],
+                "collision_groups": 0,
+            },
+            args,
+        )
+        captured = capsys.readouterr()
+        assert "ID" in captured.out
+        assert "Ada Lovelace" in captured.out
+        assert '"persons"' not in captured.out
+
+    def test_people_list_json_flag_keeps_json_output(self, capsys):
+        args = parse(["people", "list", "--json"])
+        _output_result({"mode": "list", "persons": []}, args)
+        captured = capsys.readouterr()
+        assert captured.out.strip() == '{"mode": "list", "persons": []}'
+
+    def test_people_list_pretty_keeps_pretty_json_output(self, capsys):
+        args = parse(["--pretty", "people", "list"])
+        _output_result({"mode": "list", "persons": []}, args)
+        captured = capsys.readouterr()
+        parsed = json.loads(captured.out)
+        assert parsed == {"mode": "list", "persons": []}
+        assert "\n" in captured.out
 
 
 # ---------------------------------------------------------------------------
