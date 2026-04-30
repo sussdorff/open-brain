@@ -33,6 +33,10 @@ class Config(BaseSettings):
     # If empty, MacWhisperConnector auto-discovers the path.
     MACWHISPER_HISTORY_PATH: str = ""
 
+    # SearXNG instance URL for people enrichment web searches.
+    # If empty, web search enrichment is disabled.
+    SEARXNG_URL: str = ""
+
     # IMAP email ingest settings (cr3.4)
     IMAP_SERVER: str = ""
     IMAP_PORT: int = 993

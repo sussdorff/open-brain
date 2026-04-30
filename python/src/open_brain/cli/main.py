@@ -653,12 +653,129 @@ async def _cmd_people_merge(args: argparse.Namespace) -> Any:
     return await call_tool("people_merge", kwargs)
 
 
+async def _cmd_people_enrichment(args: argparse.Namespace) -> Any:
+    """Run people enrichment: search and optionally apply org/role data.
+
+    Operates in direct mode only (requires DATABASE_URL). Lists all person
+    memories with enrich_pending=True, queries SearXNG for each, and either
+    prompts the user (interactive) or auto-applies when confidence is
+    sufficient (--auto-apply).
+
+    Args:
+        args: Parsed CLI arguments. Must have 'auto_apply' (bool),
+            'min_confidence' (float), and optionally 'searxng_url' (str).
+    """
+    import open_brain.cli.direct as _direct
+
+    database_url = _direct.load_database_url()
+    if not database_url:
+        _error("people enrichment requires DATABASE_URL env var or DATABASE_URL in .env file")
+
+    _direct.prepare_direct_env(database_url)
+
+    from open_brain.config import get_config
+    from open_brain.data_layer.postgres import PostgresDataLayer, close_pool
+    from open_brain.people.enrichment import (
+        apply_enrichment,
+        list_enrichment_candidates,
+        search_person_web,
+        should_auto_apply,
+    )
+
+    searxng_url: str = getattr(args, "searxng_url", None) or get_config().SEARXNG_URL
+    auto_apply: bool = getattr(args, "auto_apply", False)
+    min_confidence: float = getattr(args, "min_confidence", 0.8)
+
+    if not searxng_url:
+        _error(
+            "SEARXNG_URL is not configured. Set SEARXNG_URL env var, add it to .env, "
+            "or pass --searxng-url."
+        )
+
+    applied = 0
+    skipped = 0
+
+    try:
+        dl = PostgresDataLayer()
+        candidates = await list_enrichment_candidates(dl)
+
+        if not candidates:
+            print("No enrichment candidates found.")
+            return {"applied": 0, "skipped": 0, "candidates": 0}
+
+        print(f"Found {len(candidates)} enrichment candidate(s).")
+
+        for candidate in candidates:
+            print(f"\n--- {candidate.name} (memory {candidate.memory_id}) ---")
+            if candidate.transcript_context:
+                preview = candidate.transcript_context[:200]
+                print(f"Context: {preview}")
+
+            results = await search_person_web(
+                name=candidate.name,
+                context=candidate.transcript_context,
+                searxng_url=searxng_url,
+            )
+
+            if not results:
+                print("  No web results found.")
+                skipped += 1
+                continue
+
+            best = results[0]
+            print(f"  Best match:")
+            print(f"    Org:         {best.org or '—'}")
+            print(f"    Role:        {best.role or '—'}")
+            print(f"    Profile URL: {best.profile_url or '—'}")
+            print(f"    Confidence:  {best.confidence:.2f}")
+            print(f"    Source:      {best.provenance_url or '—'}")
+            if best.provenance_snippet:
+                snippet = best.provenance_snippet[:150]
+                print(f"    Snippet:     {snippet}")
+
+            if auto_apply:
+                if should_auto_apply(best, min_confidence=min_confidence):
+                    await apply_enrichment(dl, candidate.memory_id, best)
+                    print(f"  Auto-applied enrichment for {candidate.name}.")
+                    applied += 1
+                else:
+                    print(
+                        f"  Skipped (confidence {best.confidence:.2f} < threshold "
+                        f"{min_confidence:.2f} or < 0.6 minimum)."
+                    )
+                    skipped += 1
+            else:
+                # Interactive prompt
+                try:
+                    answer = input(f"Apply enrichment for {candidate.name}? [y/N] ").strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    print("\nAborted.")
+                    break
+
+                if answer == "y":
+                    await apply_enrichment(dl, candidate.memory_id, best)
+                    print(f"  Applied enrichment for {candidate.name}.")
+                    applied += 1
+                else:
+                    print(f"  Skipped.")
+                    skipped += 1
+
+        print(f"\nSummary: {applied} applied, {skipped} skipped.")
+        return {"applied": applied, "skipped": skipped, "candidates": len(candidates)}
+
+    finally:
+        from open_brain.data_layer.postgres import close_pool
+        await close_pool()
+
+
 async def _cmd_people(args: argparse.Namespace) -> Any:
     """Dispatch people subcommands."""
     if args.people_command == "list":
         return await _cmd_people_list(args)
     if args.people_command == "merge":
         return await _cmd_people_merge(args)
+    if args.people_command in {"enrichment", "enrich"}:
+        return await _cmd_people_enrichment(args)
     raise ValueError(f"Unknown people command: {args.people_command}")
 
 
@@ -1011,6 +1128,42 @@ def _build_parser() -> argparse.ArgumentParser:
         "--absorb-text",
         action="store_true",
         help="Append source content to target content as provenance",
+    )
+
+    # people enrichment (also accepts 'enrich' alias)
+    p_people_enrich = people_sub.add_parser(
+        "enrichment",
+        aliases=["enrich"],
+        help="Enrich person memories with org/role data from web search",
+    )
+    p_people_enrich.add_argument(
+        "--auto-apply",
+        action="store_true",
+        dest="auto_apply",
+        help=(
+            "Apply enrichments non-interactively when confidence >= --min-confidence. "
+            "Matches with confidence < 0.6 are NEVER auto-applied."
+        ),
+    )
+    p_people_enrich.add_argument(
+        "--min-confidence",
+        type=float,
+        default=0.8,
+        dest="min_confidence",
+        metavar="THRESHOLD",
+        help=(
+            "Minimum confidence score for auto-apply (default: 0.8). "
+            "The hard floor of 0.6 applies regardless of this setting."
+        ),
+    )
+    p_people_enrich.add_argument(
+        "--searxng-url",
+        dest="searxng_url",
+        metavar="URL",
+        help=(
+            "SearXNG instance URL (overrides SEARXNG_URL env var). "
+            "Example: http://localhost:8888"
+        ),
     )
 
     return parser

@@ -92,6 +92,13 @@ class PersonMetadata(TypedDict, total=False):
     role: str
     relationship: str
     last_contact: str  # ISO datetime
+    # Enrichment fields (set by people enrichment pipeline)
+    profile_url: str         # direct profile URL (e.g. LinkedIn/Xing)
+    confidence: float        # enrichment confidence score in [0.0, 1.0]
+    provenance: str          # "url: snippet" summary of enrichment source
+    provenance_url: str      # source URL where enrichment data was found
+    provenance_snippet: str  # short text snippet from the source
+    enrich_pending: bool     # True when person needs enrichment; False after applied
 
 
 class HouseholdMetadata(TypedDict, total=False):
