@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from open_brain.data_layer.interface import SaveMemoryResult, SearchResult
+from open_brain.data_layer.interface import Memory, SaveMemoryResult, SearchResult
 from open_brain.ingest.adapters.transcript import TranscriptIngestor
 from open_brain.ingest.models import IngestResult
 
@@ -192,6 +192,80 @@ class TestIngestReturnsPopulatedResult:
 
         assert isinstance(result.follow_up_candidates, list)
         assert len(result.follow_up_candidates) == 3
+
+    async def test_meeting_memory_stores_full_transcript_content(self):
+        mock_dl = _make_mock_dl()
+        full_text = "[0001] Alice: " + ("important detail " * 450)
+
+        with patch("open_brain.ingest.extract.llm_complete") as mock_llm:
+            mock_llm.return_value = LLM_NO_ATTENDEES
+
+            ingestor = TranscriptIngestor(data_layer=mock_dl)
+            await ingestor.ingest(
+                text=full_text,
+                source_ref="test-ref-full-content",
+            )
+
+        meeting_params = mock_dl.save_memory.await_args_list[0].args[0]
+        assert meeting_params.text == full_text
+        assert meeting_params.metadata["raw_content_chars"] == len(full_text)
+
+    async def test_same_source_ref_refreshes_existing_meeting_content(self):
+        ingest_result = {
+            "meeting_memory_id": 99,
+            "person_memory_ids": [20],
+            "mention_memory_ids": [],
+            "interaction_memory_ids": [],
+            "relationship_ids": [101],
+            "follow_up_candidates": [{"task": "existing follow-up"}],
+            "run_id": "run-existing",
+        }
+        existing_memory = Memory(
+            id=99,
+            index_id=1,
+            session_id=None,
+            type="meeting",
+            title="Meeting",
+            subtitle=None,
+            narrative=None,
+            content="old excerpt",
+            metadata={
+                "source_ref": "same-source",
+                "run_id": "run-existing",
+                "ingest_result": ingest_result,
+            },
+            priority=0.5,
+            stability="stable",
+            access_count=0,
+            last_accessed_at=None,
+            created_at="2026-01-01T00:00:00",
+            updated_at="2026-01-01T00:00:00",
+        )
+        mock_dl = AsyncMock()
+
+        async def _search(params):
+            if params.metadata_filter == {"source_ref": "same-source"}:
+                return SearchResult(results=[existing_memory], total=1)
+            return SearchResult(results=[], total=0)
+
+        mock_dl.search.side_effect = _search
+        mock_dl.update_memory.return_value = SaveMemoryResult(id=99, message="ok")
+
+        full_text = "[0001] Alice: refreshed full transcript"
+
+        with patch("open_brain.ingest.extract.llm_complete") as mock_llm:
+            ingestor = TranscriptIngestor(data_layer=mock_dl)
+            result = await ingestor.ingest(text=full_text, source_ref="same-source")
+
+        mock_llm.assert_not_called()
+        mock_dl.save_memory.assert_not_called()
+        mock_dl.update_memory.assert_awaited_once()
+        update_params = mock_dl.update_memory.await_args.args[0]
+        assert update_params.id == 99
+        assert update_params.text == full_text
+        assert update_params.metadata["source_ref"] == "same-source"
+        assert update_params.metadata["raw_content_chars"] == len(full_text)
+        assert result.follow_up_candidates == [{"task": "existing follow-up"}]
 
 
 class TestIngestIdempotency:

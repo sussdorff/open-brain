@@ -80,6 +80,17 @@ class TranscriptRef:
     participants: list[str] = field(default_factory=list)
 
 
+@dataclass
+class TranscriptTurn:
+    """One ordered speaker-attributed transcript segment."""
+
+    index: int
+    speaker: str
+    text: str
+    start: float | None = None
+    end: float | None = None
+
+
 # ─── Errors ──────────────────────────────────────────────────────────────────
 
 
@@ -410,7 +421,16 @@ class MacWhisperConnector:
                 row = self._fetch_sqlite_entry(conn, candidate_type, hex_id)
                 if row is None:
                     continue
-                text = row["text"] or ""
+                turns = (
+                    self._fetch_session_transcript_turns(conn, hex_id)
+                    if candidate_type == "session"
+                    else []
+                )
+                text = (
+                    self._format_speaker_turns(turns)
+                    if turns
+                    else row["text"] or ""
+                )
                 participants = (
                     self._fetch_session_participants(conn, hex_id)
                     if candidate_type == "session"
@@ -425,6 +445,10 @@ class MacWhisperConnector:
                     "duration_seconds": row["duration_seconds"],
                     "participants": participants,
                     "medium": "macwhisper",
+                    "transcript_format": (
+                        "speaker_turns_v1" if turns else "plain_text"
+                    ),
+                    "turn_count": len(turns),
                 }
         except sqlite3.Error as exc:
             logger.warning("Failed to read MacWhisper SQLite entry %s: %s", entry_id, exc)
@@ -433,6 +457,55 @@ class MacWhisperConnector:
                 conn.close()
 
         return None
+
+    def _fetch_session_transcript_turns(
+        self,
+        conn: sqlite3.Connection,
+        session_hex_id: str,
+    ) -> list[TranscriptTurn]:
+        """Return ordered speaker-attributed transcript lines for a session."""
+        if not session_hex_id:
+            return []
+
+        rows = conn.execute(
+            """
+            SELECT
+                tl.text AS text,
+                tl.start AS start,
+                tl.end AS end,
+                COALESCE(NULLIF(trim(sp.name), ''), 'Unknown speaker') AS speaker
+            FROM transcriptline tl
+            LEFT JOIN speaker sp ON sp.id = tl.speakerID
+            WHERE lower(hex(tl.sessionId)) = ?
+              AND tl.text IS NOT NULL
+              AND length(trim(tl.text)) > 0
+            ORDER BY tl.start ASC, tl.dateCreated ASC, lower(hex(tl.id)) ASC
+            """,
+            (session_hex_id,),
+        ).fetchall()
+
+        turns: list[TranscriptTurn] = []
+        for row in rows:
+            text = " ".join(str(row["text"] or "").split())
+            if not text:
+                continue
+            turns.append(
+                TranscriptTurn(
+                    index=len(turns) + 1,
+                    speaker=" ".join(str(row["speaker"] or "Unknown speaker").split()),
+                    text=text,
+                    start=row["start"],
+                    end=row["end"],
+                )
+            )
+        return turns
+
+    def _format_speaker_turns(self, turns: list[TranscriptTurn]) -> str:
+        """Format ordered speaker turns as readable, searchable transcript text."""
+        return "\n".join(
+            f"[{turn.index:04d}] {turn.speaker}: {turn.text}"
+            for turn in turns
+        )
 
     def _parse_sqlite_entry_id(self, entry_id: str) -> tuple[str | None, str]:
         """Return optional source type and normalized hex id."""

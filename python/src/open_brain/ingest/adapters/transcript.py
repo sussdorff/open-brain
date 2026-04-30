@@ -136,6 +136,23 @@ class TranscriptIngestor:
             )
             return prior
 
+        prior_by_ref = await self._find_prior_run_by_source_ref(source_ref)
+        if prior_by_ref is not None:
+            await self._refresh_prior_meeting_content(
+                result=prior_by_ref,
+                text=text,
+                source_ref=source_ref,
+                idempotency_key=idempotency_key,
+                medium_hint=medium_hint,
+            )
+            idempotency_duration_ms = int((time.monotonic() - ingest_start) * 1000)
+            logger.info(
+                "ingest_end source_ref=%r duration_ms=%d idempotent=source_ref_refreshed",
+                source_ref,
+                idempotency_duration_ms,
+            )
+            return prior_by_ref
+
         logger.info("idempotency_miss source_ref=%r", source_ref)
         metrics.record_ingest("transcript")
 
@@ -172,11 +189,10 @@ class TranscriptIngestor:
         # --- Load existing person memories for dedup ---
         existing_records = await self._load_existing_persons()
 
-        # --- Save meeting memory (placeholder metadata; updated with full result below) ---
-        transcript_excerpt = text[:4000]
+        # --- Save meeting memory (metadata updated with full result below) ---
         meeting_result = await self._dl.save_memory(
             SaveMemoryParams(
-                text=transcript_excerpt,
+                text=text,
                 type="meeting",
                 project="people",
                 title=f"Meeting: {source_ref}",
@@ -186,6 +202,7 @@ class TranscriptIngestor:
                     "run_id": run_id,
                     "topics": topics,
                     "medium_hint": medium_hint,
+                    "raw_content_chars": len(text),
                 },
             )
         )
@@ -380,6 +397,59 @@ class TranscriptIngestor:
             relationship_ids=stored.get("relationship_ids", []),
             follow_up_candidates=stored.get("follow_up_candidates", []),
             run_id=stored.get("run_id", ""),
+        )
+
+    async def _find_prior_run_by_source_ref(self, source_ref: str) -> IngestResult | None:
+        """Find a prior meeting by source_ref, even if transcript text changed."""
+        try:
+            search_result = await self._dl.search(
+                SearchParams(
+                    type="meeting",
+                    project="people",
+                    metadata_filter={"source_ref": source_ref},
+                )
+            )
+        except Exception as exc:
+            logger.warning("Source-ref idempotency check failed: %s", exc)
+            return None
+
+        if not search_result.results:
+            return None
+
+        meeting_memory = search_result.results[0]
+        stored = (meeting_memory.metadata or {}).get("ingest_result") or {}
+        logger.info("Source-ref hit for source_ref=%r — refreshing prior run", source_ref)
+        return IngestResult(
+            meeting_memory_id=stored.get("meeting_memory_id", meeting_memory.id),
+            person_memory_ids=stored.get("person_memory_ids", []),
+            mention_memory_ids=stored.get("mention_memory_ids", []),
+            interaction_memory_ids=stored.get("interaction_memory_ids", []),
+            relationship_ids=stored.get("relationship_ids", []),
+            follow_up_candidates=stored.get("follow_up_candidates", []),
+            run_id=stored.get("run_id", (meeting_memory.metadata or {}).get("run_id", "")),
+        )
+
+    async def _refresh_prior_meeting_content(
+        self,
+        result: IngestResult,
+        text: str,
+        source_ref: str,
+        idempotency_key: str,
+        medium_hint: str | None,
+    ) -> None:
+        """Update prior meeting content after transcript formatting/source text changes."""
+        await self._dl.update_memory(
+            UpdateMemoryParams(
+                id=result.meeting_memory_id,
+                text=text,
+                metadata={
+                    "source_ref": source_ref,
+                    "idempotency_key": idempotency_key,
+                    "medium_hint": medium_hint,
+                    "raw_content_chars": len(text),
+                    "ingest_result": dataclasses.asdict(result),
+                },
+            )
         )
 
     async def _load_existing_persons(self) -> list[PersonRecord]:

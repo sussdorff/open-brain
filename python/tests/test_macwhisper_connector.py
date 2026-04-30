@@ -432,13 +432,18 @@ class TestReadSQLiteEntry:
 
         text, metadata = connector.read_entry(f"session:{SESSION_ID_HEX}")
 
-        assert text == "Full session transcript."
+        assert text == (
+            "[0001] Alice Example: Hello from Alice.\n"
+            "[0002] Bob Example: Hello from Bob."
+        )
         assert metadata["source_type"] == "recorded_meeting"
         assert metadata["title"] == "Weekly Product Sync"
         assert metadata["source_app"] == "Teams"
         assert metadata["duration_seconds"] == 3672.2
         assert metadata["participants"] == ["Alice Example", "Bob Example"]
         assert metadata["medium"] == "macwhisper"
+        assert metadata["transcript_format"] == "speaker_turns_v1"
+        assert metadata["turn_count"] == 2
 
     def test_reads_dictation_entry(self, tmp_path):
         """read_entry supports dictation:<hex-id> from modern SQLite history."""
