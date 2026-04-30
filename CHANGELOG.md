@@ -5,8 +5,18 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
-- *(open-brain-3bm)* **Person dedup** now matches on name-token containment (first-name vs full-name variations)
-- *(open-brain-8i5)* Fix metadata stored as JSONB string/array instead of object (double-encoding fix in save_memory and update_memory with backfill migration)
+- *(open-brain-3bm)* Green — name-containment auto_merge for first-name/full-name dedup
+- *(open-brain-3bm)* Address review findings iteration 1
+- *(open-brain-3bm)* Address codex adversarial findings
+
+### Miscellaneous
+
+- *(open-brain-3bm)* Update changelog for person dedup name-variation fix
+
+## [2026.04.30] - 2026-04-30
+
+### Bug Fixes
+
 - *(open-brain-c5e)* Address review findings iteration 1
 - *(open-brain-c5e)* Address codex adversarial findings
 - *(open-brain-8i5)* Green — remove double-encoding of metadata JSONB params
@@ -20,7 +30,9 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous
 
 - *(open-brain-c5e)* Update changelog for direct-mode ob ingest transcript
+- Stage CHANGELOG update for 8i5 (pre-merge)
 - *(open-brain-8i5)* Update changelog for JSONB double-encoding fix
+- *(open-brain-8i5)* Session close — JSONB metadata double-encoding fix
 
 ## [0.26.0] - 2026-04-29
 
