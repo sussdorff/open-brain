@@ -410,6 +410,8 @@ ob --pretty doctor
 ob search "what did I decide about X?"
 ob save "Decided to use asyncpg for lower overhead" --type decision
 ob ingest transcript --source-ref meeting-2026-04-29 --file transcript.txt
+ob --pretty ingest macwhisper list --limit 5
+ob ingest macwhisper ingest <entry-id>
 ob people list --collisions
 ```
 
@@ -429,6 +431,7 @@ Current `ob` commands:
 | `ob update` | Update an existing memory |
 | `ob ingest email` | Ingest an IMAP inbox through the MCP server |
 | `ob ingest transcript` | Ingest a transcript file or stdin |
+| `ob ingest macwhisper` | List and ingest transcripts from local MacWhisper history |
 | `ob people list` | List person memories and merge candidates through the MCP server |
 | `ob people merge` | Merge duplicate person memories server-side |
 
@@ -473,6 +476,30 @@ ob ingest transcript --source-ref meeting-2026-04-29 --file transcript.txt --dir
 `--direct` requires `DATABASE_URL` to be set (env var or `DATABASE_URL=...` line in a `.env` file in the current directory). `VOYAGE_API_KEY` must also be set for embedding calls.
 
 You can also set `OB_DIRECT=1` as an environment variable instead of passing `--direct` on every invocation.
+
+### `ob ingest macwhisper`
+
+Lists and ingests transcripts from the local MacWhisper history directory. This
+command intentionally reads MacWhisper files on the CLI machine, then submits the
+transcript text to the configured open-brain server. That means it still works
+when the server runs somewhere else.
+
+```bash
+# Show recent local MacWhisper transcript entries
+ob --pretty ingest macwhisper list --limit 10
+
+# Ingest one entry by ID; defaults to source_ref macwhisper:<entry-id>
+ob ingest macwhisper ingest <entry-id>
+
+# Use a non-standard history directory
+ob ingest macwhisper list --history-path ~/Exports/MacWhisper
+ob ingest macwhisper ingest <entry-id> --history-path ~/Exports/MacWhisper
+```
+
+The history path is auto-discovered from `MACWHISPER_HISTORY_PATH`, the standard
+MacWhisper sandbox/application-support directories, or path hints from the `mw`
+CLI. `macwhisper ingest` defaults the medium hint to `macwhisper` unless the
+MacWhisper entry metadata or `--medium-hint` provides a more specific value.
 
 ## Documentation
 

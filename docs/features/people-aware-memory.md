@@ -99,6 +99,30 @@ to the system or want to understand how person-centric data flows through the st
 
 ---
 
+## MacWhisper Ingest CLI
+
+`ob ingest macwhisper` exposes the local MacWhisper history connector through
+the CLI. The CLI reads transcript JSON files on the user's Mac and sends only
+the transcript text to the configured open-brain server via the existing
+`ingest_transcript` tool. This is important for remote deployments: the server
+does not need access to the MacWhisper history directory.
+
+```bash
+# List recent entries from local MacWhisper history
+ob --pretty ingest macwhisper list --limit 10
+
+# Ingest one entry by ID
+ob ingest macwhisper ingest <entry-id>
+
+# Override auto-discovery for exported or custom history directories
+ob ingest macwhisper ingest <entry-id> --history-path ~/Exports/MacWhisper
+```
+
+By default, the source reference is `macwhisper:<entry-id>` and the medium hint
+is `macwhisper` unless entry metadata or `--medium-hint` overrides it.
+
+---
+
 ## Email Ingest CLI / MCP Tool
 
 The `ingest_email_inbox` MCP tool and `ob ingest email` CLI command let you pull emails

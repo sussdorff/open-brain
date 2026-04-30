@@ -5,8 +5,10 @@ import asyncio
 import json
 import os
 import sys
+from contextlib import contextmanager
+from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from open_brain.cli.client import MCPError, call_tool
 from open_brain.runtime import run_server
@@ -165,6 +167,32 @@ def _cmd_server(args: argparse.Namespace) -> None:
     run_server(host=args.host, port=args.port)
 
 
+@contextmanager
+def _temporary_env_var(name: str, value: str | None) -> Iterator[None]:
+    """Temporarily set one environment variable inside the CLI process."""
+    if value is None:
+        yield
+        return
+
+    had_old_value = name in os.environ
+    old_value = os.environ.get(name)
+    os.environ[name] = value
+    try:
+        yield
+    finally:
+        if not had_old_value:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = old_value or ""
+
+
+def _new_macwhisper_connector() -> Any:
+    """Create a MacWhisper connector lazily so normal CLI startup stays cheap."""
+    from open_brain.ingest.adapters.macwhisper import MacWhisperConnector
+
+    return MacWhisperConnector()
+
+
 async def _cmd_update(args: argparse.Namespace) -> Any:
     """Update an existing memory.
 
@@ -203,6 +231,41 @@ async def _cmd_ingest_email(args: argparse.Namespace) -> Any:
     return await call_tool("ingest_email_inbox", kwargs)
 
 
+async def _ingest_transcript_text(
+    *,
+    text: str,
+    source_ref: str,
+    medium_hint: str | None,
+    direct: bool,
+) -> Any:
+    """Ingest transcript text through MCP or direct mode."""
+    if not text.strip():
+        _error("Empty input: transcript text must not be empty")
+
+    if direct or os.environ.get("OB_DIRECT") == "1":
+        import open_brain.cli.direct as _direct
+
+        database_url = _direct.load_database_url()
+        if not database_url:
+            _error(
+                "--direct requires DATABASE_URL env var or DATABASE_URL in .env file"
+            )
+        _direct.prepare_direct_env(database_url)
+        return await _direct.run_ingest_transcript_direct(
+            text=text,
+            source_ref=source_ref,
+            medium_hint=medium_hint,
+        )
+
+    kwargs: dict[str, Any] = {
+        "text": text,
+        "source_ref": source_ref,
+    }
+    if medium_hint:
+        kwargs["medium_hint"] = medium_hint
+    return await call_tool("ingest_transcript", kwargs)
+
+
 async def _cmd_ingest_transcript(args: argparse.Namespace) -> Any:
     """Ingest a transcript from a file or stdin.
 
@@ -220,31 +283,61 @@ async def _cmd_ingest_transcript(args: argparse.Namespace) -> Any:
     else:
         text = sys.stdin.read()
 
-    if not text.strip():
-        _error("Empty input: transcript text must not be empty")
+    return await _ingest_transcript_text(
+        text=text,
+        source_ref=args.source_ref,
+        medium_hint=args.medium_hint,
+        direct=getattr(args, "direct", False),
+    )
 
-    if getattr(args, "direct", False) or os.environ.get("OB_DIRECT") == "1":
-        import open_brain.cli.direct as _direct
 
-        database_url = _direct.load_database_url()
-        if not database_url:
-            _error(
-                "--direct requires DATABASE_URL env var or DATABASE_URL in .env file"
-            )
-        _direct.prepare_direct_env(database_url)
-        return await _direct.run_ingest_transcript_direct(
-            text=text,
-            source_ref=args.source_ref,
-            medium_hint=args.medium_hint,
-        )
+async def _cmd_ingest_macwhisper_list(args: argparse.Namespace) -> Any:
+    """List recent transcripts from the local MacWhisper history."""
+    from open_brain.ingest.adapters.macwhisper import MacWhisperNotFoundError
 
-    kwargs: dict[str, Any] = {
-        "text": text,
-        "source_ref": args.source_ref,
+    try:
+        with _temporary_env_var("MACWHISPER_HISTORY_PATH", args.history_path):
+            connector = _new_macwhisper_connector()
+            history_path = connector.discover_history_path()
+            refs = await connector.list_recent(n=args.limit)
+    except (MacWhisperNotFoundError, RuntimeError) as exc:
+        _error(str(exc))
+
+    return {
+        "history_path": str(history_path),
+        "count": len(refs),
+        "items": [asdict(ref) for ref in refs],
     }
-    if args.medium_hint:
-        kwargs["medium_hint"] = args.medium_hint
-    return await call_tool("ingest_transcript", kwargs)
+
+
+async def _cmd_ingest_macwhisper_ingest(args: argparse.Namespace) -> Any:
+    """Read one local MacWhisper transcript and ingest it through open-brain."""
+    from open_brain.ingest.adapters.macwhisper import MacWhisperNotFoundError
+
+    try:
+        with _temporary_env_var("MACWHISPER_HISTORY_PATH", args.history_path):
+            connector = _new_macwhisper_connector()
+            text, metadata = connector.read_entry(args.entry_id)
+    except (FileNotFoundError, MacWhisperNotFoundError, RuntimeError) as exc:
+        _error(str(exc))
+
+    source_ref = args.source_ref or f"macwhisper:{args.entry_id}"
+    medium_hint = args.medium_hint or metadata.get("medium") or "macwhisper"
+    return await _ingest_transcript_text(
+        text=text,
+        source_ref=source_ref,
+        medium_hint=medium_hint,
+        direct=getattr(args, "direct", False),
+    )
+
+
+async def _cmd_ingest_macwhisper(args: argparse.Namespace) -> Any:
+    """Dispatch MacWhisper ingest subcommands."""
+    if args.macwhisper_command == "list":
+        return await _cmd_ingest_macwhisper_list(args)
+    if args.macwhisper_command == "ingest":
+        return await _cmd_ingest_macwhisper_ingest(args)
+    raise ValueError(f"Unknown macwhisper command: {args.macwhisper_command}")
 
 
 async def _cmd_ingest(args: argparse.Namespace) -> Any:
@@ -260,6 +353,8 @@ async def _cmd_ingest(args: argparse.Namespace) -> Any:
         return await _cmd_ingest_email(args)
     if args.ingest_command == "transcript":
         return await _cmd_ingest_transcript(args)
+    if args.ingest_command == "macwhisper":
+        return await _cmd_ingest_macwhisper(args)
     raise ValueError(f"Unknown ingest command: {args.ingest_command}")
 
 
@@ -483,6 +578,69 @@ def _build_parser() -> argparse.ArgumentParser:
             "Requires DATABASE_URL env var (or DATABASE_URL in .env). "
             "Use for local operator workflows. "
             "Not suitable for multi-user or sandboxed setups."
+        ),
+    )
+
+    # ingest macwhisper
+    p_ingest_macwhisper = ingest_sub.add_parser(
+        "macwhisper",
+        help="Ingest transcripts from local MacWhisper history",
+    )
+    macwhisper_sub = p_ingest_macwhisper.add_subparsers(
+        dest="macwhisper_command",
+        metavar="ACTION",
+    )
+    macwhisper_sub.required = True
+
+    p_macwhisper_list = macwhisper_sub.add_parser(
+        "list",
+        help="List recent local MacWhisper transcript entries",
+    )
+    p_macwhisper_list.add_argument(
+        "--limit",
+        "-n",
+        type=int,
+        default=10,
+        help="Maximum number of entries to list (default: 10)",
+    )
+    p_macwhisper_list.add_argument(
+        "--history-path",
+        metavar="PATH",
+        help="Override the MacWhisper history directory",
+    )
+
+    p_macwhisper_ingest = macwhisper_sub.add_parser(
+        "ingest",
+        help="Ingest one local MacWhisper transcript by entry ID",
+    )
+    p_macwhisper_ingest.add_argument(
+        "entry_id",
+        metavar="ENTRY_ID",
+        help="MacWhisper entry ID, usually the JSON filename without .json",
+    )
+    p_macwhisper_ingest.add_argument(
+        "--history-path",
+        metavar="PATH",
+        help="Override the MacWhisper history directory",
+    )
+    p_macwhisper_ingest.add_argument(
+        "--source-ref",
+        dest="source_ref",
+        metavar="SOURCE_REF",
+        help="Override the default source_ref macwhisper:<ENTRY_ID>",
+    )
+    p_macwhisper_ingest.add_argument(
+        "--medium-hint",
+        dest="medium_hint",
+        metavar="MEDIUM",
+        help="Override the default medium hint from metadata or macwhisper",
+    )
+    p_macwhisper_ingest.add_argument(
+        "--direct",
+        action="store_true",
+        help=(
+            "Bypass MCP transport and call PostgresDataLayer directly. "
+            "Requires DATABASE_URL env var or DATABASE_URL in .env."
         ),
     )
 
