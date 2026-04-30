@@ -90,7 +90,7 @@ def compute_merged_aliases(
     source_meta = source_row.get("metadata") or {}
 
     target_existing: list[str] = target_meta.get("aliases") or []
-    source_name: str = source_meta.get("name") or source_row.get("title") or ""
+    source_name: str = display_name(source_row)
     source_aliases: list[str] = source_meta.get("aliases") or []
 
     # Build deduplicated list: target aliases first, then source name, then source aliases
@@ -153,10 +153,8 @@ def name_length_warning(
     Returns:
         Warning string if target name is strictly shorter, None otherwise.
     """
-    source_meta = source_row.get("metadata") or {}
-    target_meta = target_row.get("metadata") or {}
-    source_name = source_meta.get("name") or source_row.get("title") or ""
-    target_name = target_meta.get("name") or target_row.get("title") or ""
+    source_name = display_name(source_row)
+    target_name = display_name(target_row)
 
     if len(target_name) < len(source_name):
         return (
@@ -168,11 +166,24 @@ def name_length_warning(
     return None
 
 
+def display_name(row: dict[str, Any]) -> str:
+    """Return the display name for a memory row.
+
+    Args:
+        row: Memory dict with optional metadata, title, id keys.
+
+    Returns:
+        Best available name string, or empty string if none found.
+    """
+    return (row.get("metadata") or {}).get("name") or row.get("title") or ""
+
+
 def format_dry_run_report(
     source_row: dict[str, Any],
     target_row: dict[str, Any],
     interaction_count: int,
     relationship_count: int,
+    absorb_text: bool = False,
 ) -> str:
     """Return human-readable dry-run report showing what would change.
 
@@ -181,14 +192,13 @@ def format_dry_run_report(
         target_row: The target memory dict.
         interaction_count: Number of interaction/mention rows that would be re-pointed.
         relationship_count: Number of relationship rows that would be updated.
+        absorb_text: If True, include absorption line in report.
 
     Returns:
         Multi-line human-readable report string.
     """
-    source_meta = source_row.get("metadata") or {}
-    target_meta = target_row.get("metadata") or {}
-    source_name = source_meta.get("name") or source_row.get("title") or str(source_row.get("id"))
-    target_name = target_meta.get("name") or target_row.get("title") or str(target_row.get("id"))
+    source_name = display_name(source_row) or str(source_row.get("id"))
+    target_name = display_name(target_row) or str(target_row.get("id"))
     source_id = source_row.get("id")
     target_id = target_row.get("id")
 
@@ -197,10 +207,10 @@ def format_dry_run_report(
 
     lines = [
         "=== DRY RUN — no changes will be made ===",
-        f"",
+        "",
         f"Source: [{source_id}] {source_name!r}",
         f"Target: [{target_id}] {target_name!r}",
-        f"",
+        "",
         f"Would re-point {interaction_count} interaction/mention rows "
         f"(metadata.person_ref → target)",
         f"Would update {relationship_count} relationship rows "
@@ -208,8 +218,13 @@ def format_dry_run_report(
         f"Would set target aliases to: {merged_aliases!r}",
         f"Would soft-delete source: metadata.merged_into={target_id}, metadata.merged_at=<now>",
     ]
+    if absorb_text:
+        source_content = source_row.get("content") or ""
+        lines.append(
+            f"Would absorb source content into target ({len(source_content)} chars)"
+        )
     if warning:
-        lines.append(f"")
+        lines.append("")
         lines.append(warning)
     return "\n".join(lines)
 
@@ -217,6 +232,22 @@ def format_dry_run_report(
 # ---------------------------------------------------------------------------
 # Async DB helpers
 # ---------------------------------------------------------------------------
+
+
+def _parse_row_count(result: str) -> int:
+    """Parse row count from asyncpg execute() result string (e.g. 'UPDATE 3').
+
+    Args:
+        result: The string returned by asyncpg Connection.execute().
+
+    Returns:
+        Parsed integer row count, or 0 if parsing fails.
+    """
+    parts = result.split() if isinstance(result, str) else []
+    if len(parts) >= 2 and parts[-1].isdigit():
+        return int(parts[-1])
+    logger.warning("Could not parse row count from asyncpg result: %r", result)
+    return 0
 
 
 async def _init_conn(conn: asyncpg.Connection) -> None:
@@ -324,10 +355,7 @@ async def repoint_person_refs(
         target_person_ref,
     )
     # asyncpg returns "UPDATE N" string
-    try:
-        return int(result.split()[-1])
-    except (IndexError, ValueError):
-        return 0
+    return _parse_row_count(result)
 
 
 async def repoint_relationships(
@@ -335,7 +363,14 @@ async def repoint_relationships(
 ) -> int:
     """UPDATE memory_relationships rows referencing source_id.
 
-    Updates both source_id and target_id columns in a single pass.
+    Before updating, deletes self-loops and collision rows to avoid violating
+    the UNIQUE constraint on (source_id, target_id, relation_type).
+
+    Steps:
+    1. Delete self-loops: source<->target edges that would become self-referential.
+    2. Delete source_id collision rows: source rows that would duplicate existing target rows.
+    3. Delete target_id collision rows: source rows that would duplicate existing target rows.
+    4. UPDATE remaining rows to point to target.
 
     Args:
         conn: asyncpg connection.
@@ -343,9 +378,58 @@ async def repoint_relationships(
         target_id: Numeric ID of the target memory.
 
     Returns:
-        Number of rows updated.
+        Total rows affected (deleted + updated).
     """
-    result = await conn.execute(
+    total_affected = 0
+
+    # Step 1: Delete self-loops: source<->target edges
+    r1 = await conn.execute(
+        """
+        DELETE FROM memory_relationships
+        WHERE (source_id = $1 AND target_id = $2)
+           OR (source_id = $2 AND target_id = $1)
+        """,
+        source_id,
+        target_id,
+    )
+    total_affected += _parse_row_count(r1)
+
+    # Step 2: Delete collision rows for source_id column
+    r2 = await conn.execute(
+        """
+        DELETE FROM memory_relationships
+        WHERE source_id = $1
+          AND EXISTS (
+            SELECT 1 FROM memory_relationships r2
+            WHERE r2.source_id = $2
+              AND r2.target_id = memory_relationships.target_id
+              AND r2.relation_type = memory_relationships.relation_type
+          )
+        """,
+        source_id,
+        target_id,
+    )
+    total_affected += _parse_row_count(r2)
+
+    # Step 3: Delete collision rows for target_id column
+    r3 = await conn.execute(
+        """
+        DELETE FROM memory_relationships
+        WHERE target_id = $1
+          AND EXISTS (
+            SELECT 1 FROM memory_relationships r2
+            WHERE r2.target_id = $2
+              AND r2.source_id = memory_relationships.source_id
+              AND r2.relation_type = memory_relationships.relation_type
+          )
+        """,
+        source_id,
+        target_id,
+    )
+    total_affected += _parse_row_count(r3)
+
+    # Step 4: Now UPDATE won't hit any unique constraint violations
+    r4 = await conn.execute(
         """
         UPDATE memory_relationships
         SET source_id = CASE WHEN source_id = $1 THEN $2 ELSE source_id END,
@@ -355,10 +439,9 @@ async def repoint_relationships(
         source_id,
         target_id,
     )
-    try:
-        return int(result.split()[-1])
-    except (IndexError, ValueError):
-        return 0
+    total_affected += _parse_row_count(r4)
+
+    return total_affected
 
 
 async def update_target_aliases(
@@ -402,24 +485,21 @@ async def soft_delete_source(
 
 
 async def absorb_text_into_target(
-    conn: asyncpg.Connection, source_row: dict[str, Any], target_id: int
+    conn: asyncpg.Connection, source_row: dict[str, Any], target_row: dict[str, Any]
 ) -> None:
     """Append source's text/content to target's content as provenance note.
 
     Args:
         conn: asyncpg connection.
         source_row: The source memory dict.
-        target_id: Numeric ID of the target memory.
+        target_row: The target memory dict (avoids re-fetching from DB).
     """
     source_id = source_row.get("id")
-    source_name = (source_row.get("metadata") or {}).get("name") or source_row.get("title") or ""
+    source_name = display_name(source_row)
     source_content = source_row.get("content") or ""
+    target_id = target_row.get("id")
 
-    target_row = await conn.fetchrow("SELECT content FROM memories WHERE id = $1", target_id)
-    if target_row is None:
-        return
-
-    current_content = target_row["content"] or ""
+    current_content = target_row.get("content") or ""
     provenance = (
         f"\n\n--- Absorbed from [{source_id}] {source_name!r} ---\n{source_content}"
     )
@@ -433,7 +513,7 @@ async def absorb_text_into_target(
 
 
 async def run_dry_run(
-    conn: asyncpg.Connection, source_id: int, target_id: int
+    conn: asyncpg.Connection, source_id: int, target_id: int, absorb_text: bool = False
 ) -> str:
     """Execute dry-run: fetch data, count what would change, return report.
 
@@ -443,6 +523,7 @@ async def run_dry_run(
         conn: asyncpg connection.
         source_id: Numeric ID of the source memory.
         target_id: Numeric ID of the target memory.
+        absorb_text: If True, include absorption line in report.
 
     Returns:
         Human-readable dry-run report string.
@@ -470,7 +551,9 @@ async def run_dry_run(
     interaction_count = await count_person_ref_rows(conn, source_person_ref)
     relationship_count = await count_relationship_rows(conn, source_id)
 
-    return format_dry_run_report(source_row, target_row, interaction_count, relationship_count)
+    return format_dry_run_report(
+        source_row, target_row, interaction_count, relationship_count, absorb_text=absorb_text
+    )
 
 
 async def do_merge(
@@ -559,7 +642,7 @@ async def do_merge(
 
         # Step 4: Optionally absorb source text
         if absorb_text:
-            await absorb_text_into_target(conn, source_row, target_id)
+            await absorb_text_into_target(conn, source_row, target_row)
             logger.info(f"  Absorbed source [{source_id}] content into target [{target_id}]")
 
         # Step 5: Soft-delete source
@@ -626,7 +709,7 @@ async def main() -> None:
         await _init_conn(conn)
 
         if args.dry_run:
-            report = await run_dry_run(conn, args.source, args.target)
+            report = await run_dry_run(conn, args.source, args.target, absorb_text=args.absorb_text)
             print(report)
         else:
             summary = await do_merge(conn, args.source, args.target, absorb_text=args.absorb_text)

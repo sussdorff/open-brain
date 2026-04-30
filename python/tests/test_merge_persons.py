@@ -441,3 +441,138 @@ class TestDryRunMode:
             result = await mp.run_dry_run(mock_conn, 17692, 17700)
 
             assert "already" in result.lower() or "skip" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_dry_run_absorb_text_false_no_absorption_line(self):
+        """When absorb_text=False, report does not mention text absorption."""
+        mock_conn = AsyncMock()
+
+        with (
+            patch.object(mp, "fetch_memory") as mock_fetch,
+            patch.object(mp, "count_person_ref_rows") as mock_count_interactions,
+            patch.object(mp, "count_relationship_rows") as mock_count_rels,
+        ):
+            mock_fetch.side_effect = [SOURCE_PERSON, TARGET_PERSON]
+            mock_count_interactions.return_value = 2
+            mock_count_rels.return_value = 1
+
+            result = await mp.run_dry_run(mock_conn, 17692, 17700, absorb_text=False)
+
+            assert "absorb" not in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_dry_run_absorb_text_true_includes_absorption_line(self):
+        """When absorb_text=True, report includes the absorption line with char count."""
+        mock_conn = AsyncMock()
+
+        with (
+            patch.object(mp, "fetch_memory") as mock_fetch,
+            patch.object(mp, "count_person_ref_rows") as mock_count_interactions,
+            patch.object(mp, "count_relationship_rows") as mock_count_rels,
+        ):
+            mock_fetch.side_effect = [SOURCE_PERSON, TARGET_PERSON]
+            mock_count_interactions.return_value = 2
+            mock_count_rels.return_value = 1
+
+            result = await mp.run_dry_run(mock_conn, 17692, 17700, absorb_text=True)
+
+            assert "absorb" in result.lower()
+            # Should mention the char count from source content
+            source_content = SOURCE_PERSON["content"] or ""
+            assert str(len(source_content)) in result
+
+
+# ---------------------------------------------------------------------------
+# TestFormatDryRunReportAbsorbText: B1 — absorb_text in dry-run report
+# ---------------------------------------------------------------------------
+
+
+class TestFormatDryRunReportAbsorbText:
+    """format_dry_run_report absorb_text parameter."""
+
+    def test_absorb_text_false_no_absorption_line(self):
+        report = mp.format_dry_run_report(SOURCE_PERSON, TARGET_PERSON, 5, 3, absorb_text=False)
+        assert "absorb" not in report.lower()
+
+    def test_absorb_text_true_includes_char_count(self):
+        report = mp.format_dry_run_report(SOURCE_PERSON, TARGET_PERSON, 5, 3, absorb_text=True)
+        assert "absorb" in report.lower()
+        source_content = SOURCE_PERSON["content"] or ""
+        assert str(len(source_content)) in report
+
+    def test_absorb_text_default_is_false(self):
+        # Default call without absorb_text should not mention absorption
+        report = mp.format_dry_run_report(SOURCE_PERSON, TARGET_PERSON, 5, 3)
+        assert "absorb" not in report.lower()
+
+
+# ---------------------------------------------------------------------------
+# TestRepointRelationships: B2 — UNIQUE constraint safe repoint
+# ---------------------------------------------------------------------------
+
+
+class TestRepointRelationships:
+    """repoint_relationships handles self-loops and collision rows."""
+
+    @pytest.mark.asyncio
+    async def test_self_loop_rows_are_deleted(self):
+        """Rows forming source<->target edges are deleted before the UPDATE."""
+        mock_conn = AsyncMock()
+        # Each execute call returns "DELETE N" or "UPDATE N"
+        mock_conn.execute.side_effect = [
+            "DELETE 2",  # self-loop delete
+            "DELETE 0",  # source_id collision delete
+            "DELETE 0",  # target_id collision delete
+            "UPDATE 0",  # final UPDATE (no remaining rows)
+        ]
+
+        total = await mp.repoint_relationships(mock_conn, source_id=1, target_id=2)
+
+        assert mock_conn.execute.call_count == 4
+        assert total == 2  # 2 self-loop rows deleted + 0 collisions + 0 updated
+
+    @pytest.mark.asyncio
+    async def test_collision_rows_are_deleted_before_update(self):
+        """Triangle case: collision rows are deleted so UPDATE doesn't violate UNIQUE."""
+        mock_conn = AsyncMock()
+        mock_conn.execute.side_effect = [
+            "DELETE 0",  # no self-loops
+            "DELETE 1",  # one source_id collision
+            "DELETE 1",  # one target_id collision
+            "UPDATE 2",  # remaining rows updated
+        ]
+
+        total = await mp.repoint_relationships(mock_conn, source_id=10, target_id=20)
+
+        assert mock_conn.execute.call_count == 4
+        assert total == 4  # 0 + 1 + 1 + 2
+
+    @pytest.mark.asyncio
+    async def test_no_special_rows_just_updates(self):
+        """When there are no self-loops or collisions, all rows are updated."""
+        mock_conn = AsyncMock()
+        mock_conn.execute.side_effect = [
+            "DELETE 0",
+            "DELETE 0",
+            "DELETE 0",
+            "UPDATE 5",
+        ]
+
+        total = await mp.repoint_relationships(mock_conn, source_id=100, target_id=200)
+
+        assert total == 5
+
+    @pytest.mark.asyncio
+    async def test_returns_combined_affected_count(self):
+        """Total returned is sum of deleted + updated rows."""
+        mock_conn = AsyncMock()
+        mock_conn.execute.side_effect = [
+            "DELETE 3",
+            "DELETE 2",
+            "DELETE 1",
+            "UPDATE 4",
+        ]
+
+        total = await mp.repoint_relationships(mock_conn, source_id=5, target_id=6)
+
+        assert total == 10  # 3 + 2 + 1 + 4
