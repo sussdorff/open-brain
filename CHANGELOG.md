@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - *(open-brain-3lr)* Green — implement people enrichment pipeline
+- *(open-brain-3lr)* Add opt-in person enrichment pipeline for transcript mentions
 
 ## [2026.04.31] - 2026-04-30
 
