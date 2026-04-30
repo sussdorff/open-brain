@@ -80,6 +80,9 @@ def _render_macwhisper_list(data: dict[str, Any]) -> str:
         f"MacWhisper history: {data.get('history_path', '-')}",
         f"Entries shown: {data.get('count', len(items))}",
     ]
+    scanned_count = data.get("scanned_count")
+    if scanned_count is not None and scanned_count != data.get("count", len(items)):
+        lines.append(f"Entries scanned: {scanned_count}")
 
     if not items:
         lines.append("No transcripts found.")
@@ -93,6 +96,7 @@ def _render_macwhisper_list(data: dict[str, Any]) -> str:
         source_app = item.get("source_app") or ""
         duration = _format_duration(item.get("duration_seconds"))
         participants = item.get("participants") or []
+        status = _format_ingest_status(item)
         preview = _single_line_preview(item.get("text_preview", ""))
         lines.append(f"{created_at}  {entry_id}")
         details = "  ".join(
@@ -100,6 +104,8 @@ def _render_macwhisper_list(data: dict[str, Any]) -> str:
         )
         if details:
             lines.append(f"  {details}")
+        if status:
+            lines.append(f"  Status: {status}")
         if participants:
             lines.append(f"  Participants: {', '.join(str(p) for p in participants)}")
         if preview:
@@ -165,6 +171,24 @@ def _format_duration(value: Any) -> str:
     if minutes:
         return f"{minutes:d}m {seconds:02d}s"
     return f"{seconds:d}s"
+
+
+def _format_ingest_status(item: dict[str, Any]) -> str:
+    """Format optional ingest status for terminal output."""
+    if "ingested" not in item:
+        return ""
+    if not item.get("ingested"):
+        return "new"
+
+    memory_id = item.get("memory_id")
+    run_id = item.get("run_id")
+    details: list[str] = []
+    if memory_id is not None:
+        details.append(f"memory {memory_id}")
+    if run_id:
+        details.append(f"run {run_id}")
+    suffix = f" ({', '.join(details)})" if details else ""
+    return f"ingested{suffix}"
 
 
 def _error(msg: str) -> None:
@@ -435,19 +459,67 @@ async def _cmd_ingest_macwhisper_list(args: argparse.Namespace) -> Any:
     """List recent transcripts from the local MacWhisper history."""
     from open_brain.ingest.adapters.macwhisper import MacWhisperNotFoundError
 
+    local_limit = args.limit
+    if args.not_ingested:
+        local_limit = args.scan_limit or max(args.limit * 5, 50)
+
     try:
         with _temporary_env_var("MACWHISPER_HISTORY_PATH", args.history_path):
             connector = _new_macwhisper_connector()
             history_path = connector.discover_history_path()
-            refs = await connector.list_recent(n=args.limit)
+            refs = await connector.list_recent(n=local_limit)
     except (MacWhisperNotFoundError, RuntimeError) as exc:
         _error(str(exc))
 
-    return {
+    items = [asdict(ref) for ref in refs]
+    if args.status or args.not_ingested:
+        try:
+            items = await _attach_ingest_status(items)
+        except MCPError as exc:
+            _error(f"Could not check ingest status: {exc}")
+
+    scanned_count = len(items)
+    if args.not_ingested:
+        items = [item for item in items if not item.get("ingested")]
+    items = items[: args.limit]
+
+    payload = {
         "history_path": str(history_path),
-        "count": len(refs),
-        "items": [asdict(ref) for ref in refs],
+        "count": len(items),
+        "items": items,
     }
+    if args.status or args.not_ingested:
+        payload["scanned_count"] = scanned_count
+    return payload
+
+
+async def _attach_ingest_status(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Attach open-brain ingest status to MacWhisper list items."""
+    if not items:
+        return items
+
+    source_refs = [f"macwhisper:{item.get('entry_id', '')}" for item in items]
+    payload = await call_tool("ingest_status", {"source_refs": source_refs})
+    statuses = {
+        item.get("source_ref"): item
+        for item in (payload.get("items") or [])
+        if isinstance(item, dict)
+    }
+
+    enriched: list[dict[str, Any]] = []
+    for item, source_ref in zip(items, source_refs):
+        status = statuses.get(source_ref) or {
+            "source_ref": source_ref,
+            "ingested": False,
+            "memory_id": None,
+            "run_id": None,
+            "ingested_at": None,
+            "title": None,
+        }
+        updated = dict(item)
+        updated.update(status)
+        enriched.append(updated)
+    return enriched
 
 
 async def _cmd_ingest_macwhisper_ingest(args: argparse.Namespace) -> Any:
@@ -753,6 +825,25 @@ def _build_parser() -> argparse.ArgumentParser:
         "--history-path",
         metavar="PATH",
         help="Override the MacWhisper history directory",
+    )
+    p_macwhisper_list.add_argument(
+        "--status",
+        action="store_true",
+        help="Check the open-brain server and show whether each entry is already ingested",
+    )
+    p_macwhisper_list.add_argument(
+        "--not-ingested",
+        action="store_true",
+        help="Only show entries not yet ingested; implies --status",
+    )
+    p_macwhisper_list.add_argument(
+        "--scan-limit",
+        type=int,
+        metavar="N",
+        help=(
+            "Number of local entries to scan before filtering with --not-ingested "
+            "(default: max(limit*5, 50))"
+        ),
     )
     p_macwhisper_list.add_argument(
         "--json",

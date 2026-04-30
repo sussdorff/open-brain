@@ -48,6 +48,16 @@ def mock_dl():
     dl.get_observations.return_value = [_make_memory(id=1), _make_memory(id=2)]
     dl.save_memory.return_value = SaveMemoryResult(id=42, message="Memory saved")
     dl.search_by_concept.return_value = {"results": [_make_memory()]}
+    dl.ingest_status_by_source_refs.return_value = {
+        "macwhisper:session:abc123": {
+            "source_ref": "macwhisper:session:abc123",
+            "ingested": True,
+            "memory_id": 42,
+            "run_id": "run-123",
+            "ingested_at": "2026-04-30T12:00:00",
+            "title": "Meeting: macwhisper:session:abc123",
+        }
+    }
     dl.get_context.return_value = {"sessions": []}
     dl.stats.return_value = {
         "memories": 100, "sessions": 10, "relationships": 50,
@@ -118,6 +128,35 @@ class TestSearchTool:
             data = json.loads(result)
             assert "total" in data
             assert "results" in data
+
+
+class TestIngestStatusTool:
+    @pytest.mark.asyncio
+    async def test_ingest_status_returns_status_items(self, mock_dl):
+        with patch("open_brain.server.get_dl", return_value=mock_dl):
+            from open_brain.server import ingest_status
+
+            result = await ingest_status([
+                "macwhisper:session:abc123",
+                "macwhisper:session:abc123",
+                " ",
+            ])
+
+        data = json.loads(result)
+        assert data["count"] == 1
+        assert data["items"][0]["source_ref"] == "macwhisper:session:abc123"
+        assert data["items"][0]["ingested"] is True
+        mock_dl.ingest_status_by_source_refs.assert_awaited_once_with([
+            "macwhisper:session:abc123"
+        ])
+
+    @pytest.mark.asyncio
+    async def test_ingest_status_rejects_too_many_refs(self, mock_dl):
+        with patch("open_brain.server.get_dl", return_value=mock_dl):
+            from open_brain.server import ingest_status
+
+            with pytest.raises(ValueError, match="at most 500"):
+                await ingest_status([f"ref-{i}" for i in range(501)])
 
 
 # ─── Timeline tool ────────────────────────────────────────────────────────────

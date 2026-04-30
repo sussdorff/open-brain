@@ -310,6 +310,9 @@ class TestOutput:
                         "source_app": "Teams",
                         "duration_seconds": 1800,
                         "participants": ["Alice", "Bob"],
+                        "ingested": True,
+                        "memory_id": 42,
+                        "run_id": "run-123",
                     }
                 ],
             },
@@ -319,9 +322,33 @@ class TestOutput:
         assert "MacWhisper history: /tmp/MacWhisper" in captured.out
         assert "session:abc123" in captured.out
         assert "Planning Sync  Teams  30m 00s" in captured.out
+        assert "Status: ingested (memory 42, run run-123)" in captured.out
         assert "Participants: Alice, Bob" in captured.out
         assert "ob ingest macwhisper entry <entry-id>" in captured.out
         assert '"items"' not in captured.out
+
+    def test_macwhisper_list_renders_new_status_and_scanned_count(self, capsys):
+        args = parse(["ingest", "macwhisper", "list", "--not-ingested"])
+        _output_result(
+            {
+                "history_path": "/tmp/MacWhisper",
+                "count": 1,
+                "scanned_count": 5,
+                "items": [
+                    {
+                        "entry_id": "session:new",
+                        "created_at": "2026-04-30 08:22:41",
+                        "text_preview": "A short transcript preview.",
+                        "ingested": False,
+                    }
+                ],
+            },
+            args,
+        )
+        captured = capsys.readouterr()
+        assert "Entries shown: 1" in captured.out
+        assert "Entries scanned: 5" in captured.out
+        assert "Status: new" in captured.out
 
     def test_macwhisper_list_json_flag_keeps_json_output(self, capsys):
         args = parse(["ingest", "macwhisper", "list", "--json"])

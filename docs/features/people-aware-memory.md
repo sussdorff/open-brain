@@ -114,6 +114,12 @@ from MacWhisper speaker data.
 # List recent transcript sessions/meetings from local MacWhisper history
 ob ingest macwhisper list --limit 10
 
+# Show which sessions are already present in open-brain
+ob ingest macwhisper list --status
+
+# Show only local sessions that are not ingested yet
+ob ingest macwhisper list --not-ingested
+
 # Machine-readable output
 ob ingest macwhisper list --limit 10 --json
 
@@ -127,6 +133,9 @@ ob ingest macwhisper entry <entry-id> --history-path ~/Exports/MacWhisper
 By default, the source reference is `macwhisper:<entry-id>` and the medium hint
 is `macwhisper` unless entry metadata or `--medium-hint` overrides it.
 `macwhisper ingest` is accepted as a compatibility alias.
+Status checks compare that source reference against meeting memories in the
+configured open-brain server; the server still does not need filesystem access
+to MacWhisper.
 
 ---
 

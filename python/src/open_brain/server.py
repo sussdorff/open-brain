@@ -1093,6 +1093,41 @@ async def ingest_transcript(text: str, source_ref: str, medium_hint: str | None 
 
 @mcp.tool(
     description=(
+        "Check whether source references have already been ingested. "
+        "Returns one status item per source_ref without recording memory recall usage. "
+        "Params: source_refs (list[str], required)."
+    )
+)
+@logged_tool
+async def ingest_status(source_refs: list[str]) -> str:
+    """Return ingest status for source references."""
+    if not isinstance(source_refs, list):
+        raise ValueError("source_refs must be a list of strings")
+    if len(source_refs) > 500:
+        raise ValueError("source_refs must contain at most 500 items")
+
+    normalized_refs: list[str] = []
+    seen: set[str] = set()
+    for source_ref in source_refs:
+        ref = str(source_ref).strip()
+        if not ref or ref in seen:
+            continue
+        seen.add(ref)
+        normalized_refs.append(ref)
+
+    dl = get_dl()
+    statuses = await dl.ingest_status_by_source_refs(normalized_refs)
+    return json.dumps(
+        {
+            "count": len(normalized_refs),
+            "items": [statuses[ref] for ref in normalized_refs],
+        },
+        default=str,
+    )
+
+
+@mcp.tool(
+    description=(
         "Roll back an ingest run by deleting all memories and relationships created with the given run_id. "
         "Returns deletion counts. Non-existent run_id returns zero counts (not an error). "
         "Param: run_id (str, required — the run_id returned by ingest_run())."

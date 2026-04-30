@@ -313,6 +313,50 @@ class TestPostgresSearchByConcept:
         assert "results" in result
 
 
+class TestPostgresIngestStatus:
+    @pytest.fixture
+    def dl(self):
+        return PostgresDataLayer()
+
+    @pytest.mark.asyncio
+    async def test_ingest_status_by_source_refs_returns_ordered_statuses(self, dl):
+        row = MagicMock()
+        row.__getitem__ = lambda self, key: {
+            "source_ref": "macwhisper:session:abc123",
+            "memory_id": 42,
+            "run_id": "run-123",
+            "ingested_at": "2026-04-30T12:00:00",
+            "title": "Meeting: macwhisper:session:abc123",
+        }[key]
+
+        conn = AsyncMock()
+        conn.fetch.return_value = [row]
+        pool = _make_pool(conn)
+
+        with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
+            result = await dl.ingest_status_by_source_refs([
+                "macwhisper:session:abc123",
+                "macwhisper:session:new",
+                "macwhisper:session:abc123",
+            ])
+
+        conn.fetch.assert_awaited_once()
+        assert conn.fetch.call_args[0][1] == [
+            "macwhisper:session:abc123",
+            "macwhisper:session:new",
+        ]
+        assert result["macwhisper:session:abc123"]["ingested"] is True
+        assert result["macwhisper:session:abc123"]["memory_id"] == 42
+        assert result["macwhisper:session:new"]["ingested"] is False
+        assert result["macwhisper:session:new"]["memory_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_ingest_status_by_source_refs_empty_skips_db(self, dl):
+        result = await dl.ingest_status_by_source_refs(["", "   "])
+
+        assert result == {}
+
+
 class TestPostgresGetContext:
     @pytest.fixture
     def dl(self):

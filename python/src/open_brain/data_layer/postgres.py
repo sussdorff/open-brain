@@ -625,6 +625,67 @@ class PostgresDataLayer:
                 asyncio.create_task(self._apply_recall_decay_background(decay_candidates))
             return SearchResult(results=memories, total=count_row["total"])
 
+    async def ingest_status_by_source_refs(
+        self,
+        source_refs: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        """Return ingest status for source references without recording recall usage."""
+        unique_refs: list[str] = []
+        seen: set[str] = set()
+        for source_ref in source_refs:
+            ref = str(source_ref).strip()
+            if not ref or ref in seen:
+                continue
+            seen.add(ref)
+            unique_refs.append(ref)
+
+        statuses: dict[str, dict[str, Any]] = {
+            ref: {
+                "source_ref": ref,
+                "ingested": False,
+                "memory_id": None,
+                "run_id": None,
+                "ingested_at": None,
+                "title": None,
+            }
+            for ref in unique_refs
+        }
+        if not unique_refs:
+            return statuses
+
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    metadata->>'source_ref' AS source_ref,
+                    id AS memory_id,
+                    metadata->>'run_id' AS run_id,
+                    created_at AS ingested_at,
+                    title
+                FROM memories
+                WHERE type = 'meeting'
+                  AND metadata->>'source_ref' = ANY($1::text[])
+                ORDER BY created_at DESC
+                """,
+                unique_refs,
+            )
+
+        for row in rows:
+            ref = row["source_ref"]
+            if ref not in statuses or statuses[ref]["ingested"]:
+                continue
+            statuses[ref] = {
+                "source_ref": ref,
+                "ingested": True,
+                "memory_id": row["memory_id"],
+                "run_id": row["run_id"],
+                "ingested_at": row["ingested_at"],
+                "title": row["title"],
+            }
+
+        return statuses
+
     async def _apply_recall_decay_background(
         self, candidates: list[tuple[int, str, int]]
     ) -> None:

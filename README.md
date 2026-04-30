@@ -492,6 +492,12 @@ somewhere else.
 # Show recent local MacWhisper transcript sessions/meetings
 ob ingest macwhisper list --limit 10
 
+# Check the configured open-brain server and show ingest status
+ob ingest macwhisper list --limit 10 --status
+
+# Show only sessions that have no matching macwhisper:<entry-id> source_ref yet
+ob ingest macwhisper list --not-ingested
+
 # Machine-readable output
 ob ingest macwhisper list --limit 10 --json
 
@@ -508,6 +514,12 @@ MacWhisper sandbox/application-support directories, or path hints from the `mw`
 CLI. `macwhisper entry` defaults the medium hint to `macwhisper` unless the
 MacWhisper entry metadata or `--medium-hint` provides a more specific value.
 `macwhisper ingest` is accepted as a compatibility alias.
+
+`--status` and `--not-ingested` call the configured open-brain server to compare
+each local entry against ingested meeting memories by `metadata.source_ref`.
+The default source reference is `macwhisper:<entry-id>`. `--not-ingested` scans
+more local entries than it displays by default (`max(limit*5, 50)`); use
+`--scan-limit N` to adjust that window.
 
 ## Documentation
 

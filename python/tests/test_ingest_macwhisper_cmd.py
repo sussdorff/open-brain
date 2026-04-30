@@ -47,6 +47,20 @@ class TestIngestMacWhisperArgParsing:
 
         assert args.json_output is True
 
+    def test_list_status_flags(self):
+        args = parse([
+            "ingest",
+            "macwhisper",
+            "list",
+            "--status",
+            "--not-ingested",
+            "--scan-limit=25",
+        ])
+
+        assert args.status is True
+        assert args.not_ingested is True
+        assert args.scan_limit == 25
+
     def test_ingest_entry_defaults(self):
         args = parse(["ingest", "macwhisper", "entry", "abc123"])
 
@@ -135,6 +149,102 @@ class TestIngestMacWhisperHandlers:
                 }
             ],
         }
+
+    @pytest.mark.asyncio
+    async def test_list_status_enriches_entries(self, tmp_path: Path):
+        connector = MagicMock()
+        connector.discover_history_path.return_value = tmp_path
+        connector.list_recent = AsyncMock(return_value=[
+            TranscriptRef(
+                entry_id="session:abc123",
+                created_at="2026-04-30T10:00:00",
+                text_preview="Meeting transcript",
+            )
+        ])
+        args = parse(["ingest", "macwhisper", "list", "--status"])
+
+        with (
+            patch(
+                "open_brain.cli.main._new_macwhisper_connector",
+                return_value=connector,
+            ),
+            patch("open_brain.cli.main.call_tool", new_callable=AsyncMock) as mock_call,
+        ):
+            mock_call.return_value = {
+                "items": [
+                    {
+                        "source_ref": "macwhisper:session:abc123",
+                        "ingested": True,
+                        "memory_id": 42,
+                        "run_id": "run-123",
+                        "ingested_at": "2026-04-30T12:00:00",
+                        "title": "Meeting: macwhisper:session:abc123",
+                    }
+                ]
+            }
+            result = await _cmd_ingest_macwhisper_list(args)
+
+        mock_call.assert_awaited_once_with(
+            "ingest_status",
+            {"source_refs": ["macwhisper:session:abc123"]},
+        )
+        assert result["scanned_count"] == 1
+        assert result["items"][0]["ingested"] is True
+        assert result["items"][0]["memory_id"] == 42
+
+    @pytest.mark.asyncio
+    async def test_list_not_ingested_filters_and_scans_more_than_limit(self, tmp_path: Path):
+        connector = MagicMock()
+        connector.discover_history_path.return_value = tmp_path
+        connector.list_recent = AsyncMock(return_value=[
+            TranscriptRef(
+                entry_id="session:old",
+                created_at="2026-04-30T10:00:00",
+                text_preview="Old meeting",
+            ),
+            TranscriptRef(
+                entry_id="session:new",
+                created_at="2026-04-29T10:00:00",
+                text_preview="New meeting",
+            ),
+        ])
+        args = parse([
+            "ingest",
+            "macwhisper",
+            "list",
+            "--limit=1",
+            "--not-ingested",
+            "--scan-limit=2",
+        ])
+
+        with (
+            patch(
+                "open_brain.cli.main._new_macwhisper_connector",
+                return_value=connector,
+            ),
+            patch("open_brain.cli.main.call_tool", new_callable=AsyncMock) as mock_call,
+        ):
+            mock_call.return_value = {
+                "items": [
+                    {
+                        "source_ref": "macwhisper:session:old",
+                        "ingested": True,
+                        "memory_id": 42,
+                    },
+                    {
+                        "source_ref": "macwhisper:session:new",
+                        "ingested": False,
+                        "memory_id": None,
+                    },
+                ]
+            }
+            result = await _cmd_ingest_macwhisper_list(args)
+
+        connector.list_recent.assert_awaited_once_with(n=2)
+        assert result["count"] == 1
+        assert result["scanned_count"] == 2
+        assert result["items"][0]["entry_id"] == "session:new"
+        assert result["items"][0]["ingested"] is False
 
     @pytest.mark.asyncio
     async def test_history_path_env_override_is_restored(
