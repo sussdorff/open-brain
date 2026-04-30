@@ -348,7 +348,7 @@ async def repoint_person_refs(
     """
     result = await conn.execute(
         "UPDATE memories "
-        "SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('person_ref', $2) "
+        "SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('person_ref', $2::text) "
         "WHERE type IN ('interaction', 'mention') "
         "AND metadata->>'person_ref' = $1",
         source_person_ref,
@@ -476,7 +476,7 @@ async def soft_delete_source(
     merged_at = datetime.now(timezone.utc).isoformat()
     await conn.execute(
         "UPDATE memories "
-        "SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('merged_into', $2, 'merged_at', $3) "
+        "SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('merged_into', $2::int, 'merged_at', $3::text) "
         "WHERE id = $1",
         source_id,
         target_id,

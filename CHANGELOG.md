@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 - *(open-brain-mx1)* Address review findings iteration 1
 - *(open-brain-mx1)* Address codex adversarial findings
 - *(transcript-dedup)* Improve LLM-confirm prompt with PKM context, target aliases/org, and likelihood framing — replaces overly conservative "if uncertain, say false" wording that was rejecting clear matches like `Malte` → `Malte Sussdorff`
+- *(merge-persons)* Add explicit type casts on `jsonb_build_object` parameters in `repoint_person_refs` (`$2::text`) and `soft_delete_source` (`$2::int`, `$3::text`). Without casts, asyncpg raises `IndeterminateDatatypeError` because Postgres cannot infer types for the polymorphic value parameters. Unit tests with mocked connections did not catch this — only real Postgres execution exposed it.
 
 ### Features
 
