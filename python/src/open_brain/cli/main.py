@@ -682,14 +682,24 @@ async def _cmd_people_enrichment(args: argparse.Namespace) -> Any:
         should_auto_apply,
     )
 
-    searxng_url: str = getattr(args, "searxng_url", None) or get_config().SEARXNG_URL
+    from open_brain.cli.client import _load_searxng_url
+
+    # Resolution order: --searxng-url arg → OB_SEARXNG_URL env / XDG config → server SEARXNG_URL
+    searxng_url: str = (
+        getattr(args, "searxng_url", None)
+        or _load_searxng_url()
+        or get_config().SEARXNG_URL
+    )
     auto_apply: bool = getattr(args, "auto_apply", False)
     min_confidence: float = getattr(args, "min_confidence", 0.8)
 
     if not searxng_url:
         _error(
-            "SEARXNG_URL is not configured. Set SEARXNG_URL env var, add it to .env, "
-            "or pass --searxng-url."
+            "SEARXNG_URL is not configured. Options:\n"
+            "  1. Add to ~/.config/open-brain/config.json: {\"searxng_url\": \"http://...\"}\n"
+            "  2. Set OB_SEARXNG_URL env var\n"
+            "  3. Set SEARXNG_URL in the server .env\n"
+            "  4. Pass --searxng-url <URL>"
         )
 
     applied = 0

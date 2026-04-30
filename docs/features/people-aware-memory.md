@@ -53,6 +53,7 @@ to the system or want to understand how person-centric data flows through the st
 | [Domain Metadata Schemas](domain-metadata-schemas.md) | cr3.1 | TypedDict schemas for `event`, `person`, `meeting`, `decision`, `household` — validation rules and JSONB storage |
 | [Typed Relationships](typed-relationships.md) | cr3.10 | Semantic edge labels (`attended_by`, `mentioned_in`, …), `create_relationship()` API, graph traversal |
 | [People-Aware Queries](people-aware-queries.md) | cr3.9 | Three MCP tools for person-centric queries + the `people-query` Claude Code skill |
+| [People Enrichment](people-enrichment.md) | open-brain-3lr | Opt-in `ob people enrichment` command — SearXNG web search to fill in org/role/profile URL for name-only person memories |
 
 ## Architecture Decision Records
 

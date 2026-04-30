@@ -123,6 +123,22 @@ def _load_api_key() -> str | None:
     return _config_str(_load_client_config(), "api_key")
 
 
+def _load_searxng_url() -> str | None:
+    """Load SearXNG instance URL from env var or client config.
+
+    Resolution order:
+    1. ``OB_SEARXNG_URL`` environment variable
+    2. ``searxng_url`` key in ``~/.config/open-brain/config.json``
+
+    Returns:
+        SearXNG base URL string, or None if not configured on the client side.
+    """
+    url = os.environ.get("OB_SEARXNG_URL")
+    if url:
+        return url
+    return _config_str(_load_client_config(), "searxng_url")
+
+
 def _get_server_url() -> str:
     """Get server URL from env var or default.
 
