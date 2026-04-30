@@ -5,13 +5,20 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
-- *(open-brain-8i5)* Fix metadata stored as JSONB string/array instead of object (double-encoding fix in save_memory and update_memory with backfill migration)
 - *(open-brain-c5e)* Address review findings iteration 1
 - *(open-brain-c5e)* Address codex adversarial findings
+- *(open-brain-8i5)* Green — remove double-encoding of metadata JSONB params
+- *(open-brain-8i5)* Address review findings iteration 1
+- *(open-brain-8i5)* Address codex adversarial findings
 
 ### Features
 
 - *(open-brain-c5e)* Green — direct-mode for ob ingest transcript --direct
+
+### Miscellaneous
+
+- *(open-brain-c5e)* Update changelog for direct-mode ob ingest transcript
+- *(open-brain-8i5)* Update changelog for JSONB double-encoding fix
 
 ## [0.26.0] - 2026-04-29
 
