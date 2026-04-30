@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(open-brain-mx1)* Wire LLM confirmation in transcript person deduplication for partial names
 - *(open-brain-9rn)* Require confirmation for partial incoming person-name containment
 - *(open-brain-3bm)* Green — name-containment auto_merge for first-name/full-name dedup
 - *(open-brain-3bm)* Address review findings iteration 1
