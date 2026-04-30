@@ -69,16 +69,26 @@ def _make_meeting_memory(id: int = 99, name: str = "Alice Smith") -> Memory:
 def _make_dl(
     person_memories: list[Memory] | None = None,
     meeting_memories: list[Memory] | None = None,
+    all_person_memories: list[Memory] | None = None,
 ) -> AsyncMock:
-    """Build a mock DataLayer that returns preset search results."""
+    """Build a mock DataLayer that returns preset search results.
+
+    person_memories: returned for the enrich_pending=true filter query.
+    all_person_memories: returned for the broad all-persons query (no filter).
+      Defaults to person_memories so the standard tests remain unaffected.
+    meeting_memories: returned for meeting-type searches.
+    """
     dl = AsyncMock()
 
-    persons = person_memories or [_make_memory()]
-    meetings = meeting_memories or [_make_meeting_memory()]
+    persons = person_memories if person_memories is not None else [_make_memory()]
+    all_persons = all_person_memories if all_person_memories is not None else persons
+    meetings = meeting_memories if meeting_memories is not None else [_make_meeting_memory()]
 
     def search_side_effect(params: SearchParams) -> SearchResult:
         if params.type == "person" and params.metadata_filter == {"enrich_pending": "true"}:
             return SearchResult(results=persons, total=len(persons))
+        if params.type == "person" and not params.metadata_filter:
+            return SearchResult(results=all_persons, total=len(all_persons))
         if params.type == "meeting":
             return SearchResult(results=meetings, total=len(meetings))
         return SearchResult(results=[], total=0)
@@ -113,10 +123,11 @@ class TestListEnrichmentCandidates:
 
     @pytest.mark.asyncio
     async def test_returns_empty_when_no_pending(self) -> None:
-        """Should return empty list when no person memories have enrich_pending."""
+        """Should return empty list when no person memories are candidates."""
         from open_brain.people.enrichment import list_enrichment_candidates
 
         dl = AsyncMock()
+        # Both the flagged query and the all-persons query return nothing.
         dl.search.return_value = SearchResult(results=[], total=0)
         candidates = await list_enrichment_candidates(dl)
 
@@ -778,3 +789,239 @@ class TestEnrichmentResultDataclass:
         assert candidate.memory_id == 42
         assert candidate.name == "Alice Smith"
         assert candidate.transcript_context == "Alice Smith is CEO at Acme Corp."
+
+
+# ---------------------------------------------------------------------------
+# Regression fixes (Codex adversarial findings)
+# ---------------------------------------------------------------------------
+
+
+class TestRegressionFix1PreExistingPersonsVisibleToEnrichment:
+    """REGRESSION 1: list_enrichment_candidates must also surface pre-existing
+    person memories with a name but no org/role, even without enrich_pending."""
+
+    @pytest.mark.asyncio
+    async def test_person_without_enrich_pending_but_missing_org_role_included(self) -> None:
+        """Person with name but no org/role and no enrich_pending flag must be a candidate."""
+        from open_brain.people.enrichment import list_enrichment_candidates
+
+        # This person has no enrich_pending flag — pre-existing memory.
+        legacy_person = _make_memory(
+            id=5,
+            metadata={"name": "Bob Jones"},  # no org, no role, no enrich_pending
+        )
+
+        # flagged query returns nothing; broad query returns the legacy person.
+        dl = _make_dl(
+            person_memories=[],
+            all_person_memories=[legacy_person],
+        )
+        candidates = await list_enrichment_candidates(dl)
+
+        assert len(candidates) == 1
+        assert candidates[0].memory_id == 5
+        assert candidates[0].name == "Bob Jones"
+
+    @pytest.mark.asyncio
+    async def test_person_with_org_already_set_not_included(self) -> None:
+        """Person that already has org should NOT be returned as a candidate."""
+        from open_brain.people.enrichment import list_enrichment_candidates
+
+        complete_person = _make_memory(
+            id=6,
+            metadata={"name": "Carol King", "org": "Acme Corp"},
+        )
+
+        dl = _make_dl(
+            person_memories=[],
+            all_person_memories=[complete_person],
+        )
+        candidates = await list_enrichment_candidates(dl)
+
+        assert candidates == []
+
+    @pytest.mark.asyncio
+    async def test_person_with_role_already_set_not_included(self) -> None:
+        """Person that already has role should NOT be returned as a candidate."""
+        from open_brain.people.enrichment import list_enrichment_candidates
+
+        person_with_role = _make_memory(
+            id=7,
+            metadata={"name": "Dave Lee", "role": "Engineer"},
+        )
+
+        dl = _make_dl(
+            person_memories=[],
+            all_person_memories=[person_with_role],
+        )
+        candidates = await list_enrichment_candidates(dl)
+
+        assert candidates == []
+
+    @pytest.mark.asyncio
+    async def test_no_duplicates_when_person_appears_in_both_queries(self) -> None:
+        """A person with enrich_pending=true must not appear twice in results."""
+        from open_brain.people.enrichment import list_enrichment_candidates
+
+        person = _make_memory(
+            id=1,
+            metadata={"name": "Alice Smith", "enrich_pending": "true"},
+        )
+
+        # Same person returned by both the flagged query and the broad query.
+        dl = _make_dl(
+            person_memories=[person],
+            all_person_memories=[person],
+        )
+        candidates = await list_enrichment_candidates(dl)
+
+        ids = [c.memory_id for c in candidates]
+        assert ids.count(1) == 1, "Duplicate candidate entries must be deduplicated"
+
+
+class TestRegressionFix2ContextWordsExcludePersonName:
+    """REGRESSION 2: search query context words must not include parts of the person's name."""
+
+    @pytest.mark.asyncio
+    async def test_context_query_excludes_name_parts(self) -> None:
+        """If context starts with the person's name, those words must be excluded from query."""
+        from open_brain.people.enrichment import search_person_web
+
+        captured_queries: list[str] = []
+
+        with patch("open_brain.people.enrichment.httpx") as mock_httpx:
+            mock_client = AsyncMock()
+            mock_httpx.AsyncClient.return_value.__aenter__.return_value = mock_client
+
+            async def capture_get(url: str, **kwargs: Any) -> MagicMock:
+                params = kwargs.get("params", {})
+                captured_queries.append(params.get("q", ""))
+                resp = MagicMock()
+                resp.json.return_value = {"results": []}
+                resp.raise_for_status = MagicMock()
+                return resp
+
+            mock_client.get.side_effect = capture_get
+
+            # Context starts with the person's name — a common transcript pattern.
+            await search_person_web(
+                name="Alice Smith",
+                context="Alice Smith is the CEO of Acme Corp",
+                searxng_url="http://searxng.local",
+            )
+
+        assert len(captured_queries) == 1
+        query = captured_queries[0]
+        # The query should NOT be '"Alice Smith" Alice ...' (name repeated).
+        # Name appears in quotes once; remaining tokens should be non-name words.
+        after_name = query.replace('"Alice Smith"', "").strip()
+        assert "alice" not in after_name.lower(), (
+            f"Name part 'alice' leaked into context tokens: {query!r}"
+        )
+        assert "smith" not in after_name.lower(), (
+            f"Name part 'smith' leaked into context tokens: {query!r}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_context_query_uses_non_name_words(self) -> None:
+        """Non-name context words (e.g. company name) should appear in the query."""
+        from open_brain.people.enrichment import search_person_web
+
+        captured_queries: list[str] = []
+
+        with patch("open_brain.people.enrichment.httpx") as mock_httpx:
+            mock_client = AsyncMock()
+            mock_httpx.AsyncClient.return_value.__aenter__.return_value = mock_client
+
+            async def capture_get(url: str, **kwargs: Any) -> MagicMock:
+                params = kwargs.get("params", {})
+                captured_queries.append(params.get("q", ""))
+                resp = MagicMock()
+                resp.json.return_value = {"results": []}
+                resp.raise_for_status = MagicMock()
+                return resp
+
+            mock_client.get.side_effect = capture_get
+
+            await search_person_web(
+                name="Alice Smith",
+                context="Alice Smith works at Cognovis GmbH",
+                searxng_url="http://searxng.local",
+            )
+
+        assert len(captured_queries) == 1
+        query = captured_queries[0]
+        # At least one non-name word from context (e.g. "works", "Cognovis", "GmbH")
+        # should appear in the query.
+        assert any(
+            word in query for word in ["works", "Cognovis", "GmbH"]
+        ), f"Expected a non-name context word in query but got: {query!r}"
+
+
+class TestRegressionFix3AutoApplyRequiresOrgOrRole:
+    """REGRESSION 3: should_auto_apply must return False when both org and role are None."""
+
+    def test_url_only_result_not_auto_applied(self) -> None:
+        """A result with only profile_url but no org/role must not be auto-applied."""
+        from open_brain.people.enrichment import EnrichmentResult, should_auto_apply
+
+        url_only = EnrichmentResult(
+            name="Alice Smith",
+            org=None,
+            role=None,
+            profile_url="https://www.linkedin.com/in/alice-smith",
+            confidence=0.95,
+            provenance_url="https://www.linkedin.com/in/alice-smith",
+            provenance_snippet=None,
+        )
+
+        # High confidence but no extractable metadata — must NOT auto-apply.
+        assert should_auto_apply(url_only, min_confidence=0.8) is False
+
+    def test_result_with_only_org_can_auto_apply(self) -> None:
+        """A result with at least org (even without role) can still be auto-applied."""
+        from open_brain.people.enrichment import EnrichmentResult, should_auto_apply
+
+        result = EnrichmentResult(
+            name="Alice Smith",
+            org="Acme Corp",
+            role=None,
+            profile_url=None,
+            confidence=0.85,
+            provenance_url=None,
+            provenance_snippet=None,
+        )
+
+        assert should_auto_apply(result, min_confidence=0.8) is True
+
+    def test_result_with_only_role_can_auto_apply(self) -> None:
+        """A result with at least role (even without org) can still be auto-applied."""
+        from open_brain.people.enrichment import EnrichmentResult, should_auto_apply
+
+        result = EnrichmentResult(
+            name="Alice Smith",
+            org=None,
+            role="CEO",
+            profile_url=None,
+            confidence=0.85,
+            provenance_url=None,
+            provenance_snippet=None,
+        )
+
+        assert should_auto_apply(result, min_confidence=0.8) is True
+
+    def test_result_with_both_org_and_role_can_auto_apply(self) -> None:
+        """A result with both org and role must be auto-applied when confidence is high."""
+        from open_brain.people.enrichment import EnrichmentResult, should_auto_apply
+
+        result = EnrichmentResult(
+            name="Alice Smith",
+            org="Acme Corp",
+            role="CEO",
+            profile_url=None,
+            confidence=0.9,
+            provenance_url=None,
+            provenance_snippet=None,
+        )
+
+        assert should_auto_apply(result, min_confidence=0.8) is True

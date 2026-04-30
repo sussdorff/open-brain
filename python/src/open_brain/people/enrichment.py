@@ -81,15 +81,19 @@ def should_auto_apply(result: EnrichmentResult, min_confidence: float = 0.8) -> 
     Rules:
     - Confidence < 0.6 is NEVER auto-applied, regardless of min_confidence.
     - Confidence must also meet or exceed min_confidence.
+    - Results with neither org nor role are not auto-applied (URL-only results
+      would clear enrich_pending without actually filling in the missing data).
 
     Args:
         result: The enrichment result to evaluate.
         min_confidence: The caller-specified minimum confidence threshold.
 
     Returns:
-        True if both the absolute minimum and the caller threshold are met.
+        True if all conditions are met.
     """
     if result.confidence < _ABSOLUTE_MIN_CONFIDENCE:
+        return False
+    if not result.org and not result.role:
         return False
     return result.confidence >= min_confidence
 
@@ -192,7 +196,14 @@ def _extract_org_and_role(title: str, content: str) -> tuple[str | None, str | N
 
 
 async def list_enrichment_candidates(dl: DataLayer) -> list[EnrichmentCandidate]:
-    """Return person memories with enrich_pending=True as EnrichmentCandidate list.
+    """Return person memories that need enrichment as EnrichmentCandidate list.
+
+    Candidates are person memories that meet either of these criteria:
+    1. ``enrich_pending="true"`` metadata flag is set (new/ambiguous persons
+       flagged at ingest time).
+    2. Have a ``name`` field but are missing both ``org`` and ``role`` — this
+       covers pre-existing person memories created before the enrich_pending
+       flag was introduced.
 
     For each candidate, attempts to find linked meeting memories to extract
     transcript context. If no meeting context is found, transcript_context
@@ -202,10 +213,14 @@ async def list_enrichment_candidates(dl: DataLayer) -> list[EnrichmentCandidate]
         dl: DataLayer implementation for searching memories.
 
     Returns:
-        List of EnrichmentCandidate, one per person memory with enrich_pending=True.
+        List of EnrichmentCandidate, deduplicated by memory ID.
     """
+    seen_ids: set[int] = set()
+    raw_memories = []
+
+    # Fetch memories with the explicit enrich_pending flag.
     try:
-        search_result = await dl.search(
+        flagged = await dl.search(
             SearchParams(
                 type="person",
                 project="people",
@@ -213,15 +228,40 @@ async def list_enrichment_candidates(dl: DataLayer) -> list[EnrichmentCandidate]
                 limit=100,
             )
         )
+        raw_memories.extend(flagged.results or [])
     except Exception as exc:
-        logger.warning("Failed to search for enrichment candidates: %s", exc)
-        return []
+        logger.warning("Failed to search for flagged enrichment candidates: %s", exc)
 
-    if not search_result.results:
+    # Also fetch all person memories (up to 500) to find pre-existing persons
+    # that have a name but no org/role — even if they lack the enrich_pending flag.
+    try:
+        all_persons = await dl.search(
+            SearchParams(
+                type="person",
+                project="people",
+                limit=500,
+            )
+        )
+        for mem in all_persons.results or []:
+            meta = mem.metadata or {}
+            has_name = bool(meta.get("name") or mem.title)
+            missing_org = not meta.get("org")
+            missing_role = not meta.get("role")
+            not_already_flagged = meta.get("enrich_pending") != "true"
+            if has_name and missing_org and missing_role and not_already_flagged:
+                raw_memories.append(mem)
+    except Exception as exc:
+        logger.warning("Failed to search for pre-existing enrichment candidates: %s", exc)
+
+    if not raw_memories:
         return []
 
     candidates: list[EnrichmentCandidate] = []
-    for memory in search_result.results:
+    for memory in raw_memories:
+        if memory.id in seen_ids:
+            continue
+        seen_ids.add(memory.id)
+
         name = (memory.metadata or {}).get("name") or memory.title or ""
         if not name:
             continue
@@ -336,10 +376,17 @@ async def search_person_web(
 
     query = f'"{name}" site:linkedin.com OR site:xing.com OR company bio'
     if context:
-        # Add first meaningful keyword from context
-        context_words = [w for w in context.split() if len(w) >= 4]
-        if context_words:
-            query = f'"{name}" {context_words[0]} site:linkedin.com OR site:xing.com OR company bio'
+        # Add context keywords, excluding words that are part of the person's name
+        # to avoid redundant "Name Name ..." queries.
+        name_lower = name.lower()
+        name_parts = set(name_lower.split())
+        context_words = [
+            w for w in context.split()
+            if w.lower() not in name_parts and len(w) > 2
+        ]
+        context_str = " ".join(context_words[:3]) if context_words else ""
+        if context_str:
+            query = f'"{name}" {context_str} site:linkedin.com OR site:xing.com OR company bio'
 
     search_url = f"{searxng_url.rstrip('/')}/search"
     params = {
