@@ -98,7 +98,7 @@ class PersonMetadata(TypedDict, total=False):
     provenance: str          # "url: snippet" summary of enrichment source
     provenance_url: str      # source URL where enrichment data was found
     provenance_snippet: str  # short text snippet from the source
-    enrich_pending: bool     # True when person needs enrichment; False after applied
+    enrich_pending: str      # "true" when person needs enrichment; "false" after applied
 
 
 class HouseholdMetadata(TypedDict, total=False):

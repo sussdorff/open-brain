@@ -701,7 +701,7 @@ async def _cmd_people_enrichment(args: argparse.Namespace) -> Any:
 
         if not candidates:
             print("No enrichment candidates found.")
-            return {"applied": 0, "skipped": 0, "candidates": 0}
+            return None
 
         print(f"Found {len(candidates)} enrichment candidate(s).")
 
@@ -723,7 +723,7 @@ async def _cmd_people_enrichment(args: argparse.Namespace) -> Any:
                 continue
 
             best = results[0]
-            print(f"  Best match:")
+            print("  Best match:")
             print(f"    Org:         {best.org or '—'}")
             print(f"    Role:        {best.role or '—'}")
             print(f"    Profile URL: {best.profile_url or '—'}")
@@ -757,14 +757,13 @@ async def _cmd_people_enrichment(args: argparse.Namespace) -> Any:
                     print(f"  Applied enrichment for {candidate.name}.")
                     applied += 1
                 else:
-                    print(f"  Skipped.")
+                    print("  Skipped.")
                     skipped += 1
 
         print(f"\nSummary: {applied} applied, {skipped} skipped.")
-        return {"applied": applied, "skipped": skipped, "candidates": len(candidates)}
+        return None
 
     finally:
-        from open_brain.data_layer.postgres import close_pool
         await close_pool()
 
 
@@ -1204,7 +1203,8 @@ def main() -> None:
 
     try:
         result = asyncio.run(handler(args))
-        _output_result(result, args)
+        if result is not None:
+            _output_result(result, args)
     except MCPError as e:
         _error(str(e))
     except KeyboardInterrupt:

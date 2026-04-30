@@ -2,7 +2,7 @@
 
 Provides opt-in web search enrichment for person memories that are missing
 org/role information. Enrichment candidates are person memories with the
-``enrich_pending=True`` metadata flag, which is set at ingest time for new
+``enrich_pending="true"`` metadata flag, which is set at ingest time for new
 or ambiguous person entries.
 
 Usage:
@@ -20,6 +20,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 
 import httpx
@@ -159,8 +160,6 @@ def _extract_org_and_role(title: str, content: str) -> tuple[str | None, str | N
     """
     org: str | None = None
     role: str | None = None
-
-    import re
 
     # Pattern: "Name - Role at Org | Platform" or "Name | Role | Org | Platform"
     # Try title first
@@ -416,6 +415,12 @@ async def apply_enrichment(
         metadata["provenance_url"] = result.provenance_url
     if result.provenance_snippet:
         metadata["provenance_snippet"] = result.provenance_snippet
+    if result.provenance_url and result.provenance_snippet:
+        metadata["provenance"] = f"{result.provenance_url}: {result.provenance_snippet}"
+    elif result.provenance_url:
+        metadata["provenance"] = result.provenance_url
+    elif result.provenance_snippet:
+        metadata["provenance"] = result.provenance_snippet
 
     await dl.update_memory(
         UpdateMemoryParams(

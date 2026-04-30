@@ -638,7 +638,7 @@ class TranscriptIngestor:
                 metadata={
                     "name": name,
                     "run_id": run_id,
-                    "enrich_pending": True,
+                    "enrich_pending": "true",
                 },
             )
         )

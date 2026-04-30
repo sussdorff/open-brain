@@ -556,7 +556,7 @@ class TestEnrichPendingAtIngestTime:
         assert len(person_calls) >= 1
         person_params: SaveMemoryParams = person_calls[0][0][0]
         assert person_params.metadata is not None
-        assert person_params.metadata.get("enrich_pending") is True
+        assert person_params.metadata.get("enrich_pending") == "true"
 
     @pytest.mark.asyncio
     async def test_ambiguous_person_gets_enrich_pending_flag(self) -> None:
@@ -614,7 +614,7 @@ class TestEnrichPendingAtIngestTime:
         assert len(person_calls) >= 1
         person_params: SaveMemoryParams = person_calls[0][0][0]
         assert person_params.metadata is not None
-        assert person_params.metadata.get("enrich_pending") is True
+        assert person_params.metadata.get("enrich_pending") == "true"
 
 
 # ---------------------------------------------------------------------------
@@ -709,13 +709,13 @@ class TestPersonMetadataFields:
             "profile_url": "https://linkedin.com/in/alice",
             "confidence": 0.9,
             "provenance": "https://linkedin.com/in/alice: Alice Smith CEO at Acme.",
-            "enrich_pending": True,
+            "enrich_pending": "true",
         }
 
         # Just making sure the TypedDict accepts the fields
         assert metadata["name"] == "Alice Smith"
         assert metadata["profile_url"] == "https://linkedin.com/in/alice"
-        assert metadata["enrich_pending"] is True
+        assert metadata["enrich_pending"] == "true"
 
 
 # ---------------------------------------------------------------------------
