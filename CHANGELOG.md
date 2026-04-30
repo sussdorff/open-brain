@@ -9,10 +9,18 @@ All notable changes to this project will be documented in this file.
 - *(open-brain-3bm)* Green — name-containment auto_merge for first-name/full-name dedup
 - *(open-brain-3bm)* Address review findings iteration 1
 - *(open-brain-3bm)* Address codex adversarial findings
+- *(open-brain-mx1)* Address review findings iteration 1
+- *(open-brain-mx1)* Address codex adversarial findings
+
+### Features
+
+- *(open-brain-8yh)* Add `merge_persons.py` utility for one-shot person deduplication with transactional safety and dry-run mode
+- *(open-brain-mx1)* Green — wire llm_confirm callback in _resolve_person
 
 ### Miscellaneous
 
 - *(open-brain-3bm)* Update changelog for person dedup name-variation fix
+- *(open-brain-mx1)* Update changelog
 
 ## [2026.04.30] - 2026-04-30
 
