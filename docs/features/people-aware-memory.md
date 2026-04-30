@@ -102,14 +102,17 @@ to the system or want to understand how person-centric data flows through the st
 ## MacWhisper Ingest CLI
 
 `ob ingest macwhisper` exposes the local MacWhisper history connector through
-the CLI. The CLI reads transcript JSON files on the user's Mac and sends only
+the CLI. The CLI reads MacWhisper history on the user's Mac and sends only
 the transcript text to the configured open-brain server via the existing
 `ingest_transcript` tool. This is important for remote deployments: the server
 does not need access to the MacWhisper history directory.
 
 ```bash
 # List recent entries from local MacWhisper history
-ob --pretty ingest macwhisper list --limit 10
+ob ingest macwhisper list --limit 10
+
+# Machine-readable output
+ob ingest macwhisper list --limit 10 --json
 
 # Ingest one entry by ID
 ob ingest macwhisper entry <entry-id>
@@ -172,15 +175,15 @@ ob ingest email --config <OP_REF> [--max-messages <N>]
 **Arguments:**
 - `--config OP_REF` (required): 1Password op:// reference for the IMAP password
 - `--max-messages N` (optional, default 50): how many recent emails to process
-- `--pretty` (global flag): pretty-print the JSON output
+- `--json` (global flag): request machine-readable JSON for commands with human defaults
 
 **Examples:**
 ```bash
 # Ingest the last 50 emails (default)
 ob ingest email --config "op://Private/email-account/app-password"
 
-# Ingest the last 200 emails with pretty output
-ob --pretty ingest email --config "op://Private/email-account/app-password" \
+# Ingest the last 200 emails
+ob ingest email --config "op://Private/email-account/app-password" \
     --max-messages 200
 ```
 

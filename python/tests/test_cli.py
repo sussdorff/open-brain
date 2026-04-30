@@ -287,13 +287,62 @@ class TestOutput:
         captured = capsys.readouterr()
         assert captured.out.strip() == '{"mode": "list", "persons": []}'
 
-    def test_people_list_pretty_keeps_pretty_json_output(self, capsys):
+    def test_people_list_pretty_keeps_terminal_display(self, capsys):
         args = parse(["--pretty", "people", "list"])
         _output_result({"mode": "list", "persons": []}, args)
         captured = capsys.readouterr()
-        parsed = json.loads(captured.out)
-        assert parsed == {"mode": "list", "persons": []}
-        assert "\n" in captured.out
+        assert "Total: 0" in captured.out
+        assert '"persons"' not in captured.out
+
+    def test_macwhisper_list_uses_terminal_display_by_default(self, capsys):
+        args = parse(["ingest", "macwhisper", "list"])
+        _output_result(
+            {
+                "history_path": "/tmp/MacWhisper",
+                "count": 1,
+                "items": [
+                    {
+                        "entry_id": "dictation:abc123",
+                        "created_at": "2026-04-30 08:22:41",
+                        "text_preview": "A short transcript preview.",
+                    }
+                ],
+            },
+            args,
+        )
+        captured = capsys.readouterr()
+        assert "MacWhisper history: /tmp/MacWhisper" in captured.out
+        assert "dictation:abc123" in captured.out
+        assert "ob ingest macwhisper entry <entry-id>" in captured.out
+        assert '"items"' not in captured.out
+
+    def test_macwhisper_list_json_flag_keeps_json_output(self, capsys):
+        args = parse(["ingest", "macwhisper", "list", "--json"])
+        _output_result({"history_path": "/tmp/MacWhisper", "count": 0, "items": []}, args)
+        captured = capsys.readouterr()
+        assert captured.out.strip() == (
+            '{"history_path": "/tmp/MacWhisper", "count": 0, "items": []}'
+        )
+
+    def test_macwhisper_entry_uses_terminal_display_by_default(self, capsys):
+        args = parse(["ingest", "macwhisper", "entry", "dictation:abc123"])
+        _output_result(
+            {
+                "meeting_memory_id": 42,
+                "person_memory_ids": [1, 2],
+                "mention_memory_ids": [3],
+                "interaction_memory_ids": [4],
+                "relationship_ids": [5, 6],
+                "follow_up_candidates": [],
+                "run_id": "run-123",
+            },
+            args,
+        )
+        captured = capsys.readouterr()
+        assert "MacWhisper entry ingested" in captured.out
+        assert "Entry: dictation:abc123" in captured.out
+        assert "Meeting memory: 42" in captured.out
+        assert '"meeting_memory_id"' not in captured.out
 
 
 # ---------------------------------------------------------------------------

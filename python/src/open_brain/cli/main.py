@@ -27,13 +27,27 @@ def _output(data: Any, pretty: bool) -> None:
         print(json.dumps(data, ensure_ascii=False))
 
 
+def _wants_json(args: argparse.Namespace) -> bool:
+    """Return True when a command should emit machine-readable JSON."""
+    return bool(getattr(args, "json_output", False))
+
+
 def _should_render_people_list(args: argparse.Namespace) -> bool:
     """Return True when people list should use terminal-oriented output."""
     return (
         args.command == "people"
         and args.people_command == "list"
-        and not getattr(args, "json_output", False)
-        and not args.pretty
+        and not _wants_json(args)
+    )
+
+
+def _should_render_macwhisper(args: argparse.Namespace) -> bool:
+    """Return True when MacWhisper output should be terminal-oriented."""
+    return (
+        args.command == "ingest"
+        and args.ingest_command == "macwhisper"
+        and args.macwhisper_command in {"list", "entry", "ingest"}
+        and not _wants_json(args)
     )
 
 
@@ -45,7 +59,81 @@ def _output_result(data: Any, args: argparse.Namespace) -> None:
         print(render_persons_payload(data), end="")
         return
 
+    if _should_render_macwhisper(args) and isinstance(data, dict):
+        print(_render_macwhisper_payload(data, args), end="")
+        return
+
     _output(data, pretty=args.pretty)
+
+
+def _render_macwhisper_payload(data: dict[str, Any], args: argparse.Namespace) -> str:
+    """Render MacWhisper command output for humans."""
+    if args.macwhisper_command == "list":
+        return _render_macwhisper_list(data)
+    return _render_macwhisper_entry(data, args)
+
+
+def _render_macwhisper_list(data: dict[str, Any]) -> str:
+    """Render a MacWhisper list payload."""
+    items = data.get("items") or []
+    lines = [
+        f"MacWhisper history: {data.get('history_path', '-')}",
+        f"Entries shown: {data.get('count', len(items))}",
+    ]
+
+    if not items:
+        lines.append("No transcripts found.")
+        return "\n".join(lines) + "\n"
+
+    lines.append("")
+    for item in items:
+        entry_id = item.get("entry_id", "-")
+        created_at = item.get("created_at") or "-"
+        preview = _single_line_preview(item.get("text_preview", ""))
+        lines.append(f"{created_at}  {entry_id}")
+        if preview:
+            lines.append(f"  {preview}")
+
+    lines.extend(["", "Ingest one entry with:", "  ob ingest macwhisper entry <entry-id>"])
+    return "\n".join(lines) + "\n"
+
+
+def _render_macwhisper_entry(data: dict[str, Any], args: argparse.Namespace) -> str:
+    """Render a MacWhisper entry ingest result."""
+    source_ref = args.source_ref or f"macwhisper:{args.entry_id}"
+    lines = [
+        "MacWhisper entry ingested",
+        f"Entry: {args.entry_id}",
+        f"Source ref: {source_ref}",
+    ]
+
+    if "meeting_memory_id" in data:
+        lines.append(f"Meeting memory: {data['meeting_memory_id']}")
+    if "run_id" in data:
+        lines.append(f"Run ID: {data['run_id']}")
+    if "skipped_count" in data and data["skipped_count"]:
+        lines.append(f"Skipped: {data['skipped_count']}")
+
+    count_fields = [
+        ("People", "person_memory_ids"),
+        ("Mentions", "mention_memory_ids"),
+        ("Interactions", "interaction_memory_ids"),
+        ("Relationships", "relationship_ids"),
+        ("Follow-up candidates", "follow_up_candidates"),
+    ]
+    for label, key in count_fields:
+        if isinstance(data.get(key), list):
+            lines.append(f"{label}: {len(data[key])}")
+
+    return "\n".join(lines) + "\n"
+
+
+def _single_line_preview(text: str, limit: int = 120) -> str:
+    """Collapse and shorten text for terminal previews."""
+    preview = " ".join(str(text).split())
+    if len(preview) <= limit:
+        return preview
+    return preview[: limit - 3].rstrip() + "..."
 
 
 def _error(msg: str) -> None:
@@ -424,7 +512,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--pretty",
         action="store_true",
-        help="Output pretty-printed JSON",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--json",
@@ -635,6 +723,13 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="Override the MacWhisper history directory",
     )
+    p_macwhisper_list.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        default=argparse.SUPPRESS,
+        help="Output machine-readable JSON instead of the terminal display",
+    )
 
     p_macwhisper_ingest = macwhisper_sub.add_parser(
         "entry",
@@ -670,6 +765,13 @@ def _build_parser() -> argparse.ArgumentParser:
             "Bypass MCP transport and call PostgresDataLayer directly. "
             "Requires DATABASE_URL env var or DATABASE_URL in .env."
         ),
+    )
+    p_macwhisper_ingest.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        default=argparse.SUPPRESS,
+        help="Output machine-readable JSON instead of the terminal display",
     )
 
     # people

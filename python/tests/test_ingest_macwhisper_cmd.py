@@ -42,6 +42,11 @@ class TestIngestMacWhisperArgParsing:
         assert args.limit == 5
         assert args.history_path == "/tmp/macwhisper"
 
+    def test_list_json_flag(self):
+        args = parse(["ingest", "macwhisper", "list", "--json"])
+
+        assert args.json_output is True
+
     def test_ingest_entry_defaults(self):
         args = parse(["ingest", "macwhisper", "entry", "abc123"])
 
@@ -52,6 +57,11 @@ class TestIngestMacWhisperArgParsing:
         assert args.source_ref is None
         assert args.medium_hint is None
         assert args.direct is False
+
+    def test_ingest_entry_json_flag(self):
+        args = parse(["ingest", "macwhisper", "entry", "abc123", "--json"])
+
+        assert args.json_output is True
 
     def test_ingest_entry_legacy_alias(self):
         args = parse(["ingest", "macwhisper", "ingest", "abc123"])

@@ -149,7 +149,7 @@ cat > "${XDG_CONFIG_HOME:-$HOME/.config}/open-brain/config.json" <<'JSON'
 JSON
 chmod 600 "${XDG_CONFIG_HOME:-$HOME/.config}/open-brain/config.json"
 
-ob --pretty doctor
+ob --json doctor
 ob search "what did I decide about X?"
 ```
 
@@ -406,11 +406,11 @@ The `ob` command is the main human-facing CLI. It intentionally covers normal se
 
 ```bash
 ob server
-ob --pretty doctor
+ob --json doctor
 ob search "what did I decide about X?"
 ob save "Decided to use asyncpg for lower overhead" --type decision
 ob ingest transcript --source-ref meeting-2026-04-29 --file transcript.txt
-ob --pretty ingest macwhisper list --limit 5
+ob ingest macwhisper list --limit 5
 ob ingest macwhisper entry <entry-id>
 ob people list --collisions
 ```
@@ -441,9 +441,9 @@ Person deduplication runs on the server because remote CLI installs should not
 need `DATABASE_URL`.
 
 ```bash
-ob --pretty people list --collisions
-ob --pretty people merge --source 17692 --target 17700 --dry-run
-ob --pretty people merge --source 17692 --target 17700
+ob people list --collisions
+ob people merge --source 17692 --target 17700 --dry-run
+ob people merge --source 17692 --target 17700
 ```
 
 Use `--absorb-text` when the source content should be appended to the target as
@@ -486,7 +486,10 @@ when the server runs somewhere else.
 
 ```bash
 # Show recent local MacWhisper transcript entries
-ob --pretty ingest macwhisper list --limit 10
+ob ingest macwhisper list --limit 10
+
+# Machine-readable output
+ob ingest macwhisper list --limit 10 --json
 
 # Ingest one entry by ID; defaults to source_ref macwhisper:<entry-id>
 ob ingest macwhisper entry <entry-id>
