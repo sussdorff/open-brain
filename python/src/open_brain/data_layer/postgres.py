@@ -479,9 +479,7 @@ class PostgresDataLayer:
                     # Use hybrid_search for scoring, join memories for full rows + filters
                     # author (p_user_id) is pre-constrained inside hybrid_search as $5
                     # metadata_filter is pre-constrained inside hybrid_search as $6 (NULL if not set)
-                    metadata_jsonb = (
-                        _json.dumps(params.metadata_filter) if params.metadata_filter else None
-                    )
+                    metadata_jsonb = params.metadata_filter if params.metadata_filter else None
                     post_conditions: list[str] = []
                     post_values: list[Any] = [
                         query, to_pg_vector(query_embedding), fetch_limit * 3, index_id, params.author,
@@ -582,7 +580,7 @@ class PostgresDataLayer:
                 param_idx += 1
             if params.metadata_filter:
                 conditions.append(f"m.metadata @> ${param_idx}::jsonb")
-                values.append(_json.dumps(params.metadata_filter))
+                values.append(params.metadata_filter)
                 param_idx += 1
             if params.author:
                 conditions.append(f"m.user_id = ${param_idx}")
@@ -825,7 +823,6 @@ class PostgresDataLayer:
                         # Inject run_id if inside an ingest_run context
                         if run_id := get_current_run_id():
                             base_metadata["run_id"] = run_id
-                        metadata_json_replace = _json.dumps(base_metadata)
                         row_replace = await conn.fetchrow(
                             """INSERT INTO memories (index_id, type, title, subtitle, narrative, content, session_ref, metadata, user_id, importance)
                                VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10)
@@ -837,7 +834,7 @@ class PostgresDataLayer:
                             params.narrative,
                             params.text,
                             params.session_ref,
-                            metadata_json_replace,
+                            base_metadata,
                             params.user_id,
                             params.importance,
                         )
@@ -960,7 +957,6 @@ class PostgresDataLayer:
             # Inject run_id if inside an ingest_run context
             if run_id := get_current_run_id():
                 base_metadata["run_id"] = run_id
-            metadata_json = _json.dumps(base_metadata)
             row = await conn.fetchrow(
                 """INSERT INTO memories (index_id, type, title, subtitle, narrative, content, session_ref, metadata, user_id, importance)
                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10)
@@ -972,7 +968,7 @@ class PostgresDataLayer:
                 params.narrative,
                 params.text,
                 params.session_ref,
-                metadata_json,
+                base_metadata,
                 params.user_id,
                 params.importance,
             )
@@ -1031,7 +1027,7 @@ class PostgresDataLayer:
                 param_idx += 1
             if has_metadata_merge:
                 set_parts.append(f"metadata = metadata || ${param_idx}::jsonb")
-                values.append(_json.dumps(params.metadata))
+                values.append(params.metadata)
                 param_idx += 1
             set_parts.append(f"updated_at = NOW()")
 
@@ -1812,7 +1808,7 @@ class PostgresDataLayer:
                 source_id,
                 target_id,
                 link_type,
-                _json.dumps(metadata) if metadata is not None else None,
+                metadata,
             )
         logger.info(
             "Created relationship id=%d source=%d target=%d link_type=%s",

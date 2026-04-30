@@ -277,7 +277,7 @@ class TestSaveMemoryInjectsRunId:
         """When inside an ingest_run context, save_memory stores run_id in metadata."""
         from open_brain.data_layer.interface import SaveMemoryParams
 
-        captured_metadata: list[str] = []
+        captured_metadata: list[dict] = []
 
         # Build an insert_row mock that captures metadata
         insert_row = MagicMock()
@@ -290,8 +290,9 @@ class TestSaveMemoryInjectsRunId:
                 # metadata is the 8th positional arg ($8 in SQL)
                 # args[0]=index_id, [1]=type, [2]=title, [3]=subtitle,
                 # [4]=narrative, [5]=content, [6]=session_ref, [7]=metadata, [8]=user_id, [9]=importance
+                # asyncpg handles JSONB encoding, so args[7] is a dict (not JSON string)
                 if len(args) >= 8:
-                    captured_metadata.append(str(args[7]))
+                    captured_metadata.append(args[7])
                 return insert_row
             # content-hash dedup check — return None (no dup)
             return None
@@ -310,8 +311,8 @@ class TestSaveMemoryInjectsRunId:
 
         # Verify run_id appears in the captured metadata
         assert len(captured_metadata) >= 1, "No INSERT metadata was captured"
-        for meta_str in captured_metadata:
-            meta = json.loads(meta_str)
+        for meta in captured_metadata:
+            assert isinstance(meta, dict), f"Expected dict metadata, got {type(meta)}: {meta}"
             assert "run_id" in meta, f"run_id not found in metadata: {meta}"
             assert meta["run_id"] == run_id
 

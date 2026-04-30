@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import inspect
-import json
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -520,15 +519,14 @@ class TestSaveMemoryWithMetadata:
         insert_call = conn.fetchrow.call_args_list[-1]
         insert_sql = insert_call[0][0]
         assert "metadata" in insert_sql
-        # Check the metadata JSON was passed as an argument
+        # Check the metadata dict was passed as an argument (asyncpg handles JSONB encoding)
         insert_args = insert_call[0]
-        metadata_arg = next((a for a in insert_args if isinstance(a, str) and "status" in a), None)
+        metadata_arg = next((a for a in insert_args if isinstance(a, dict) and "status" in a), None)
         assert metadata_arg is not None
 
-        parsed = json.loads(metadata_arg)
-        assert parsed["status"] == "open"
-        assert parsed["source"] == "bot"
-        assert "content_hash" in parsed
+        assert metadata_arg["status"] == "open"
+        assert metadata_arg["source"] == "bot"
+        assert "content_hash" in metadata_arg
 
     @pytest.mark.asyncio
     async def test_save_memory_without_metadata_defaults_to_empty(self, dl):
@@ -558,11 +556,10 @@ class TestSaveMemoryWithMetadata:
         # Metadata should now always contain content_hash (never bare '{}')
 
         metadata_arg = next(
-            (a for a in insert_args if isinstance(a, str) and "content_hash" in a), None
+            (a for a in insert_args if isinstance(a, dict) and "content_hash" in a), None
         )
         assert metadata_arg is not None
-        parsed = json.loads(metadata_arg)
-        assert "content_hash" in parsed
+        assert "content_hash" in metadata_arg
 
 
 class TestUpdateMemoryMetadataMerge:
@@ -610,12 +607,11 @@ class TestUpdateMemoryMetadataMerge:
         update_args = conn.execute.call_args[0]
 
         metadata_arg = next(
-            (a for a in update_args if isinstance(a, str) and "status" in a), None
+            (a for a in update_args if isinstance(a, dict) and "status" in a), None
         )
         assert metadata_arg is not None
-        parsed = json.loads(metadata_arg)
-        assert parsed["status"] == "closed"
-        assert parsed["reviewer"] == "alice"
+        assert metadata_arg["status"] == "closed"
+        assert metadata_arg["reviewer"] == "alice"
 
     @pytest.mark.asyncio
     async def test_update_memory_metadata_only_no_other_updates(self, dl):
@@ -673,9 +669,9 @@ class TestSearchMetadataFilter:
         fetch_sql = fetch_call[0][0]
         assert "metadata @>" in fetch_sql
         assert "metadata->>" not in fetch_sql
-        # The JSONB value should appear as a single serialized arg
+        # The JSONB value should appear as a single dict arg (asyncpg handles encoding)
         fetch_args = fetch_call[0]
-        assert any('"status"' in str(a) and '"open"' in str(a) for a in fetch_args)
+        assert any(isinstance(a, dict) and a.get("status") == "open" for a in fetch_args)
 
     @pytest.mark.asyncio
     async def test_search_metadata_filter_multiple_keys(self, dl):
@@ -702,10 +698,10 @@ class TestSearchMetadataFilter:
         # Single @> containment condition for all keys (not one ->> per key)
         assert fetch_sql.count("metadata @>") == 1
         assert "metadata->>" not in fetch_sql
-        # Both keys and values must be serialized into one JSONB arg
+        # Both keys and values must appear in one dict arg (asyncpg handles encoding)
         fetch_args = fetch_call[0]
         assert any(
-            '"status"' in str(a) and '"source"' in str(a) for a in fetch_args
+            isinstance(a, dict) and "status" in a and "source" in a for a in fetch_args
         )
 
 
@@ -799,11 +795,10 @@ class TestContentHashDedup:
         insert_call = conn.fetchrow.call_args_list[-1]
         insert_args = insert_call[0]
         metadata_arg = next(
-            (a for a in insert_args if isinstance(a, str) and "content_hash" in a), None
+            (a for a in insert_args if isinstance(a, dict) and "content_hash" in a), None
         )
         assert metadata_arg is not None
-        parsed = json.loads(metadata_arg)
-        assert parsed["content_hash"] == HASH_A
+        assert metadata_arg["content_hash"] == HASH_A
 
     @pytest.mark.asyncio
     async def test_dedup_metadata_merged_not_replaced(self, dl):
@@ -835,12 +830,11 @@ class TestContentHashDedup:
         insert_call = conn.fetchrow.call_args_list[-1]
         insert_args = insert_call[0]
         metadata_arg = next(
-            (a for a in insert_args if isinstance(a, str) and "content_hash" in a), None
+            (a for a in insert_args if isinstance(a, dict) and "content_hash" in a), None
         )
         assert metadata_arg is not None
-        parsed = json.loads(metadata_arg)
-        assert parsed["source"] == "test"
-        assert parsed["content_hash"] == HASH_A
+        assert metadata_arg["source"] == "test"
+        assert metadata_arg["content_hash"] == HASH_A
 
     @pytest.mark.asyncio
     async def test_dedup_metadata_none_becomes_hash_only(self, dl):
@@ -868,12 +862,11 @@ class TestContentHashDedup:
         insert_call = conn.fetchrow.call_args_list[-1]
         insert_args = insert_call[0]
         metadata_arg = next(
-            (a for a in insert_args if isinstance(a, str) and "content_hash" in a), None
+            (a for a in insert_args if isinstance(a, dict) and "content_hash" in a), None
         )
         assert metadata_arg is not None
-        parsed = json.loads(metadata_arg)
-        assert list(parsed.keys()) == ["content_hash"]
-        assert parsed["content_hash"] == HASH_A
+        assert list(metadata_arg.keys()) == ["content_hash"]
+        assert metadata_arg["content_hash"] == HASH_A
 
     @pytest.mark.asyncio
     async def test_dedup_session_summary_upsert_bypasses_dedup(self, dl):
