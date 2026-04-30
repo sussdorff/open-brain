@@ -9,14 +9,15 @@ a list of existing PersonRecords:
                 + token-subset bonus    (+0.25)
                 + org-boost             (+0.05 / +0.10 with subset)
 
-    Name-containment fast path (within Stage 3): when the incoming name tokens
-    are a strict subset/superset of the existing member's tokens (e.g. "Malte"
-    vs "Malte Sussdorff"), and there is no org conflict, skip fuzzy scoring and
-    assign CONTAINMENT_SCORE (0.93) directly → auto_merge.  The containment
-    path bypasses the subset-cap rule; only the org-conflict guard can prevent
-    containment from producing auto_merge.  The fuzzy scoring fallthrough path
-    (used when containment is skipped due to org conflict) applies SUBSET_CAP_MAX
-    to prevent high fuzzy-sim + subset bonus combinations from crossing AUTO_MERGE_T.
+    Name-containment fast paths (within Stage 3): when the incoming name adds
+    information to an existing shorter name (e.g. "Malte Sussdorff" vs "Malte")
+    and there is no org conflict, assign CONTAINMENT_SCORE (0.93) directly →
+    auto_merge. When the incoming name is only a partial subset of an existing
+    longer name (e.g. "Malte" vs "Malte Sussdorff"), assign a score below
+    AUTO_MERGE_T so the decision routes through llm_confirm instead. The fuzzy
+    scoring fallthrough path (used when containment is skipped due to org
+    conflict) applies SUBSET_CAP_MAX to prevent high fuzzy-sim + subset bonus
+    combinations from crossing AUTO_MERGE_T.
 
 Thresholds: auto_merge >= 0.92, llm_confirm >= 0.85.
 """
@@ -56,10 +57,14 @@ ORG_BOOST_SUBSET: float = 0.10  # used combined with subset
 # Minimum score to even keep a fuzzy candidate
 MIN_FUZZY_SCORE: float = 0.4
 
-# Containment score: assigned when incoming name tokens are a strict subset/superset
-# of the existing member's tokens and there is no org conflict.
-# Set above AUTO_MERGE_T to produce auto_merge without the subset-cap rule.
+# Containment score: assigned when incoming name tokens are a strict superset of
+# the existing member's tokens and there is no org conflict. Set above
+# AUTO_MERGE_T to produce auto_merge without the subset-cap rule.
 CONTAINMENT_SCORE: float = 0.93
+
+# Partial containment score: assigned when the incoming name is only a strict
+# subset of the existing member's tokens. Keep it in the LLM-confirm band.
+PARTIAL_CONTAINMENT_SCORE: float = SUBSET_CAP_MAX
 
 # Title prefixes to strip during normalisation.
 # Dotless forms: punctuation is stripped before tokenization,
@@ -189,14 +194,16 @@ def match_person(
     1. LinkedIn URL exact match (confidence 0.99)
     2. Alias exact match on normalised name (confidence 0.96)
     3. Fuzzy name similarity with optional subset bonus and org boost.
-       Within Stage 3, a name-containment sub-path fires first:
-       - Containment check: if one name's token set strictly contains the
-         other (e.g. "Malte" ⊂ "Malte Sussdorff"), assign
-         CONTAINMENT_SCORE (0.93) directly → auto_merge.
+       Within Stage 3, name-containment sub-paths fire first:
+       - Superset containment: if the incoming name's token set strictly
+         contains the stored member name (e.g. incoming "Malte Sussdorff" vs
+         stored "Malte"), assign CONTAINMENT_SCORE (0.93) directly → auto_merge.
+       - Incoming-subset containment: if the incoming name is only a partial
+         subset of the stored member name (e.g. incoming "Malte" vs stored
+         "Malte Sussdorff"), assign PARTIAL_CONTAINMENT_SCORE (0.91) so the
+         decision routes through llm_confirm instead of auto_merge.
        - Org-conflict guard: if both parties have non-overlapping orgs,
          the containment check is skipped and fuzzy scoring proceeds.
-       - Critical rule: containment bypasses the old subset-cap; only the
-         org-conflict guard can prevent containment auto_merge.
 
     If *llm_confirm* is provided and the decision is "llm_confirm", it is
     invoked once. A True return changes action to "auto_merge"; False to "new".
@@ -258,18 +265,21 @@ def match_person(
             new_tokens = set(_normalize_name(new_name).split())
             member_tokens = set(_normalize_name(member_name).split())
 
-            # Name-containment fast path: one name's tokens are a strict subset of
-            # the other's (e.g. "Malte" ⊂ "Malte Sussdorff"). Bypass fuzzy scoring
-            # and assign CONTAINMENT_SCORE directly — unless org conflict exists.
+            # Name-containment fast paths. A richer incoming name may auto-merge
+            # into an existing shorter record. A partial incoming name must stay
+            # below AUTO_MERGE_T so transcript ingest does not silently fuse two
+            # different people who share a first name.
             containment_applied = False
+            incoming_subset_applied = False
             # Skip equal token sets: Stage-3 fuzzy with sim=1.0 handles exact token matches correctly.
             if new_tokens and member_tokens and new_tokens != member_tokens:
-                if new_tokens.issubset(member_tokens) or member_tokens.issubset(new_tokens):
-                    # Guard: if both sides have an org and they conflict, fall through
-                    if new_org and member_org and _org_overlap(new_org, member_org) == 0.0:
-                        pass  # org conflict — fall through to fuzzy scoring
-                    else:
+                # Guard: if both sides have an org and they conflict, fall through
+                org_conflict = bool(new_org and member_org and _org_overlap(new_org, member_org) == 0.0)
+                if not org_conflict:
+                    if member_tokens.issubset(new_tokens):
                         containment_applied = True
+                    elif new_tokens.issubset(member_tokens):
+                        incoming_subset_applied = True
 
             if containment_applied:
                 candidates.append(
@@ -279,6 +289,22 @@ def match_person(
                         member_org=member_org,
                         confidence=CONTAINMENT_SCORE,
                         reasons=["name-containment"],
+                        aliases=aliases,
+                    )
+                )
+                continue
+
+            if incoming_subset_applied:
+                candidates.append(
+                    MatchCandidate(
+                        memory_id=record.memory_id,
+                        member_name=member_name,
+                        member_org=member_org,
+                        confidence=PARTIAL_CONTAINMENT_SCORE,
+                        reasons=[
+                            "name-containment:incoming-subset",
+                            "capped:incoming-subset-below-auto-merge",
+                        ],
                         aliases=aliases,
                     )
                 )

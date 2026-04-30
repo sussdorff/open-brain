@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(open-brain-9rn)* Require confirmation for partial incoming person-name containment
 - *(open-brain-3bm)* Green — name-containment auto_merge for first-name/full-name dedup
 - *(open-brain-3bm)* Address review findings iteration 1
 - *(open-brain-3bm)* Address codex adversarial findings
@@ -1471,5 +1472,4 @@ All notable changes to this project will be documented in this file.
 ### Init
 
 - Scaffold open-brain repo with TypeScript + MCP server structure
-
 

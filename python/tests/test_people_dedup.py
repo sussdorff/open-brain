@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from open_brain.people.dedup import match_person
-from open_brain.people.models import MatchDecision, PersonRecord
+from open_brain.people.models import PersonRecord
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -46,12 +46,12 @@ SCENARIOS: list[tuple[str, str | None, str | None, str]] = [
     ("Jochen Jungbluth", "Dental-Now", None, "auto_merge"),         # 1: exact name
     ("Cyrus Amadi", "Dental-Now", None, "auto_merge"),              # 2: alias match
     ("Jochen Jungblut", "Dental-Now", None, "auto_merge"),          # 3: alias (no h)
-    ("Dr. Alamouti", "Dental-Now", None, "auto_merge"),              # 4: containment → auto_merge (single Alamouti)
+    ("Dr. Alamouti", "Dental-Now", None, "llm_confirm"),             # 4: incoming subset → llm_confirm
     ("Stephan Weihe", "ICRD", None, "auto_merge"),                  # 5: alias match singleton
     ("Reza Mollaei", "HeyDonto", None, "new"),                      # 6: new person
-    ("Siamak", "Dental-Now", None, "auto_merge"),                   # 7: containment → auto_merge (single Siamak)
+    ("Siamak", "Dental-Now", None, "llm_confirm"),                  # 7: incoming subset → llm_confirm
     ("J. Jungbluth", None, "jochen-jungbluth-a5a412152", "auto_merge"),  # 8: linkedin beats name diff
-    ("Philipp", "Sonia", None, "auto_merge"),                        # 9: containment → auto_merge (single Philipp@Sonia)
+    ("Philipp", "Sonia", None, "llm_confirm"),                       # 9: incoming subset → llm_confirm
     ("Thomas Müller", None, None, "new"),                           # 10: unknown person with diacritic
 ]
 
@@ -97,21 +97,19 @@ def test_directory_members_iterated(existing_records: list[PersonRecord]) -> Non
 # ---------------------------------------------------------------------------
 
 
-def test_subset_cap_below_auto_merge(existing_records: list[PersonRecord]) -> None:
-    """Containment path supersedes the old subset-cap rule for unambiguous single matches.
+def test_incoming_subset_routes_to_llm_confirm(existing_records: list[PersonRecord]) -> None:
+    """Incoming partial names must not auto_merge into a longer stored name.
 
-    With the name-containment fix, 'Siamak' vs 'Siamak Ghasemi' (the only Siamak
-    in the fixture) is now auto_merge at CONTAINMENT_SCORE (0.93).
-    The subset-cap rule still applies to fuzzy-path candidates (non-containment).
+    'Siamak' vs 'Siamak Ghasemi' is a strict incoming subset. Even when it is
+    the only Siamak in the fixture, the matcher should require confirmation.
     """
     decision = match_person("Siamak", "Dental-Now", None, existing_records)
-    # Single unambiguous Siamak → containment path → auto_merge
-    assert decision.action == "auto_merge", (
-        "Unambiguous containment match should auto_merge; got: "
+    assert decision.action == "llm_confirm", (
+        "Incoming subset match should require confirmation; got: "
         f"{decision.action} (rationale: {decision.rationale})"
     )
     assert decision.target is not None
-    assert "name-containment" in decision.target.reasons
+    assert decision.target.confidence < 0.92
 
 
 # ---------------------------------------------------------------------------
@@ -180,8 +178,8 @@ def test_llm_confirm_not_called_for_new(
 # ---------------------------------------------------------------------------
 
 
-def test_first_name_matches_full_name_auto_merge() -> None:
-    """AK2: 'Malte' matches existing 'Malte Sussdorff' → auto_merge."""
+def test_regression_incoming_first_name_subset_requires_confirmation() -> None:
+    """Regression: 'Malte' must not silently merge into 'Malte Sussdorff'."""
     existing = [
         PersonRecord(
             memory_id=100,
@@ -190,13 +188,14 @@ def test_first_name_matches_full_name_auto_merge() -> None:
         )
     ]
     decision = match_person("Malte", None, None, existing)
-    assert decision.action == "auto_merge"
+    assert decision.action == "llm_confirm"
     assert decision.target is not None
     assert decision.target.memory_id == 100
+    assert decision.target.confidence < 0.92
 
 
-def test_first_name_umlauts_auto_merge() -> None:
-    """AK3: 'Andreas' matches 'Andreas Müller' → auto_merge."""
+def test_incoming_subset_with_umlauts_requires_confirmation() -> None:
+    """Incoming subset safety still applies after umlaut normalization."""
     existing = [
         PersonRecord(
             memory_id=200,
@@ -205,7 +204,7 @@ def test_first_name_umlauts_auto_merge() -> None:
         )
     ]
     decision = match_person("Andreas", None, None, existing)
-    assert decision.action == "auto_merge"
+    assert decision.action == "llm_confirm"
     assert decision.target is not None
     assert decision.target.memory_id == 200
 
@@ -268,6 +267,45 @@ def test_superset_new_name_auto_merge() -> None:
     assert decision.action == "auto_merge"
     assert decision.target is not None
     assert decision.target.memory_id == 600
+
+
+def test_incoming_subset_alias_hard_signal_auto_merges() -> None:
+    """Alias hard signals are allowed to auto_merge partial incoming names."""
+    existing = [
+        PersonRecord(
+            memory_id=700,
+            style="single",
+            members=[{"name": "Malte Sussdorff", "org": None, "linkedin": None, "aliases": ["Malte"]}],
+        )
+    ]
+    decision = match_person("Malte", None, None, existing)
+    assert decision.action == "auto_merge"
+    assert decision.target is not None
+    assert decision.target.memory_id == 700
+    assert any(r.startswith("alias-match:") for r in decision.target.reasons)
+
+
+def test_incoming_subset_linkedin_hard_signal_auto_merges() -> None:
+    """LinkedIn hard signals are allowed to auto_merge partial incoming names."""
+    existing = [
+        PersonRecord(
+            memory_id=701,
+            style="single",
+            members=[
+                {
+                    "name": "Malte Sussdorff",
+                    "org": None,
+                    "linkedin": "malte-sussdorff",
+                    "aliases": [],
+                }
+            ],
+        )
+    ]
+    decision = match_person("Malte", None, "https://www.linkedin.com/in/malte-sussdorff/", existing)
+    assert decision.action == "auto_merge"
+    assert decision.target is not None
+    assert decision.target.memory_id == 701
+    assert "linkedin-exact" in decision.target.reasons
 
 
 # ---------------------------------------------------------------------------
@@ -341,13 +379,14 @@ def test_exact_name_auto_merge_with_containment_runner_up() -> None:
 
 
 @pytest.mark.asyncio
-async def test_alias_persisted_after_containment_auto_merge() -> None:
-    """AK4: _resolve_person() calls update_memory with the short name as alias.
+async def test_incoming_subset_does_not_persist_alias_without_confirmation() -> None:
+    """Regression: partial incoming names must not become aliases silently.
 
-    When 'Malte' matches existing 'Malte Sussdorff' via name-containment, the
-    ingestor must persist 'Malte' as an alias on memory_id=100.
+    Without a hard signal, 'Malte' vs existing 'Malte Sussdorff' should route
+    through llm_confirm. Transcript ingest has no interactive confirmer, so it
+    must create a conservative new person memory and avoid alias persistence.
     """
-    from open_brain.data_layer.interface import SaveMemoryResult, SearchResult
+    from open_brain.data_layer.interface import SaveMemoryResult
     from open_brain.ingest.adapters.transcript import TranscriptIngestor
 
     # Pre-load an existing person record for "Malte Sussdorff"
@@ -359,17 +398,46 @@ async def test_alias_persisted_after_containment_auto_merge() -> None:
 
     mock_dl = AsyncMock()
     mock_dl.update_memory.return_value = SaveMemoryResult(id=100, message="ok")
+    mock_dl.save_memory.return_value = SaveMemoryResult(id=101, message="ok")
 
     ingestor = TranscriptIngestor(data_layer=mock_dl)
 
-    await ingestor._resolve_person(
+    person_id = await ingestor._resolve_person(
         name="Malte",
         existing_records=[existing_person_record],
         run_id="test-run-id",
     )
 
-    # update_memory must have been called exactly once with the alias list
+    assert person_id == 101
+    mock_dl.update_memory.assert_not_called()
+    mock_dl.save_memory.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_alias_persisted_after_superset_containment_auto_merge() -> None:
+    """Superset containment still persists the richer incoming name as alias."""
+    from open_brain.data_layer.interface import SaveMemoryResult
+    from open_brain.ingest.adapters.transcript import TranscriptIngestor
+
+    existing_person_record = PersonRecord(
+        memory_id=100,
+        style="single",
+        members=[{"name": "Malte", "org": None, "linkedin": None, "aliases": []}],
+    )
+
+    mock_dl = AsyncMock()
+    mock_dl.update_memory.return_value = SaveMemoryResult(id=100, message="ok")
+
+    ingestor = TranscriptIngestor(data_layer=mock_dl)
+
+    person_id = await ingestor._resolve_person(
+        name="Malte Sussdorff",
+        existing_records=[existing_person_record],
+        run_id="test-run-id",
+    )
+
+    assert person_id == 100
     mock_dl.update_memory.assert_called_once()
     call_kwargs = mock_dl.update_memory.call_args[0][0]  # UpdateMemoryParams positional arg
     assert call_kwargs.id == 100
-    assert call_kwargs.metadata == {"aliases": ["Malte"]}
+    assert call_kwargs.metadata == {"aliases": ["Malte Sussdorff"]}
