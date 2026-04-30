@@ -44,10 +44,10 @@ See [docs/architecture.md](docs/architecture.md) for detailed diagrams and techn
 
 open-brain has two installable components:
 
-- **Server**: the long-running FastAPI/MCP service backed by Postgres + pgvector.
-- **CLI**: the `ob` command for humans and operator scripts. The same Python package provides this CLI; it can start the server and call the MCP tools.
+- **Server**: the long-running FastAPI/MCP service backed by Postgres + pgvector. Install this on the machine or container host where open-brain runs.
+- **CLI**: the `ob` command for humans and operator scripts. Install this on your workstation, laptop, jump host, or the server itself.
 
-Docker Compose is the recommended server install. `uv tool install` is the recommended CLI install.
+The server and CLI do not need to be on the same machine. Docker Compose is the recommended server install. `uv tool install` is the recommended CLI install.
 
 ### 1. Start the server
 
@@ -97,7 +97,7 @@ docker compose -f docker-compose.service.yml up -d
 
 **Python package server (local/bare-metal):**
 
-Use this when you already have Postgres + pgvector running and want the same installed `ob` command to launch the server.
+Use this on the server host when you already have Postgres + pgvector running and want the same installed `ob` command to launch the server.
 
 ```bash
 uv tool install --python 3.14 "git+https://github.com/sussdorff/open-brain.git#subdirectory=python"
@@ -131,7 +131,7 @@ Save the raw token — it is shown exactly once.
 
 ### 3. Install and configure the CLI
 
-If you did not already install `ob` for the Python package server path:
+Run this on every machine where you want to use the CLI. If you did not already install `ob` for the Python package server path:
 
 ```bash
 uv tool install --python 3.14 "git+https://github.com/sussdorff/open-brain.git#subdirectory=python"
