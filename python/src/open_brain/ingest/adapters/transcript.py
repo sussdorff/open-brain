@@ -429,19 +429,41 @@ class TranscriptIngestor:
 
         metrics.record_llm_call("dedup_confirm")
         target_name = target.member_name
+        target_org_str = f' [{target.member_org}]' if target.member_org else ''
+        target_aliases_str = (
+            f' (already known as: {", ".join(target.aliases)})'
+            if target.aliases
+            else ''
+        )
         runners_up_names = (
             ", ".join(r.member_name for r in preliminary.runners_up)
             if preliminary.runners_up
             else "none"
         )
 
+        # The LLM is only invoked for the "incoming-subset" containment path:
+        # the incoming name's tokens are a strict subset of the existing record's
+        # tokens (e.g. incoming "Malte" vs stored "Malte Sussdorff"). The
+        # ambiguity gate has already filtered out cases with multiple plausible
+        # candidates — by construction there is exactly one candidate worth
+        # asking about. The model just needs to judge whether the partial
+        # incoming name plausibly refers to that record.
         prompt = (
-            f'Determine if these two names refer to the same person.\n\n'
-            f'Incoming name: "{incoming_name}"\n'
-            f'Best match: "{target_name}"\n'
-            f'Other candidates: {runners_up_names}\n\n'
-            f'Respond with JSON only: {{"confirmed": true}} or {{"confirmed": false}}\n'
-            f'Be conservative: if uncertain, say false.'
+            'You are deduplicating people in a personal knowledge graph built '
+            'from meeting transcripts. Transcripts often mention people informally '
+            'by first-name only when their full name was recorded earlier in the '
+            'graph. Your task: decide whether an incoming partial name refers to '
+            'an existing record.\n\n'
+            f'Incoming name from transcript: "{incoming_name}"\n'
+            f'Existing record: "{target_name}"{target_org_str}{target_aliases_str}\n'
+            f'Other candidates with overlapping name in graph: {runners_up_names}\n\n'
+            'Context: this question is only asked when exactly one existing '
+            'record plausibly matches the partial name (no ambiguous matches). '
+            'If the existing record is consistent with the partial name (e.g. '
+            'first-name matches and no contradicting signal exists), confirm. '
+            'Decline only if the names refer to clearly different people '
+            '(e.g. wrong language family, contradicting context).\n\n'
+            'Respond with JSON only: {"confirmed": true} or {"confirmed": false}'
         )
 
         try:

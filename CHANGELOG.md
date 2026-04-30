@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 - *(open-brain-8yh)* Address codex adversarial findings
 - *(open-brain-mx1)* Address review findings iteration 1
 - *(open-brain-mx1)* Address codex adversarial findings
+- *(transcript-dedup)* Improve LLM-confirm prompt with PKM context, target aliases/org, and likelihood framing — replaces overly conservative "if uncertain, say false" wording that was rejecting clear matches like `Malte` → `Malte Sussdorff`
 
 ### Features
 
