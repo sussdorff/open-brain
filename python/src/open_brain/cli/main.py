@@ -92,7 +92,7 @@ def _render_macwhisper_list(data: dict[str, Any]) -> str:
     for item in items:
         entry_id = item.get("entry_id", "-")
         created_at = item.get("created_at") or "-"
-        title = _single_line_preview(item.get("title", ""), limit=100)
+        title = _single_line_preview(item.get("title") or "", limit=100)
         source_app = item.get("source_app") or ""
         duration = _format_duration(item.get("duration_seconds"))
         participants = item.get("participants") or []
@@ -516,8 +516,12 @@ async def _attach_ingest_status(items: list[dict[str, Any]]) -> list[dict[str, A
             "ingested_at": None,
             "title": None,
         }
+        status = dict(status)
+        ingested_title = status.pop("title", None)
         updated = dict(item)
         updated.update(status)
+        if ingested_title:
+            updated["ingested_title"] = ingested_title
         enriched.append(updated)
     return enriched
 

@@ -159,6 +159,7 @@ class TestIngestMacWhisperHandlers:
                 entry_id="session:abc123",
                 created_at="2026-04-30T10:00:00",
                 text_preview="Meeting transcript",
+                title="Local MacWhisper Title",
             )
         ])
         args = parse(["ingest", "macwhisper", "list", "--status"])
@@ -189,6 +190,8 @@ class TestIngestMacWhisperHandlers:
             {"source_refs": ["macwhisper:session:abc123"]},
         )
         assert result["scanned_count"] == 1
+        assert result["items"][0]["title"] == "Local MacWhisper Title"
+        assert result["items"][0]["ingested_title"] == "Meeting: macwhisper:session:abc123"
         assert result["items"][0]["ingested"] is True
         assert result["items"][0]["memory_id"] == 42
 
