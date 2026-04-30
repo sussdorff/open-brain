@@ -532,7 +532,7 @@ wheels = [
 
 [[package]]
 name = "open-brain"
-version = "0.1.0"
+version = "0.29.0"
 source = { editable = "." }
 dependencies = [
     { name = "asyncpg" },

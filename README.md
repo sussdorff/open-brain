@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/sussdorff/open-brain/actions/workflows/ci.yml/badge.svg)](https://github.com/sussdorff/open-brain/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/)
+[![Python 3.14+](https://img.shields.io/badge/python-3.14%2B-blue.svg)](https://www.python.org/)
 [![MCP](https://img.shields.io/badge/protocol-MCP-green.svg)](https://modelcontextprotocol.io/)
 
 A pluggable MCP memory server that gives AI assistants long-term, searchable memory across sessions and projects.
@@ -41,6 +41,13 @@ A pluggable MCP memory server that gives AI assistants long-term, searchable mem
 See [docs/architecture.md](docs/architecture.md) for detailed diagrams and technical deep-dives.
 
 ## Installation
+
+open-brain has two installable components:
+
+- **Server**: the long-running FastAPI/MCP service backed by Postgres + pgvector.
+- **CLI**: the `ob` command for humans and operator scripts. The same Python package provides this CLI; it can start the server and call the MCP tools.
+
+Docker Compose is the recommended server install. `uv tool install` is the recommended CLI install.
 
 ### 1. Start the server
 
@@ -88,6 +95,26 @@ docker compose -f docker-compose.service.yml pull
 docker compose -f docker-compose.service.yml up -d
 ```
 
+**Python package server (local/bare-metal):**
+
+Use this when you already have Postgres + pgvector running and want the same installed `ob` command to launch the server.
+
+```bash
+uv tool install --python 3.14 "git+https://github.com/sussdorff/open-brain.git#subdirectory=python"
+
+# Set the same variables shown in .env.example, then:
+ob server
+
+# Optional bind overrides
+ob server --host 127.0.0.1 --port 8091
+```
+
+For a local checkout, install from the Python package directory:
+
+```bash
+uv tool install --python 3.14 ./python
+```
+
 ### 2. Issue an access token
 
 Use your API key (from `API_KEYS` in `.env`) to issue a URL token for each client:
@@ -102,7 +129,34 @@ curl -X POST https://your-server.example.com/token/url \
 
 Save the raw token — it is shown exactly once.
 
-### 3. Connect Claude Code
+### 3. Install and configure the CLI
+
+If you did not already install `ob` for the Python package server path:
+
+```bash
+uv tool install --python 3.14 "git+https://github.com/sussdorff/open-brain.git#subdirectory=python"
+```
+
+Point the CLI at your MCP endpoint and provide the URL token from step 2:
+
+```bash
+export OB_URL="https://your-server.example.com/mcp"
+export OB_URL_TOKEN="TOKEN_FROM_STEP_2"
+
+ob --pretty doctor
+ob search "what did I decide about X?"
+```
+
+Instead of `OB_URL_TOKEN`, you can save the token once:
+
+```bash
+mkdir -p ~/.open-brain
+printf '%s\n' 'TOKEN_FROM_STEP_2' > ~/.open-brain/url-token
+```
+
+`OB_URL` must be the MCP endpoint, usually `/mcp`. OAuth bearer tokens are also supported via `OB_TOKEN` or `~/.open-brain/token`; URL tokens use `OB_URL_TOKEN`, `~/.open-brain/url-token`, or an explicit `?token=...` in `OB_URL`.
+
+### 4. Connect Claude Code
 
 ```bash
 claude mcp add open-brain \
@@ -290,7 +344,7 @@ uv run pytest -m "not integration"
 uv run pytest
 
 # Run locally
-uv run python -m open_brain
+uv run ob server
 ```
 
 ## Deployment
@@ -324,13 +378,32 @@ volumes:
 
 ## CLI Usage
 
-The `ob` command provides a thin CLI wrapper over the open-brain MCP tools:
+The `ob` command is the main human-facing CLI. It intentionally covers normal server and memory workflows; one-off migrations, dev checks, and Claude Code hook internals remain in `scripts/`, `python/scripts/`, and `plugin/scripts/`.
 
 ```bash
+ob server
+ob --pretty doctor
 ob search "what did I decide about X?"
 ob save "Decided to use asyncpg for lower overhead" --type decision
 ob ingest transcript --source-ref meeting-2026-04-29 --file transcript.txt
 ```
+
+Current `ob` commands:
+
+| Command | Purpose |
+|---|---|
+| `ob server` | Start the FastAPI/MCP server from the installed Python package |
+| `ob doctor` | Run server diagnostics through the MCP `doctor` tool |
+| `ob stats` | Show memory/database statistics |
+| `ob search` | Hybrid vector + full-text search |
+| `ob concept` | Semantic-only vector search |
+| `ob timeline` | Show context around an anchor memory or query |
+| `ob get` | Fetch full observations by ID |
+| `ob context` | Fetch recent session context |
+| `ob save` | Save a memory |
+| `ob update` | Update an existing memory |
+| `ob ingest email` | Ingest an IMAP inbox through the MCP server |
+| `ob ingest transcript` | Ingest a transcript file or stdin |
 
 ### `ob ingest transcript`
 

@@ -3,12 +3,14 @@
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 
 
 DEFAULT_URL = "https://open-brain.sussdorff.org/mcp/mcp"
 TOKEN_FILE = Path.home() / ".open-brain" / "token"
+URL_TOKEN_FILE = Path.home() / ".open-brain" / "url-token"
 
 
 class MCPError(Exception):
@@ -16,7 +18,7 @@ class MCPError(Exception):
 
 
 def _load_token() -> str | None:
-    """Load bearer token from env var or token file.
+    """Load OAuth bearer token from env var or token file.
 
     Returns:
         Token string or None if not configured.
@@ -31,6 +33,25 @@ def _load_token() -> str | None:
     return None
 
 
+def _load_url_token() -> str | None:
+    """Load URL token from env var or token file.
+
+    URL tokens are issued by the server's /token/url endpoint and must be sent
+    as a `?token=` query parameter, not as an OAuth Bearer token.
+
+    Returns:
+        URL token string or None if not configured.
+    """
+    import os
+
+    token = os.environ.get("OB_URL_TOKEN")
+    if token:
+        return token
+    if URL_TOKEN_FILE.exists():
+        return URL_TOKEN_FILE.read_text(encoding="utf-8").strip()
+    return None
+
+
 def _get_server_url() -> str:
     """Get server URL from env var or default.
 
@@ -40,6 +61,22 @@ def _get_server_url() -> str:
     import os
 
     return os.environ.get("OB_URL", DEFAULT_URL)
+
+
+def _with_url_token(url: str, token: str) -> str:
+    """Append a URL token query parameter unless the URL already has one."""
+    parts = urlsplit(url)
+    query = parse_qsl(parts.query, keep_blank_values=True)
+    if any(key == "token" for key, _value in query):
+        return url
+    query.append(("token", token))
+    return urlunsplit((
+        parts.scheme,
+        parts.netloc,
+        parts.path,
+        urlencode(query),
+        parts.fragment,
+    ))
 
 
 async def call_tool(tool_name: str, arguments: dict[str, Any]) -> Any:
@@ -59,6 +96,10 @@ async def call_tool(tool_name: str, arguments: dict[str, Any]) -> Any:
     """
     url = _get_server_url()
     token = _load_token()
+    if not token:
+        url_token = _load_url_token()
+        if url_token:
+            url = _with_url_token(url, url_token)
 
     headers: dict[str, str] = {
         "Content-Type": "application/json",

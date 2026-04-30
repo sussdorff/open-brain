@@ -1,4 +1,4 @@
-"""CLI entry point for the ob command — thin wrapper for open-brain MCP tools."""
+"""CLI entry point for the ob command."""
 
 import argparse
 import asyncio
@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from open_brain.cli.client import MCPError, call_tool
+from open_brain.runtime import run_server
 
 
 def _output(data: Any, pretty: bool) -> None:
@@ -154,6 +155,16 @@ async def _cmd_stats(_args: argparse.Namespace) -> Any:
     return await call_tool("stats", {})
 
 
+async def _cmd_doctor(_args: argparse.Namespace) -> Any:
+    """Run server diagnostics through the MCP doctor tool."""
+    return await call_tool("doctor", {})
+
+
+def _cmd_server(args: argparse.Namespace) -> None:
+    """Start the open-brain MCP/HTTP server."""
+    run_server(host=args.host, port=args.port)
+
+
 async def _cmd_update(args: argparse.Namespace) -> Any:
     """Update an existing memory.
 
@@ -260,7 +271,7 @@ def _build_parser() -> argparse.ArgumentParser:
     """
     parser = argparse.ArgumentParser(
         prog="ob",
-        description="open-brain CLI — query and manage your memory store",
+        description="open-brain CLI — run, query, and manage your memory store",
     )
     parser.add_argument(
         "--pretty",
@@ -340,6 +351,28 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser(
         "stats",
         help="Show database statistics",
+    )
+
+    # doctor
+    subparsers.add_parser(
+        "doctor",
+        help="Run server diagnostics",
+    )
+
+    # server
+    p_server = subparsers.add_parser(
+        "server",
+        help="Start the open-brain MCP/HTTP server",
+    )
+    p_server.add_argument(
+        "--host",
+        default="0.0.0.0",
+        help="Bind host (default: 0.0.0.0)",
+    )
+    p_server.add_argument(
+        "--port",
+        type=int,
+        help="Bind port (default: PORT env var or 8091)",
     )
 
     # update
@@ -432,8 +465,14 @@ _COMMAND_MAP = {
     "timeline": _cmd_timeline,
     "context": _cmd_context,
     "stats": _cmd_stats,
+    "doctor": _cmd_doctor,
     "update": _cmd_update,
     "ingest": _cmd_ingest,
+}
+
+
+_SYNC_COMMAND_MAP = {
+    "server": _cmd_server,
 }
 
 
@@ -441,6 +480,10 @@ def main() -> None:
     """CLI entry point for the ob command."""
     parser = _build_parser()
     args = parser.parse_args()
+
+    if args.command in _SYNC_COMMAND_MAP:
+        _SYNC_COMMAND_MAP[args.command](args)
+        return
 
     handler = _COMMAND_MAP.get(args.command)
     if handler is None:

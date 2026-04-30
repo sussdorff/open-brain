@@ -1221,7 +1221,7 @@ async def lifespan(app: FastAPI):
     await close_pool()
 
 
-app = FastAPI(title="open-brain MCP Server", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="open-brain MCP Server", version="0.29.0", lifespan=lifespan)
 app.add_middleware(BearerAuthMiddleware)
 
 

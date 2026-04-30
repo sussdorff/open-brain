@@ -10,9 +10,12 @@ import pytest
 
 from open_brain.cli.client import (
     MCPError,
+    call_tool,
     _extract_result,
     _load_token,
+    _load_url_token,
     _parse_sse_response,
+    _with_url_token,
 )
 from open_brain.cli.main import _build_parser, _output
 
@@ -135,6 +138,25 @@ class TestStatsCommand:
     def test_no_args(self):
         args = parse(["stats"])
         assert args.command == "stats"
+
+
+class TestDoctorCommand:
+    def test_no_args(self):
+        args = parse(["doctor"])
+        assert args.command == "doctor"
+
+
+class TestServerCommand:
+    def test_defaults(self):
+        args = parse(["server"])
+        assert args.command == "server"
+        assert args.host == "0.0.0.0"
+        assert args.port is None
+
+    def test_host_and_port(self):
+        args = parse(["server", "--host", "127.0.0.1", "--port", "9000"])
+        assert args.host == "127.0.0.1"
+        assert args.port == 9000
 
 
 class TestUpdateCommand:
@@ -273,6 +295,57 @@ class TestLoadToken:
         assert result is None
 
 
+class TestLoadUrlToken:
+    def test_env_var_takes_priority(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("OB_URL_TOKEN", "env-url-token")
+        token_file = tmp_path / ".open-brain" / "url-token"
+        token_file.parent.mkdir(parents=True)
+        token_file.write_text("file-url-token\n")
+
+        with patch("open_brain.cli.client.URL_TOKEN_FILE", token_file):
+            result = _load_url_token()
+
+        assert result == "env-url-token"
+
+    def test_reads_url_token_file(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("OB_URL_TOKEN", raising=False)
+        token_file = tmp_path / ".open-brain" / "url-token"
+        token_file.parent.mkdir(parents=True)
+        token_file.write_text("file-url-token\n")
+
+        with patch("open_brain.cli.client.URL_TOKEN_FILE", token_file):
+            result = _load_url_token()
+
+        assert result == "file-url-token"
+
+    def test_returns_none_when_no_url_token(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("OB_URL_TOKEN", raising=False)
+        nonexistent = tmp_path / "no-such-file"
+
+        with patch("open_brain.cli.client.URL_TOKEN_FILE", nonexistent):
+            result = _load_url_token()
+
+        assert result is None
+
+
+class TestWithUrlToken:
+    def test_appends_token_to_url_without_query(self):
+        assert (
+            _with_url_token("https://brain.example.com/mcp", "abc")
+            == "https://brain.example.com/mcp?token=abc"
+        )
+
+    def test_preserves_existing_query_params(self):
+        assert (
+            _with_url_token("https://brain.example.com/mcp?foo=bar", "abc")
+            == "https://brain.example.com/mcp?foo=bar&token=abc"
+        )
+
+    def test_does_not_override_existing_token(self):
+        url = "https://brain.example.com/mcp?token=existing"
+        assert _with_url_token(url, "new") == url
+
+
 # ---------------------------------------------------------------------------
 # Command handler integration (mocked)
 # ---------------------------------------------------------------------------
@@ -334,6 +407,22 @@ class TestCommandHandlers:
             from open_brain.cli.main import _cmd_stats
             await _cmd_stats(args)
             mock_call.assert_called_once_with("stats", {})
+
+    @pytest.mark.asyncio
+    async def test_doctor_calls_correct_tool(self):
+        args = parse(["doctor"])
+        with patch("open_brain.cli.main.call_tool", new_callable=AsyncMock) as mock_call:
+            mock_call.return_value = {"db_status": "ok"}
+            from open_brain.cli.main import _cmd_doctor
+            await _cmd_doctor(args)
+            mock_call.assert_called_once_with("doctor", {})
+
+    def test_server_calls_runtime(self):
+        args = parse(["server", "--host", "127.0.0.1", "--port", "9000"])
+        with patch("open_brain.cli.main.run_server") as mock_run_server:
+            from open_brain.cli.main import _cmd_server
+            _cmd_server(args)
+            mock_run_server.assert_called_once_with(host="127.0.0.1", port=9000)
 
     @pytest.mark.asyncio
     async def test_update_calls_correct_tool(self):

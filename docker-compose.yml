@@ -18,9 +18,7 @@ services:
     restart: unless-stopped
 
   open-brain:
-    # Use pre-built image (faster startup):
-    # image: ghcr.io/sussdorff/open-brain:latest
-    build: .
+    image: ghcr.io/sussdorff/open-brain:latest
     env_file: .env
     environment:
       # Override DATABASE_URL to point at the local postgres service

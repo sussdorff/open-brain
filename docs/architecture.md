@@ -345,7 +345,8 @@ docker compose up -d
 For embedding into existing stacks:
 
 ```bash
-docker compose -f docker-compose.service.yml up --build -d
+docker compose -f docker-compose.service.yml pull
+docker compose -f docker-compose.service.yml up -d
 ```
 
 ### 3. Bare Metal
@@ -353,9 +354,8 @@ docker compose -f docker-compose.service.yml up --build -d
 For direct installation without Docker:
 
 ```bash
-cd python
-uv sync
-uv run python -m open_brain
+uv tool install --python 3.14 "git+https://github.com/sussdorff/open-brain.git#subdirectory=python"
+ob server
 ```
 
 Requires a running Postgres instance with pgvector.
