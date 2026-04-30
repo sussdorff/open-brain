@@ -12,6 +12,11 @@ All notable changes to this project will be documented in this file.
 - *(open-brain-mx1)* Address codex adversarial findings
 - *(transcript-dedup)* Improve LLM-confirm prompt with PKM context, target aliases/org, and likelihood framing — replaces overly conservative "if uncertain, say false" wording that was rejecting clear matches like `Malte` → `Malte Sussdorff`
 - *(merge-persons)* Add explicit type casts on `jsonb_build_object` parameters in `repoint_person_refs` (`$2::text`) and `soft_delete_source` (`$2::int`, `$3::text`). Without casts, asyncpg raises `IndeterminateDatatypeError` because Postgres cannot infer types for the polymorphic value parameters. Unit tests with mocked connections did not catch this — only real Postgres execution exposed it.
+- *(merge-persons)* Stop double-encoding aliases in `update_target_aliases`. The script registers a JSONB codec (`encoder=json.dumps`) on the connection but then also called `json.dumps()` manually on the alias list, producing a JSONB *string* like `"[\"Malte\"]"` instead of a JSONB array. Same bug class as open-brain-8i5. Fix: pass the Python list directly and let the codec handle encoding.
+
+### Features
+
+- *(merge-persons)* Add `--list` mode for discovery: shows ID, name, org, ref-count, relationship-count, aliases, and merge status for every person record. Supports `--include-merged` (also show soft-deleted) and `--collisions` (only first-token collision groups, the candidates for manual merging). Mutually exclusive with `--source/--target`.
 
 ### Features
 

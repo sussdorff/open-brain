@@ -454,12 +454,16 @@ async def update_target_aliases(
         target_id: Numeric ID of the target memory.
         merged_aliases: New alias list to set.
     """
+    # Pass list directly — the registered JSONB codec (set in _init_conn) calls
+    # json.dumps() automatically. Manually calling json.dumps() here would
+    # double-encode the value, producing a JSONB string instead of a JSONB array
+    # (same bug class as open-brain-8i5).
     await conn.execute(
         "UPDATE memories "
         "SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('aliases', $2::jsonb) "
         "WHERE id = $1",
         target_id,
-        json.dumps(merged_aliases),
+        merged_aliases,
     )
 
 
@@ -664,6 +668,139 @@ async def do_merge(
 
 
 # ---------------------------------------------------------------------------
+# List mode — discover person records and potential merge candidates
+# ---------------------------------------------------------------------------
+
+
+async def list_persons(
+    conn: asyncpg.Connection,
+    *,
+    include_merged: bool = False,
+    collisions_only: bool = False,
+) -> str:
+    """Render a tabular list of person memories with usage stats.
+
+    Args:
+        conn: asyncpg connection.
+        include_merged: also list soft-deleted (merged) records.
+        collisions_only: only show first-token collision groups (potential
+            merge candidates).
+
+    Returns:
+        Formatted multi-line string suitable for stdout.
+    """
+    # Fetch persons + stats. Use LATERAL for per-row counts.
+    rows = await conn.fetch(
+        """
+        SELECT
+          p.id,
+          p.title,
+          p.metadata,
+          p.created_at,
+          (SELECT COUNT(*) FROM memories m
+             WHERE m.type IN ('interaction', 'mention')
+               AND m.metadata->>'person_ref' = p.id::text) AS refs_count,
+          (SELECT COUNT(*) FROM memory_relationships r
+             WHERE r.source_id = p.id OR r.target_id = p.id) AS rels_count
+        FROM memories p
+        WHERE p.type = 'person'
+        ORDER BY (p.metadata->>'merged_into') IS NOT NULL, p.id
+        """
+    )
+
+    # Prepare rendered rows + first-token groupings
+    by_first_token: dict[str, list[dict[str, Any]]] = {}
+    rendered: list[dict[str, Any]] = []
+    for r in rows:
+        md = r["metadata"]
+        if isinstance(md, str):
+            md = json.loads(md)
+        merged_into = md.get("merged_into")
+        if merged_into and not include_merged:
+            continue
+
+        # Extract canonical name from members[] or top-level name
+        members = md.get("members") or [
+            {"name": md.get("name", ""), "org": md.get("org"),
+             "aliases": md.get("aliases", []) or []}
+        ]
+        # Normalize: aliases at top-level or per-member
+        top_aliases = md.get("aliases") or []
+        if isinstance(top_aliases, str):
+            try:
+                top_aliases = json.loads(top_aliases)
+            except json.JSONDecodeError:
+                top_aliases = []
+
+        for m in members:
+            name = m.get("name") or ""
+            org = m.get("org") or md.get("org") or ""
+            member_aliases = m.get("aliases") or []
+            aliases = list({*member_aliases, *top_aliases})  # union, dedup
+            tokens = name.split()
+            first_token = tokens[0].lower() if tokens else "(no-name)"
+            entry = {
+                "id": r["id"],
+                "name": name,
+                "org": org,
+                "aliases": aliases,
+                "refs": r["refs_count"],
+                "rels": r["rels_count"],
+                "merged_into": merged_into,
+                "first_token": first_token,
+                "created": r["created_at"].strftime("%Y-%m-%d") if r["created_at"] else "?",
+            }
+            rendered.append(entry)
+            by_first_token.setdefault(first_token, []).append(entry)
+
+    lines: list[str] = []
+
+    if collisions_only:
+        # Only show first-token groups with >=2 distinct names
+        collisions = {
+            tok: entries for tok, entries in by_first_token.items()
+            if len({e["name"] for e in entries}) >= 2
+        }
+        if not collisions:
+            return "No first-name collisions among active person records.\n"
+        lines.append(
+            f"=== First-name collisions ({len(collisions)} groups, "
+            "potential merge candidates) ===\n"
+        )
+        for tok, entries in sorted(collisions.items()):
+            lines.append(f"'{tok}' — {len(entries)} records:")
+            for e in sorted(entries, key=lambda x: x["id"]):
+                status = f" → {e['merged_into']}" if e["merged_into"] else ""
+                aliases = f"  aliases={e['aliases']}" if e["aliases"] else ""
+                lines.append(
+                    f"  [{e['id']}] {e['name']!r:<30}  "
+                    f"refs={e['refs']:>3}  rels={e['rels']:>3}{aliases}{status}"
+                )
+            lines.append("")
+    else:
+        header = (
+            f"{'ID':>6}  {'Status':<10}  {'Name':<30}  "
+            f"{'Org':<18}  {'Refs':>4}  {'Rels':>4}  Aliases"
+        )
+        lines.append(header)
+        lines.append("-" * len(header))
+        for e in sorted(rendered, key=lambda x: (x["merged_into"] is not None, x["id"])):
+            status = f"→{e['merged_into']}" if e["merged_into"] else "active"
+            aliases = ", ".join(e["aliases"]) if e["aliases"] else ""
+            lines.append(
+                f"{e['id']:>6}  {status:<10}  {e['name'][:30]:<30}  "
+                f"{e['org'][:18]:<18}  {e['refs']:>4}  {e['rels']:>4}  {aliases}"
+            )
+
+        active = sum(1 for e in rendered if not e["merged_into"])
+        merged = sum(1 for e in rendered if e["merged_into"])
+        lines.append("")
+        lines.append(f"Total: {len(rendered)} (active: {active}, merged: {merged})")
+
+    return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -671,19 +808,41 @@ async def do_merge(
 async def main() -> None:
     """CLI entry point for merge_persons script."""
     parser = argparse.ArgumentParser(
-        description="Merge two duplicate type=person memories (source → target)."
+        description="Merge two duplicate type=person memories (source → target), "
+        "or list person records to find merge candidates."
+    )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        default=False,
+        dest="list_mode",
+        help="List all active person records instead of merging. "
+             "Mutually exclusive with --source/--target.",
+    )
+    parser.add_argument(
+        "--include-merged",
+        action="store_true",
+        default=False,
+        help="With --list: also show soft-deleted (merged) records.",
+    )
+    parser.add_argument(
+        "--collisions",
+        action="store_true",
+        default=False,
+        help="With --list: show only first-token collision groups "
+             "(candidates for manual merging).",
     )
     parser.add_argument(
         "--source",
         type=int,
-        required=True,
-        help="Memory ID of the source person (will be soft-deleted).",
+        help="Memory ID of the source person (will be soft-deleted). "
+             "Required unless --list is used.",
     )
     parser.add_argument(
         "--target",
         type=int,
-        required=True,
-        help="Memory ID of the target person (will be kept and enriched).",
+        help="Memory ID of the target person (will be kept and enriched). "
+             "Required unless --list is used.",
     )
     parser.add_argument(
         "--dry-run",
@@ -699,6 +858,14 @@ async def main() -> None:
     )
     args = parser.parse_args()
 
+    # Mode validation
+    if args.list_mode:
+        if args.source is not None or args.target is not None:
+            parser.error("--list is mutually exclusive with --source/--target.")
+    else:
+        if args.source is None or args.target is None:
+            parser.error("--source and --target are required (or use --list).")
+
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
         logger.error("DATABASE_URL environment variable is not set")
@@ -708,7 +875,14 @@ async def main() -> None:
     try:
         await _init_conn(conn)
 
-        if args.dry_run:
+        if args.list_mode:
+            output = await list_persons(
+                conn,
+                include_merged=args.include_merged,
+                collisions_only=args.collisions,
+            )
+            print(output, end="")
+        elif args.dry_run:
             report = await run_dry_run(conn, args.source, args.target, absorb_text=args.absorb_text)
             print(report)
         else:
