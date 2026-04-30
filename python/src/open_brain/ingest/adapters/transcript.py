@@ -14,21 +14,25 @@ Flow per ingest call:
 
 import dataclasses
 import hashlib
+import json
 import logging
+import re
 import time
 import uuid
 
+from open_brain.config import get_config
 from open_brain.data_layer.interface import (
     DataLayer,
     SaveMemoryParams,
     SearchParams,
     UpdateMemoryParams,
 )
+from open_brain.data_layer.llm import LlmMessage, llm_complete
 from open_brain.ingest import metrics
 from open_brain.ingest.extract import extract_from_transcript
 from open_brain.ingest.models import IngestResult
 from open_brain.people.dedup import match_person
-from open_brain.people.models import PersonMember, PersonRecord
+from open_brain.people.models import MatchDecision, PersonMember, PersonRecord
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +83,9 @@ class TranscriptIngestor:
 
     def __init__(self, data_layer: DataLayer) -> None:
         self._dl = data_layer
+        # Per-run cache for LLM dedup confirmations.
+        # Key: (incoming_name_normalised, target_memory_id) → bool
+        self._dedup_confirm_cache: dict[tuple[str, int], bool] = {}
 
     async def ingest(
         self,
@@ -105,6 +112,9 @@ class TranscriptIngestor:
         """
         if not text or not text.strip():
             raise ValueError("text must not be empty or whitespace-only")
+
+        # Reset per-run cache at the start of each ingest call.
+        self._dedup_confirm_cache = {}
 
         ingest_start = time.monotonic()
 
@@ -393,6 +403,67 @@ class TranscriptIngestor:
                 records.append(record)
         return records
 
+    async def _llm_dedup_confirm(
+        self,
+        incoming_name: str,
+        preliminary: MatchDecision,
+    ) -> bool:
+        """Ask the LLM whether the incoming name refers to the same person as the top candidate.
+
+        Uses a per-run cache to avoid repeated LLM calls for the same pair.
+
+        Args:
+            incoming_name: The unresolved name from the transcript.
+            preliminary: The preliminary MatchDecision with action=="llm_confirm".
+
+        Returns:
+            True if the LLM is confident they are the same person, False otherwise.
+        """
+        target = preliminary.target
+        if target is None:
+            return False
+
+        cache_key = (incoming_name.lower().strip(), target.memory_id)
+        if cache_key in self._dedup_confirm_cache:
+            return self._dedup_confirm_cache[cache_key]
+
+        metrics.record_llm_call("dedup_confirm")
+        target_name = target.member_name
+        runners_up_names = (
+            ", ".join(r.member_name for r in preliminary.runners_up)
+            if preliminary.runners_up
+            else "none"
+        )
+
+        prompt = (
+            f'Determine if these two names refer to the same person.\n\n'
+            f'Incoming name: "{incoming_name}"\n'
+            f'Best match: "{target_name}"\n'
+            f'Other candidates: {runners_up_names}\n\n'
+            f'Respond with JSON only: {{"confirmed": true}} or {{"confirmed": false}}\n'
+            f'Be conservative: if uncertain, say false.'
+        )
+
+        try:
+            response = await llm_complete(
+                messages=[LlmMessage(role="user", content=prompt)],
+                model=get_config().LLM_MODEL,
+                max_tokens=64,
+            )
+            cleaned = response.strip()
+            fence_match = re.match(r"^```(?:json)?\s*\n(.*?)\n```\s*$", cleaned, re.DOTALL)
+            if fence_match:
+                cleaned = fence_match.group(1)
+            data = json.loads(cleaned)
+            raw = data.get("confirmed", False)
+            confirmed: bool = raw is True  # only accept JSON boolean true, not string "true" or "false"
+        except Exception as e:
+            logger.warning("llm_dedup_confirm_error name=%r error=%r", incoming_name, e)
+            confirmed = False
+
+        self._dedup_confirm_cache[cache_key] = confirmed
+        return confirmed
+
     async def _resolve_person(
         self,
         name: str,
@@ -409,25 +480,37 @@ class TranscriptIngestor:
         Returns:
             memory_id — either an existing one (auto_merge) or newly created.
         """
-        decision = match_person(
+        # Pass 1: preliminary decision without llm_confirm callback
+        preliminary = match_person(
             new_name=name,
             new_org=None,
             new_linkedin=None,
             existing=existing_records,
         )
 
-        metrics.record_dedup_decision(decision.action)
-        logger.debug("dedup_decision action=%s name=%r", decision.action, name)
+        metrics.record_dedup_decision(preliminary.action)
+        logger.debug("dedup_decision action=%s name=%r", preliminary.action, name)
 
-        if decision.action == "llm_confirm":
-            # Records that this dedup decision required LLM assistance (the LLM call is
-            # made internally by match_person). This tracks LLM-assisted dedup decisions,
-            # not a direct LLM call from the adapter.
-            metrics.record_llm_call("dedup_confirm")
+        # Pass 2: if llm_confirm is needed, make the async LLM call and
+        # construct the final decision directly from the preliminary result
+        # (avoids a redundant second call to match_person with all its scoring).
+        decision = preliminary
+        if preliminary.action == "llm_confirm":
+            confirmed = await self._llm_dedup_confirm(name, preliminary)
+            decision = MatchDecision(
+                action="auto_merge" if confirmed else "new",
+                target=preliminary.target,
+                runners_up=preliminary.runners_up,
+                rationale=f"llm_confirm decided: {'auto_merge' if confirmed else 'new'}",
+            )
 
         if decision.action == "auto_merge" and decision.target is not None:
             # Persist alias when name containment was the matching signal
-            if "name-containment" in (decision.target.reasons or []):
+            # Accept both "name-containment" and "name-containment:*" variants
+            if any(
+                r == "name-containment" or r.startswith("name-containment:")
+                for r in (decision.target.reasons or [])
+            ):
                 existing_aliases = list(decision.target.aliases)
                 name_norm = name.strip()
                 member_norm = decision.target.member_name.strip()
@@ -451,7 +534,7 @@ class TranscriptIngestor:
                             break
             return decision.target.memory_id
 
-        # For llm_confirm, ambiguous, or new: create a new person memory (conservative)
+        # For ambiguous or new: create a new person memory (conservative)
         save_result = await self._dl.save_memory(
             SaveMemoryParams(
                 text=f"Person: {name}",

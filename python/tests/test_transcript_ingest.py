@@ -10,6 +10,8 @@ Acceptance criteria covered:
 7. test_ingest_fixture_transcript — fixture from fixtures/macwhisper/sample_transcript_3person_meeting.txt
 8. test_ingest_fixture_dictated_note — dictated note fixture (mentioned people, no attendees)
 9. test_ingest_fixture_long_meeting — long meeting fixture (4 attendees + 1 mentioned)
+10. test_llm_confirm_true — "Malte" maps to existing "Malte Sussdorff" when LLM confirms (AK5)
+11. test_llm_confirm_false — "Malte" creates new person when LLM declines (AK6)
 """
 
 import json
@@ -703,3 +705,151 @@ class TestFixtureLongMeeting:
         # 1 follow-up candidate
         assert len(result.follow_up_candidates) == 1
         assert result.run_id
+
+
+LLM_PARTIAL_NAME = json.dumps({
+    "attendees": ["Malte"],
+    "mentioned_people": [],
+    "topics": ["project update"],
+    "follow_up_tasks": [],
+})
+
+
+class TestLLMDedupConfirm:
+    """AK5 & AK6: llm_confirm wiring in _resolve_person for partial names."""
+
+    def _make_malte_memory(self):
+        """Return a Memory object representing an existing 'Malte Sussdorff' person."""
+        from open_brain.data_layer.interface import Memory
+
+        return Memory(
+            id=50,
+            index_id=1,
+            session_id=None,
+            type="person",
+            title="Malte Sussdorff",
+            subtitle=None,
+            narrative=None,
+            content="Malte Sussdorff, engineer.",
+            metadata={"name": "Malte Sussdorff"},
+            priority=0.5,
+            stability="stable",
+            access_count=2,
+            last_accessed_at=None,
+            created_at="2026-01-01T00:00:00",
+            updated_at="2026-01-01T00:00:00",
+        )
+
+    async def test_llm_confirm_true_returns_existing_id_and_writes_alias(self):
+        """AK5: existing=[Malte Sussdorff], incoming=Malte, LLM=True → returns id=50, alias written."""
+        malte_memory = self._make_malte_memory()
+        mock_dl = AsyncMock()
+
+        async def _search(params):
+            if params.type == "person":
+                return SearchResult(results=[malte_memory], total=1)
+            return SearchResult(results=[], total=0)
+
+        mock_dl.search = _search
+        mock_dl.save_memory.side_effect = [
+            SaveMemoryResult(id=10, message="ok"),   # meeting
+            # No new person — "Malte" deduped to id=50
+            SaveMemoryResult(id=30, message="ok"),   # interaction
+        ]
+        mock_dl.update_memory.return_value = SaveMemoryResult(id=50, message="ok")
+
+        _rel_counter = [100]
+
+        async def _auto_rel(*args, **kwargs):
+            _rel_counter[0] += 1
+            return _rel_counter[0]
+
+        mock_dl.create_relationship.side_effect = _auto_rel
+        mock_dl.get_relationships.return_value = []
+
+        with (
+            patch("open_brain.ingest.extract.llm_complete") as mock_extract,
+            patch("open_brain.ingest.adapters.transcript.llm_complete") as mock_dedup_llm,
+        ):
+            mock_extract.return_value = LLM_PARTIAL_NAME
+            mock_dedup_llm.return_value = '{"confirmed": true}'
+
+            ingestor = TranscriptIngestor(data_layer=mock_dl)
+            result = await ingestor.ingest(
+                text="Malte gave a project update.",
+                source_ref="dedup-llm-confirm-true",
+            )
+
+        # "Malte" should have been matched to existing memory id=50
+        assert 50 in result.person_memory_ids, (
+            f"Expected person id=50 in {result.person_memory_ids}"
+        )
+        # No new person memory should be created
+        save_types = [
+            call.args[0].type if call.args else call.kwargs.get("params", MagicMock()).type
+            for call in mock_dl.save_memory.call_args_list
+        ]
+        assert "person" not in save_types, f"Unexpected person save: {save_types}"
+        # Alias "Malte" should have been persisted via update_memory
+        update_calls = mock_dl.update_memory.call_args_list
+        alias_calls = [
+            c for c in update_calls
+            if c.args and hasattr(c.args[0], "metadata") and "aliases" in (c.args[0].metadata or {})
+        ]
+        assert alias_calls, "Expected update_memory call to persist alias 'Malte'"
+        aliases_written = alias_calls[0].args[0].metadata["aliases"]
+        assert "Malte" in aliases_written, f"Alias 'Malte' not in {aliases_written}"
+
+    async def test_llm_confirm_false_creates_new_person(self):
+        """AK6: existing=[Malte Sussdorff], incoming=Malte, LLM=False → new person created."""
+        malte_memory = self._make_malte_memory()
+        mock_dl = AsyncMock()
+
+        async def _search(params):
+            if params.type == "person":
+                return SearchResult(results=[malte_memory], total=1)
+            return SearchResult(results=[], total=0)
+
+        mock_dl.search = _search
+        mock_dl.save_memory.side_effect = [
+            SaveMemoryResult(id=10, message="ok"),   # meeting
+            SaveMemoryResult(id=99, message="ok"),   # NEW person for "Malte"
+            SaveMemoryResult(id=30, message="ok"),   # interaction
+        ]
+        mock_dl.update_memory.return_value = SaveMemoryResult(id=50, message="ok")
+
+        _rel_counter = [100]
+
+        async def _auto_rel(*args, **kwargs):
+            _rel_counter[0] += 1
+            return _rel_counter[0]
+
+        mock_dl.create_relationship.side_effect = _auto_rel
+        mock_dl.get_relationships.return_value = []
+
+        with (
+            patch("open_brain.ingest.extract.llm_complete") as mock_extract,
+            patch("open_brain.ingest.adapters.transcript.llm_complete") as mock_dedup_llm,
+        ):
+            mock_extract.return_value = LLM_PARTIAL_NAME
+            mock_dedup_llm.return_value = '{"confirmed": false}'
+
+            ingestor = TranscriptIngestor(data_layer=mock_dl)
+            result = await ingestor.ingest(
+                text="Malte gave a project update.",
+                source_ref="dedup-llm-confirm-false",
+            )
+
+        # "Malte" should have gotten a NEW memory id=99 (not the existing id=50)
+        assert 99 in result.person_memory_ids, (
+            f"Expected new person id=99 in {result.person_memory_ids}"
+        )
+        assert 50 not in result.person_memory_ids, (
+            f"Did not expect existing id=50 in {result.person_memory_ids}"
+        )
+        # save_memory should have been called for a person type
+        save_types = [
+            call.args[0].type if call.args else call.kwargs.get("params", MagicMock()).type
+            for call in mock_dl.save_memory.call_args_list
+        ]
+        assert "person" in save_types, f"Expected a person save call, got: {save_types}"
