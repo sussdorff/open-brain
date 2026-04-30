@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(open-brain-8i5)* Fix metadata stored as JSONB string/array instead of object (double-encoding fix in save_memory and update_memory with backfill migration)
 - *(open-brain-c5e)* Address review findings iteration 1
 - *(open-brain-c5e)* Address codex adversarial findings
 
