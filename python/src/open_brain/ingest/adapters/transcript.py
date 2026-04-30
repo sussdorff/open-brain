@@ -627,6 +627,8 @@ class TranscriptIngestor:
             return decision.target.memory_id
 
         # For ambiguous or new: create a new person memory (conservative)
+        # Set enrich_pending=True so the enrichment pipeline can later
+        # search for org/role/profile information for this person.
         save_result = await self._dl.save_memory(
             SaveMemoryParams(
                 text=f"Person: {name}",
@@ -636,6 +638,7 @@ class TranscriptIngestor:
                 metadata={
                     "name": name,
                     "run_id": run_id,
+                    "enrich_pending": "true",
                 },
             )
         )

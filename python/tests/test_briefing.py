@@ -9,7 +9,7 @@ import pytest
 
 from open_brain.data_layer.interface import Memory, SearchResult
 
-NOW = datetime(2026, 4, 3, 12, 0, 0, tzinfo=UTC)
+NOW = datetime.now(UTC).replace(hour=12, minute=0, second=0, microsecond=0)
 
 
 def _make_memory(
