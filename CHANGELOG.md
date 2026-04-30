@@ -17,6 +17,7 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - *(merge-persons)* Add `--list` mode for discovery: shows ID, name, org, ref-count, relationship-count, aliases, and merge status for every person record. Supports `--include-merged` (also show soft-deleted) and `--collisions` (only first-token collision groups, the candidates for manual merging). Mutually exclusive with `--source/--target`.
+- *(merge-persons)* `--list` now correctly handles directory-style person records (those with `metadata.companies`/`linkedin_urls` containing multiple people). The primary person is read from `metadata.person` and prefixed with `[dir]` in the display, so e.g. memory 18175 shows as `[dir] Elias Trewin` instead of being blank. Mentioned-people from `metadata.entities.people` are intentionally **not** added as aliases — they are referenced contacts, not alternative names for the primary.
 
 ### Features
 

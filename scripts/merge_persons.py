@@ -719,11 +719,20 @@ async def list_persons(
         if merged_into and not include_merged:
             continue
 
-        # Extract canonical name from members[] or top-level name
+        # Extract canonical name. Person memories appear in two shapes:
+        #   1. Single: metadata.name + (optionally) metadata.members[0]
+        #   2. Directory: metadata.person (primary) + metadata.companies/linkedin_urls
+        #      maps for multiple people; the title carries a description.
         members = md.get("members") or [
-            {"name": md.get("name", ""), "org": md.get("org"),
+            {"name": md.get("name") or md.get("person") or "",
+             "org": md.get("org"),
              "aliases": md.get("aliases", []) or []}
         ]
+        is_directory = bool(
+            md.get("companies") or md.get("linkedin_urls") or md.get("entities", {}).get("people")
+        ) and not (md.get("members") or md.get("name"))
+        title = r["title"] or ""
+
         # Normalize: aliases at top-level or per-member
         top_aliases = md.get("aliases") or []
         if isinstance(top_aliases, str):
@@ -734,20 +743,29 @@ async def list_persons(
 
         for m in members:
             name = m.get("name") or ""
+            # Fallback chain for directory-style records that lack a primary name
+            if not name and is_directory:
+                # Prefer metadata.person, else use the title (truncated)
+                name = md.get("person") or (f"[directory] {title[:40]}" if title else "")
             org = m.get("org") or md.get("org") or ""
             member_aliases = m.get("aliases") or []
             aliases = list({*member_aliases, *top_aliases})  # union, dedup
+            # Tag directory records visibly. The other people listed inside
+            # are *mentioned* people, not aliases of the primary — do not
+            # treat them as alternative names for collision detection.
+            display_name = f"[dir] {name}" if is_directory else name
             tokens = name.split()
             first_token = tokens[0].lower() if tokens else "(no-name)"
             entry = {
                 "id": r["id"],
-                "name": name,
+                "name": display_name,
                 "org": org,
                 "aliases": aliases,
                 "refs": r["refs_count"],
                 "rels": r["rels_count"],
                 "merged_into": merged_into,
                 "first_token": first_token,
+                "is_directory": is_directory,
                 "created": r["created_at"].strftime("%Y-%m-%d") if r["created_at"] else "?",
             }
             rendered.append(entry)
