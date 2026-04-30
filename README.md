@@ -410,6 +410,7 @@ ob --pretty doctor
 ob search "what did I decide about X?"
 ob save "Decided to use asyncpg for lower overhead" --type decision
 ob ingest transcript --source-ref meeting-2026-04-29 --file transcript.txt
+ob people list --collisions
 ```
 
 Current `ob` commands:
@@ -428,6 +429,24 @@ Current `ob` commands:
 | `ob update` | Update an existing memory |
 | `ob ingest email` | Ingest an IMAP inbox through the MCP server |
 | `ob ingest transcript` | Ingest a transcript file or stdin |
+| `ob people list` | List person memories and merge candidates through the MCP server |
+| `ob people merge` | Merge duplicate person memories server-side |
+
+### `ob people`
+
+Person deduplication runs on the server because remote CLI installs should not
+need `DATABASE_URL`.
+
+```bash
+ob --pretty people list --collisions
+ob --pretty people merge --source 17692 --target 17700 --dry-run
+ob --pretty people merge --source 17692 --target 17700
+```
+
+Use `--absorb-text` when the source content should be appended to the target as
+provenance. The merge repoints mention/interaction references, repoints typed
+relationships, updates target aliases, and marks the source with
+`metadata.merged_into`.
 
 ### `ob ingest transcript`
 
@@ -458,6 +477,7 @@ You can also set `OB_DIRECT=1` as an environment variable instead of passing `--
 ## Documentation
 
 - [Architecture & Diagrams](docs/architecture.md) — system design, hybrid search, memory lifecycle, auth flow
+- [Operator Script Promotion Policy](docs/operator-scripts.md) — which scripts become stable `ob` commands and which stay as scripts
 - [Contributing](CONTRIBUTING.md) — development setup, PR process, coding guidelines
 - [Security](SECURITY.md) — vulnerability reporting, security considerations
 - [Changelog](CHANGELOG.md) — version history

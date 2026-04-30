@@ -263,6 +263,38 @@ async def _cmd_ingest(args: argparse.Namespace) -> Any:
     raise ValueError(f"Unknown ingest command: {args.ingest_command}")
 
 
+async def _cmd_people_list(args: argparse.Namespace) -> Any:
+    """List person memories through the server-side MCP tool."""
+    kwargs: dict[str, Any] = {}
+    if args.include_merged:
+        kwargs["include_merged"] = True
+    if args.collisions:
+        kwargs["collisions_only"] = True
+    return await call_tool("people_list", kwargs)
+
+
+async def _cmd_people_merge(args: argparse.Namespace) -> Any:
+    """Merge duplicate person memories through the server-side MCP tool."""
+    kwargs: dict[str, Any] = {
+        "source_id": int(args.source),
+        "target_id": int(args.target),
+    }
+    if args.dry_run:
+        kwargs["dry_run"] = True
+    if args.absorb_text:
+        kwargs["absorb_text"] = True
+    return await call_tool("people_merge", kwargs)
+
+
+async def _cmd_people(args: argparse.Namespace) -> Any:
+    """Dispatch people subcommands."""
+    if args.people_command == "list":
+        return await _cmd_people_list(args)
+    if args.people_command == "merge":
+        return await _cmd_people_merge(args)
+    raise ValueError(f"Unknown people command: {args.people_command}")
+
+
 def _build_parser() -> argparse.ArgumentParser:
     """Build the CLI argument parser.
 
@@ -454,6 +486,56 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    # people
+    p_people = subparsers.add_parser(
+        "people",
+        help="Manage people memories",
+    )
+    people_sub = p_people.add_subparsers(dest="people_command", metavar="ACTION")
+    people_sub.required = True
+
+    p_people_list = people_sub.add_parser(
+        "list",
+        help="List person memories",
+    )
+    p_people_list.add_argument(
+        "--include-merged",
+        action="store_true",
+        help="Include soft-deleted records with metadata.merged_into",
+    )
+    p_people_list.add_argument(
+        "--collisions",
+        action="store_true",
+        help="Show only first-token collision groups for manual merge review",
+    )
+
+    p_people_merge = people_sub.add_parser(
+        "merge",
+        help="Merge a duplicate person memory into the canonical one",
+    )
+    p_people_merge.add_argument(
+        "--source",
+        type=int,
+        required=True,
+        help="Source person memory ID to soft-delete",
+    )
+    p_people_merge.add_argument(
+        "--target",
+        type=int,
+        required=True,
+        help="Target person memory ID to keep",
+    )
+    p_people_merge.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would change without writing",
+    )
+    p_people_merge.add_argument(
+        "--absorb-text",
+        action="store_true",
+        help="Append source content to target content as provenance",
+    )
+
     return parser
 
 
@@ -468,6 +550,7 @@ _COMMAND_MAP = {
     "doctor": _cmd_doctor,
     "update": _cmd_update,
     "ingest": _cmd_ingest,
+    "people": _cmd_people,
 }
 
 

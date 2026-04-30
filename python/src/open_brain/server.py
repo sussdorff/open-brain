@@ -53,6 +53,11 @@ from open_brain.data_layer.interface import (
 from open_brain.capture_router import classify_and_extract
 from open_brain.ingest import metrics as ingest_metrics
 from open_brain.data_layer.llm import LlmMessage, llm_complete
+from open_brain.people.merge import (
+    do_merge as merge_people_records,
+    list_persons_payload,
+    run_dry_run as dry_run_people_merge,
+)
 from open_brain.utils import parse_llm_json
 from open_brain.data_layer.postgres import PostgresDataLayer, close_pool, get_pool
 from open_brain.digest import generate_weekly_briefing
@@ -714,6 +719,78 @@ async def people_mentions_window(
     """Aggregate mention memories in the last N days, grouped by person_ref."""
     dl = get_dl()
     result = await dl.people_mentions_window(days=days, min_count=min_count)
+    return json.dumps(result, default=str)
+
+
+@mcp.tool(
+    description=(
+        "List person memories for operator review. Use this before merging duplicate people. "
+        "Params: include_merged (default false), collisions_only (default false). "
+        "Returns structured JSON with person IDs, names, aliases, reference counts, "
+        "relationship counts, and optional first-token collision groups."
+    )
+)
+@logged_tool
+async def people_list(
+    include_merged: bool = False,
+    collisions_only: bool = False,
+) -> str:
+    """Return person memories and merge-candidate collision groups."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        payload = await list_persons_payload(
+            conn,
+            include_merged=include_merged,
+            collisions_only=collisions_only,
+        )
+    return json.dumps(payload, default=str)
+
+
+@mcp.tool(
+    description=(
+        "Merge one duplicate type=person memory into another. "
+        "Recommended workflow: first call people_merge(..., dry_run=true), then call "
+        "again with dry_run=false if the source and target direction is correct. "
+        "Params: source_id (person to soft-delete), target_id (person to keep), "
+        "dry_run (default false), absorb_text (default false). "
+        "The write path runs in one DB transaction, repoints mentions/relationships, "
+        "updates target aliases, and records metadata.merged_into on the source."
+    )
+)
+@logged_tool
+async def people_merge(
+    source_id: int,
+    target_id: int,
+    dry_run: bool = False,
+    absorb_text: bool = False,
+) -> str:
+    """Merge duplicate person memories server-side."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        if dry_run:
+            report = await dry_run_people_merge(
+                conn,
+                source_id,
+                target_id,
+                absorb_text=absorb_text,
+            )
+            return json.dumps(
+                {
+                    "status": "dry_run",
+                    "source_id": source_id,
+                    "target_id": target_id,
+                    "absorb_text": absorb_text,
+                    "report": report,
+                },
+                default=str,
+            )
+
+        result = await merge_people_records(
+            conn,
+            source_id,
+            target_id,
+            absorb_text=absorb_text,
+        )
     return json.dumps(result, default=str)
 
 

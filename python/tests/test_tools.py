@@ -61,6 +61,19 @@ def mock_dl():
     return dl
 
 
+class _AcquireContext:
+    async def __aenter__(self):
+        return "conn"
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
+
+
+class _Pool:
+    def acquire(self):
+        return _AcquireContext()
+
+
 # ─── Search tool ──────────────────────────────────────────────────────────────
 
 class TestSearchTool:
@@ -377,6 +390,80 @@ class TestImportantTool:
         tools = await mcp.list_tools()
         tool_names = [t.name for t in tools]
         assert "____IMPORTANT" in tool_names or "__IMPORTANT" in tool_names
+
+
+# ─── People operator tools ────────────────────────────────────────────────────
+
+class TestPeopleOperatorTools:
+    @pytest.mark.asyncio
+    async def test_people_list_returns_structured_payload(self):
+        payload = {"mode": "list", "total": 1, "persons": [{"id": 10}]}
+        with (
+            patch("open_brain.server.get_pool", new_callable=AsyncMock) as mock_pool,
+            patch("open_brain.server.list_persons_payload", new_callable=AsyncMock) as mock_list,
+        ):
+            mock_pool.return_value = _Pool()
+            mock_list.return_value = payload
+            from open_brain.server import people_list
+
+            result = await people_list(include_merged=True, collisions_only=True)
+
+            data = json.loads(result)
+            assert data == payload
+            mock_list.assert_called_once_with(
+                "conn",
+                include_merged=True,
+                collisions_only=True,
+            )
+
+    @pytest.mark.asyncio
+    async def test_people_merge_dry_run_returns_report(self):
+        with (
+            patch("open_brain.server.get_pool", new_callable=AsyncMock) as mock_pool,
+            patch("open_brain.server.dry_run_people_merge", new_callable=AsyncMock) as mock_dry_run,
+        ):
+            mock_pool.return_value = _Pool()
+            mock_dry_run.return_value = "would merge"
+            from open_brain.server import people_merge
+
+            result = await people_merge(
+                source_id=10,
+                target_id=20,
+                dry_run=True,
+                absorb_text=True,
+            )
+
+            data = json.loads(result)
+            assert data["status"] == "dry_run"
+            assert data["report"] == "would merge"
+            mock_dry_run.assert_called_once_with(
+                "conn",
+                10,
+                20,
+                absorb_text=True,
+            )
+
+    @pytest.mark.asyncio
+    async def test_people_merge_write_path_delegates_to_merge_helper(self):
+        summary = {"status": "merged", "source_id": 10, "target_id": 20}
+        with (
+            patch("open_brain.server.get_pool", new_callable=AsyncMock) as mock_pool,
+            patch("open_brain.server.merge_people_records", new_callable=AsyncMock) as mock_merge,
+        ):
+            mock_pool.return_value = _Pool()
+            mock_merge.return_value = summary
+            from open_brain.server import people_merge
+
+            result = await people_merge(source_id=10, target_id=20)
+
+            data = json.loads(result)
+            assert data == summary
+            mock_merge.assert_called_once_with(
+                "conn",
+                10,
+                20,
+                absorb_text=False,
+            )
 
 
 # ─── User Attribution Tests ───────────────────────────────────────────────────

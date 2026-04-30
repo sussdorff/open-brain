@@ -176,6 +176,45 @@ class TestUpdateCommand:
         assert args.title == "T"
 
 
+class TestPeopleCommand:
+    def test_list_defaults(self):
+        args = parse(["people", "list"])
+        assert args.command == "people"
+        assert args.people_command == "list"
+        assert args.include_merged is False
+        assert args.collisions is False
+
+    def test_list_flags(self):
+        args = parse(["people", "list", "--include-merged", "--collisions"])
+        assert args.include_merged is True
+        assert args.collisions is True
+
+    def test_merge_required_args(self):
+        args = parse(["people", "merge", "--source", "10", "--target", "20"])
+        assert args.command == "people"
+        assert args.people_command == "merge"
+        assert args.source == 10
+        assert args.target == 20
+        assert args.dry_run is False
+        assert args.absorb_text is False
+
+    def test_merge_flags(self):
+        args = parse(
+            [
+                "people",
+                "merge",
+                "--source",
+                "10",
+                "--target",
+                "20",
+                "--dry-run",
+                "--absorb-text",
+            ]
+        )
+        assert args.dry_run is True
+        assert args.absorb_text is True
+
+
 # ---------------------------------------------------------------------------
 # Output formatting tests
 # ---------------------------------------------------------------------------
@@ -647,6 +686,46 @@ class TestCommandHandlers:
             from open_brain.cli.main import _cmd_context
             await _cmd_context(args)
             mock_call.assert_called_once_with("get_context", {})
+
+    @pytest.mark.asyncio
+    async def test_people_list_calls_correct_tool(self):
+        args = parse(["people", "list", "--include-merged", "--collisions"])
+        with patch("open_brain.cli.main.call_tool", new_callable=AsyncMock) as mock_call:
+            mock_call.return_value = {"mode": "collisions"}
+            from open_brain.cli.main import _cmd_people
+            await _cmd_people(args)
+            mock_call.assert_called_once_with(
+                "people_list",
+                {"include_merged": True, "collisions_only": True},
+            )
+
+    @pytest.mark.asyncio
+    async def test_people_merge_calls_correct_tool(self):
+        args = parse(
+            [
+                "people",
+                "merge",
+                "--source",
+                "10",
+                "--target",
+                "20",
+                "--dry-run",
+                "--absorb-text",
+            ]
+        )
+        with patch("open_brain.cli.main.call_tool", new_callable=AsyncMock) as mock_call:
+            mock_call.return_value = {"status": "dry_run"}
+            from open_brain.cli.main import _cmd_people
+            await _cmd_people(args)
+            mock_call.assert_called_once_with(
+                "people_merge",
+                {
+                    "source_id": 10,
+                    "target_id": 20,
+                    "dry_run": True,
+                    "absorb_text": True,
+                },
+            )
 
 
 # ---------------------------------------------------------------------------
