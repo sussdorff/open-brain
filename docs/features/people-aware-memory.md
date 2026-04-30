@@ -105,10 +105,13 @@ to the system or want to understand how person-centric data flows through the st
 the CLI. The CLI reads MacWhisper history on the user's Mac and sends only
 the transcript text to the configured open-brain server via the existing
 `ingest_transcript` tool. This is important for remote deployments: the server
-does not need access to the MacWhisper history directory.
+does not need access to the MacWhisper history directory. For modern
+MacWhisper SQLite history, the default list view focuses on transcript
+sessions/meetings and shows source app, duration, and detected participants
+from MacWhisper speaker data.
 
 ```bash
-# List recent entries from local MacWhisper history
+# List recent transcript sessions/meetings from local MacWhisper history
 ob ingest macwhisper list --limit 10
 
 # Machine-readable output

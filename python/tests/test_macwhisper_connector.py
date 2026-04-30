@@ -46,6 +46,9 @@ SAMPLE_ENTRY = {
 
 SESSION_ID_HEX = "1fe090fa10084fe792b92278532f76b3"
 DICTATION_ID_HEX = "9e68fb295680454cb2db649d536e0894"
+RECORDED_MEETING_ID_HEX = "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"
+SPEAKER_ALICE_ID_HEX = "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1"
+SPEAKER_BOB_ID_HEX = "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1"
 
 
 def _make_data_layer() -> MagicMock:
@@ -139,13 +142,75 @@ def _create_sqlite_history(history_path: Path) -> None:
                 transcriptionError TEXT,
                 processingError TEXT
             );
+            CREATE TABLE recordedmeeting (
+                id BLOB PRIMARY KEY NOT NULL,
+                date DATETIME,
+                title TEXT,
+                bundleIdentifier TEXT,
+                appName TEXT,
+                duration DOUBLE,
+                dateCreated DATETIME,
+                dateUpdated DATETIME,
+                matchedCalendarTitle TEXT,
+                dateDeleted DOUBLE
+            );
+            CREATE TABLE systemaudiorecording (
+                id BLOB PRIMARY KEY NOT NULL,
+                date DATETIME,
+                title TEXT,
+                bundleIdentifier TEXT,
+                appName TEXT,
+                duration DOUBLE,
+                dateCreated DATETIME,
+                dateUpdated DATETIME,
+                dateDeleted DOUBLE
+            );
+            CREATE TABLE speaker (
+                id BLOB PRIMARY KEY NOT NULL,
+                name TEXT,
+                color TEXT,
+                isStub BOOLEAN,
+                photoData BLOB
+            );
+            CREATE TABLE transcriptline (
+                id BLOB PRIMARY KEY NOT NULL,
+                dateCreated DATETIME,
+                dateUpdated DATETIME,
+                text TEXT,
+                start DOUBLE,
+                end DOUBLE,
+                isFavorite BOOLEAN,
+                sessionId BLOB,
+                speakerID BLOB,
+                wordsJson TEXT
+            );
+            CREATE TABLE session_speaker (
+                sessionID BLOB NOT NULL,
+                speakerID BLOB NOT NULL
+            );
             """
         )
         conn.execute(
             """
+            INSERT INTO recordedmeeting (
+                id, date, title, bundleIdentifier, appName, duration, dateDeleted
+            ) VALUES (?, ?, ?, ?, ?, ?, NULL)
+            """,
+            (
+                bytes.fromhex(RECORDED_MEETING_ID_HEX),
+                "2026-04-29 10:00:00.000",
+                "Weekly Product Sync",
+                "com.microsoft.teams2",
+                "Teams",
+                3672.2,
+            ),
+        )
+        conn.execute(
+            """
             INSERT INTO session (
-                id, dateCreated, textPreview, fullText, userChosenTitle, dateDeleted
-            ) VALUES (?, ?, ?, ?, ?, NULL)
+                id, dateCreated, textPreview, fullText, userChosenTitle,
+                hasBeenDiarized, recordedMeetingID, playbackDuration, dateDeleted
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
             """,
             (
                 bytes.fromhex(SESSION_ID_HEX),
@@ -153,7 +218,57 @@ def _create_sqlite_history(history_path: Path) -> None:
                 "Session preview",
                 "Full session transcript.",
                 "Rucksprache zu Mira",
+                1,
+                bytes.fromhex(RECORDED_MEETING_ID_HEX),
+                3600.0,
             ),
+        )
+        conn.executemany(
+            """
+            INSERT INTO speaker (id, name, color, isStub, photoData)
+            VALUES (?, ?, ?, 0, NULL)
+            """,
+            [
+                (bytes.fromhex(SPEAKER_ALICE_ID_HEX), "Alice Example", "#ff0000"),
+                (bytes.fromhex(SPEAKER_BOB_ID_HEX), "Bob Example", "#00ff00"),
+            ],
+        )
+        conn.executemany(
+            """
+            INSERT INTO transcriptline (
+                id, dateCreated, text, start, end, sessionId, speakerID
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    bytes.fromhex("d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1"),
+                    "2026-04-29 10:03:00.000",
+                    "Hello from Alice.",
+                    0.0,
+                    2.0,
+                    bytes.fromhex(SESSION_ID_HEX),
+                    bytes.fromhex(SPEAKER_ALICE_ID_HEX),
+                ),
+                (
+                    bytes.fromhex("e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1"),
+                    "2026-04-29 10:03:03.000",
+                    "Hello from Bob.",
+                    3.0,
+                    5.0,
+                    bytes.fromhex(SESSION_ID_HEX),
+                    bytes.fromhex(SPEAKER_BOB_ID_HEX),
+                ),
+            ],
+        )
+        conn.executemany(
+            """
+            INSERT INTO session_speaker (sessionID, speakerID)
+            VALUES (?, ?)
+            """,
+            [
+                (bytes.fromhex(SESSION_ID_HEX), bytes.fromhex(SPEAKER_ALICE_ID_HEX)),
+                (bytes.fromhex(SESSION_ID_HEX), bytes.fromhex(SPEAKER_BOB_ID_HEX)),
+            ],
         )
         conn.execute(
             """
@@ -292,19 +407,21 @@ class TestListRecentEmptyDir:
 
 
 class TestListRecentSQLiteHistory:
-    async def test_returns_session_and_dictation_entries(self, tmp_path):
-        """Modern MacWhisper SQLite history is listed newest first."""
+    async def test_returns_session_entries_with_meeting_metadata(self, tmp_path):
+        """Modern MacWhisper SQLite history lists transcript sessions by default."""
         _create_sqlite_history(tmp_path)
         connector = _make_connector(history_path=str(tmp_path))
 
         results = await connector.list_recent(n=5)
 
-        assert [r.entry_id for r in results] == [
-            f"dictation:{DICTATION_ID_HEX}",
-            f"session:{SESSION_ID_HEX}",
-        ]
-        assert results[0].created_at == "2026-04-30 08:22:41.412"
-        assert results[0].text_preview == "Processed dictation transcript."
+        assert [r.entry_id for r in results] == [f"session:{SESSION_ID_HEX}"]
+        assert results[0].created_at == "2026-04-29 10:02:52.120"
+        assert results[0].text_preview == "Full session transcript."
+        assert results[0].title == "Weekly Product Sync"
+        assert results[0].source_type == "recorded_meeting"
+        assert results[0].source_app == "Teams"
+        assert results[0].duration_seconds == 3672.2
+        assert results[0].participants == ["Alice Example", "Bob Example"]
 
 
 class TestReadSQLiteEntry:
@@ -316,8 +433,11 @@ class TestReadSQLiteEntry:
         text, metadata = connector.read_entry(f"session:{SESSION_ID_HEX}")
 
         assert text == "Full session transcript."
-        assert metadata["source_type"] == "session"
-        assert metadata["title"] == "Rucksprache zu Mira"
+        assert metadata["source_type"] == "recorded_meeting"
+        assert metadata["title"] == "Weekly Product Sync"
+        assert metadata["source_app"] == "Teams"
+        assert metadata["duration_seconds"] == 3672.2
+        assert metadata["participants"] == ["Alice Example", "Bob Example"]
         assert metadata["medium"] == "macwhisper"
 
     def test_reads_dictation_entry(self, tmp_path):
@@ -330,6 +450,9 @@ class TestReadSQLiteEntry:
         assert text == "Processed dictation transcript."
         assert metadata["source_type"] == "dictation"
         assert metadata["title"] == "Dictation prompt"
+        assert metadata["source_app"] == ""
+        assert metadata["duration_seconds"] is None
+        assert metadata["participants"] == []
         assert metadata["medium"] == "macwhisper"
 
 

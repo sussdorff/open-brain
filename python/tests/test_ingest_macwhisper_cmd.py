@@ -97,6 +97,11 @@ class TestIngestMacWhisperHandlers:
                 entry_id="abc123",
                 created_at="2026-04-30T10:00:00",
                 text_preview="Meeting transcript",
+                title="Planning Sync",
+                source_type="recorded_meeting",
+                source_app="Teams",
+                duration_seconds=1800.0,
+                participants=["Alice", "Bob"],
             )
         ])
         args = parse([
@@ -122,6 +127,11 @@ class TestIngestMacWhisperHandlers:
                     "entry_id": "abc123",
                     "created_at": "2026-04-30T10:00:00",
                     "text_preview": "Meeting transcript",
+                    "title": "Planning Sync",
+                    "source_type": "recorded_meeting",
+                    "source_app": "Teams",
+                    "duration_seconds": 1800.0,
+                    "participants": ["Alice", "Bob"],
                 }
             ],
         }

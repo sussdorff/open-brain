@@ -14,7 +14,7 @@ import os
 import platform
 import sqlite3
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -73,6 +73,11 @@ class TranscriptRef:
     entry_id: str
     created_at: str
     text_preview: str
+    title: str = ""
+    source_type: str = ""
+    source_app: str = ""
+    duration_seconds: float | None = None
+    participants: list[str] = field(default_factory=list)
 
 
 # ─── Errors ──────────────────────────────────────────────────────────────────
@@ -236,8 +241,10 @@ class MacWhisperConnector:
     async def list_recent(self, n: int = 10) -> list[TranscriptRef]:
         """List the most recent n transcript entries (ADR-0001 Protocol method).
 
-        Reads legacy JSON files and newer SQLite-backed MacWhisper history,
-        sorted by created_at descending.
+        Reads legacy JSON files and newer SQLite-backed MacWhisper transcript
+        sessions, sorted by created_at descending. Modern SQLite dictations are
+        intentionally not listed because they are short dictation notes, not
+        meeting/session transcripts.
 
         Args:
             n: Maximum number of entries to return.
@@ -289,55 +296,57 @@ class MacWhisperConnector:
             rows = conn.execute(
                 """
                 SELECT
-                    'session:' || lower(hex(id)) AS entry_id,
-                    dateCreated AS created_at,
-                    fullText AS text
-                FROM session
-                WHERE dateDeleted IS NULL
-                  AND fullText IS NOT NULL
-                  AND length(trim(fullText)) > 0
-                ORDER BY dateCreated DESC
-                LIMIT ?
-                """,
-                (n,),
-            ).fetchall()
-            refs.extend(
-                TranscriptRef(
-                    entry_id=row["entry_id"],
-                    created_at=row["created_at"] or "",
-                    text_preview=(row["text"] or "")[:200],
-                )
-                for row in rows
-            )
-
-            rows = conn.execute(
-                """
-                SELECT
-                    'dictation:' || lower(hex(id)) AS entry_id,
-                    dateCreated AS created_at,
+                    'session:' || lower(hex(s.id)) AS entry_id,
+                    lower(hex(s.id)) AS session_hex_id,
+                    s.dateCreated AS created_at,
+                    s.fullText AS text,
                     COALESCE(
-                        NULLIF(trim(processedText), ''),
-                        NULLIF(trim(transcribedText), '')
-                    ) AS text
-                FROM dictation
-                WHERE dateDeleted IS NULL
-                  AND COALESCE(
-                        NULLIF(trim(processedText), ''),
-                        NULLIF(trim(transcribedText), '')
-                      ) IS NOT NULL
-                ORDER BY dateCreated DESC
+                        NULLIF(trim(rm.title), ''),
+                        NULLIF(trim(sar.title), ''),
+                        NULLIF(trim(s.userChosenTitle), ''),
+                        NULLIF(trim(s.aiTitle), ''),
+                        NULLIF(trim(s.originalFilename), ''),
+                        ''
+                    ) AS title,
+                    CASE
+                        WHEN s.recordedMeetingID IS NOT NULL THEN 'recorded_meeting'
+                        WHEN s.systemAudioRecordingID IS NOT NULL THEN 'system_audio_recording'
+                        ELSE 'session'
+                    END AS source_type,
+                    COALESCE(
+                        NULLIF(trim(rm.appName), ''),
+                        NULLIF(trim(sar.appName), ''),
+                        NULLIF(trim(s.sourceAppBundleID), ''),
+                        NULLIF(trim(s.originalExtension), ''),
+                        ''
+                    ) AS source_app,
+                    COALESCE(rm.duration, sar.duration, s.playbackDuration) AS duration_seconds
+                FROM session s
+                LEFT JOIN recordedmeeting rm ON rm.id = s.recordedMeetingID
+                LEFT JOIN systemaudiorecording sar ON sar.id = s.systemAudioRecordingID
+                WHERE s.dateDeleted IS NULL
+                  AND s.fullText IS NOT NULL
+                  AND length(trim(s.fullText)) > 0
+                ORDER BY s.dateCreated DESC
                 LIMIT ?
                 """,
                 (n,),
             ).fetchall()
-            refs.extend(
-                TranscriptRef(
-                    entry_id=row["entry_id"],
-                    created_at=row["created_at"] or "",
-                    text_preview=(row["text"] or "")[:200],
+            for row in rows:
+                refs.append(
+                    TranscriptRef(
+                        entry_id=row["entry_id"],
+                        created_at=row["created_at"] or "",
+                        text_preview=(row["text"] or "")[:200],
+                        title=row["title"] or "",
+                        source_type=row["source_type"] or "",
+                        source_app=row["source_app"] or "",
+                        duration_seconds=row["duration_seconds"],
+                        participants=self._fetch_session_participants(
+                            conn, row["session_hex_id"] or ""
+                        ),
+                    )
                 )
-                for row in rows
-            )
         except sqlite3.Error as exc:
             logger.warning("Failed to read MacWhisper SQLite history %s: %s", db_path, exc)
         finally:
@@ -402,11 +411,19 @@ class MacWhisperConnector:
                 if row is None:
                     continue
                 text = row["text"] or ""
+                participants = (
+                    self._fetch_session_participants(conn, hex_id)
+                    if candidate_type == "session"
+                    else []
+                )
                 return text, {
                     "id": hex_id,
-                    "source_type": candidate_type,
+                    "source_type": row["source_type"] or candidate_type,
                     "created_at": row["created_at"] or "",
                     "title": row["title"] or "",
+                    "source_app": row["source_app"] or "",
+                    "duration_seconds": row["duration_seconds"],
+                    "participants": participants,
                     "medium": "macwhisper",
                 }
         except sqlite3.Error as exc:
@@ -446,14 +463,37 @@ class MacWhisperConnector:
             return conn.execute(
                 """
                 SELECT
-                    dateCreated AS created_at,
-                    COALESCE(userChosenTitle, aiTitle, originalFilename, textPreview, '') AS title,
-                    fullText AS text
-                FROM session
-                WHERE lower(hex(id)) = ?
-                  AND dateDeleted IS NULL
-                  AND fullText IS NOT NULL
-                  AND length(trim(fullText)) > 0
+                    s.dateCreated AS created_at,
+                    CASE
+                        WHEN s.recordedMeetingID IS NOT NULL THEN 'recorded_meeting'
+                        WHEN s.systemAudioRecordingID IS NOT NULL THEN 'system_audio_recording'
+                        ELSE 'session'
+                    END AS source_type,
+                    COALESCE(
+                        NULLIF(trim(rm.title), ''),
+                        NULLIF(trim(sar.title), ''),
+                        NULLIF(trim(s.userChosenTitle), ''),
+                        NULLIF(trim(s.aiTitle), ''),
+                        NULLIF(trim(s.originalFilename), ''),
+                        NULLIF(trim(s.textPreview), ''),
+                        ''
+                    ) AS title,
+                    COALESCE(
+                        NULLIF(trim(rm.appName), ''),
+                        NULLIF(trim(sar.appName), ''),
+                        NULLIF(trim(s.sourceAppBundleID), ''),
+                        NULLIF(trim(s.originalExtension), ''),
+                        ''
+                    ) AS source_app,
+                    COALESCE(rm.duration, sar.duration, s.playbackDuration) AS duration_seconds,
+                    s.fullText AS text
+                FROM session s
+                LEFT JOIN recordedmeeting rm ON rm.id = s.recordedMeetingID
+                LEFT JOIN systemaudiorecording sar ON sar.id = s.systemAudioRecordingID
+                WHERE lower(hex(s.id)) = ?
+                  AND s.dateDeleted IS NULL
+                  AND s.fullText IS NOT NULL
+                  AND length(trim(s.fullText)) > 0
                 LIMIT 1
                 """,
                 (hex_id,),
@@ -464,7 +504,10 @@ class MacWhisperConnector:
                 """
                 SELECT
                     dateCreated AS created_at,
+                    'dictation' AS source_type,
                     COALESCE(aiPromptName, targetAppLocalizedName, '') AS title,
+                    COALESCE(targetAppLocalizedName, targetAppBundleID, '') AS source_app,
+                    NULL AS duration_seconds,
                     COALESCE(
                         NULLIF(trim(processedText), ''),
                         NULLIF(trim(transcribedText), '')
@@ -482,6 +525,79 @@ class MacWhisperConnector:
             ).fetchone()
 
         return None
+
+    def _fetch_session_participants(
+        self,
+        conn: sqlite3.Connection,
+        session_hex_id: str,
+    ) -> list[str]:
+        """Return distinct speaker names detected for a session."""
+        if not session_hex_id:
+            return []
+
+        try:
+            rows = conn.execute(
+                """
+                SELECT sp.name AS name, MIN(tl.start) AS first_start
+                FROM transcriptline tl
+                JOIN speaker sp ON sp.id = tl.speakerID
+                WHERE lower(hex(tl.sessionId)) = ?
+                  AND sp.name IS NOT NULL
+                  AND length(trim(sp.name)) > 0
+                GROUP BY sp.id, sp.name
+                ORDER BY first_start ASC, lower(sp.name) ASC
+                """,
+                (session_hex_id,),
+            ).fetchall()
+        except sqlite3.Error as exc:
+            logger.debug(
+                "Failed to read MacWhisper transcriptline speakers for %s: %s",
+                session_hex_id,
+                exc,
+            )
+            rows = []
+
+        names = self._dedupe_names(row["name"] for row in rows)
+        if names:
+            return names
+
+        try:
+            rows = conn.execute(
+                """
+                SELECT sp.name AS name
+                FROM session_speaker ss
+                JOIN speaker sp ON sp.id = ss.speakerID
+                WHERE lower(hex(ss.sessionID)) = ?
+                  AND sp.name IS NOT NULL
+                  AND length(trim(sp.name)) > 0
+                ORDER BY lower(sp.name) ASC
+                """,
+                (session_hex_id,),
+            ).fetchall()
+        except sqlite3.Error as exc:
+            logger.debug(
+                "Failed to read MacWhisper session speakers for %s: %s",
+                session_hex_id,
+                exc,
+            )
+            return []
+
+        return self._dedupe_names(row["name"] for row in rows)
+
+    def _dedupe_names(self, names: Any) -> list[str]:
+        """Normalize and de-duplicate speaker names while preserving order."""
+        result: list[str] = []
+        seen: set[str] = set()
+        for name in names:
+            normalized = " ".join(str(name).split())
+            if not normalized:
+                continue
+            key = normalized.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(normalized)
+        return result
 
     async def ingest_entry(self, entry_id: str) -> IngestResult:
         """Ingest a single MacWhisper transcript entry into open-brain memory.

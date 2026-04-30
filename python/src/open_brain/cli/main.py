@@ -89,8 +89,19 @@ def _render_macwhisper_list(data: dict[str, Any]) -> str:
     for item in items:
         entry_id = item.get("entry_id", "-")
         created_at = item.get("created_at") or "-"
+        title = _single_line_preview(item.get("title", ""), limit=100)
+        source_app = item.get("source_app") or ""
+        duration = _format_duration(item.get("duration_seconds"))
+        participants = item.get("participants") or []
         preview = _single_line_preview(item.get("text_preview", ""))
         lines.append(f"{created_at}  {entry_id}")
+        details = "  ".join(
+            part for part in [title, source_app, duration] if part
+        )
+        if details:
+            lines.append(f"  {details}")
+        if participants:
+            lines.append(f"  Participants: {', '.join(str(p) for p in participants)}")
         if preview:
             lines.append(f"  {preview}")
 
@@ -134,6 +145,26 @@ def _single_line_preview(text: str, limit: int = 120) -> str:
     if len(preview) <= limit:
         return preview
     return preview[: limit - 3].rstrip() + "..."
+
+
+def _format_duration(value: Any) -> str:
+    """Format a duration in seconds for compact terminal output."""
+    if value is None or value == "":
+        return ""
+    try:
+        seconds = int(round(float(value)))
+    except (TypeError, ValueError):
+        return ""
+    if seconds <= 0:
+        return ""
+
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours:d}h {minutes:02d}m"
+    if minutes:
+        return f"{minutes:d}m {seconds:02d}s"
+    return f"{seconds:d}s"
 
 
 def _error(msg: str) -> None:
@@ -699,7 +730,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # ingest macwhisper
     p_ingest_macwhisper = ingest_sub.add_parser(
         "macwhisper",
-        help="List/read local MacWhisper history and ingest transcript text",
+        help="List/read local MacWhisper sessions and ingest transcript text",
     )
     macwhisper_sub = p_ingest_macwhisper.add_subparsers(
         dest="macwhisper_command",
@@ -709,7 +740,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_macwhisper_list = macwhisper_sub.add_parser(
         "list",
-        help="List recent local MacWhisper transcript entries",
+        help="List recent local MacWhisper transcript sessions/meetings",
     )
     p_macwhisper_list.add_argument(
         "--limit",

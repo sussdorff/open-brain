@@ -302,9 +302,14 @@ class TestOutput:
                 "count": 1,
                 "items": [
                     {
-                        "entry_id": "dictation:abc123",
+                        "entry_id": "session:abc123",
                         "created_at": "2026-04-30 08:22:41",
                         "text_preview": "A short transcript preview.",
+                        "title": "Planning Sync",
+                        "source_type": "recorded_meeting",
+                        "source_app": "Teams",
+                        "duration_seconds": 1800,
+                        "participants": ["Alice", "Bob"],
                     }
                 ],
             },
@@ -312,7 +317,9 @@ class TestOutput:
         )
         captured = capsys.readouterr()
         assert "MacWhisper history: /tmp/MacWhisper" in captured.out
-        assert "dictation:abc123" in captured.out
+        assert "session:abc123" in captured.out
+        assert "Planning Sync  Teams  30m 00s" in captured.out
+        assert "Participants: Alice, Bob" in captured.out
         assert "ob ingest macwhisper entry <entry-id>" in captured.out
         assert '"items"' not in captured.out
 

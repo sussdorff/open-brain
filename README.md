@@ -479,13 +479,17 @@ You can also set `OB_DIRECT=1` as an environment variable instead of passing `--
 
 ### `ob ingest macwhisper`
 
-Lists and ingests transcripts from the local MacWhisper history directory. This
-command intentionally reads MacWhisper files on the CLI machine, then submits the
-transcript text to the configured open-brain server. That means it still works
-when the server runs somewhere else.
+Lists and ingests transcript sessions from the local MacWhisper history
+directory. For modern MacWhisper SQLite history, `list` shows transcript
+sessions/meetings by default, including source app, duration, and detected
+participants from MacWhisper speaker data. Dictations remain readable by ID but
+are not part of the default meeting/session list. This command intentionally
+reads MacWhisper files on the CLI machine, then submits the transcript text to
+the configured open-brain server. That means it still works when the server runs
+somewhere else.
 
 ```bash
-# Show recent local MacWhisper transcript entries
+# Show recent local MacWhisper transcript sessions/meetings
 ob ingest macwhisper list --limit 10
 
 # Machine-readable output
