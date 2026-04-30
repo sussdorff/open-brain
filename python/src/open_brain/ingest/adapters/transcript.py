@@ -16,6 +16,7 @@ import dataclasses
 import hashlib
 import json
 import logging
+import re
 import time
 import uuid
 
@@ -111,6 +112,9 @@ class TranscriptIngestor:
         """
         if not text or not text.strip():
             raise ValueError("text must not be empty or whitespace-only")
+
+        # Reset per-run cache at the start of each ingest call.
+        self._dedup_confirm_cache = {}
 
         ingest_start = time.monotonic()
 
@@ -445,7 +449,11 @@ class TranscriptIngestor:
                 model=get_config().LLM_MODEL,
                 max_tokens=64,
             )
-            data = json.loads(response)
+            cleaned = response.strip()
+            fence_match = re.match(r"^```(?:json)?\s*\n(.*?)\n```\s*$", cleaned, re.DOTALL)
+            if fence_match:
+                cleaned = fence_match.group(1)
+            data = json.loads(cleaned)
             confirmed: bool = bool(data.get("confirmed", False))
         except Exception as e:
             logger.warning("llm_dedup_confirm_error name=%r error=%r", incoming_name, e)
@@ -481,19 +489,18 @@ class TranscriptIngestor:
         metrics.record_dedup_decision(preliminary.action)
         logger.debug("dedup_decision action=%s name=%r", preliminary.action, name)
 
-        # Pass 2: if llm_confirm is needed, make the async LLM call and re-run match
+        # Pass 2: if llm_confirm is needed, make the async LLM call and
+        # construct the final decision directly from the preliminary result
+        # (avoids a redundant second call to match_person with all its scoring).
         decision = preliminary
         if preliminary.action == "llm_confirm":
             metrics.record_llm_call("dedup_confirm")
             confirmed = await self._llm_dedup_confirm(name, preliminary)
-            cached_result = confirmed  # captured for closure
-
-            decision = match_person(
-                new_name=name,
-                new_org=None,
-                new_linkedin=None,
-                existing=existing_records,
-                llm_confirm=lambda d: cached_result,
+            decision = MatchDecision(
+                action="auto_merge" if confirmed else "new",
+                target=preliminary.target,
+                runners_up=preliminary.runners_up,
+                rationale=f"llm_confirm decided: {'auto_merge' if confirmed else 'new'}",
             )
 
         if decision.action == "auto_merge" and decision.target is not None:
