@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import platform
+import sqlite3
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -99,6 +100,7 @@ _CANDIDATE_PATHS = [
     Path.home() / "Library/Containers/com.goodsnooze.MacWhisper/Data/Library/Application Support/MacWhisper",
     Path.home() / "Library/Application Support/MacWhisper",
 ]
+_SQLITE_RELATIVE_PATH = Path("Database/main.sqlite")
 
 
 class MacWhisperConnector:
@@ -234,8 +236,8 @@ class MacWhisperConnector:
     async def list_recent(self, n: int = 10) -> list[TranscriptRef]:
         """List the most recent n transcript entries (ADR-0001 Protocol method).
 
-        Reads JSON files from the history directory, sorted by created_at
-        descending.
+        Reads legacy JSON files and newer SQLite-backed MacWhisper history,
+        sorted by created_at descending.
 
         Args:
             n: Maximum number of entries to return.
@@ -247,27 +249,108 @@ class MacWhisperConnector:
             MacWhisperNotFoundError: If the history directory cannot be found.
         """
         history_dir = self.discover_history_path()
-        entries: list[dict] = []
+        refs = self._list_recent_json(history_dir)
+        refs.extend(self._list_recent_sqlite(history_dir, n=n))
+        refs.sort(key=lambda ref: ref.created_at, reverse=True)
+        return refs[:n]
+
+    def _list_recent_json(self, history_dir: Path) -> list[TranscriptRef]:
+        """List legacy JSON transcript refs from the history directory."""
+        refs: list[TranscriptRef] = []
 
         for json_file in history_dir.glob("*.json"):
             try:
                 data = json.loads(json_file.read_text(encoding="utf-8"))
-                entries.append(data)
+                refs.append(
+                    TranscriptRef(
+                        entry_id=data.get("id", ""),
+                        created_at=data.get("created_at", ""),
+                        text_preview=data.get("text", "")[:200],
+                    )
+                )
             except (json.JSONDecodeError, OSError) as exc:
                 logger.warning("Failed to parse %s: %s", json_file, exc)
 
-        # Sort by created_at descending (newest first)
-        entries.sort(key=lambda e: e.get("created_at", ""), reverse=True)
-        entries = entries[:n]
+        return refs
 
-        return [
-            TranscriptRef(
-                entry_id=entry.get("id", ""),
-                created_at=entry.get("created_at", ""),
-                text_preview=entry.get("text", "")[:200],
+    def _list_recent_sqlite(self, history_dir: Path, n: int) -> list[TranscriptRef]:
+        """List transcript refs from modern MacWhisper SQLite history."""
+        if n <= 0:
+            return []
+
+        db_path = history_dir / _SQLITE_RELATIVE_PATH
+        if not db_path.exists():
+            return []
+
+        refs: list[TranscriptRef] = []
+        conn: sqlite3.Connection | None = None
+        try:
+            conn = self._connect_sqlite(db_path)
+            rows = conn.execute(
+                """
+                SELECT
+                    'session:' || lower(hex(id)) AS entry_id,
+                    dateCreated AS created_at,
+                    fullText AS text
+                FROM session
+                WHERE dateDeleted IS NULL
+                  AND fullText IS NOT NULL
+                  AND length(trim(fullText)) > 0
+                ORDER BY dateCreated DESC
+                LIMIT ?
+                """,
+                (n,),
+            ).fetchall()
+            refs.extend(
+                TranscriptRef(
+                    entry_id=row["entry_id"],
+                    created_at=row["created_at"] or "",
+                    text_preview=(row["text"] or "")[:200],
+                )
+                for row in rows
             )
-            for entry in entries
-        ]
+
+            rows = conn.execute(
+                """
+                SELECT
+                    'dictation:' || lower(hex(id)) AS entry_id,
+                    dateCreated AS created_at,
+                    COALESCE(
+                        NULLIF(trim(processedText), ''),
+                        NULLIF(trim(transcribedText), '')
+                    ) AS text
+                FROM dictation
+                WHERE dateDeleted IS NULL
+                  AND COALESCE(
+                        NULLIF(trim(processedText), ''),
+                        NULLIF(trim(transcribedText), '')
+                      ) IS NOT NULL
+                ORDER BY dateCreated DESC
+                LIMIT ?
+                """,
+                (n,),
+            ).fetchall()
+            refs.extend(
+                TranscriptRef(
+                    entry_id=row["entry_id"],
+                    created_at=row["created_at"] or "",
+                    text_preview=(row["text"] or "")[:200],
+                )
+                for row in rows
+            )
+        except sqlite3.Error as exc:
+            logger.warning("Failed to read MacWhisper SQLite history %s: %s", db_path, exc)
+        finally:
+            if conn is not None:
+                conn.close()
+
+        return refs
+
+    def _connect_sqlite(self, db_path: Path) -> sqlite3.Connection:
+        """Open a read-only SQLite connection for MacWhisper's database."""
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        return conn
 
     def read_entry(self, entry_id: str) -> tuple[str, dict]:
         """Read a single transcript entry by ID.
@@ -285,15 +368,120 @@ class MacWhisperConnector:
         history_dir = self.discover_history_path()
         entry_path = history_dir / f"{entry_id}.json"
 
-        if not entry_path.exists():
-            raise FileNotFoundError(
-                f"MacWhisper entry not found: {entry_path}"
-            )
+        if entry_path.exists():
+            data = json.loads(entry_path.read_text(encoding="utf-8"))
+            text = data.get("text", "")
+            metadata = {k: v for k, v in data.items() if k != "text"}
+            return text, metadata
 
-        data = json.loads(entry_path.read_text(encoding="utf-8"))
-        text = data.get("text", "")
-        metadata = {k: v for k, v in data.items() if k != "text"}
-        return text, metadata
+        sqlite_entry = self._read_sqlite_entry(history_dir, entry_id)
+        if sqlite_entry is not None:
+            return sqlite_entry
+
+        raise FileNotFoundError(
+            f"MacWhisper entry not found: {entry_id}. Tried {entry_path} "
+            f"and {_SQLITE_RELATIVE_PATH}"
+        )
+
+    def _read_sqlite_entry(self, history_dir: Path, entry_id: str) -> tuple[str, dict] | None:
+        """Read one transcript from modern MacWhisper SQLite history."""
+        db_path = history_dir / _SQLITE_RELATIVE_PATH
+        if not db_path.exists():
+            return None
+
+        source_type, hex_id = self._parse_sqlite_entry_id(entry_id)
+        if not hex_id:
+            return None
+
+        conn: sqlite3.Connection | None = None
+        try:
+            conn = self._connect_sqlite(db_path)
+            source_types = [source_type] if source_type else ["session", "dictation"]
+            for candidate_type in source_types:
+                row = self._fetch_sqlite_entry(conn, candidate_type, hex_id)
+                if row is None:
+                    continue
+                text = row["text"] or ""
+                return text, {
+                    "id": hex_id,
+                    "source_type": candidate_type,
+                    "created_at": row["created_at"] or "",
+                    "title": row["title"] or "",
+                    "medium": "macwhisper",
+                }
+        except sqlite3.Error as exc:
+            logger.warning("Failed to read MacWhisper SQLite entry %s: %s", entry_id, exc)
+        finally:
+            if conn is not None:
+                conn.close()
+
+        return None
+
+    def _parse_sqlite_entry_id(self, entry_id: str) -> tuple[str | None, str]:
+        """Return optional source type and normalized hex id."""
+        source_type: str | None = None
+        raw_id = entry_id
+        if ":" in entry_id:
+            prefix, raw_id = entry_id.split(":", 1)
+            if prefix in {"session", "dictation"}:
+                source_type = prefix
+
+        normalized = raw_id.replace("-", "").lower()
+        if len(normalized) != 32:
+            return source_type, ""
+        try:
+            bytes.fromhex(normalized)
+        except ValueError:
+            return source_type, ""
+        return source_type, normalized
+
+    def _fetch_sqlite_entry(
+        self,
+        conn: sqlite3.Connection,
+        source_type: str,
+        hex_id: str,
+    ) -> sqlite3.Row | None:
+        """Fetch a SQLite-backed session or dictation by hex id."""
+        if source_type == "session":
+            return conn.execute(
+                """
+                SELECT
+                    dateCreated AS created_at,
+                    COALESCE(userChosenTitle, aiTitle, originalFilename, textPreview, '') AS title,
+                    fullText AS text
+                FROM session
+                WHERE lower(hex(id)) = ?
+                  AND dateDeleted IS NULL
+                  AND fullText IS NOT NULL
+                  AND length(trim(fullText)) > 0
+                LIMIT 1
+                """,
+                (hex_id,),
+            ).fetchone()
+
+        if source_type == "dictation":
+            return conn.execute(
+                """
+                SELECT
+                    dateCreated AS created_at,
+                    COALESCE(aiPromptName, targetAppLocalizedName, '') AS title,
+                    COALESCE(
+                        NULLIF(trim(processedText), ''),
+                        NULLIF(trim(transcribedText), '')
+                    ) AS text
+                FROM dictation
+                WHERE lower(hex(id)) = ?
+                  AND dateDeleted IS NULL
+                  AND COALESCE(
+                        NULLIF(trim(processedText), ''),
+                        NULLIF(trim(transcribedText), '')
+                      ) IS NOT NULL
+                LIMIT 1
+                """,
+                (hex_id,),
+            ).fetchone()
+
+        return None
 
     async def ingest_entry(self, entry_id: str) -> IngestResult:
         """Ingest a single MacWhisper transcript entry into open-brain memory.

@@ -14,6 +14,7 @@ Acceptance criteria covered:
 
 import json
 import os
+import sqlite3
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -43,6 +44,9 @@ SAMPLE_ENTRY = {
     "created_at": "2026-04-24T10:00:00",
 }
 
+SESSION_ID_HEX = "1fe090fa10084fe792b92278532f76b3"
+DICTATION_ID_HEX = "9e68fb295680454cb2db649d536e0894"
+
 
 def _make_data_layer() -> MagicMock:
     """Return a minimal mock DataLayer with spec."""
@@ -61,12 +65,113 @@ def _make_connector(
     with __import__("unittest.mock", fromlist=["patch"]).patch.dict(
         os.environ, {"MACWHISPER_HISTORY_PATH": history_path}
     ):
-        return MacWhisperConnector(
+        connector = MacWhisperConnector(
             data_layer=dl,
             command_runner=runner,
             ingestor=ingestor,
             skip_platform_check=True,
         )
+    if history_path:
+        connector._cached_path = Path(history_path)
+    return connector
+
+
+def _create_sqlite_history(history_path: Path) -> None:
+    """Create a minimal modern MacWhisper SQLite history fixture."""
+    db_dir = history_path / "Database"
+    db_dir.mkdir(parents=True)
+    conn = sqlite3.connect(db_dir / "main.sqlite")
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE session (
+                id BLOB PRIMARY KEY NOT NULL,
+                dateCreated DATETIME NOT NULL,
+                dateUpdated DATETIME,
+                dateLastOpened DATETIME,
+                textPreview TEXT,
+                aiSummary TEXT,
+                fullText TEXT,
+                userChosenTitle TEXT,
+                transcriptionDidSucceed BOOLEAN,
+                modelEngine TEXT,
+                modelIdentifer TEXT,
+                modelInputLanguage TEXT,
+                hasBeenDiarized BOOLEAN NOT NULL DEFAULT 0,
+                detectedLanguage TEXT,
+                isMergedFromMultipleTracks BOOLEAN NOT NULL DEFAULT 0,
+                isFromYoutube BOOLEAN NOT NULL DEFAULT 0,
+                originalFilename TEXT,
+                originalExtension TEXT,
+                startTimeOffset DOUBLE NOT NULL DEFAULT 0.0,
+                wasTranslatedToEnglishDuringTranscription BOOLEAN NOT NULL DEFAULT 0,
+                timeTakenToTranscribe DOUBLE,
+                playbackDuration DOUBLE,
+                sourceAppBundleID TEXT,
+                aiSummaryShort TEXT,
+                recordedMeetingID BLOB,
+                systemAudioRecordingID BLOB,
+                isTransient BOOLEAN NOT NULL DEFAULT 0,
+                voiceMemoID BLOB,
+                podcastID BLOB,
+                importedFromDefaults BOOLEAN NOT NULL DEFAULT 0,
+                isBeingRetranscribed BOOLEAN NOT NULL DEFAULT 0,
+                dateRetranscribed DATETIME,
+                downloadMetadataID BLOB,
+                aiTitle TEXT,
+                originalFileHash TEXT,
+                dateDeleted DOUBLE
+            );
+            CREATE TABLE dictation (
+                id BLOB PRIMARY KEY NOT NULL,
+                dateCreated DATETIME NOT NULL,
+                transcribedText TEXT,
+                processedText TEXT,
+                mediaFileID BLOB,
+                transcriptionDidSucceed BOOLEAN,
+                aiPromptID BLOB,
+                aiPromptName TEXT,
+                aiServiceName TEXT,
+                aiServiceID BLOB,
+                targetAppBundleID TEXT,
+                targetAppLocalizedName TEXT,
+                dateDeleted DOUBLE,
+                transcriptionError TEXT,
+                processingError TEXT
+            );
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO session (
+                id, dateCreated, textPreview, fullText, userChosenTitle, dateDeleted
+            ) VALUES (?, ?, ?, ?, ?, NULL)
+            """,
+            (
+                bytes.fromhex(SESSION_ID_HEX),
+                "2026-04-29 10:02:52.120",
+                "Session preview",
+                "Full session transcript.",
+                "Rucksprache zu Mira",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO dictation (
+                id, dateCreated, transcribedText, processedText, aiPromptName, dateDeleted
+            ) VALUES (?, ?, ?, ?, ?, NULL)
+            """,
+            (
+                bytes.fromhex(DICTATION_ID_HEX),
+                "2026-04-30 08:22:41.412",
+                "Raw dictation transcript.",
+                "Processed dictation transcript.",
+                "Dictation prompt",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 # ─── AC1: discover_history_path — container path ─────────────────────────────
@@ -184,6 +289,48 @@ class TestListRecentEmptyDir:
         connector = _make_connector()
         results = await connector.list_recent()
         assert results == []
+
+
+class TestListRecentSQLiteHistory:
+    async def test_returns_session_and_dictation_entries(self, tmp_path):
+        """Modern MacWhisper SQLite history is listed newest first."""
+        _create_sqlite_history(tmp_path)
+        connector = _make_connector(history_path=str(tmp_path))
+
+        results = await connector.list_recent(n=5)
+
+        assert [r.entry_id for r in results] == [
+            f"dictation:{DICTATION_ID_HEX}",
+            f"session:{SESSION_ID_HEX}",
+        ]
+        assert results[0].created_at == "2026-04-30 08:22:41.412"
+        assert results[0].text_preview == "Processed dictation transcript."
+
+
+class TestReadSQLiteEntry:
+    def test_reads_session_entry(self, tmp_path):
+        """read_entry supports session:<hex-id> from modern SQLite history."""
+        _create_sqlite_history(tmp_path)
+        connector = _make_connector(history_path=str(tmp_path))
+
+        text, metadata = connector.read_entry(f"session:{SESSION_ID_HEX}")
+
+        assert text == "Full session transcript."
+        assert metadata["source_type"] == "session"
+        assert metadata["title"] == "Rucksprache zu Mira"
+        assert metadata["medium"] == "macwhisper"
+
+    def test_reads_dictation_entry(self, tmp_path):
+        """read_entry supports dictation:<hex-id> from modern SQLite history."""
+        _create_sqlite_history(tmp_path)
+        connector = _make_connector(history_path=str(tmp_path))
+
+        text, metadata = connector.read_entry(f"dictation:{DICTATION_ID_HEX}")
+
+        assert text == "Processed dictation transcript."
+        assert metadata["source_type"] == "dictation"
+        assert metadata["title"] == "Dictation prompt"
+        assert metadata["medium"] == "macwhisper"
 
 
 # ─── AC3 (ingest_entry): delegates to TranscriptIngestor ─────────────────────

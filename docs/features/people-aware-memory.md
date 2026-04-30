@@ -112,14 +112,15 @@ does not need access to the MacWhisper history directory.
 ob --pretty ingest macwhisper list --limit 10
 
 # Ingest one entry by ID
-ob ingest macwhisper ingest <entry-id>
+ob ingest macwhisper entry <entry-id>
 
 # Override auto-discovery for exported or custom history directories
-ob ingest macwhisper ingest <entry-id> --history-path ~/Exports/MacWhisper
+ob ingest macwhisper entry <entry-id> --history-path ~/Exports/MacWhisper
 ```
 
 By default, the source reference is `macwhisper:<entry-id>` and the medium hint
 is `macwhisper` unless entry metadata or `--medium-hint` overrides it.
+`macwhisper ingest` is accepted as a compatibility alias.
 
 ---
 

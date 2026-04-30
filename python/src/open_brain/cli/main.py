@@ -356,7 +356,7 @@ async def _cmd_ingest_macwhisper(args: argparse.Namespace) -> Any:
     """Dispatch MacWhisper ingest subcommands."""
     if args.macwhisper_command == "list":
         return await _cmd_ingest_macwhisper_list(args)
-    if args.macwhisper_command == "ingest":
+    if args.macwhisper_command in {"entry", "ingest"}:
         return await _cmd_ingest_macwhisper_ingest(args)
     raise ValueError(f"Unknown macwhisper command: {args.macwhisper_command}")
 
@@ -570,7 +570,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # ingest transcript
     p_ingest_transcript = ingest_sub.add_parser(
         "transcript",
-        help="Ingest a transcript from a file or stdin",
+        help="Ingest transcript text from a file or stdin",
     )
     p_ingest_transcript.add_argument(
         "--source-ref",
@@ -611,7 +611,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # ingest macwhisper
     p_ingest_macwhisper = ingest_sub.add_parser(
         "macwhisper",
-        help="Ingest transcripts from local MacWhisper history",
+        help="List/read local MacWhisper history and ingest transcript text",
     )
     macwhisper_sub = p_ingest_macwhisper.add_subparsers(
         dest="macwhisper_command",
@@ -637,7 +637,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     p_macwhisper_ingest = macwhisper_sub.add_parser(
-        "ingest",
+        "entry",
+        aliases=["ingest"],
         help="Ingest one local MacWhisper transcript by entry ID",
     )
     p_macwhisper_ingest.add_argument(

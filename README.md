@@ -411,7 +411,7 @@ ob search "what did I decide about X?"
 ob save "Decided to use asyncpg for lower overhead" --type decision
 ob ingest transcript --source-ref meeting-2026-04-29 --file transcript.txt
 ob --pretty ingest macwhisper list --limit 5
-ob ingest macwhisper ingest <entry-id>
+ob ingest macwhisper entry <entry-id>
 ob people list --collisions
 ```
 
@@ -489,17 +489,18 @@ when the server runs somewhere else.
 ob --pretty ingest macwhisper list --limit 10
 
 # Ingest one entry by ID; defaults to source_ref macwhisper:<entry-id>
-ob ingest macwhisper ingest <entry-id>
+ob ingest macwhisper entry <entry-id>
 
 # Use a non-standard history directory
 ob ingest macwhisper list --history-path ~/Exports/MacWhisper
-ob ingest macwhisper ingest <entry-id> --history-path ~/Exports/MacWhisper
+ob ingest macwhisper entry <entry-id> --history-path ~/Exports/MacWhisper
 ```
 
 The history path is auto-discovered from `MACWHISPER_HISTORY_PATH`, the standard
 MacWhisper sandbox/application-support directories, or path hints from the `mw`
-CLI. `macwhisper ingest` defaults the medium hint to `macwhisper` unless the
+CLI. `macwhisper entry` defaults the medium hint to `macwhisper` unless the
 MacWhisper entry metadata or `--medium-hint` provides a more specific value.
+`macwhisper ingest` is accepted as a compatibility alias.
 
 ## Documentation
 

@@ -43,21 +43,27 @@ class TestIngestMacWhisperArgParsing:
         assert args.history_path == "/tmp/macwhisper"
 
     def test_ingest_entry_defaults(self):
-        args = parse(["ingest", "macwhisper", "ingest", "abc123"])
+        args = parse(["ingest", "macwhisper", "entry", "abc123"])
 
         assert args.command == "ingest"
         assert args.ingest_command == "macwhisper"
-        assert args.macwhisper_command == "ingest"
+        assert args.macwhisper_command == "entry"
         assert args.entry_id == "abc123"
         assert args.source_ref is None
         assert args.medium_hint is None
         assert args.direct is False
 
+    def test_ingest_entry_legacy_alias(self):
+        args = parse(["ingest", "macwhisper", "ingest", "abc123"])
+
+        assert args.macwhisper_command == "ingest"
+        assert args.entry_id == "abc123"
+
     def test_ingest_entry_overrides(self):
         args = parse([
             "ingest",
             "macwhisper",
-            "ingest",
+            "entry",
             "abc123",
             "--history-path=/tmp/macwhisper",
             "--source-ref=custom-ref",
@@ -142,7 +148,7 @@ class TestIngestMacWhisperHandlers:
             "Transcript content.",
             {"medium": "meeting"},
         )
-        args = parse(["ingest", "macwhisper", "ingest", "abc123"])
+        args = parse(["ingest", "macwhisper", "entry", "abc123"])
 
         with (
             patch(
@@ -172,7 +178,7 @@ class TestIngestMacWhisperHandlers:
         args = parse([
             "ingest",
             "macwhisper",
-            "ingest",
+            "entry",
             "abc123",
             "--source-ref=custom-ref",
             "--medium-hint=dictation",
@@ -201,7 +207,7 @@ class TestIngestMacWhisperHandlers:
     async def test_ingest_defaults_medium_hint_to_macwhisper(self):
         connector = MagicMock()
         connector.read_entry.return_value = ("Transcript content.", {})
-        args = parse(["ingest", "macwhisper", "ingest", "abc123"])
+        args = parse(["ingest", "macwhisper", "entry", "abc123"])
 
         with (
             patch(
