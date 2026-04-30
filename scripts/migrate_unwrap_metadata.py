@@ -117,10 +117,10 @@ async def main() -> None:
                     )
                     continue
 
-                # Re-store as proper JSONB object
+                # Re-store as proper JSONB object (codec handles encoding — pass dict directly)
                 await conn.execute(
                     "UPDATE memories SET metadata = $1::jsonb WHERE id = $2",
-                    json.dumps(unwrapped),
+                    unwrapped,  # pass dict directly; asyncpg codec handles json.dumps()
                     memory_id,
                 )
                 batch_fixed += 1
