@@ -12,9 +12,11 @@ from open_brain.cli.client import (
     MCPError,
     call_tool,
     _extract_result,
+    _get_server_url,
     _load_token,
     _load_url_token,
     _parse_sse_response,
+    _normalize_mcp_url,
     _with_url_token,
 )
 from open_brain.cli.main import _build_parser, _output
@@ -279,19 +281,59 @@ class TestLoadToken:
 
     def test_reads_token_file(self, tmp_path, monkeypatch):
         monkeypatch.delenv("OB_TOKEN", raising=False)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
         token_file = tmp_path / ".open-brain" / "token"
         token_file.parent.mkdir(parents=True)
         token_file.write_text("file-token\n")
 
-        with patch("open_brain.cli.client.TOKEN_FILE", token_file):
+        with (
+            patch("open_brain.cli.client.LEGACY_CONFIG_FILE", tmp_path / "legacy.json"),
+            patch("open_brain.cli.client.TOKEN_FILE", token_file),
+        ):
             result = _load_token()
         assert result == "file-token"
 
+    def test_reads_xdg_config_token(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("OB_TOKEN", raising=False)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        config_file = tmp_path / "xdg" / "open-brain" / "config.json"
+        config_file.parent.mkdir(parents=True)
+        config_file.write_text(json.dumps({"token": "xdg-token"}))
+
+        with (
+            patch("open_brain.cli.client.LEGACY_CONFIG_FILE", tmp_path / "legacy.json"),
+            patch("open_brain.cli.client.TOKEN_FILE", tmp_path / "legacy-token"),
+        ):
+            result = _load_token()
+
+        assert result == "xdg-token"
+
+    def test_reads_xdg_token_file(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("OB_TOKEN", raising=False)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        token_file = tmp_path / "xdg" / "open-brain" / "token"
+        token_file.parent.mkdir(parents=True)
+        token_file.write_text("xdg-file-token\n")
+
+        with (
+            patch("open_brain.cli.client.LEGACY_CONFIG_FILE", tmp_path / "legacy.json"),
+            patch("open_brain.cli.client.TOKEN_FILE", tmp_path / "legacy-token"),
+        ):
+            result = _load_token()
+
+        assert result == "xdg-file-token"
+
     def test_returns_none_when_no_token(self, tmp_path, monkeypatch):
         monkeypatch.delenv("OB_TOKEN", raising=False)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
         nonexistent = tmp_path / "no-such-file"
-        with patch("open_brain.cli.client.TOKEN_FILE", nonexistent):
+
+        with (
+            patch("open_brain.cli.client.LEGACY_CONFIG_FILE", tmp_path / "legacy.json"),
+            patch("open_brain.cli.client.TOKEN_FILE", nonexistent),
+        ):
             result = _load_token()
+
         assert result is None
 
 
@@ -309,23 +351,113 @@ class TestLoadUrlToken:
 
     def test_reads_url_token_file(self, tmp_path, monkeypatch):
         monkeypatch.delenv("OB_URL_TOKEN", raising=False)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
         token_file = tmp_path / ".open-brain" / "url-token"
         token_file.parent.mkdir(parents=True)
         token_file.write_text("file-url-token\n")
 
-        with patch("open_brain.cli.client.URL_TOKEN_FILE", token_file):
+        with (
+            patch("open_brain.cli.client.LEGACY_CONFIG_FILE", tmp_path / "legacy.json"),
+            patch("open_brain.cli.client.URL_TOKEN_FILE", token_file),
+        ):
             result = _load_url_token()
 
         assert result == "file-url-token"
 
+    def test_reads_xdg_config_url_token(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("OB_URL_TOKEN", raising=False)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        config_file = tmp_path / "xdg" / "open-brain" / "config.json"
+        config_file.parent.mkdir(parents=True)
+        config_file.write_text(json.dumps({"url_token": "xdg-url-token"}))
+
+        with (
+            patch("open_brain.cli.client.LEGACY_CONFIG_FILE", tmp_path / "legacy.json"),
+            patch("open_brain.cli.client.URL_TOKEN_FILE", tmp_path / "legacy-url-token"),
+        ):
+            result = _load_url_token()
+
+        assert result == "xdg-url-token"
+
+    def test_reads_xdg_url_token_file(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("OB_URL_TOKEN", raising=False)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        token_file = tmp_path / "xdg" / "open-brain" / "url-token"
+        token_file.parent.mkdir(parents=True)
+        token_file.write_text("xdg-file-url-token\n")
+
+        with (
+            patch("open_brain.cli.client.LEGACY_CONFIG_FILE", tmp_path / "legacy.json"),
+            patch("open_brain.cli.client.URL_TOKEN_FILE", tmp_path / "legacy-url-token"),
+        ):
+            result = _load_url_token()
+
+        assert result == "xdg-file-url-token"
+
     def test_returns_none_when_no_url_token(self, tmp_path, monkeypatch):
         monkeypatch.delenv("OB_URL_TOKEN", raising=False)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
         nonexistent = tmp_path / "no-such-file"
 
-        with patch("open_brain.cli.client.URL_TOKEN_FILE", nonexistent):
+        with (
+            patch("open_brain.cli.client.LEGACY_CONFIG_FILE", tmp_path / "legacy.json"),
+            patch("open_brain.cli.client.URL_TOKEN_FILE", nonexistent),
+        ):
             result = _load_url_token()
 
         assert result is None
+
+
+class TestGetServerUrl:
+    def test_env_var_takes_priority(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("OB_URL", "https://env.example.com/mcp")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        config_file = tmp_path / "xdg" / "open-brain" / "config.json"
+        config_file.parent.mkdir(parents=True)
+        config_file.write_text(json.dumps({"mcp_url": "https://xdg.example.com/mcp"}))
+
+        assert _get_server_url() == "https://env.example.com/mcp"
+
+    def test_reads_xdg_mcp_url(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("OB_URL", raising=False)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        config_file = tmp_path / "xdg" / "open-brain" / "config.json"
+        config_file.parent.mkdir(parents=True)
+        config_file.write_text(json.dumps({"mcp_url": "https://xdg.example.com/custom"}))
+
+        with patch("open_brain.cli.client.LEGACY_CONFIG_FILE", tmp_path / "legacy.json"):
+            assert _get_server_url() == "https://xdg.example.com/custom"
+
+    def test_normalizes_xdg_server_url_to_mcp_endpoint(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("OB_URL", raising=False)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        config_file = tmp_path / "xdg" / "open-brain" / "config.json"
+        config_file.parent.mkdir(parents=True)
+        config_file.write_text(json.dumps({"server_url": "https://brain.example.com"}))
+
+        with patch("open_brain.cli.client.LEGACY_CONFIG_FILE", tmp_path / "legacy.json"):
+            assert _get_server_url() == "https://brain.example.com/mcp"
+
+    def test_xdg_config_overrides_legacy_config(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("OB_URL", raising=False)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        legacy_config = tmp_path / "legacy" / "config.json"
+        legacy_config.parent.mkdir(parents=True)
+        legacy_config.write_text(json.dumps({"server_url": "https://legacy.example.com"}))
+        xdg_config = tmp_path / "xdg" / "open-brain" / "config.json"
+        xdg_config.parent.mkdir(parents=True)
+        xdg_config.write_text(json.dumps({"server_url": "https://xdg.example.com"}))
+
+        with patch("open_brain.cli.client.LEGACY_CONFIG_FILE", legacy_config):
+            assert _get_server_url() == "https://xdg.example.com/mcp"
+
+
+class TestNormalizeMcpUrl:
+    def test_appends_mcp_to_base_url(self):
+        assert _normalize_mcp_url("https://brain.example.com") == "https://brain.example.com/mcp"
+
+    def test_keeps_explicit_path(self):
+        assert _normalize_mcp_url("https://brain.example.com/custom") == "https://brain.example.com/custom"
 
 
 class TestWithUrlToken:

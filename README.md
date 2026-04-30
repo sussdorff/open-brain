@@ -140,21 +140,34 @@ uv tool install --python 3.14 "git+https://github.com/sussdorff/open-brain.git#s
 Point the CLI at your MCP endpoint and provide the URL token from step 2:
 
 ```bash
-export OB_URL="https://your-server.example.com/mcp"
-export OB_URL_TOKEN="TOKEN_FROM_STEP_2"
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/open-brain"
+cat > "${XDG_CONFIG_HOME:-$HOME/.config}/open-brain/config.json" <<'JSON'
+{
+  "server_url": "https://your-server.example.com",
+  "url_token": "TOKEN_FROM_STEP_2"
+}
+JSON
+chmod 600 "${XDG_CONFIG_HOME:-$HOME/.config}/open-brain/config.json"
 
 ob --pretty doctor
 ob search "what did I decide about X?"
 ```
 
-Instead of `OB_URL_TOKEN`, you can save the token once:
+The CLI follows XDG config conventions. The primary config file is:
+
+- `$XDG_CONFIG_HOME/open-brain/config.json`
+- `~/.config/open-brain/config.json` when `XDG_CONFIG_HOME` is unset
+
+Use `server_url` for the public base URL (`/mcp` is appended automatically) or `mcp_url` for an explicit MCP endpoint.
+
+Environment variables override config:
 
 ```bash
-mkdir -p ~/.open-brain
-printf '%s\n' 'TOKEN_FROM_STEP_2' > ~/.open-brain/url-token
+export OB_URL="https://your-server.example.com/mcp"
+export OB_URL_TOKEN="TOKEN_FROM_STEP_2"
 ```
 
-`OB_URL` must be the MCP endpoint, usually `/mcp`. OAuth bearer tokens are also supported via `OB_TOKEN` or `~/.open-brain/token`; URL tokens use `OB_URL_TOKEN`, `~/.open-brain/url-token`, or an explicit `?token=...` in `OB_URL`.
+OAuth bearer tokens are also supported via `OB_TOKEN` or `"token"` in the config file. URL tokens use `OB_URL_TOKEN`, `"url_token"` in the config file, or an explicit `?token=...` in `OB_URL`. Legacy `~/.open-brain/config.json`, `~/.open-brain/token`, and `~/.open-brain/url-token` files still work as fallback.
 
 ### 4. Connect Claude Code
 

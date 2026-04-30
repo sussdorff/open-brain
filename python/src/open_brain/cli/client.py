@@ -1,6 +1,7 @@
 """Async HTTP client for MCP JSON-RPC over Streamable HTTP transport."""
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -11,10 +12,64 @@ import httpx
 DEFAULT_URL = "https://open-brain.sussdorff.org/mcp/mcp"
 TOKEN_FILE = Path.home() / ".open-brain" / "token"
 URL_TOKEN_FILE = Path.home() / ".open-brain" / "url-token"
+LEGACY_CONFIG_FILE = Path.home() / ".open-brain" / "config.json"
 
 
 class MCPError(Exception):
     """Raised when the MCP server returns an error response."""
+
+
+def _xdg_config_dir() -> Path:
+    """Return the XDG config directory for open-brain."""
+    base = os.environ.get("XDG_CONFIG_HOME")
+    if base:
+        return Path(base) / "open-brain"
+    return Path.home() / ".config" / "open-brain"
+
+
+def _read_json_config(path: Path) -> dict[str, Any]:
+    """Read a JSON object config file, returning an empty dict on absence/errors."""
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return data
+
+
+def _load_client_config() -> dict[str, Any]:
+    """Load client config, with XDG config overriding legacy config."""
+    config: dict[str, Any] = {}
+    config.update(_read_json_config(LEGACY_CONFIG_FILE))
+    config.update(_read_json_config(_xdg_config_dir() / "config.json"))
+    return config
+
+
+def _config_str(config: dict[str, Any], *keys: str) -> str | None:
+    """Return the first non-empty string value for the given config keys."""
+    for key in keys:
+        value = config.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _normalize_mcp_url(url: str) -> str:
+    """Normalize a base server URL to an MCP endpoint URL."""
+    url = url.strip().rstrip("/")
+    parts = urlsplit(url)
+    if parts.path in ("", "/"):
+        return urlunsplit((
+            parts.scheme,
+            parts.netloc,
+            "/mcp",
+            parts.query,
+            parts.fragment,
+        ))
+    return url
 
 
 def _load_token() -> str | None:
@@ -23,11 +78,15 @@ def _load_token() -> str | None:
     Returns:
         Token string or None if not configured.
     """
-    import os
-
     token = os.environ.get("OB_TOKEN")
     if token:
         return token
+    config_token = _config_str(_load_client_config(), "token", "bearer_token")
+    if config_token:
+        return config_token
+    xdg_token_file = _xdg_config_dir() / "token"
+    if xdg_token_file.exists():
+        return xdg_token_file.read_text(encoding="utf-8").strip()
     if TOKEN_FILE.exists():
         return TOKEN_FILE.read_text(encoding="utf-8").strip()
     return None
@@ -42,11 +101,15 @@ def _load_url_token() -> str | None:
     Returns:
         URL token string or None if not configured.
     """
-    import os
-
     token = os.environ.get("OB_URL_TOKEN")
     if token:
         return token
+    config_token = _config_str(_load_client_config(), "url_token")
+    if config_token:
+        return config_token
+    xdg_token_file = _xdg_config_dir() / "url-token"
+    if xdg_token_file.exists():
+        return xdg_token_file.read_text(encoding="utf-8").strip()
     if URL_TOKEN_FILE.exists():
         return URL_TOKEN_FILE.read_text(encoding="utf-8").strip()
     return None
@@ -58,9 +121,17 @@ def _get_server_url() -> str:
     Returns:
         Server URL string.
     """
-    import os
-
-    return os.environ.get("OB_URL", DEFAULT_URL)
+    url = os.environ.get("OB_URL")
+    if url:
+        return url
+    config = _load_client_config()
+    mcp_url = _config_str(config, "mcp_url")
+    if mcp_url:
+        return mcp_url
+    server_url = _config_str(config, "server_url", "url")
+    if server_url:
+        return _normalize_mcp_url(server_url)
+    return DEFAULT_URL
 
 
 def _with_url_token(url: str, token: str) -> str:
