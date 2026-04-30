@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 ## [unreleased]
 
+### Features
+
+- *(open-brain-8yh)* Add `merge_persons.py` utility for one-shot person deduplication with transactional safety and dry-run mode
+
 ### Bug Fixes
 
 - *(open-brain-9rn)* Require confirmation for partial incoming person-name containment
