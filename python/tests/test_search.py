@@ -338,8 +338,6 @@ class TestMetadataFilterPreCondition:
         include the filter as a parameter ($6), and the outer WHERE clause must
         NOT contain metadata conditions.
         """
-        import json
-
         mock_conn = AsyncMock()
         mock_conn.fetch.return_value = []
         mock_pool = _make_mock_pool(mock_conn)

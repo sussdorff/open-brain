@@ -14,8 +14,6 @@ Usage:
     DATABASE_URL=postgresql://... python scripts/migrate_unwrap_metadata.py
 """
 
-from __future__ import annotations
-
 import asyncio
 import json
 import logging
@@ -37,6 +35,7 @@ async def main() -> None:
         sys.exit(1)
 
     conn = await asyncpg.connect(db_url)
+    await conn.set_type_codec('jsonb', encoder=json.dumps, decoder=json.loads, schema='pg_catalog')
     try:
         total_fixed = 0
 

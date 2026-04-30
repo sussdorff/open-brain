@@ -1808,7 +1808,7 @@ class PostgresDataLayer:
                 source_id,
                 target_id,
                 link_type,
-                metadata if metadata is not None else None,
+                metadata,
             )
         logger.info(
             "Created relationship id=%d source=%d target=%d link_type=%s",

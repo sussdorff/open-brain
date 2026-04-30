@@ -7,8 +7,6 @@ metadata as a JSONB string instead of a JSONB object.
 These tests verify that the data layer passes dicts directly.
 """
 
-from __future__ import annotations
-
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
