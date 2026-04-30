@@ -6,16 +6,20 @@ All notable changes to this project will be documented in this file.
 ### Bug Fixes
 
 - *(open-brain-9rn)* Confirm partial person-name containment
+- *(open-brain-8yh)* Address review findings iteration 1
+- *(open-brain-8yh)* Address codex adversarial findings
 - *(open-brain-mx1)* Address review findings iteration 1
 - *(open-brain-mx1)* Address codex adversarial findings
 
 ### Features
 
+- *(open-brain-8yh)* Green — one-shot person-merge CLI tool with full test suite
 - *(open-brain-8yh)* Add `merge_persons.py` utility for one-shot person deduplication with transactional safety and dry-run mode
 - *(open-brain-mx1)* Green — wire llm_confirm callback in _resolve_person
 
 ### Miscellaneous
 
+- *(open-brain-8yh)* Update changelog
 - *(open-brain-mx1)* Update changelog
 
 ## [0.27.0] - 2026-04-30
