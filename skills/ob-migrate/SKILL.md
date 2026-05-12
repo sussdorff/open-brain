@@ -8,6 +8,9 @@ description: >
   "migrate knowledge", "import into open-brain", "bootstrap memory",
   "migrate from Obsidian", "import JSONL", "Wissen importieren", "Memories importieren".
 version: 0.1.0
+requires:
+  - prompt:english-only
+  - mcp:open-brain
 ---
 
 # open-brain Memory Migration

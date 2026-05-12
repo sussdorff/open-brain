@@ -5,7 +5,7 @@ and prints the result as JSON (or "null" if no code references found).
 
 Usage (safe for arbitrary JSON — assign to variable first):
     MEMORY_JSON=$(...)
-    printf '%s' "$MEMORY_JSON" | uv run python plugin/scripts/provenance_check.py
+    printf '%s' "$MEMORY_JSON" | uv run python hooks/scripts/provenance_check.py
 
 Requires env var:
     PROVENANCE_REPO_ROOT — absolute path to the repo root for resolving code refs
@@ -19,7 +19,7 @@ Output (stdout):
 Example:
     export PROVENANCE_REPO_ROOT="/Users/malte/code/claude"
     MEMORY_JSON='{"id":"abc","content":"See src/foo.py for details."}'
-    printf '%s' "$MEMORY_JSON" | uv run python plugin/scripts/provenance_check.py
+    printf '%s' "$MEMORY_JSON" | uv run python hooks/scripts/provenance_check.py
 """
 
 # /// script

@@ -1,6 +1,7 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+<<<<<<< Updated upstream
 ## [unreleased]
 
 ### Bug Fixes
@@ -28,6 +29,14 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous
 
 - Bump VERSION to 0.29.0 and release changelog for person-dedup wave
+=======
+
+## [Unreleased]
+
+### Features
+
+- *(open-brain-3lr)* **Person enrichment** command for opt-in metadata lookup via SearXNG web search — lists candidates with name only, queries transcript context for disambiguation, displays org/role/profile URL with confidence scores and provenance snippets, and applies approved enrichments non-interactively with `--auto-apply --min-confidence` (hard floor 0.6)
+>>>>>>> Stashed changes
 
 ## [0.29.0] - 2026-04-30
 

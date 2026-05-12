@@ -4,6 +4,9 @@ description: >-
   Find symbols (functions, classes, methods) across a codebase using AST analysis.
   Use when: "where is X defined", "find function X", "smart_search", "find symbol",
   "where is class X", "suche Funktion", "wo ist X definiert".
+requires:
+  - prompt:english-only
+  - mcp:open-brain
 ---
 
 # ob-smart-search
@@ -26,7 +29,7 @@ Run the smart_search script:
 
 ```bash
 cd <project_root>
-uv run python plugin/scripts/smart_search.py "<query>" --path=<search_dir> [--pattern=**/*.py] [--max-results=20]
+uv run python hooks/scripts/smart_search.py "<query>" --path=<search_dir> [--pattern=**/*.py] [--max-results=20]
 ```
 
 Output is a JSON array:
@@ -52,13 +55,13 @@ Ranking: exact match > prefix match > substring match (case-insensitive).
 
 ```bash
 # Find a Python function
-uv run python plugin/scripts/smart_search.py "process_data" --path=.
+uv run python hooks/scripts/smart_search.py "process_data" --path=.
 
 # Find TypeScript symbols (grep fallback when tree-sitter unavailable)
-uv run python plugin/scripts/smart_search.py "fetchUser" --path=src --pattern="**/*.ts"
+uv run python hooks/scripts/smart_search.py "fetchUser" --path=src --pattern="**/*.ts"
 
 # Limit results
-uv run python plugin/scripts/smart_search.py "handle" --max-results=5
+uv run python hooks/scripts/smart_search.py "handle" --max-results=5
 ```
 
 ## Graceful Fallback

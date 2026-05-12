@@ -9,10 +9,10 @@ from unittest.mock import patch
 
 import pytest
 
-# Import functions directly from the plugin script.
-# Because the plugin lives outside the Python package tree we manipulate sys.path.
+# Import functions directly from the hook script.
+# Because the hooks live outside the Python package tree we manipulate sys.path.
 import sys
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "plugin" / "scripts"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "hooks" / "scripts"))
 
 from hook_runner import content_hash, is_duplicate, should_skip, truncate
 

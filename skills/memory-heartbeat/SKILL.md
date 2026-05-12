@@ -4,6 +4,9 @@ description: >-
   Periodic memory maintenance for open-brain. Runs lifecycle pipeline during work hours,
   generates daily digest at end-of-day, and produces weekly summary on Fridays.
   Triggers on /memory-heartbeat, memory heartbeat, heartbeat maintenance, memory lifecycle.
+requires:
+  - prompt:english-only
+  - mcp:open-brain
 ---
 
 # Memory Heartbeat
@@ -39,7 +42,7 @@ Use these as a verification reference when testing or reviewing the skill.
 
 ## Step 1: Detect Time Context
 
-Run: `uv run python plugin/scripts/check_time_window.py`
+Run: `uv run python hooks/scripts/check_time_window.py`
 Parse the JSON output: `window`, `hour`, `dow`.
 
 Classify the window using this priority order (highest first):
@@ -96,7 +99,7 @@ After running the lifecycle pipeline, check if periodic learnings extraction is 
    <!-- NOTE: Rate-limit logic (4h interval, last_learnings_run key) is duplicated in
         open_brain/learnings_state.py — keep both in sync when changing interval or key name. -->
 
-   Run: `uv run python plugin/scripts/check_learnings_due.py`
+   Run: `uv run python hooks/scripts/check_learnings_due.py`
    Parse `data.result` from the execution-result envelope: `due` or `skip`.
 
 2. If output is `due`:
@@ -212,13 +215,13 @@ Call `mcp__open-brain__search` with:
 
 ### 3.2 For each memory, run the staleness check
 
-Use `plugin/scripts/provenance_check.py` to compute the metadata patch.
+Use `hooks/scripts/provenance_check.py` to compute the metadata patch.
 
 Assign the JSON-serialised dict for each memory to a shell variable, then pipe it:
 
 ```bash
 MEMORY_JSON=$(...)   # JSON-serialised dict for the memory returned by the search
-printf '%s' "$MEMORY_JSON" | uv run python plugin/scripts/provenance_check.py
+printf '%s' "$MEMORY_JSON" | uv run python hooks/scripts/provenance_check.py
 ```
 
 Parse stdout as JSON; `null` means no code refs found.

@@ -1,4 +1,4 @@
-"""Tests for plugin/scripts/worktree_turn_log.py."""
+"""Tests for hooks/scripts/worktree_turn_log.py."""
 
 from __future__ import annotations
 

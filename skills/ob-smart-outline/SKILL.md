@@ -4,6 +4,9 @@ description: >-
   Show the structural skeleton of a file: classes, methods, functions with line numbers.
   Use when: "outline file", "show structure", "smart_outline", "what's in this file",
   "file structure", "list all functions", "Dateistruktur", "zeige Klassen".
+requires:
+  - prompt:english-only
+  - mcp:open-brain
 ---
 
 # ob-smart-outline
@@ -27,7 +30,7 @@ Run the smart_outline script:
 
 ```bash
 cd <project_root>
-uv run python plugin/scripts/smart_outline.py <file_path>
+uv run python hooks/scripts/smart_outline.py <file_path>
 ```
 
 Output format:

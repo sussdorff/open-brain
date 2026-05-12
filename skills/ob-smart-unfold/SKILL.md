@@ -4,6 +4,9 @@ description: >-
   Extract a complete function or class from a file, AST-bounded (no mid-function cuts).
   Use when: "unfold symbol", "show function X", "smart_unfold", "extract class X",
   "show me the implementation of X", "zeige Funktion X", "entfalte Symbol".
+requires:
+  - prompt:english-only
+  - mcp:open-brain
 ---
 
 # ob-smart-unfold
@@ -27,7 +30,7 @@ Run the smart_unfold script:
 
 ```bash
 cd <project_root>
-uv run python plugin/scripts/smart_unfold.py <file_path> <symbol_name>
+uv run python hooks/scripts/smart_unfold.py <file_path> <symbol_name>
 ```
 
 Output format (success):

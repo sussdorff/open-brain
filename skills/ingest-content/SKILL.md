@@ -3,6 +3,9 @@ name: ingest-content
 model: sonnet
 description: "Save any URL to open-brain memory as curated_content. Detects content type (video/article/doc), extracts via the right tool, and persists with source_url, extraction_date, and content_type metadata. Triggers on /ingest-content, ingest URL, save to memory, save article, save video."
 triggers: ingest-content, ingest URL, save to memory, save article, save video, curated content, bookmark
+requires:
+  - prompt:english-only
+  - mcp:open-brain
 ---
 
 # ingest-content

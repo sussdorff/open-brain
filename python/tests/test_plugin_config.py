@@ -1,4 +1,4 @@
-"""Tests for the plugin config loader (plugin/scripts/config.py)."""
+"""Tests for the hooks config loader (hooks/scripts/config.py)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import sys
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "plugin" / "scripts"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "hooks" / "scripts"))
 
 import config as plugin_config
 from config import detect_project, load_config

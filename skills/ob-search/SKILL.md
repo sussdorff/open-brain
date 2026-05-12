@@ -6,6 +6,9 @@ description: >
   "what happened before", "previous context", "recall", "remember", "erinnere dich",
   "was habe ich gelernt", "letzte Session", "memory context".
 version: 0.1.0
+requires:
+  - prompt:english-only
+  - mcp:open-brain
 ---
 
 # open-brain Memory Search

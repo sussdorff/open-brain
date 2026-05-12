@@ -7,6 +7,9 @@ description: >
   "materialize learnings", "memory housekeeping", "ob triage", "memory triage",
   "Memories aufräumen", "Learnings reviewen".
 version: 0.1.0
+requires:
+  - prompt:english-only
+  - mcp:open-brain
 ---
 
 # open-brain Memory Triage

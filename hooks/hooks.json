@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/session_end_summary.py",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/session_end_summary.py",
             "timeout": 30000
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/context_inject.py",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/context_inject.py",
             "timeout": 10
           }
         ]
@@ -34,7 +34,7 @@
           },
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/worktree_turn_log.py",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/worktree_turn_log.py",
             "timeout": 10
           }
         ]
@@ -45,7 +45,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/worktree_turn_log.py",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/worktree_turn_log.py",
             "timeout": 10
           }
         ]

@@ -1,4 +1,4 @@
-"""Tests for plugin/skills/ob-migrate/SKILL.md — format validation and batch mode logic.
+"""Tests for skills/ob-migrate/SKILL.md — format validation and batch mode logic.
 
 These are unit tests that verify:
 1. The SKILL.md file exists and has correct frontmatter/sections (AK1, AK2, AK3, AK4, AK5, AK6)
@@ -13,7 +13,7 @@ import pytest
 
 from open_brain.migrate import parse_jsonl_batch, parse_jsonl_line
 
-SKILL_PATH = Path(__file__).parent.parent.parent / "plugin" / "skills" / "ob-migrate" / "SKILL.md"
+SKILL_PATH = Path(__file__).parent.parent.parent / "skills" / "ob-migrate" / "SKILL.md"
 
 
 # ---------------------------------------------------------------------------
