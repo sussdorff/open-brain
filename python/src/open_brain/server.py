@@ -67,6 +67,10 @@ from open_brain.evolution import (
     log_evolution_approval as _log_evolution_approval,
     query_evolution_history,
 )
+from open_brain.memory_write_judge import (
+    judge_memory_write_proposal,
+    memory_metadata_from_judged_proposal,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -432,9 +436,10 @@ async def get_observations(ids: list[int]) -> str:
     "household: {category: str, item: str, location: str, details: str, warranty_expiry: ISO datetime}. "
     "ISO datetime format: 'YYYY-MM-DDTHH:MM:SS' (e.g. '2026-04-15T10:00:00'). "
     "Invalid or missing required datetime fields produce a warning in the response but still save the memory. "
-    "Params: text (required), type, project, title, subtitle, narrative, session_ref, is_test, metadata, importance, dedup_mode. "
+    "Params: text (required), type, project, title, subtitle, narrative, session_ref, is_test, metadata, importance, dedup_mode, proposal. "
     "importance: optional retention class (critical|high|medium|low, default medium). "
-    "dedup_mode: 'skip' (default) or 'merge' — if 'merge', returns existing id when vector similarity >= DEDUP_THRESHOLD instead of inserting."
+    "dedup_mode: 'skip' (default) or 'merge' — if 'merge', returns existing id when vector similarity >= DEDUP_THRESHOLD instead of inserting. "
+    "proposal: optional seven-field memory-write proposal; when supplied, the Memory-Write Judge must ALLOW it before persistence."
 )
 @logged_tool
 async def save_memory(
@@ -449,6 +454,7 @@ async def save_memory(
     metadata: dict | None = None,
     importance: str = "medium",
     dedup_mode: str = "skip",
+    proposal: dict | None = None,
 ) -> str:
     """Save a new memory entry."""
     if is_test:
@@ -456,6 +462,19 @@ async def save_memory(
 
     if dedup_mode not in ("skip", "merge"):
         return json.dumps({"error": "invalid_dedup_mode", "message": f"dedup_mode must be 'skip' or 'merge', got: {dedup_mode!r}"})
+
+    if proposal is not None:
+        judge_outcome = judge_memory_write_proposal(proposal)
+        if judge_outcome.decision != "ALLOW":
+            return json.dumps({
+                "error": "memory_write_judge_rejected",
+                "message": judge_outcome.reason,
+                "judge": judge_outcome.to_payload(),
+            })
+        metadata = {
+            **(metadata or {}),
+            **memory_metadata_from_judged_proposal(proposal, judge_outcome),
+        }
 
     # ── Rate limit check (per-user sliding window, 10/60s) ─────────────────────
     # Note: not atomic — concurrent coroutines may slightly exceed the limit. Acceptable for soft guardrail.

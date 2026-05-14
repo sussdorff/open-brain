@@ -1,0 +1,66 @@
+# Memory-Write Judge
+
+The Memory-Write Judge gates structured `save_memory` proposals before they are
+persisted. It implements the judge-layer contract shipped by
+`cognovis-core/clc-oxg` while keeping OpenBrain-specific memory semantics local
+to this repo.
+
+## Proposal Schema
+
+OpenBrain uses a seven-field proposal for memory writes:
+
+| Field | Meaning |
+|-------|---------|
+| `intended_memory_content` | Exact memory content proposed for persistence. |
+| `category` | `preference`, `fact`, `policy`, `lesson`, or `observation`. |
+| `source_citation` | `{ref, label}` evidence for the claim. |
+| `authorization_basis` | `{ref, label, granted_by?}` or `null`. |
+| `expected_use` | `evidence` or `instruction`. |
+| `retention_scope` | `session`, `project`, `personal`, or `team`. |
+| `risk_flags` | `pii`, `secret`, `credential`, `policy-sensitive`, `external-confidential`. |
+
+Provenance labels are `observed`, `inferred`, `generated`, `confirmed`,
+`disputed`, and `superseded`.
+
+## Runtime Shape
+
+The Python implementation is `open_brain.memory_write_judge`.
+
+- `judge_memory_write_proposal()` parses a raw proposal and returns an outcome.
+- `deterministic_memory_write_gate()` handles schema, authorization,
+  provenance, retention, and risk checks without model calls.
+- `reasoned_gate` is an optional callback that can add model-reasoned judgment
+  only after deterministic gates have returned `ALLOW`.
+- `memory_metadata_from_judged_proposal()` records provenance, retention,
+  expected use, risk flags, and `policy_version` on allowed writes.
+
+`save_memory(..., proposal={...})` invokes the judge before rate-limit slot
+claiming and before data-layer persistence. Rejected proposals return
+`memory_write_judge_rejected` and do not call the data layer. Calls without a
+proposal remain backward-compatible for the existing API surface.
+
+## Evidence Discipline
+
+The judge enforces evidence-not-instruction structurally:
+
+- `generated` and `inferred` sources may be stored only as `expected_use:
+  evidence`.
+- `expected_use: instruction` requires observed or confirmed source and
+  observed or confirmed authorization.
+- `disputed` and `superseded` sources or authorizations escalate rather than
+  silently becoming new memory.
+- `secret` and `credential` risk flags block persistence because credentials are
+  ephemeral under ADR 0002.
+
+## Policy Version
+
+Every outcome includes `policy_version: memory-write-judge.v1`. Allowed writes
+store the policy version under `metadata.memory_write_judge.policy_version`, so
+future prompt or policy changes can detect stale judgment.
+
+## Eval Suite
+
+The paired eval suite is `agents/memory-write-judge-eval.json`. The test
+`python/tests/test_memory_write_judge.py` requires at least 20 cases, coverage
+for `ALLOW`, `BLOCK`, `REVISE`, and `ESCALATE`, and exact agreement with the
+deterministic judge.

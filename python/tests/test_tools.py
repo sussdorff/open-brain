@@ -312,6 +312,68 @@ class TestSaveMemoryTool:
             mock_classify.assert_not_called()
             mock_entities.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_save_memory_blocks_rejected_proposal(self, mock_dl):
+        """Memory-Write Judge rejection prevents persistence."""
+        proposal = {
+            "intended_memory_content": "API token begins with redacted.",
+            "category": "fact",
+            "source_citation": {"ref": "terminal://env", "label": "observed"},
+            "authorization_basis": {
+                "ref": "conversation://current",
+                "label": "observed",
+                "granted_by": "user",
+            },
+            "expected_use": "evidence",
+            "retention_scope": "personal",
+            "risk_flags": ["secret"],
+        }
+        with patch("open_brain.server.get_dl", return_value=mock_dl):
+            from open_brain.server import save_memory
+            result = await save_memory(text="API token begins with redacted.", proposal=proposal)
+
+        data = json.loads(result)
+        assert data["error"] == "memory_write_judge_rejected"
+        assert data["judge"]["decision"] == "BLOCK"
+        mock_dl.save_memory.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_save_memory_persists_allowed_proposal_metadata(self, mock_dl):
+        """Allowed proposals write provenance and policy-version metadata."""
+        proposal = {
+            "intended_memory_content": "User prefers concise status updates.",
+            "category": "preference",
+            "source_citation": {"ref": "conversation://current/preference", "label": "observed"},
+            "authorization_basis": {
+                "ref": "conversation://current/preference",
+                "label": "observed",
+                "granted_by": "user",
+            },
+            "expected_use": "instruction",
+            "retention_scope": "personal",
+            "risk_flags": [],
+        }
+        with (
+            patch("open_brain.server.get_dl", return_value=mock_dl),
+            patch("open_brain.server.classify_and_extract", return_value={}),
+            patch("open_brain.server._extract_entities", return_value={}),
+        ):
+            from open_brain.server import save_memory
+            result = await save_memory(
+                text="User prefers concise status updates.",
+                metadata={"existing": True},
+                proposal=proposal,
+            )
+
+        data = json.loads(result)
+        call_args = mock_dl.save_memory.call_args[0][0]
+        assert data["id"] == 42
+        assert call_args.metadata["existing"] is True
+        assert call_args.metadata["memory_write_judge"]["decision"] == "ALLOW"
+        assert call_args.metadata["memory_write_judge"]["policy_version"] == "memory-write-judge.v1"
+        assert call_args.metadata["provenance"]["source_label"] == "observed"
+        assert call_args.metadata["provenance"]["expected_use"] == "instruction"
+
 
 # ─── SearchByConcept tool ─────────────────────────────────────────────────────
 
