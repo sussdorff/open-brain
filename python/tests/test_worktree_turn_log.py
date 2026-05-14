@@ -10,8 +10,8 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-PLUGIN_SCRIPTS = Path(__file__).parent.parent.parent / "plugin" / "scripts"
-sys.path.insert(0, str(PLUGIN_SCRIPTS))
+HOOK_SCRIPTS = Path(__file__).parent.parent.parent / "hooks" / "scripts"
+sys.path.insert(0, str(HOOK_SCRIPTS))
 
 
 # ─── Fixtures ─────────────────────────────────────────────────────────────────

@@ -26,7 +26,7 @@ class Config(BaseSettings):
     RERANK_ENABLED: bool = True
     RERANK_MODEL: str = "rerank-2.5"
 
-    # API key auth for plugin hooks (comma-separated list of valid keys)
+    # API key auth for hooks and CLI clients (comma-separated list of valid keys)
     API_KEYS: str = ""
 
     # Optional override for MacWhisper history directory path.

@@ -12,16 +12,16 @@ import pytest
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "hooks" / "scripts"))
 
-import config as plugin_config
+import config as hook_config
 from config import detect_project, load_config
 
 
 @pytest.fixture(autouse=True)
 def reset_project_cache():
     """Clear the detect_project cache between tests to prevent cross-test pollution."""
-    plugin_config._project_cache.clear()
+    hook_config._project_cache.clear()
     yield
-    plugin_config._project_cache.clear()
+    hook_config._project_cache.clear()
 
 
 # ─── load_config ──────────────────────────────────────────────────────────────
@@ -29,25 +29,25 @@ def reset_project_cache():
 class TestLoadConfig:
     def test_returns_none_when_config_file_does_not_exist(self, tmp_path):
         missing = tmp_path / "config.json"
-        with patch.object(plugin_config, "CONFIG_FILE", missing):
+        with patch.object(hook_config, "CONFIG_FILE", missing):
             assert load_config() is None
 
     def test_returns_none_when_server_url_is_empty(self, tmp_path):
         cfg_file = tmp_path / "config.json"
         cfg_file.write_text(json.dumps({"server_url": ""}))
-        with patch.object(plugin_config, "CONFIG_FILE", cfg_file):
+        with patch.object(hook_config, "CONFIG_FILE", cfg_file):
             assert load_config() is None
 
     def test_returns_none_when_server_url_is_missing(self, tmp_path):
         cfg_file = tmp_path / "config.json"
         cfg_file.write_text(json.dumps({"api_key": "key123"}))
-        with patch.object(plugin_config, "CONFIG_FILE", cfg_file):
+        with patch.object(hook_config, "CONFIG_FILE", cfg_file):
             assert load_config() is None
 
     def test_returns_config_dict_when_valid(self, tmp_path):
         cfg_file = tmp_path / "config.json"
         cfg_file.write_text(json.dumps({"server_url": "http://localhost:8091"}))
-        with patch.object(plugin_config, "CONFIG_FILE", cfg_file):
+        with patch.object(hook_config, "CONFIG_FILE", cfg_file):
             result = load_config()
         assert result is not None
         assert isinstance(result, dict)
@@ -59,7 +59,7 @@ class TestLoadConfig:
             "server_url": "http://my-server:8091",
             "api_key": "my-api-key",
         }))
-        with patch.object(plugin_config, "CONFIG_FILE", cfg_file):
+        with patch.object(hook_config, "CONFIG_FILE", cfg_file):
             result = load_config()
         assert result["api_key"] == "my-api-key"
         # Default value from DEFAULT_CONFIG should be present
@@ -72,21 +72,21 @@ class TestLoadConfig:
             "server_url": "http://srv:8091",
             "bash_output_max_kb": 100,
         }))
-        with patch.object(plugin_config, "CONFIG_FILE", cfg_file):
+        with patch.object(hook_config, "CONFIG_FILE", cfg_file):
             result = load_config()
         assert result["bash_output_max_kb"] == 100
 
     def test_returns_none_for_invalid_json(self, tmp_path):
         cfg_file = tmp_path / "config.json"
         cfg_file.write_text("not valid json {{{")
-        with patch.object(plugin_config, "CONFIG_FILE", cfg_file):
+        with patch.object(hook_config, "CONFIG_FILE", cfg_file):
             assert load_config() is None
 
     def test_returns_none_for_unreadable_file(self, tmp_path):
         cfg_file = tmp_path / "config.json"
         cfg_file.write_text(json.dumps({"server_url": "http://x"}))
         cfg_file.chmod(0o000)
-        with patch.object(plugin_config, "CONFIG_FILE", cfg_file):
+        with patch.object(hook_config, "CONFIG_FILE", cfg_file):
             result = load_config()
         cfg_file.chmod(0o644)  # restore so tmp_path cleanup works
         assert result is None

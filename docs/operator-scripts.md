@@ -20,7 +20,7 @@ developer checks, local batch jobs, and Claude Code hook internals.
 | Local maintenance batches | `scripts/embed-missing.ts`, `scripts/prune-discoveries.ts`, `scripts/decay-priorities.ts`, `scripts/fleet-compact.py`, `scripts/triage_ccmem.py` | Keep as scripts until a specific workflow is reused enough to deserve MCP auth, rate limiting, and documentation. |
 | Hook installation and test helpers | `scripts/install-hooks.sh`, `scripts/test_install_hooks.sh`, `scripts/run-nightly-tests.sh`, `scripts/test_nightly_schedule.sh` | Keep as repo/developer scripts. They operate on checkout state rather than a remote server API. |
 | Server bootstrap | `python/scripts/create_user.py` | Keep as a server-local bootstrap helper. Promote later only if an authenticated admin API is introduced. |
-| Claude Code plugin runtime | `plugin/scripts/*` | Keep as plugin internals. Human-facing behavior belongs in plugin skills or `ob`; hook plumbing should not be exposed as stable CLI. |
+| Hook runtime (Claude Code) | `hooks/scripts/*` | Keep as hook internals. Human-facing behavior belongs in skills or `ob`; hook plumbing should not be exposed as stable CLI. |
 
 ## Promotion Criteria
 

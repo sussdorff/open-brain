@@ -4,7 +4,7 @@ Automatic session turn logging via Stop/SubagentStop hooks in Claude Code worktr
 
 ## Was
 
-The Worktree Turn-Log Hook is a plugin feature that automatically captures and logs session turn metadata whenever a Claude Code session ends (Stop event) or a subagent session ends (SubagentStop event). It writes tool-agnostic JSONL records to a `.worktree-turns.jsonl` file in the worktree root, creating an audit trail of all interactions within a worktree.
+The Worktree Turn-Log Hook is part of the `open-brain-hooks` bundle (installed via `/library use open-brain-hooks`). It automatically captures and logs session turn metadata whenever a Claude Code session ends (Stop event) or a subagent session ends (SubagentStop event). It writes tool-agnostic JSONL records to a `.worktree-turns.jsonl` file in the worktree root, creating an audit trail of all interactions within a worktree.
 
 **Key capabilities:**
 - Runs only when inside a Claude Code worktree (`.claude/worktrees/` path detection)
@@ -33,11 +33,11 @@ The Worktree Turn-Log Hook is a plugin feature that automatically captures and l
 
 ### Hook Integration
 
-The hook is registered in `plugin/hooks/hooks.json` under two events:
+The hook is registered in `hooks/hooks.json` under two events:
 - **Stop** — Fires when a main Claude Code session ends
 - **SubagentStop** — Fires when a subagent session ends
 
-On each event, the hook runs `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/worktree_turn_log.py`.
+On each event, the hook runs `python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/worktree_turn_log.py`. (`${CLAUDE_PLUGIN_ROOT}` is the library's install-time placeholder for the source-repo checkout root — see `scripts/install-hook.py` in `the-library`.)
 
 ### Core Logic
 
@@ -229,8 +229,8 @@ def _ensure_exclude(git_common_dir: Path) -> None:
 
 ### Script Location
 
-- **Plugin script** — `plugin/scripts/worktree_turn_log.py` (292 lines)
-- **Hook registration** — `plugin/hooks/hooks.json` (Stop and SubagentStop entries)
+- **Hook script** — `hooks/scripts/worktree_turn_log.py` (292 lines)
+- **Hook registration** — `hooks/hooks.json` (Stop and SubagentStop entries)
 
 ### Integration Points
 
@@ -278,7 +278,7 @@ cd python && uv run pytest tests/test_worktree_turn_log.py
 
 ### OpenAPI / API Documentation
 
-No API endpoints exposed. This is a plugin hook (internal infrastructure), not a user-facing API. No OpenAPI schema needed.
+No API endpoints exposed. This is an internal hook (infrastructure), not a user-facing API. No OpenAPI schema needed.
 
 ### Future Extensions
 

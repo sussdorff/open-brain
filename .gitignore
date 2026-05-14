@@ -21,3 +21,12 @@ src-ts-DEPRECATED/
 
 # Claude Code user config
 .claude/
+
+# Library-installed primitives (when this repo is used as a consumer; this repo
+# is itself a marketplace, so its source primitives live in top-level dirs
+# skills/, hooks/, agents/, etc. — installs into .agents/.claude/ are ignored).
+.agents/skills/
+.agents/standards/
+.agents/agents/
+.agents/prompts/
+.library.lock

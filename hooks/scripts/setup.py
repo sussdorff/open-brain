@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Setup script for open-brain plugin: configure server URL and API key."""
+"""Setup script for open-brain hooks: configure server URL and API key."""
 
 import json
 import sys
@@ -12,7 +12,7 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 
 
 def main():
-    print("open-brain Plugin Setup")
+    print("open-brain Hook Setup")
     print("=" * 40)
     print()
 
@@ -80,7 +80,7 @@ def main():
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     CONFIG_FILE.write_text(json.dumps(config, indent=2) + "\n")
     print(f"\nConfig written to {CONFIG_FILE}")
-    print("\nSetup complete. The plugin will start capturing observations on your next Claude Code session.")
+    print("\nSetup complete. The hooks will start capturing observations on your next Claude Code session.")
 
 
 if __name__ == "__main__":

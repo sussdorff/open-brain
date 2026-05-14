@@ -110,7 +110,7 @@ The memory migration skill integrates with three core components:
 
 ### Tool Invocation
 
-The skill is triggered via Claude Code plugin system on phrases including:
+The skill is triggered by Claude Code's skill system on phrases including:
 - "/ob-migrate"
 - "migrate memories", "import memories"
 - "migrate knowledge", "import into open-brain"
@@ -130,6 +130,6 @@ Memory migration uses the existing `save_memory` MCP tool — no new routes are 
 
 ### Skill Definition
 
-- **Location** — `plugin/skills/ob-migrate/SKILL.md`
+- **Location** — `skills/ob-migrate/SKILL.md`
 - **Version** — 0.1.0
 - **Handler** — Implements interactive + batch workflows with progress tracking and duplicate detection via `duplicate_of` response field

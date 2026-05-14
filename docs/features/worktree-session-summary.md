@@ -8,7 +8,7 @@ The worktree session summary feature provides a high-level synthesis endpoint fo
 
 ## Für wen
 
-Worktree orchestration tools and plugin hooks that need to:
+Worktree orchestration tools and hooks that need to:
 
 - **Capture session context at hand-off** — Save a summary when transitioning between worktrees or closing a bead, so that future sessions can quickly recall what was done
 - **Track bead progress** — Store turn summaries with bead_id in metadata for project management and retrospectives

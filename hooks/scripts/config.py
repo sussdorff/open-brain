@@ -1,11 +1,11 @@
-"""Configuration loader for open-brain plugin."""
+"""Configuration loader for open-brain hooks."""
 
 import json
 import logging
 import os
 from pathlib import Path
 
-logger = logging.getLogger("open-brain-plugin")
+logger = logging.getLogger("open-brain-hooks")
 
 DEFAULT_CONFIG = {
     "server_url": "",

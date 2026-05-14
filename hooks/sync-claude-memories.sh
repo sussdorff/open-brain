@@ -11,7 +11,7 @@
 
 LOG_FILE="${HOME}/.claude/memory-sync.log"
 TUNNEL_PORT="${SYNC_TUNNEL_PORT:-15432}"
-MIGRATE_SCRIPT="${CLAUDE_PLUGIN_ROOT}/scripts/migrate_claude_memories.py"
+MIGRATE_SCRIPT="${CLAUDE_PLUGIN_ROOT}/hooks/scripts/migrate_claude_memories.py"
 
 # ISO timestamp helper
 ts() {

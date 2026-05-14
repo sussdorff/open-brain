@@ -160,7 +160,7 @@ The CLI follows XDG config conventions. The primary config file is:
 
 Use `server_url` for the public base URL (`/mcp` is appended automatically) or `mcp_url` for an explicit MCP endpoint.
 
-If you use the plugin setup, your existing config may contain an `api_key` instead of a URL token. The CLI supports that too:
+If you previously used the hook setup script, your existing config may contain an `api_key` instead of a URL token. The CLI supports that too:
 
 ```json
 {
@@ -226,7 +226,7 @@ All configuration is via environment variables (`.env` file or injected by your 
 | `LLM_MODEL_CAPTURE` | No | — | Optional override for `/api/session-capture` (falls back to `LLM_MODEL`) |
 | `ANTHROPIC_API_KEY` | Cond. | — | Required when `LLM_PROVIDER=anthropic` |
 | `OPENROUTER_API_KEY` | Cond. | — | Required when `LLM_PROVIDER=openrouter` |
-| `API_KEYS` | No | — | Comma-separated API keys for plugin/script access |
+| `API_KEYS` | No | — | Comma-separated API keys for hook/CLI/script access |
 | `PORT` | No | `8091` | Server port |
 | `CLIENTS_FILE` | No | `/app/clients.json` | OAuth client registry path |
 | `MAX_MEMORIES_PER_DAY` | No | `500` | Daily ingestion limit (0 = disabled) |
@@ -325,19 +325,44 @@ Memory is segmented by `project`, not by user. This works well for individual us
 
 **Planned**: Shared memory with user attribution — memories tagged by author, visible to all authenticated users, filterable by contributor.
 
-## Claude Code Plugin
+## Library Marketplace
 
-The plugin provides **automatic memory capture** — no manual MCP calls needed:
+open-brain is registered as a marketplace in [`the-library`](https://github.com/disler/the-library) (`cognovis/library` fork). The repo's top-level `skills/` and `hooks/` directories are the harness-neutral source primitives; the meta library installs them into any harness (Claude Code, Codex, …) via `/library use`.
 
-- **Session start**: Injects recent memories and session summaries as narrative context
-- **Session end**: Generates and saves a session summary from recent observations
+Register the marketplace once in your `library.yaml`:
 
-Install:
-```bash
-claude plugin add /path/to/open-brain/plugin
+```yaml
+marketplaces:
+  - name: open-brain
+    source: https://github.com/sussdorff/open-brain
+    description: open-brain memory store with skills+hooks for memory capture
+    type: git
 ```
 
-See [plugin/](plugin/) for configuration details.
+Then install primitives on demand:
+
+```bash
+/library use ob-search             # MCP-backed memory search skill
+/library use ob-smart-search       # AST + tree-sitter symbol search
+/library use ob-smart-outline      # File-structure skeleton
+/library use ob-smart-unfold       # Bounded symbol extraction
+/library use ob-triage             # Human-in-the-loop memory triage
+/library use ob-migrate            # Legacy memory migration
+/library use ingest-content        # Email/transcript ingestion driver
+/library use learnings-pipeline    # Learning consolidation workflow
+/library use memory-heartbeat      # Periodic memory health check
+/library use open-brain-hooks      # SessionStart/Stop/SessionEnd hooks bundle
+```
+
+The `open-brain-hooks` guardrail merges `hooks/hooks.json` into `~/.claude/settings.json` and resolves the source paths to the library cache — no symlinking into `plugin/`, no `claude plugin add`, no marketplace.json manifest.
+
+After installing the hooks, configure the server connection:
+
+```bash
+python3 ~/.local/share/library/guardrails/open-brain-hooks/checkout/hooks/scripts/setup.py
+```
+
+This prompts for server URL + API key and writes `~/.open-brain/config.json`.
 
 ## Embedding into Existing Stacks
 
@@ -402,7 +427,7 @@ volumes:
 
 ## CLI Usage
 
-The `ob` command is the main human-facing CLI. It intentionally covers normal server and memory workflows; one-off migrations, dev checks, and Claude Code hook internals remain in `scripts/`, `python/scripts/`, and `plugin/scripts/`.
+The `ob` command is the main human-facing CLI. It intentionally covers normal server and memory workflows; one-off migrations, dev checks, and Claude Code hook internals remain in `scripts/`, `python/scripts/`, and `hooks/scripts/`.
 
 ```bash
 ob server

@@ -1,4 +1,4 @@
-"""Tests for plugin hook_runner filtering logic."""
+"""Tests for hook_runner filtering logic."""
 
 from __future__ import annotations
 

@@ -1213,7 +1213,7 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
         if request.url.path in _PUBLIC_PATHS:
             return await call_next(request)
 
-        # Check API key first (for plugin hooks)
+        # Check API key first (for hooks and CLI clients)
         api_key = request.headers.get("x-api-key", "")
         if api_key:
             if api_key in self._get_api_keys():
@@ -1660,10 +1660,10 @@ async def health() -> JSONResponse:
     )
 
 
-# ─── REST API Endpoints (Plugin Hooks) ────────────────────────────────────────
+# ─── REST API Endpoints (Hook + CLI Clients) ──────────────────────────────────
 #
 # Endpoints (all require X-API-Key or Bearer token auth unless noted):
-#   POST /api/ingest                    — ingest single tool observation (plugin hook)
+#   POST /api/ingest                    — ingest single tool observation (PostToolUse hook)
 #   POST /api/session-end               — generate session summary from transcript turns (SessionEnd hook)
 #   POST /api/session-capture           — extract observations from conversation transcript
 #   POST /api/worktree-session-summary  — generate summary from worktree session turn batch
@@ -1683,7 +1683,7 @@ _INGEST_SKIP_TOOLS = {
 
 @app.post("/api/ingest")
 async def api_ingest(request: Request) -> JSONResponse:
-    """Ingest tool observation from plugin hook. Returns 202, processes async."""
+    """Ingest tool observation from a Claude Code hook. Returns 202, processes async."""
     body = await request.json()
     tool_name = body.get("tool_name", "")
 

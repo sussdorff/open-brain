@@ -17,7 +17,7 @@ open-brain is an MCP (Model Context Protocol) server that gives AI assistants pe
 │                                                         │
 │  ┌──────────┐  ┌──────────┐  ┌───────────┐             │
 │  │ MCP API  │  │ REST API │  │   OAuth   │             │
-│  │ (tools)  │  │ (plugin) │  │   2.1     │             │
+│  │ (tools)  │  │ (hooks)  │  │   2.1     │             │
 │  └────┬─────┘  └────┬─────┘  └───────────┘             │
 │       │              │                                   │
 │  ┌────▼──────────────▼─────┐  ┌───────────────────┐    │
@@ -206,7 +206,7 @@ open-brain implements OAuth 2.1 with PKCE for secure client authentication:
 └──────────┘                           └──────────────┘
 ```
 
-Clients can also authenticate via API key (`x-api-key` header) for plugin/automation use cases.
+Clients can also authenticate via API key (`x-api-key` header) for hook/automation use cases.
 
 Dynamic client registration is supported via the `/register` endpoint (RFC 7591).
 
@@ -290,9 +290,9 @@ If the caller explicitly passes `duplicate_of=<id>` in `save_memory` parameters,
 
 The merge path uses only vector similarity (no LLM call). The `duplicate_of` caller-provided short-circuit always wins over semantic dedup: if both are supplied, merge logic is never consulted.
 
-## Plugin Architecture
+## Hook Architecture
 
-The Claude Code plugin provides automatic memory capture without manual MCP tool calls:
+The hooks bundle (installed via `/library use open-brain-hooks`) provides automatic memory capture without manual MCP tool calls:
 
 ```
 ┌─────────────────────────────────────────┐
@@ -310,7 +310,7 @@ The Claude Code plugin provides automatic memory capture without manual MCP tool
 └─────────────────────────────────────────┘
 ```
 
-### Plugin Hooks
+### Hook Registrations
 
 | Hook | Script | What it does |
 |------|--------|-------------|
@@ -319,9 +319,9 @@ The Claude Code plugin provides automatic memory capture without manual MCP tool
 | `Stop` | `worktree_turn_log.py` | Appends turn metadata (user input, assistant response, tool calls) to `.worktree-turns.jsonl` for session analytics |
 | `SubagentStop` | `worktree_turn_log.py` | Same as Stop, for subagent sessions |
 
-### Plugin REST API
+### Hook REST API
 
-The server exposes additional REST endpoints for the plugin:
+The server exposes additional REST endpoints that the hooks (and other HTTP clients) call:
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
