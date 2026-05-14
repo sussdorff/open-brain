@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """SessionStart hook: inject recent memory context from open-brain server."""
 
+import argparse
 import json
 import sys
 import urllib.parse
@@ -8,7 +9,7 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from config import load_config, detect_project
+from config import load_config, resolve_project
 
 
 def fetch_wake_up_pack(config: dict, project: str, token_budget: int = 500) -> str | None:
@@ -26,7 +27,32 @@ def fetch_wake_up_pack(config: dict, project: str, token_budget: int = 500) -> s
         return None
 
 
+def build_output(context_md: str | None, harness: str) -> dict:
+    """Build hook output in the target harness format."""
+    if not context_md or not context_md.strip():
+        return {"continue": True}
+
+    context = f"# open-brain Memory Context\n\n{context_md}"
+    if harness == "codex":
+        return {
+            "continue": True,
+            "hookSpecificOutput": {
+                "hookEventName": "SessionStart",
+                "additionalContext": context,
+            },
+        }
+
+    return {
+        "continue": True,
+        "systemMessage": context,
+    }
+
+
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--harness", choices=["claude", "codex"], default="claude")
+    args = parser.parse_args()
+
     config = load_config()
     if config is None:
         print(json.dumps({"continue": True}))
@@ -40,22 +66,12 @@ def main():
         hook_data = {}
 
     cwd = hook_data.get("cwd", "")
-    project = config.get("project", "auto")
-    if project == "auto":
-        project = detect_project(cwd or None)
+    project = resolve_project(config, cwd or None)
 
     token_budget = config.get("token_budget", 500)
     context_md = fetch_wake_up_pack(config, project, token_budget)
 
-    if context_md and context_md.strip():
-        output = {
-            "continue": True,
-            "systemMessage": f"# open-brain Memory Context\n\n{context_md}",
-        }
-    else:
-        output = {"continue": True}
-
-    print(json.dumps(output))
+    print(json.dumps(build_output(context_md, args.harness)))
 
 
 if __name__ == "__main__":

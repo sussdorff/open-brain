@@ -11,6 +11,7 @@ DEFAULT_CONFIG = {
     "server_url": "",
     "api_key": "",
     "project": "auto",
+    "project_overrides": {},
     "skip_tools": [
         "Read", "Glob", "Grep", "Skill", "ToolSearch", "AskUserQuestion",
         "TaskCreate", "TaskUpdate", "TaskGet", "TaskList", "TaskOutput", "TaskStop",
@@ -58,6 +59,46 @@ def ensure_log_dir():
 
 
 _project_cache: dict[str, str] = {}
+
+
+def _resolve_project_override(cwd: str | None, overrides: dict | None) -> str | None:
+    """Return the longest matching configured project override for cwd."""
+    if not cwd or not isinstance(overrides, dict) or not overrides:
+        return None
+
+    try:
+        work_dir = Path(cwd).expanduser().resolve()
+    except OSError:
+        work_dir = Path(cwd).expanduser().absolute()
+
+    matches: list[tuple[int, str]] = []
+    for raw_path, project in overrides.items():
+        if not isinstance(raw_path, str) or not isinstance(project, str) or not project:
+            continue
+        try:
+            root = Path(raw_path).expanduser().resolve()
+        except OSError:
+            root = Path(raw_path).expanduser().absolute()
+        if work_dir == root or root in work_dir.parents:
+            matches.append((len(str(root)), project))
+
+    if not matches:
+        return None
+    matches.sort(reverse=True)
+    return matches[0][1]
+
+
+def resolve_project(config: dict, cwd: str | None = None) -> str:
+    """Resolve configured project, including auto-detection overrides."""
+    project = config.get("project", "auto")
+    if project != "auto":
+        return str(project)
+
+    override = _resolve_project_override(cwd or os.getcwd(), config.get("project_overrides"))
+    if override:
+        return override
+
+    return detect_project(cwd)
 
 
 def detect_project(cwd: str | None = None) -> str:

@@ -9,7 +9,7 @@ from pathlib import Path
 
 # Add scripts dir to path for config import
 sys.path.insert(0, str(Path(__file__).parent))
-from config import load_config, ensure_log_dir, detect_project, LOG_FILE
+from config import load_config, ensure_log_dir, resolve_project, LOG_FILE
 
 
 def truncate(text: str, max_chars: int = 4000) -> str:
@@ -132,7 +132,7 @@ def main():
     # Detect project
     project = config.get("project", "auto")
     if project == "auto":
-        project = detect_project(cwd or None)
+        project = resolve_project(config, cwd or None)
 
     # Build payload
     payload = {

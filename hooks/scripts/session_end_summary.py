@@ -13,7 +13,7 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from config import load_config, detect_project
+from config import load_config, resolve_project
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger("session-end-summary")
@@ -69,9 +69,7 @@ def main() -> None:
         return
 
     # Detect project
-    project = config.get("project", "auto")
-    if project == "auto":
-        project = detect_project(cwd or None)
+    project = resolve_project(config, cwd or None)
 
     # Read transcript
     if not transcript_path:

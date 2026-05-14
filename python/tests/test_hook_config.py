@@ -13,7 +13,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "hooks" / "scripts"))
 
 import config as hook_config
-from config import detect_project, load_config
+from config import detect_project, load_config, resolve_project
 
 
 @pytest.fixture(autouse=True)
@@ -65,6 +65,7 @@ class TestLoadConfig:
         # Default value from DEFAULT_CONFIG should be present
         assert "skip_tools" in result
         assert "bash_output_max_kb" in result
+        assert "project_overrides" in result
 
     def test_user_config_overrides_defaults(self, tmp_path):
         cfg_file = tmp_path / "config.json"
@@ -153,3 +154,47 @@ class TestDetectProject:
             with patch("config.os.getcwd", return_value="/home/user/my-workspace"):
                 name = detect_project(None)
         assert name == "my-workspace"
+
+
+# ─── resolve_project ──────────────────────────────────────────────────────────
+
+class TestResolveProject:
+    def test_explicit_project_wins_over_overrides(self, tmp_path):
+        project_dir = tmp_path / "repo"
+        project_dir.mkdir()
+        cfg = {
+            "project": "explicit-project",
+            "project_overrides": {str(project_dir): "override-project"},
+        }
+        assert resolve_project(cfg, str(project_dir)) == "explicit-project"
+
+    def test_project_override_matches_nested_cwd(self, tmp_path):
+        project_dir = tmp_path / "repo"
+        nested_dir = project_dir / "package"
+        nested_dir.mkdir(parents=True)
+        cfg = {
+            "project": "auto",
+            "project_overrides": {str(project_dir): "override-project"},
+        }
+        assert resolve_project(cfg, str(nested_dir)) == "override-project"
+
+    def test_project_override_uses_longest_match(self, tmp_path):
+        repo_dir = tmp_path / "repo"
+        app_dir = repo_dir / "apps" / "cognovis-core"
+        app_dir.mkdir(parents=True)
+        cfg = {
+            "project": "auto",
+            "project_overrides": {
+                str(repo_dir): "repo-project",
+                str(app_dir): "cognovis-core",
+            },
+        }
+        assert resolve_project(cfg, str(app_dir / "src")) == "cognovis-core"
+
+    def test_falls_back_to_git_detection_without_override(self):
+        cfg = {"project": "auto", "project_overrides": {}}
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "https://github.com/org/fallback.git\n"
+        with patch("subprocess.run", return_value=mock_result):
+            assert resolve_project(cfg, "/some/path") == "fallback"

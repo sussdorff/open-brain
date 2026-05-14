@@ -351,10 +351,10 @@ Then install primitives on demand:
 /library use ingest-content        # Email/transcript ingestion driver
 /library use learnings-pipeline    # Learning consolidation workflow
 /library use memory-heartbeat      # Periodic memory health check
-/library use open-brain-hooks      # SessionStart/Stop/SessionEnd hooks bundle
+/library use open-brain-hooks      # Claude/Codex memory hooks bundle
 ```
 
-The `open-brain-hooks` guardrail merges `hooks/hooks.json` into `~/.claude/settings.json` and resolves the source paths to the library cache — no symlinking into `plugin/`, no `claude plugin add`, no marketplace.json manifest.
+The `open-brain-hooks` guardrail installs the harness-specific manifest from `hooks/`: Claude Code uses `hooks/hooks.json`, while Codex uses `hooks/hooks.codex.json`. Source paths are resolved to the library cache, so there is no symlinking into `plugin/`, no `claude plugin add`, and no marketplace.json manifest.
 
 After installing the hooks, configure the server connection:
 
