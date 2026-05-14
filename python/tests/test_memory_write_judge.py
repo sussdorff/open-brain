@@ -40,6 +40,18 @@ def test_eval_suite_matches_deterministic_judge() -> None:
         assert outcome.policy_version == "memory-write-judge.v1"
 
 
+def test_allow_outcomes_have_branch_specific_reason_categories() -> None:
+    """AK open-brain-ekn.6: ALLOW metrics do not collapse into `other`."""
+    allow_categories = {
+        judge_memory_write_proposal(case["proposal"]).reason_category
+        for case in _load_cases()
+        if case["expected_decision"] == "ALLOW"
+    }
+
+    assert "other" not in allow_categories
+    assert allow_categories == {"authorization", "evidence", "risk"}
+
+
 def test_revise_returns_full_replacement_proposal() -> None:
     """AK2: REVISE supplies a replacement proposal with instruction downgraded."""
     proposal = {

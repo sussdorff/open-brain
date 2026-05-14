@@ -250,7 +250,7 @@ def deterministic_memory_write_gate(proposal: MemoryWriteProposal) -> JudgeOutco
     return JudgeOutcome(
         decision="ALLOW",
         reason="proposal is authorized, sufficiently evidenced, and within retention/risk policy",
-        reason_category="other",
+        reason_category=_allow_reason_category(proposal),
         provenance_refs=refs,
         constraints=constraints or None,
     )
@@ -317,6 +317,19 @@ def raw_proposal_payload(proposal: MemoryWriteProposal) -> dict[str, Any]:
         "retention_scope": proposal.retention_scope,
         "risk_flags": list(proposal.risk_flags),
     }
+
+
+def _allow_reason_category(proposal: MemoryWriteProposal) -> ReasonCategory:
+    """Return the dominant metrics category for an allowed write."""
+    if proposal.risk_flags or proposal.retention_scope == "team":
+        return "risk"
+    if (
+        proposal.expected_use == "evidence"
+        or proposal.source_citation.label in EVIDENCE_ONLY_LABELS
+        or proposal.source_citation.label == "confirmed"
+    ):
+        return "evidence"
+    return "authorization"
 
 
 def memory_metadata_from_judged_proposal(

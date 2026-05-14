@@ -22,6 +22,32 @@ OpenBrain uses a seven-field proposal for memory writes:
 Provenance labels are `observed`, `inferred`, `generated`, `confirmed`,
 `disputed`, and `superseded`.
 
+## Relationship to Generic Judge Layer
+
+OpenBrain's Memory Write Proposal is the memory-boundary sibling of the generic
+judge-layer Action Proposal from `cognovis-core`; it does not replace it. The
+generic Action Proposal covers side-effecting actions with ten fields:
+`proposal_id`, `actor_ref`, `risk_class`, `effect_type`, `intended_action`,
+`reason`, `evidence_refs`, `authorization`, `expected_consequence`, and
+`rollback_path`.
+
+The OpenBrain proposal is narrower because its action boundary is memory
+persistence. Its seven fields describe the proposed memory, the evidence for the
+claim, the authorization to remember it, expected use, retention scope, and
+memory-specific risk flags.
+
+When a workflow both performs an external side effect and writes memory, use two
+proposals in sequence:
+
+1. Submit the generic Action Proposal to the pre-action judge before the side
+   effect executes.
+2. After the action is allowed or completed, submit a Memory Write Proposal to
+   the Memory-Write Judge before saving the resulting memory.
+
+The second proposal should cite the first judge outcome, action result, or other
+observed execution evidence as its `source_citation`; it should not treat the
+actor's original intent as proof that the memory is instruction-grade.
+
 ## Runtime Shape
 
 The Python implementation is `open_brain.memory_write_judge`.

@@ -14,7 +14,7 @@
         "risk_flags": []
       },
       "expected_decision": "ALLOW",
-      "expected_reason_category": "other"
+      "expected_reason_category": "authorization"
     },
     {
       "case_id": "allow-confirmed-project-fact",
@@ -28,7 +28,7 @@
         "risk_flags": []
       },
       "expected_decision": "ALLOW",
-      "expected_reason_category": "other"
+      "expected_reason_category": "evidence"
     },
     {
       "case_id": "allow-generated-summary-as-evidence",
@@ -42,7 +42,7 @@
         "risk_flags": []
       },
       "expected_decision": "ALLOW",
-      "expected_reason_category": "other"
+      "expected_reason_category": "evidence"
     },
     {
       "case_id": "allow-inferred-lesson-as-evidence",
@@ -56,7 +56,7 @@
         "risk_flags": []
       },
       "expected_decision": "ALLOW",
-      "expected_reason_category": "other"
+      "expected_reason_category": "evidence"
     },
     {
       "case_id": "allow-confirmed-policy-sensitive-policy",
@@ -70,7 +70,7 @@
         "risk_flags": ["policy-sensitive"]
       },
       "expected_decision": "ALLOW",
-      "expected_reason_category": "other"
+      "expected_reason_category": "risk"
     },
     {
       "case_id": "block-secret",
