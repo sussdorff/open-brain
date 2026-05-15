@@ -1,6 +1,13 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+
+## [unreleased]
+
+### Features
+
+- *(ob-triage)* Route promote to library marketplaces via `lib catalog match` and matching `*-forge` skill; drop CLAUDE.md/AGENTS.md as primary promote destinations (skill bumped 0.1.0 → 0.2.0)
+
 <<<<<<< Updated upstream
 ## [unreleased]
 

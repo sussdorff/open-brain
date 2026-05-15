@@ -6,10 +6,16 @@ description: >
   Use when: "triage memories", "memory review", "cleanup memories", "learnings review",
   "materialize learnings", "memory housekeeping", "ob triage", "memory triage",
   "Memories aufräumen", "Learnings reviewen".
-version: 0.1.0
+version: 0.2.0
 requires:
   - prompt:english-only
   - mcp:open-brain
+  - skill:library
+  - skill:skill-forge
+  - skill:standard-forge
+  - skill:agent-forge
+  - skill:hook-forge
+  - skill:script-forge
 ---
 
 # open-brain Memory Triage
@@ -97,27 +103,83 @@ AskUserQuestion:
 than 4 actionable items, use multiple calls. This allows the user to decide on all
 items at once in a single UI interaction.
 
-#### Promote — ALWAYS individual via AskUserQuestion
+#### Promote — multi-stage via AskUserQuestion
 
-Each promote gets its own question with destination options. Show the memory text
-and narrative in the question text so the user has full context:
+Promote routes a memory into a **marketplace primitive** owned by the library platform.
+CLAUDE.md and AGENTS.md are entrypoints/imports, **not** promotion destinations
+(narrow escape hatch in Stage B fallback only).
+
+Each promote runs three stages individually:
+
+**Stage A — Classify the primitive type**
 
 ```
 AskUserQuestion:
   question: "#10564 'UV muss mit --python 3.14 gesynct werden' (learning, open-brain)
              Text: 'Bei uv sync auf dem Server muss --python 3.14 angegeben werden,
              sonst wird die System-Python verwendet...'
-             Wohin materialisieren?"
-  header: "Promote"
+             Welches Primitive passt?"
+  header: "Primitive type"
   options:
-    - label: "CLAUDE.md (projekt)"   description: "Deployment-Sektion im Projekt-CLAUDE.md"
-    - label: "CLAUDE.md (global)"    description: "Allgemeine UV-Konvention in ~/.claude/CLAUDE.md"
-    - label: "standards/"            description: "Standard-Datei für UV-basierte Projekte"
-    - label: "Bead"                  description: "Aufgabe erstellen via bd create"
+    - label: "Standard"   description: "Faktische Regel/Referenz, über Trigger geladen"
+    - label: "Skill"      description: "Wiederverwendbarer Workflow"
+    - label: "Guardrail"  description: "Lifecycle-Hook / Enforcement"
+    - label: "Discard"    description: "Kein Primitive — Memory behalten oder verwerfen"
 ```
 
-After the user selects a destination, show the proposed text/content and get final
-approval before writing.
+Library primitive types (per `library/meta/library.yaml`): `skill`, `agent`, `standard`,
+`guardrail`, `prompt`, `script`, `model-standard`, `golden-prompt`. Surface the 3 most
+likely; the user can pick "Other" for the rest.
+
+**Stage B — Marketplace lookup (NOT classified by ob-triage)**
+
+Call the library to get ranked writable marketplaces for this primitive type + topic:
+
+```bash
+lib catalog match \
+  --primitive-type=<chosen> \
+  --topics=<topics extracted from memory> \
+  --writable-only --json
+```
+
+Branch on the result:
+
+- **1 confident candidate** → proceed silently to Stage C
+- **Multiple tied candidates** → AskUserQuestion with the candidates returned by `lib`
+  as options (e.g. `cognovis-core`, `sussdorff-core`, `open-brain`)
+- **0 candidates** → fallback AskUserQuestion:
+  - "Pick a writable marketplace anyway" → options from `lib catalog list --writable --json`
+  - "CLAUDE.md one-liner (escape hatch)" → only for project-hard-facts that cannot
+    become a primitive — should be rare
+  - "Discard" / "Keep as memory"
+
+ob-triage must **never** hard-code marketplace names or topic-to-marketplace mappings.
+That logic lives in `library/meta` (see bead CL-744).
+
+**Stage B.1 — Third-party (read-only) source handling**
+
+If `lib <prim> list --name=<x>` shows the existing primitive came from a `writable: false`
+catalog (e.g. `cognovis-samurai`, `anthropic-official`), ask the user:
+
+```
+AskUserQuestion:
+  question: "Skill 'aidbox' kommt aus cognovis-samurai (read-only). Forken nach cognovis-core
+             und dort die Learning anwenden?"
+  header: "Fork upstream"
+  options:
+    - label: "Forken"        description: "Kopie in writable marketplace, swap install pointer"
+    - label: "Überspringen"  description: "Upstream unverändert, Memory bleibt offen"
+```
+
+If user accepts: dispatch `/library <prim> fork <name> --to=<writable-marketplace>` and
+then proceed to Stage C against the forked copy. The fork mechanics are owned by the
+`library` skill, not ob-triage.
+
+**Stage C — Show diff and get final approval**
+
+Show the proposed file content (new primitive or patch to existing) and ask for final
+approval before writing. Existing primitive → edit in place; new primitive → forge
+scaffold. No "merge editor" — Edit applies the change directly.
 
 #### Scaffold — individual via AskUserQuestion
 
@@ -159,21 +221,51 @@ After the user has reviewed and approved actions, execute them:
    update_memory(id=<id>, metadata={'status': 'discarded', 'discard_reason': 'deleted — <reason>'})
    ```
 
-4. **Promote**: Execute the materialization to the chosen target:
-   - CLAUDE.md → Use Edit tool on the target CLAUDE.md file
-   - standards/ → Use Write/Edit tool on the standard file + update index.yml
-   - Skill → Use Edit tool on the skill's SKILL.md
-   - Bead → Run `bd create` via Bash
+4. **Promote**: Delegate to the matching forge skill — **never write primitive files
+   directly**. Forges already own create *and* update conventions, frontmatter shape,
+   and validation. ob-triage stays thin: classify → route → delegate → commit.
 
-   After writing to the target, mark the memory as materialized:
+   | Primitive type   | Forge skill     | Mode                |
+   |------------------|-----------------|---------------------|
+   | skill            | `skill-forge`   | create or update    |
+   | standard         | `standard-forge`| create or update    |
+   | agent            | `agent-forge`   | create or update    |
+   | guardrail / hook | `hook-forge`    | create or update    |
+   | script           | `script-forge`  | create or update    |
+   | prompt           | (no forge yet — use Edit/Write directly on the marketplace clone) |
+   | model-standard, golden-prompt | (no forge yet — Edit/Write directly) |
+
+   Pass to the forge: the marketplace's `local_path` (from `lib catalog match`), the
+   memory content, and mode (`create` if new, `update` if `lib <prim> list --name=<x>`
+   returns a hit in the chosen marketplace).
+
+   After the forge has written the file, commit in the marketplace repo (no auto-push):
+
+   ```bash
+   git -C <marketplace.local_path> add <relative-path-inside-marketplace>
+   git -C <marketplace.local_path> commit -m "<primitive-type>(<name>): from memory #<id>"
    ```
-   update_memory(id=<id>, metadata={'status': 'materialized', 'materialized_to': '<target>'})
+
+   Then update the memory:
+
    ```
-   Where `<target>` is the human-readable destination, e.g.:
-   - `"CLAUDE.md (open-brain, Deployment section)"`
-   - `"~/.claude/CLAUDE.md (UV conventions)"`
-   - `"standards/dev/uv.md"`
-   - `"bead open-brain-xyz"`
+   update_memory(id=<id>, metadata={
+     'status': 'materialized',
+     'materialized_to': '<marketplace>/<primitive-type>/<name>'
+   })
+   ```
+
+   Example `materialized_to` values:
+   - `"cognovis-core/standards/python-uv-sync"`
+   - `"sussdorff-core/skills/terminal-cleanup"`
+   - `"open-brain/hooks/memory-heartbeat"`
+
+   **Never edit `library/meta/library.yaml`** from this skill — catalog inventory
+   refresh is `lib catalog sync`'s job (see bead CL-744).
+
+   Fallback (rare): if Stage B fell through to the CLAUDE.md one-liner escape hatch,
+   record as `materialized_to: "CLAUDE.md (<file>): <one-liner summary>"` and skip
+   the forge + commit steps.
 
 5. **Scaffold**: Run `bd create` with the approved parameters.
 
@@ -182,21 +274,38 @@ for any remaining server-side state updates (priority changes, etc.).
 
 ### Step 5: Report
 
+Include a **Pending commits** section listing per-marketplace commits that are staged
+but not pushed — the user (or session-close) decides when to push.
+
 ```
 Triage complete:
 - 3 kept
 - 2 merged
 - 2 archived
 - 1 deleted
-- 1 promoted → CLAUDE.md (open-brain, Deployment section)
+- 1 promoted → cognovis-core/standards/python-uv-sync
+- 1 promoted → open-brain/skills/ob-search (update)
 - 1 scaffolded → bead open-brain-xyz
+
+Pending commits (no auto-push):
+- ~/code/library/cognovis-core: 1 commit
+- ~/code/open-brain:            1 commit
 ```
 
 ## Rules
 
 - **NEVER execute actions without user approval** — the whole point is HITL
 - **NEVER skip Step 2** (fetching full details) — the user cannot decide on IDs alone
-- **Promote is ALWAYS individual** — never en-bloc, destination must be discussed
+- **Promote routes to marketplaces, never to CLAUDE.md / AGENTS.md** — CLAUDE.md one-liners
+  are a narrow Stage-B escape hatch for project-hard-facts only
+- **Marketplace selection is a lookup, not a decision** — always go through
+  `lib catalog match`; never hard-code marketplace names or topic mappings here
+- **Always delegate file create/update to the matching `*-forge` skill** — ob-triage
+  does not write SKILL.md / standard / agent / hook frontmatter or validation logic
+- **One commit per promote in the marketplace repo, no auto-push** — surface pending
+  commits per marketplace in Step 5
+- **Never edit `library/meta/library.yaml`** — catalog inventory is `lib catalog sync`'s job
+- **Promote is ALWAYS individual** — never en-bloc, marketplace + content must be approved
 - **Scaffold is ALWAYS individual** — bead creation needs explicit approval
 - **Merge must show the merge text** — user needs to see what the result will be
 - **Archive vs Delete are separate categories** — don't conflate them
@@ -222,12 +331,15 @@ save_memory(type="learning")          →  status: open (default)
       ▼
 /ob-triage type:learning              →  review each learning interactively
       │
-      ├─ Promote → materialized      →  update_memory(metadata={'status': 'materialized',
-      │                                                          'materialized_to': '<target>'})
-      │            Write to target (CLAUDE.md, standards/, skill, bead)
+      ├─ Promote → materialized      →  Stage A: classify primitive type
+      │                                 Stage B: lib catalog match → writable marketplace
+      │                                 Stage C: <type>-forge writes/updates in marketplace clone
+      │                                 git commit in marketplace repo (no auto-push)
+      │                                 update_memory(status='materialized',
+      │                                               materialized_to='<marketplace>/<type>/<name>')
       │
-      └─ Discard → discarded         →  update_memory(metadata={'status': 'discarded',
-                                                                 'discard_reason': '<reason>'})
+      └─ Discard → discarded         →  update_memory(status='discarded',
+                                                       discard_reason='<reason>')
                    Archive or delete the memory
 ```
 
@@ -237,12 +349,14 @@ When the user runs `/ob-triage type:learning`, the triage presents all learnings
 `status: open` for review. Each learning gets its own `AskUserQuestion` call (Promote flow,
 see above) because learnings always need an explicit materialization target or discard reason.
 
-**Never batch learnings** — each one must be individually reviewed and routed to:
-- A CLAUDE.md section (project or global)
-- A standards file
-- A skill's SKILL.md
-- A bead (for actionable follow-up work)
+**Never batch learnings** — each one must be individually reviewed and routed to one of:
+- A marketplace primitive (skill / standard / agent / guardrail / prompt / script /
+  model-standard / golden-prompt) via the matching forge, written into a writable
+  marketplace chosen by `lib catalog match`
+- A bead (for actionable follow-up work, via `bd create`)
 - Discarded (if superseded, duplicate, or no longer relevant)
+- (Narrow exception) A CLAUDE.md / AGENTS.md one-liner — only for project-hard-facts
+  that cannot reasonably become a primitive (deployment URL, language hard-boundary, etc.)
 
 After every promote or discard, update the memory's `status` metadata so it no longer
 appears in future `/ob-triage type:learning` runs.
