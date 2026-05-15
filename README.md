@@ -343,6 +343,7 @@ Then install primitives on demand:
 
 ```bash
 /library use ob-search             # MCP-backed memory search skill
+/library use ob-cli                # CLI-backed memory operations for coding harnesses
 /library use ob-smart-search       # AST + tree-sitter symbol search
 /library use ob-smart-outline      # File-structure skeleton
 /library use ob-smart-unfold       # Bounded symbol extraction
