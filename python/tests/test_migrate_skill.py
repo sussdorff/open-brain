@@ -49,17 +49,20 @@ class TestSkillFileExists:
         assert "ob-migrate" in content or "ob migrate" in content.lower()
 
     def test_frontmatter_closes(self):
-        """Frontmatter must have closing --- marker within first 15 lines."""
+        """Frontmatter must have closing --- marker within first 25 lines.
+
+        Cap raised from 15 to 25 to accommodate `requires_standards` lists and
+        the two-contracts description shape (use when / NOT for / boundary).
+        """
         content = SKILL_PATH.read_text()
         lines = content.split("\n")
-        # Find the index of the closing --- in lines[1:] and assert it's within first 15 lines
         closing_index = next(
             (i for i, line in enumerate(lines[1:]) if line.strip() == "---"),
             None,
         )
         assert closing_index is not None, "Frontmatter must have closing --- marker"
-        assert closing_index < 15, (
-            f"Frontmatter closing --- found at line {closing_index + 2}, expected within first 15 lines"
+        assert closing_index < 25, (
+            f"Frontmatter closing --- found at line {closing_index + 2}, expected within first 25 lines"
         )
 
 

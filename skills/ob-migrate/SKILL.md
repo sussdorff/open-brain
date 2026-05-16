@@ -1,13 +1,16 @@
 ---
 name: ob-migrate
-description: >
-  Migrate knowledge into open-brain memory. Supports two modes:
-  Interactive mode extracts facts from prior conversation context and saves them.
-  Batch mode imports from a JSONL or Obsidian/Markdown file.
-  Use when: "/ob-migrate", "ob-migrate", "migrate memories", "import memories",
-  "migrate knowledge", "import into open-brain", "bootstrap memory",
-  "migrate from Obsidian", "import JSONL", "Wissen importieren", "Memories importieren".
-version: 0.1.0
+description: >-
+  use when: bootstrapping or extending open-brain memory by importing facts from
+  prior conversation context, a JSONL export, or Obsidian/Markdown files.
+  NOT for: ingesting URLs (use ingest-content), or saving a single observation
+  (use `ob save` directly).
+  boundary: ob-migrate is for batch + interactive memory writes; ingest-content
+  is for one URL at a time; ob-search is read-only.
+version: 0.2.0
+requires_standards:
+  - open-brain/cli-routing
+  - open-brain/memory-write-patterns
 requires:
   - prompt:english-only
   - mcp:open-brain
@@ -15,257 +18,109 @@ requires:
 
 # open-brain Memory Migration
 
-Bootstrap or extend open-brain memory by migrating knowledge from prior context or external files.
-
-Idempotent: re-running is safe. When `save_memory` returns `duplicate_of` in the response,
-the item is counted as skipped (duplicate) — no new memory is created.
+Bootstrap or extend open-brain memory by migrating knowledge from prior context
+or external files. Idempotent (see write-patterns standard).
 
 ## Quick Start
 
 ```
-/ob-migrate                          # Interactive mode: extract facts from prior context
-/ob-migrate /path/to/export.jsonl    # Batch mode: import JSONL file
-/ob-migrate /path/to/notes.md        # Batch mode: import Obsidian/Markdown file
-/ob-migrate /path/to/notes.md project:my-project   # Batch with default project
+/ob-migrate                          # Interactive: extract facts from prior context
+/ob-migrate /path/to/export.jsonl    # Batch: import JSONL file
+/ob-migrate /path/to/notes.md        # Batch: import Obsidian/Markdown file
+/ob-migrate /path/to/notes.md project:my-project
 ```
-
----
 
 ## Mode 1: Interactive Mode
 
-**Trigger:** `/ob-migrate` with no file argument.
+**Trigger**: `/ob-migrate` with no file argument.
 
-### Workflow
+1. Review current conversation history and loaded context (CLAUDE.md, standards,
+   memory context). Identify concrete facts, decisions, patterns, learnings, or
+   observations worth long-term preservation.
+2. Present the extraction plan to the user as a numbered list with
+   `[type] text (project)`, then ask `Proceed with migration? (y/n/edit)` —
+   wait for the user's answer before saving.
+3. For each approved fact, call:
 
-**Step 1 — Extract facts from prior context**
+   ```
+   save_memory(text=..., type=..., project=..., title=..., narrative=...)
+   ```
 
-Review the current conversation history and any loaded context (CLAUDE.md, standards, memory context).
-Identify concrete facts, decisions, patterns, learnings, or observations about the user, their projects,
-or their preferences that are worth preserving in long-term memory.
+   The capture router runs automatically — pass through whatever fields apply.
+4. Track and print the summary per the write-patterns standard.
 
-Focus on:
-- Technical decisions and their rationale
-- Patterns and conventions the user follows
-- Project-specific knowledge (architecture, deployment, tools)
-- Personal preferences and working styles
-- Discoveries and learnings from the current session
+Focus on: technical decisions and rationale, conventions, project-specific
+knowledge (architecture, deployment, tools), preferences, session discoveries.
 
-**Step 2 — Present extraction plan**
+## Mode 2: Batch — JSONL
 
-Before saving, list the facts you identified. Example:
-
-```
-Found 5 items to migrate:
-1. [learning] "Use uv run python for all Python commands in this project" (project: open-brain)
-2. [observation] "Deploy script requires /mcp reconnect after completion" (project: open-brain)
-3. [decision] "Voyage-4 embeddings chosen over text-embedding-3-small (14% better retrieval)"
-4. [learning] "Always run tests with -m 'not integration' to skip external deps"
-5. [observation] "pgvector cosine + tsvector FTS via RRF is the hybrid search strategy"
-
-Proceed with migration? (y/n/edit)
-```
-
-**Step 3 — Save each item via save_memory**
-
-For each fact, call `mcp__open-brain__save_memory` with appropriate fields:
-
-```
-save_memory(
-    text="<the fact/knowledge>",
-    type="<learning|observation|decision|discovery|...>",
-    project="<project name or null>",
-    title="<short title>",
-    narrative="<optional: why this matters, context>",
-)
-```
-
-The capture router is called automatically by `save_memory` — no manual routing needed.
-
-**Step 4 — Track progress and report summary**
-
-Track each response:
-- Response has no `duplicate_of` → count as **migrated**
-- Response has `duplicate_of` → count as **skipped (duplicate)**
-- Exception or missing `id` → count as **error**
-
-Print summary at the end (see Summary section below).
-
----
-
-## Mode 2: Batch Mode
-
-**Trigger:** `/ob-migrate <file-path>` — file path is the first argument.
-
-Supports two file formats: JSONL and Obsidian/Markdown.
-
-### JSONL Format
-
-Each line is a JSON object. Required field: `text`. Optional: `type`, `project`, `title`, `narrative`, `metadata`.
+Each line is a JSON object. Required: `text`. Optional: `type`, `project`,
+`title`, `narrative`, `metadata`.
 
 ```jsonl
-{"text": "Use asyncpg for all DB access in this project.", "type": "learning", "project": "open-brain"}
-{"text": "Deploy script drops MCP connection — run /mcp reconnect after.", "type": "observation", "project": "open-brain"}
-{"text": "Voyage-4 chosen for embeddings (14% better retrieval vs text-embedding-3-small).", "type": "decision"}
+{"text": "Use asyncpg for all DB access.", "type": "learning", "project": "open-brain"}
+{"text": "Voyage-4 chosen for embeddings.", "type": "decision"}
 ```
 
-**Parsing rules:**
+Parsing rules:
+
 - Skip blank lines silently
 - Lines that are not valid JSON → count as **error**, continue
-- Lines missing the `text` field → count as **error**, continue
-- Unknown extra fields are passed through as `metadata`
+- Lines missing `text` → count as **error**, continue
+- Unknown extra fields pass through into `metadata`
 
-### Obsidian/Markdown Format
+## Mode 2: Batch — Obsidian/Markdown
 
-Each file is treated as one memory, OR sections separated by `---` are treated as individual memories.
+Single file → one memory; entire content becomes `text`, filename (without
+extension) becomes `title`.
 
-**Single file → one memory:**
-```
-/ob-migrate /path/to/note.md
-```
-The entire file content becomes the `text`. The filename (without extension) becomes the `title`.
+Multi-section file (sections separated by `---`): each section is one memory.
+First heading (`# ...`) in a section becomes `title`.
 
-**Multi-section file (sections separated by `---`):**
-Each section between `---` dividers is one memory. The first heading (`# ...`) in a section becomes the `title`.
+Defaults for Markdown:
 
-**Default values for Markdown imports:**
-- `type` defaults to `"observation"` (override via argument: `type:learning`)
-- `project` defaults to `null` (override via argument: `project:my-project`)
+- `type` → `"observation"` (override via `type:learning`)
+- `project` → `null` (override via `project:my-project`)
 
-### Batch Workflow
+## Batch Workflow
 
-**Step 1 — Read the file**
+1. Read the file via the Read tool.
+2. Parse all items per the format rules above. Count malformed entries as
+   errors immediately.
+3. Preview to the user with the count and proposed action — wait for `y/n`.
+4. For each valid item, call `save_memory` with pass-through fields.
+5. Process the response per the write-patterns standard: `duplicate_of` →
+   skipped, missing `id` or exception → error, otherwise → migrated.
+6. For imports >10 items, print progress every 10.
+7. Print the summary.
 
-Use the Read tool to read the file at the given path.
-
-**Step 2 — Parse**
-
-Parse all items from the file according to format rules above.
-Count malformed lines/sections as errors immediately.
-
-**Step 3 — Preview**
-
-Show the user a preview before importing:
-
-```
-Found 42 items in /path/to/export.jsonl.
-3 malformed lines will be skipped (errors).
-Proceed with import? (y/n)
-```
-
-**Step 4 — Save each item via save_memory**
-
-For each valid item, call:
-
-```
-save_memory(
-    text=item["text"],
-    type=item.get("type"),         # null if not specified
-    project=item.get("project"),   # null if not specified
-    title=item.get("title"),
-    narrative=item.get("narrative"),
-    metadata=item.get("metadata"),
-)
-```
-
-The capture router runs automatically — each item is classified and routed.
-
-**Step 5 — Check response for duplicate_of**
-
-Parse the JSON response from `save_memory`:
-
-```python
-response = json.loads(result)
-if "duplicate_of" in response:
-    # Item already exists — count as skipped (duplicate)
-    skipped += 1
-else:
-    # Successfully saved
-    migrated += 1
-```
-
-**Step 6 — Print progress**
-
-For large imports (>10 items), print progress every 10 items:
-```
-Progress: 10/42 processed (8 migrated, 2 skipped)
-Progress: 20/42 processed (16 migrated, 4 skipped)
-...
-```
-
----
-
-## Idempotency
-
-Re-running ob-migrate is safe. The `save_memory` tool computes a SHA-256 hash of the `text` content.
-If an identical text was already saved, it returns:
-
-```json
-{"id": 456, "message": "Duplicate detected", "duplicate_of": 123}
-```
-
-When `duplicate_of` is present in the response, the item is **skipped (not re-saved)**.
-This means you can re-run the same import file and only new items will be migrated.
-
----
-
-## Summary
-
-At the end of every migration (interactive or batch), print:
-
-```
-Migration complete: N migrated, M skipped (duplicates), K errors
-```
-
-Example:
-```
-Migration complete: 38 migrated, 4 skipped (duplicates), 3 errors
-```
-
-If there were errors, list the first few with their line number and reason:
-```
-Errors:
-  Line 7: Invalid JSON — '{bad json'
-  Line 15: Missing required field 'text'
-  Line 31: Invalid JSON — 'not a json object'
-```
-
----
-
-## Arguments Reference
+## Arguments
 
 | Argument | Description |
-|----------|-------------|
-| *(none)* | Interactive mode — extract from prior conversation context |
-| `<file-path>` | Batch mode — import JSONL or Markdown file |
-| `project:<name>` | Override/default project for all items |
-| `type:<type>` | Override/default type for all items (useful for Markdown) |
-| `limit:<n>` | Only import first N items (useful for testing) |
-| `dry-run` | Parse and preview without saving anything |
-
----
+|---|---|
+| *(none)* | Interactive mode |
+| `<file-path>` | Batch mode — JSONL or Markdown |
+| `project:<name>` | Default project for all items |
+| `type:<type>` | Default type for all items (Markdown) |
+| `limit:<n>` | Import first N only |
+| `dry-run` | Parse + preview without saving |
 
 ## Rules
 
-- **NEVER save without user confirmation** in interactive mode — always show the extraction plan first
-- **Capture router runs automatically** — do not manually classify; `save_memory` handles it
-- **Batch mode: continue on error** — malformed lines are counted, not fatal
-- **Always print the summary** — migrated, skipped (duplicates), errors
-- **duplicate_of = skip** — never treat a duplicate as an error
-- **dry-run skips all save_memory calls** — only parse and count
-- **Re-running is idempotent** — safe to run multiple times on the same file
-
----
+- NEVER save without user confirmation in interactive mode
+- Batch mode continues on error — malformed lines are counted, not fatal
+- `dry-run` skips all `save_memory` calls (see write-patterns standard §5)
+- All other write semantics (duplicate handling, summary, capture router,
+  metadata encoding) inherit from `open-brain/memory-write-patterns`
 
 ## Type Reference
 
-Common memory types for migration:
-
 | Type | Use for |
-|------|---------|
-| `learning` | Technical lessons, best practices, conventions discovered |
-| `observation` | Facts about a project, system, or environment |
-| `decision` | Architectural or design decisions with rationale |
+|---|---|
+| `learning` | Technical lessons, best practices, conventions |
+| `observation` | Facts about a project, system, environment |
+| `decision` | Architectural/design decisions with rationale |
 | `discovery` | New findings, surprising behaviors |
-| `bugfix` | Bug found and fixed (document the root cause) |
+| `bugfix` | Bug found and fixed (document root cause) |
 | `feature` | Feature implemented or planned |
 | `session_summary` | Summary of a work session |

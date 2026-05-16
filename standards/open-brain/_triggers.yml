@@ -16,3 +16,13 @@ files:
     - save observation
     - save memory
     - save session summary
+  memory-write-patterns.md:
+    - save_memory
+    - duplicate_of
+    - ingest URL
+    - migrate memories
+    - import memories
+    - bulk import
+    - dry-run
+    - bootstrap memory
+    - curated_content

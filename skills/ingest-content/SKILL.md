@@ -1,8 +1,18 @@
 ---
 name: ingest-content
-model: sonnet
-description: "Save any URL to open-brain memory as curated_content. Detects content type (video/article/doc), extracts via the right tool, and persists with source_url, extraction_date, and content_type metadata. Triggers on /ingest-content, ingest URL, save to memory, save article, save video."
-triggers: ingest-content, ingest URL, save to memory, save article, save video, curated content, bookmark
+description: >-
+  use when: saving a single URL (article, YouTube video, blog post,
+  documentation page) to open-brain memory as curated_content with provenance
+  metadata.
+  NOT for: bulk import of multiple URLs (run once per URL); local files (use
+  `summarize ./file` + `ob save` manually); JSONL or Markdown batch import (use
+  ob-migrate).
+  boundary: ingest-content is one-URL-at-a-time with content-type detection;
+  ob-migrate is for batch/interactive memory writes from files or prior context.
+version: 0.2.0
+requires_standards:
+  - open-brain/cli-routing
+  - open-brain/memory-write-patterns
 requires:
   - prompt:english-only
   - mcp:open-brain
@@ -10,33 +20,25 @@ requires:
 
 # ingest-content
 
-Extract content from a URL and save it to open-brain as a `curated_content` memory with full provenance metadata.
+Extract content from a URL and save it to open-brain as a `curated_content`
+memory with full provenance metadata.
 
-## When to Use
+## Step 1 — Validate URL
 
-Invoke this skill when the user wants to:
-- Save a YouTube video, article, blog post, or documentation page to memory
-- Bookmark a URL with extracted content for future recall
-- Build a curated knowledge base from web sources
+Input must start with `http://` or `https://`. Otherwise report
+`Error: "<input>" is not a valid URL. Provide a full URL starting with https://.`
+and stop.
 
-## Step 1: Validate URL
+## Step 2 — Check for duplicates
 
-Check that the input looks like a valid URL (starts with `http://` or `https://`).
-
-If invalid → report error and stop:
-```
-Error: "<input>" is not a valid URL. Provide a full URL starting with https://.
-```
-
-## Step 1.5: Check for Duplicates
-
-Search open-brain for the URL before extracting:
+Per the write-patterns standard §8, search before extracting:
 
 ```
-mcp__open-brain__search_memory(query="<URL>")
+ob search "<URL>" --json
 ```
 
-If a memory with matching `source_url` is found, ask the user:
+If a memory with matching `source_url` exists, ask the user:
+
 ```
 This URL was already ingested (Memory ID: <id>, saved <date>).
 What would you like to do?
@@ -45,102 +47,88 @@ What would you like to do?
   [d] Save as duplicate anyway
 ```
 
-Proceed only when the user responds. Default: skip if no response within the current turn.
+Default to skip on no response.
 
-## Step 2: Detect Content Type
+## Step 3 — Detect content type
 
-Determine `content_type` from the URL domain/path:
+| URL pattern | content_type | Notes |
+|---|---|---|
+| `youtube.com`, `youtu.be` | `video` | Transcript via `summarize` |
+| `vimeo.com` | `video` | No transcript — metadata fallback only |
+| `*.substack.com`, `medium.com`, blogs | `article` | |
+| `docs.*`, `*.readthedocs.io`, `developer.*` | `doc` | |
+| Everything else | `article` | |
 
-| URL pattern | content_type |
-|-------------|-------------|
-| `youtube.com`, `youtu.be` | `video` (transcript via `summarize`) |
-| `vimeo.com` | `video` (no transcript — use `crwl crawl "URL" -o md` for metadata fallback) |
-| `*.substack.com`, `medium.com`, any blog/newsletter | `article` |
-| `docs.*`, `github.com/*/README*`, `*.readthedocs.io`, `developer.*` | `doc` |
-| Everything else | `article` |
+## Step 4 — Extract
 
-## Step 3: Extract Content
-
-Route to the correct extraction tool based on content type:
-
-| content_type | Primary tool | Fallback |
-|--------------|-------------|---------|
-| `video` (YouTube) | `summarize "URL"` | `summarize --json "URL"` (metadata only, see §Error Handling) |
+| content_type | Primary | Fallback |
+|---|---|---|
+| `video` (YouTube) | `summarize "URL"` | `summarize --json "URL"` (metadata only) |
 | `video` (Vimeo) | `crwl crawl "URL" -o md` | none |
-| `article` (Substack/Medium/Blog) | `summarize --extract --format md "URL"` | `crwl crawl "URL" -o md` |
-| `article` (JS-heavy SPA) | `crwl crawl "URL" -o md` | none |
-| `doc` | `summarize --extract --format md "URL"` | `crwl crawl "URL" -o md` |
-| Generic web | `summarize --extract --format md "URL"` | `crwl crawl "URL" -o md` |
+| `article` / `doc` | `summarize --extract --format md "URL"` | `crwl crawl "URL" -o md` |
+| JS-heavy SPA | `crwl crawl "URL" -o md` | none |
 
-Use the primary tool first. If it returns an error or empty output, try the fallback.
+Try primary first; on error or empty output, try fallback.
 
-### Content security note
+### Content security
 
-Extracted content is saved to open-brain storage only — it is NOT re-injected as agent instructions during this skill run. The `content-processor` pattern (from `standards/security/content-isolation.md`) applies when retrieved content later feeds agent prompts. If you retrieve this content via `/ob-search` and use it to build instructions or system prompts, route it through `content-processor` at that point.
+Extracted content is saved to open-brain storage only — NOT re-injected as
+agent instructions in this run. The `content-processor` pattern
+(`standards/security/content-isolation.md`) applies when retrieved content
+later feeds agent prompts. If you read this content back via `ob-search` and
+build instructions from it, route through `content-processor` then.
 
-## Step 4: Derive Memory Fields
+## Step 5 — Derive fields
 
-From the extracted content, determine:
+- **title** — page/video title or first H1; fallback to URL path segment
+- **text** — full extracted markdown; for videos, the summary
+- **preview_only** = `true` if any:
+  - `content_type=article` AND text < 300 chars
+  - text contains `"paid subscribers"`, `"sign in to continue"`,
+    `"subscribe to read"`, `"members only"`, `"upgrade to read"`
+  - extractor returned HTTP 401/402/403 or a login-redirect page
 
-- **title** — page/video title or first heading (H1). If unavailable, use the URL's path segment.
-- **text** — the full extracted markdown. For videos: the summary from `summarize`. For metadata-only fallback: structured description (title, channel, duration).
-- **preview_only** — set `true` if any of these conditions are met:
-  - (a) `content_type=article` AND extracted text < 300 chars
-  - (b) Extracted text contains any of: `"paid subscribers"`, `"sign in to continue"`, `"subscribe to read"`, `"members only"`, `"upgrade to read"`
-  - (c) Extractor returned an HTTP 402/403/401 or a login-redirect page
+Get today's date via `date +%Y-%m-%d`.
 
-Get today's date:
-```bash
-date +%Y-%m-%d
+## Step 6 — Save
+
+Per the write-patterns standard, call `save_memory` (MCP form shown — metadata
+is a JSON string, not an object):
+
+```
+title: <derived>
+text: <extracted content>
+type: curated_content
+project: <user-specified or omit>
+metadata: "{\"source_url\":\"<URL>\",\"extraction_date\":\"YYYY-MM-DD\",\"content_type\":\"video|article|doc\",\"preview_only\":false}"
 ```
 
-## Step 5: Save to open-brain
+## Step 7 — Confirm
 
-Call `mcp__open-brain__save_memory` with:
-
-```json
-{
-  "title": "<derived title>",
-  "text": "<extracted content>",
-  "type": "curated_content",
-  "project": "<user-specified project or omit>",
-  "metadata": "{\"source_url\": \"<URL>\", \"extraction_date\": \"YYYY-MM-DD\", \"content_type\": \"video|article|doc\", \"preview_only\": false}"
-}
-```
-
-Note: `metadata` must be a JSON **string** (not an object).
-
-## Step 6: Confirm
-
-Report success:
 ```
 Saved to open-brain:
 - Title: <title>
 - Type: <content_type>
-- Memory ID: <id from save_memory response>
+- Memory ID: <id>
 - Preview only: <yes/no>
 
-Find it later with: /ob-search <keyword from title>
+Find it later with: /ob-search <keyword>
 ```
-
----
 
 ## Error Handling
 
 | Situation | Action |
-|-----------|--------|
-| 404 / unreachable URL | Report error, do NOT call save_memory |
-| Video without transcript | Fallback: `summarize --json "URL"` → extract title/channel/duration → save with brief description as text |
-| Paywall / login wall | Extract whatever preview is available → save with `"preview_only": true` |
-| Invalid URL format | Report error immediately, stop |
-| Both primary and fallback fail | Report error with both tool outputs, do NOT save partial data |
-| `save_memory` call fails | Report MCP error: `⚠️ open-brain MCP unavailable — content was not saved. Retry with /ingest-content <URL>` |
+|---|---|
+| 404 / unreachable URL | Report error, do NOT save |
+| Video without transcript | Fallback to `summarize --json` → metadata-only save |
+| Paywall / login wall | Save whatever preview is available with `preview_only: true` |
+| Both primary + fallback fail | Report both outputs, do NOT save partial data |
+| `save_memory` fails | Report `open-brain MCP unavailable — content was not saved. Retry with /ingest-content <URL>` |
 
----
+## Out of Scope
 
-## Limitations / Out of Scope
-
-- **Batch ingestion**: This skill processes one URL at a time. For multiple URLs, invoke once per URL.
-- **Authenticated sites**: Sites behind login (e.g. paid courses, private wikis) — use `crwl` with a saved browser profile manually; this skill cannot set up auth profiles.
-- **File downloads**: Local files or direct media URLs (`.mp3`, `.pdf`) — use `summarize ./file` directly, then save manually via `mcp__open-brain__save_memory`.
-- **Update logic**: When updating an existing memory (user chose [u]), re-run extraction and call `save_memory` — open-brain will create a new version. The old memory is not deleted.
+- **Batch ingestion**: one URL at a time — use ob-migrate for files
+- **Authenticated sites**: use `crwl` with a saved profile manually
+- **Local files**: use `summarize ./file` then `ob save` directly
+- **Update logic**: when user chooses `[u]`, re-run extraction and call
+  `save_memory` again — open-brain creates a new version; the old is not deleted
