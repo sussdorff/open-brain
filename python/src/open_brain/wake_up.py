@@ -8,7 +8,7 @@ from open_brain.data_layer.interface import Memory, rank_importance
 
 logger = logging.getLogger(__name__)
 
-CATEGORY_ORDER = ["identity", "decisions", "constraints", "errors", "project"]
+CATEGORY_ORDER = ["identity", "constraints", "errors", "project"]
 CATEGORY_DISPLAY = {
     "identity": "Identity",
     "decisions": "Decisions",
@@ -90,7 +90,11 @@ def build_wake_up_pack(memories: list[Memory], token_budget: int = 500) -> str:
         return ""
 
     # Step 1: Classify
-    buckets: dict[str, list[Memory]] = {cat: [] for cat in CATEGORY_ORDER + ["context"]}
+    # "decisions" is intentionally not in CATEGORY_ORDER (not emitted at session start)
+    # but the classifier still returns it, so collect into a sink bucket.
+    buckets: dict[str, list[Memory]] = {
+        cat: [] for cat in CATEGORY_ORDER + ["context", "decisions"]
+    }
     for memory in memories:
         cat = classify_memory(memory)
         buckets[cat].append(memory)

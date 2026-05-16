@@ -4,13 +4,6 @@ All notable changes to this project will be documented in this file.
 
 ## [unreleased]
 
-### Features
-
-- *(ob-triage)* Route promote to library marketplaces via `lib catalog match` and matching `*-forge` skill; drop CLAUDE.md/AGENTS.md as primary promote destinations (skill bumped 0.1.0 → 0.2.0)
-
-<<<<<<< Updated upstream
-## [unreleased]
-
 ### Bug Fixes
 
 - *(open-brain-3lr)* Address review findings iteration 1
@@ -18,10 +11,17 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- *(wake-up-pack)* Drop "Decisions" bucket from wake-up pack output. Decision-typed memories were dominating SessionStart context with tactical, session-scoped calls that were not durable enough to justify their token cost. The classifier still recognises `type=decision` / `metadata.category=decision`, so existing memories are preserved — they are simply no longer surfaced at session start. Restoring the bucket later is a one-line `CATEGORY_ORDER` edit
+- *(ob-triage)* Route promote to library marketplaces via `lib catalog match` and matching `*-forge` skill; drop CLAUDE.md/AGENTS.md as primary promote destinations (skill bumped 0.1.0 → 0.2.0)
 - *(open-brain-3lr)* Green — implement people enrichment pipeline
 - *(open-brain-3lr)* Add opt-in person enrichment pipeline for transcript mentions
+- *(open-brain-3lr)* **Person enrichment** command for opt-in metadata lookup via SearXNG web search — lists candidates with name only, queries transcript context for disambiguation, displays org/role/profile URL with confidence scores and provenance snippets, and applies approved enrichments non-interactively with `--auto-apply --min-confidence` (hard floor 0.6)
 
-## [2026.04.31] - 2026-04-30
+### Miscellaneous
+
+- Resolve committed `<<<<<<< Updated upstream` / `>>>>>>> Stashed changes` markers in CHANGELOG.md. Merged the two parallel unreleased blocks into one and folded the orphaned `[2026.04.31]` draft heading into the existing `[0.29.0]` release entry below (same date, same release)
+
+## [0.29.0] - 2026-04-30
 
 ### Bug Fixes
 
@@ -32,20 +32,6 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - *(merge-persons)* Add --list discovery mode + fix alias double-encoding
-
-### Miscellaneous
-
-- Bump VERSION to 0.29.0 and release changelog for person-dedup wave
-=======
-
-## [Unreleased]
-
-### Features
-
-- *(open-brain-3lr)* **Person enrichment** command for opt-in metadata lookup via SearXNG web search — lists candidates with name only, queries transcript context for disambiguation, displays org/role/profile URL with confidence scores and provenance snippets, and applies approved enrichments non-interactively with `--auto-apply --min-confidence` (hard floor 0.6)
->>>>>>> Stashed changes
-
-## [0.29.0] - 2026-04-30
 
 ### Miscellaneous
 

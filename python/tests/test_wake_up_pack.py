@@ -169,14 +169,14 @@ class TestImportanceOrdering:
         """High importance appears before medium importance in output."""
         from open_brain.wake_up import build_wake_up_pack
         memories = [
-            _make_memory(id=1, type="decision", content="Medium decision", importance="medium",
-                         title="Medium decision", updated_at="2026-01-02T00:00:00"),
-            _make_memory(id=2, type="decision", content="High decision", importance="high",
-                         title="High decision", updated_at="2026-01-01T00:00:00"),
+            _make_memory(id=1, type="constraint", content="Medium constraint", importance="medium",
+                         title="Medium constraint", updated_at="2026-01-02T00:00:00"),
+            _make_memory(id=2, type="constraint", content="High constraint", importance="high",
+                         title="High constraint", updated_at="2026-01-01T00:00:00"),
         ]
         result = build_wake_up_pack(memories, token_budget=2000)
-        high_pos = result.find("High decision")
-        medium_pos = result.find("Medium decision")
+        high_pos = result.find("High constraint")
+        medium_pos = result.find("Medium constraint")
         assert high_pos != -1, "High entry must appear in output"
         assert medium_pos != -1, "Medium entry must appear in output"
         assert high_pos < medium_pos, "High importance must come before medium importance"
@@ -241,12 +241,12 @@ class TestTokenBudget:
 
         memories = [
             _make_memory(id=1, type="identity", content="Identity memory", title="Identity"),
-            _make_memory(id=2, type="decision", content="Decision memory", title="Decision"),
+            _make_memory(id=2, type="error_resolved", content="Error memory", title="Error"),
             _make_memory(id=3, type="constraint", content="Constraint memory", title="Constraint"),
         ]
         result = build_wake_up_pack(memories, token_budget=99999)
         assert "Identity" in result
-        assert "Decision" in result
+        assert "Error" in result
         assert "Constraint" in result
 
     def test_lowest_ranked_dropped_first(self):
@@ -304,26 +304,40 @@ class TestTokenBudget:
 # ─── AK2: Category grouping ───────────────────────────────────────────────────
 
 class TestCategoryGrouping:
-    """build_wake_up_pack() groups memories into the 5 named categories + context fallback."""
+    """build_wake_up_pack() groups memories into the 4 named categories + context fallback.
 
-    def test_all_five_categories_present(self):
-        """All 5 named categories appear as sections when memories exist for each."""
+    Note: 'decisions' is still a classifier bucket (see classify_memory tests), but is
+    intentionally omitted from CATEGORY_ORDER so decision-typed memories are not
+    surfaced at session start. See CHANGELOG entry for the rationale.
+    """
+
+    def test_all_named_categories_present(self):
+        """All 4 emitted named categories appear as sections when memories exist for each."""
         from open_brain.wake_up import build_wake_up_pack
 
         memories = [
             _make_memory(id=1, type="identity", content="I am Claude", title="Identity"),
-            _make_memory(id=2, type="decision", content="Use asyncpg", title="Decision"),
-            _make_memory(id=3, type="constraint", content="No SQL injection", title="Constraint"),
-            _make_memory(id=4, type="error_resolved", content="Fixed bug", title="Error"),
-            _make_memory(id=5, type="observation", project_name="project:myapp",
+            _make_memory(id=2, type="constraint", content="No SQL injection", title="Constraint"),
+            _make_memory(id=3, type="error_resolved", content="Fixed bug", title="Error"),
+            _make_memory(id=4, type="observation", project_name="project:myapp",
                          content="Project context", title="Project"),
         ]
         result = build_wake_up_pack(memories, token_budget=9999)
         assert "## Identity" in result
-        assert "## Decisions" in result
         assert "## Constraints" in result
         assert "## Errors" in result
         assert "## Project" in result
+
+    def test_decisions_bucket_is_not_emitted(self):
+        """Decision-typed memories are classified but NOT surfaced in the wake-up pack."""
+        from open_brain.wake_up import build_wake_up_pack
+
+        memories = [
+            _make_memory(id=1, type="decision", content="Use asyncpg", title="Some decision"),
+        ]
+        result = build_wake_up_pack(memories, token_budget=9999)
+        assert "## Decisions" not in result
+        assert "Some decision" not in result
 
     def test_empty_category_omitted(self):
         """Categories with no memories are omitted from output."""
