@@ -1,0 +1,18 @@
+# Per-file triggers for the standards-loader hook.
+# Files not listed below are excluded from auto-injection (strict mode).
+
+files:
+  cli-routing.md:
+    - ob cli
+    - ob search
+    - ob save
+    - ob context
+    - ob timeline
+    - ob ingest
+    - ob doctor
+    - open-brain memory
+    - mcp__open-brain
+    - recall past work
+    - save observation
+    - save memory
+    - save session summary

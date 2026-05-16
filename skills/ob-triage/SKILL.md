@@ -361,9 +361,8 @@ see above) because learnings always need an explicit materialization target or d
 After every promote or discard, update the memory's `status` metadata so it no longer
 appears in future `/ob-triage type:learning` runs.
 
-## Integration with learnings-pipeline
+## Integration with learning extraction
 
-open-brain is the Single Source of Truth for all learnings. The `learnings-pipeline` skill's
-extraction phase (`/learnings-pipeline extract`) writes new learnings directly to open-brain
-via `save_memory(type="learning")`. The review phase is handled entirely by this skill
-(`/ob-triage type:learning`) — no separate review step in `learnings-pipeline` is needed.
+open-brain is the Single Source of Truth for all learnings. The `learning-extractor`
+agent writes new learnings directly to open-brain via `save_memory(type="learning")`.
+The review phase is handled entirely by this skill (`/ob-triage type:learning`).
