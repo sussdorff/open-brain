@@ -343,17 +343,20 @@ Then install primitives on demand:
 
 ```bash
 /library use ob-search             # MCP-backed memory search skill
-/library use ob-cli                # CLI-backed memory operations for coding harnesses
-/library use ob-smart-search       # AST + tree-sitter symbol search
-/library use ob-smart-outline      # File-structure skeleton
-/library use ob-smart-unfold       # Bounded symbol extraction
 /library use ob-triage             # Human-in-the-loop memory triage
-/library use ob-migrate            # Legacy memory migration
-/library use ingest-content        # Email/transcript ingestion driver
-/library use learnings-pipeline    # Learning consolidation workflow
-/library use memory-heartbeat      # Periodic memory health check
+/library use ob-migrate            # Memory migration (JSONL/Markdown/interactive)
+/library use ingest-content        # URL ingestion to curated_content
+/library use memory-heartbeat      # Periodic memory lifecycle pipeline
 /library use open-brain-hooks      # Claude/Codex memory hooks bundle
 ```
+
+Memory CLI routing rules and `save_memory` conventions live in the standards
+`open-brain/cli-routing`, `open-brain/memory-write-patterns`, and
+`open-brain/memory-status-conventions` (auto-loaded via `requires_standards`).
+
+Code-intelligence tooling (`smart_search` / `smart_outline` / `smart_unfold`)
+moved to the `cognovis-core` marketplace as `/library use code-navigator` —
+the scripts have no functional relationship to open-brain memory.
 
 The `open-brain-hooks` guardrail installs the harness-specific manifest from `hooks/`: Claude Code uses `hooks/hooks.json`, while Codex uses `hooks/hooks.codex.json`. Source paths are resolved to the library cache, so there is no symlinking into `plugin/`, no `claude plugin add`, and no marketplace.json manifest.
 
