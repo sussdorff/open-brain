@@ -1,12 +1,18 @@
 ---
 name: ob-triage
-description: >
-  Triage open-brain memories with human-in-the-loop review. Classifies memories into
-  keep/merge/archive/delete/promote and presents each action for user approval before executing.
-  Use when: "triage memories", "memory review", "cleanup memories", "learnings review",
-  "materialize learnings", "memory housekeeping", "ob triage", "memory triage",
-  "Memories aufräumen", "Learnings reviewen".
-version: 0.2.0
+description: >-
+  use when: manually reviewing open-brain memories with human-in-the-loop
+  approval — classify keep/merge/archive/delete/promote, route promotes to
+  marketplace primitives via the matching *-forge skill, scaffold beads from
+  observations.
+  NOT for: scheduled or silent lifecycle maintenance (use memory-heartbeat);
+  writing new memories (use ob-migrate or ingest-content).
+  boundary: ob-triage is interactive (AskUserQuestion per action); memory-
+  heartbeat is autonomous (cron-triggered, silent when QUIET).
+version: 0.3.0
+requires_standards:
+  - open-brain/cli-routing
+  - open-brain/memory-status-conventions
 requires:
   - prompt:english-only
   - mcp:open-brain
@@ -197,29 +203,31 @@ AskUserQuestion:
 
 ### Step 4: Execute Approved Actions
 
-After the user has reviewed and approved actions, execute them:
+After the user has reviewed and approved actions, execute them. Every status
+write follows the `update_memory` patterns in the
+`open-brain/memory-status-conventions` standard.
 
 1. **Merge**: Call `mcp__open-brain__refine_memories(scope="duplicates")` or
-   `mcp__open-brain__update_memory` to update the surviving memory with merged text,
-   then archive/delete the duplicate. After merging, mark the deleted memory as discarded:
+   `mcp__open-brain__update_memory` to update the surviving memory with merged
+   text. Then mark the deleted memory as discarded with
+   `discard_reason='merged into #<surviving-id>'`.
+
+2. **Archive**: Call `mcp__open-brain__materialize_memories` with the approved
+   archive actions, then mark the memory discarded with
+   `discard_reason='archived — <reason>'`.
+
+3. **Delete**: No MCP delete tool exists (by design — see decision #10597).
+   Delete via the server REST API:
+
    ```
-   update_memory(id=<deleted-id>, metadata={'status': 'discarded', 'discard_reason': 'merged into #<surviving-id>'})
+   ssh services 'curl -s -X DELETE "http://localhost:8091/api/memories" \
+     -H "Content-Type: application/json" -H "X-API-Key: <key>" \
+     -d "{\"ids\": [...]}"'
    ```
 
-2. **Archive**: Call `mcp__open-brain__materialize_memories` with the approved archive actions.
-   Then mark the memory as discarded:
-   ```
-   update_memory(id=<id>, metadata={'status': 'discarded', 'discard_reason': 'archived — <reason>'})
-   ```
-
-3. **Delete**: No MCP delete tool exists (by design — see decision #10597). Delete via
-   REST API on the server: `ssh services 'curl -s -X DELETE "http://localhost:8091/api/memories"
-   -H "Content-Type: application/json" -H "X-API-Key: <key>" -d "{\"ids\": [...]}"'`.
-   Read the API key from `/opt/open-brain/.env.tpl` on the server (API_KEYS= line).
-   Before deleting, mark the memory as discarded:
-   ```
-   update_memory(id=<id>, metadata={'status': 'discarded', 'discard_reason': 'deleted — <reason>'})
-   ```
+   Read the API key from `/opt/open-brain/.env.tpl` on the server (`API_KEYS=`
+   line). Mark the memory discarded with
+   `discard_reason='deleted — <reason>'` before the REST call.
 
 4. **Promote**: Delegate to the matching forge skill — **never write primitive files
    directly**. Forges already own create *and* update conventions, frontmatter shape,
@@ -246,26 +254,20 @@ After the user has reviewed and approved actions, execute them:
    git -C <marketplace.local_path> commit -m "<primitive-type>(<name>): from memory #<id>"
    ```
 
-   Then update the memory:
+   Then update the memory with `status: materialized` and
+   `materialized_to: "<marketplace>/<primitive-type>/<name>"` per the
+   status-conventions standard. Examples:
 
-   ```
-   update_memory(id=<id>, metadata={
-     'status': 'materialized',
-     'materialized_to': '<marketplace>/<primitive-type>/<name>'
-   })
-   ```
-
-   Example `materialized_to` values:
    - `"cognovis-core/standards/python-uv-sync"`
    - `"sussdorff-core/skills/terminal-cleanup"`
    - `"open-brain/hooks/memory-heartbeat"`
 
-   **Never edit `library/meta/library.yaml`** from this skill — catalog inventory
-   refresh is `lib catalog sync`'s job (see bead CL-744).
+   **Never edit `library/meta/library.yaml`** from this skill — catalog
+   inventory refresh is `lib catalog sync`'s job (see bead CL-744).
 
-   Fallback (rare): if Stage B fell through to the CLAUDE.md one-liner escape hatch,
-   record as `materialized_to: "CLAUDE.md (<file>): <one-liner summary>"` and skip
-   the forge + commit steps.
+   Fallback (rare): if Stage B fell through to the CLAUDE.md one-liner escape
+   hatch, record as `materialized_to: "CLAUDE.md (<file>): <one-liner summary>"`
+   and skip the forge + commit steps.
 
 5. **Scaffold**: Run `bd create` with the approved parameters.
 

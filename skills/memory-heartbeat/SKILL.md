@@ -1,9 +1,18 @@
 ---
 name: memory-heartbeat
 description: >-
-  Periodic memory maintenance for open-brain. Runs lifecycle pipeline during work hours,
-  generates daily digest at end-of-day, and produces weekly summary on Fridays.
-  Triggers on /memory-heartbeat, memory heartbeat, heartbeat maintenance, memory lifecycle.
+  use when: scheduled/cron-driven open-brain maintenance — detects time
+  window (WORK-HOURS / END-OF-DAY / WEEKLY / QUIET) and runs the matching
+  silent action (lifecycle pipeline, daily digest, weekly summary, provenance
+  check).
+  NOT for: manual memory review with approvals (use ob-triage); writing new
+  memories (use ob-migrate or ingest-content).
+  boundary: memory-heartbeat is autonomous and silent in QUIET mode; ob-triage
+  is interactive with AskUserQuestion per action.
+version: 0.2.0
+requires_standards:
+  - open-brain/cli-routing
+  - open-brain/memory-status-conventions
 requires:
   - prompt:english-only
   - mcp:open-brain
@@ -68,12 +77,12 @@ Output nothing. Do not call any MCP tools. Exit silently.
 
 ### WORK-HOURS mode
 
-Call `mcp__open-brain__run_lifecycle_pipeline` with `scope="recent"` and `dry_run=false`.
+Call `mcp__open-brain__run_lifecycle_pipeline` with `scope="recent"` and
+`dry_run=false`.
 
-If the tool call fails (MCP unreachable):
-```
-⚠️ open-brain MCP unreachable — heartbeat skipped. Reconnect with /mcp reconnect open-brain
-```
+If the tool call fails (MCP unreachable), emit the standard error message from
+the `open-brain/memory-status-conventions` standard with verb "heartbeat
+skipped".
 
 If the result shows 0 actions processed:
 ```
@@ -128,10 +137,8 @@ Goal: Produce a daily digest of what was stored in open-brain today.
    - `limit` = 50
 3. Call `mcp__open-brain__stats` (no arguments)
 
-If either tool call fails (MCP unreachable):
-```
-⚠️ open-brain MCP unreachable — heartbeat skipped. Reconnect with /mcp reconnect open-brain
-```
+If either tool call fails, emit the standard MCP error message (see
+`open-brain/memory-status-conventions`).
 
 If no memories found today and nothing notable in stats:
 ```
@@ -165,10 +172,8 @@ Goal: Full triage + weekly summary.
    - `order_by` = "created_at"
    - `limit` = 100
 
-If any tool call fails (MCP unreachable):
-```
-⚠️ open-brain MCP unreachable — heartbeat skipped. Reconnect with /mcp reconnect open-brain
-```
+If any tool call fails, emit the standard MCP error message (see
+`open-brain/memory-status-conventions`).
 
 If lifecycle returned 0 actions and no memories in the past week:
 ```
@@ -271,7 +276,7 @@ The skill is idempotent within a time window by design:
 
 | Situation | Response |
 |-----------|----------|
-| MCP tool call throws / unreachable | `⚠️ open-brain MCP unreachable — heartbeat skipped. Reconnect with /mcp reconnect open-brain` |
+| MCP tool call throws / unreachable | Standard MCP error message (see `open-brain/memory-status-conventions`) with verb "heartbeat skipped" |
 | Lifecycle returns 0 actions | `No pending work in this window.` |
 | Search returns 0 results | Include "No memories found today/this week" in digest |
 | date command fails | Fall back to QUIET mode (safe default) |

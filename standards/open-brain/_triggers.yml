@@ -26,3 +26,15 @@ files:
     - dry-run
     - bootstrap memory
     - curated_content
+  memory-status-conventions.md:
+    - status open
+    - status materialized
+    - status discarded
+    - status archived
+    - materialized_to
+    - discard_reason
+    - run_lifecycle_pipeline
+    - triage memories
+    - memory heartbeat
+    - lifecycle pipeline
+    - open-brain MCP unreachable
