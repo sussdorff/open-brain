@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [unreleased]
 
+## [0.30.0] - 2026-05-16
+
 ### Bug Fixes
 
 - *(open-brain-3lr)* Address review findings iteration 1
