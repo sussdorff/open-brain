@@ -1,0 +1,39 @@
+# open-brain MCP server manifest
+#
+# Canonical upstream definition for the `mcp:open-brain` Library catalog entry.
+# The Library catalog (library/meta/library.yaml — section: library.mcp_servers)
+# references this file via its `source:` field; changes to MCP install metadata,
+# capabilities, or coding strategy live here in the open-brain repo and the
+# Library sync picks them up by comparing this file's commit SHA against the
+# installed lockfile entry.
+#
+# Schema mirror: cognovis-library/docs/schema/library.schema.json (mcp_server_entry).
+
+name: open-brain
+description: Stateless memory store via search/save/get — persists observations across sessions
+coding_strategy: cli
+mobile_strategy: mcp
+
+capabilities:
+  stateless: true
+  streaming: false
+  auth: token
+
+install:
+  cli:
+    package: '@cognovis/open-brain-cli'
+    manager: npm
+  mcp:
+    claude_code:
+      config_path: ~/.claude/settings.json
+      snippet:
+        type: stdio
+        command: open-brain
+    codex:
+      config_path: ~/.codex/config.toml
+      snippet:
+        command: open-brain
+    claude_ai:
+      install_url: https://claude.ai/add-mcp/open-brain
+    claude_ios:
+      install_url: https://claude.ai/add-mcp/open-brain
