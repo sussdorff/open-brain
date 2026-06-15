@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [unreleased]
 
+## [0.32.0] - 2026-06-15
+
 ### Bug Fixes
 
 - *(capture-router)* Fix `JSONDecodeError: Unterminated string` in metadata classification. The capture call was capped at `max_tokens=512`, which truncated the JSON response mid-string for memories with larger per-template field sets; classification metadata was then silently dropped. Raised to 2048 and now enforce a complete object via `response_format={"type": "json_object"}`
