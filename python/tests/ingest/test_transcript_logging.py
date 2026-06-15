@@ -448,7 +448,7 @@ class TestLlmLogging:
             patch(
                 "open_brain.data_layer.llm.get_config",
                 return_value=type(
-                    "C", (), {"OPENROUTER_API_KEY": "test-key", "LLM_MODEL": "m", "LLM_PROVIDER": "openrouter"}
+                    "C", (), {"OPENROUTER_API_KEY": "test-key", "LLM_MODEL": "m", "LLM_PROVIDER": "openrouter", "OPENROUTER_DATA_COLLECTION": "deny", "OPENROUTER_PROVIDER_ORDER": None}
                 )(),
             ),
             caplog.at_level(logging.INFO, logger="open_brain.data_layer.llm"),

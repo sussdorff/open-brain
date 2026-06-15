@@ -74,6 +74,15 @@ class Config(BaseSettings):
     ANTHROPIC_API_KEY: str | None = None
     OPENROUTER_API_KEY: str | None = None
 
+    # OpenRouter provider routing (privacy + structured-output controls).
+    # OPENROUTER_DATA_COLLECTION="deny" routes only to providers that do not
+    # retain or train on prompt data (zero prompt retention). Set to "allow"
+    # to permit all providers. Applies to every OpenRouter call.
+    OPENROUTER_DATA_COLLECTION: Literal["allow", "deny"] = "deny"
+    # Comma-separated provider slugs to prefer, in order (e.g. "deepinfra").
+    # Falls back to any other policy-compliant provider when unset/unavailable.
+    OPENROUTER_PROVIDER_ORDER: str | None = None
+
     @field_validator("JWT_SECRET")
     @classmethod
     def validate_jwt_secret(cls, v: str) -> str:

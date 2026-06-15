@@ -85,7 +85,13 @@ async def classify_and_extract(
     try:
         response = await llm_complete(
             messages=[LlmMessage(role="user", content=prompt)],
-            max_tokens=512,
+            # 2048 (was 512): the per-template field set plus list values can
+            # exceed 512 output tokens, which truncated the JSON mid-string and
+            # raised JSONDecodeError. json_object enforces a complete object;
+            # reasoning disabled so thinking tokens don't reclaim the budget.
+            max_tokens=2048,
+            response_format={"type": "json_object"},
+            disable_reasoning=True,
         )
         result = parse_llm_json(response)
         if not isinstance(result, dict) or "capture_template" not in result:
