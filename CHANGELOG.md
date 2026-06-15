@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [unreleased]
 
+### Bug Fixes
+
+- *(capture-router)* Fix `JSONDecodeError: Unterminated string` in metadata classification. The capture call was capped at `max_tokens=512`, which truncated the JSON response mid-string for memories with larger per-template field sets; classification metadata was then silently dropped. Raised to 2048 and now enforce a complete object via `response_format={"type": "json_object"}`
+
+### Features
+
+- *(llm)* OpenRouter calls now support structured outputs (`response_format`) and provider routing for privacy. New config `OPENROUTER_DATA_COLLECTION` (default `deny` — routes only to zero-prompt-retention providers) and `OPENROUTER_PROVIDER_ORDER` (preferred provider slugs). Entity extraction uses a strict JSON schema; reasoning is disabled on these classification/extraction calls so thinking tokens cannot consume the output budget
+
 ## [0.31.0] - 2026-05-16
 
 ### Bug Fixes

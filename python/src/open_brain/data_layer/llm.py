@@ -25,6 +25,8 @@ async def llm_complete(
     messages: list[LlmMessage],
     model: str | None = None,
     max_tokens: int = 1024,
+    response_format: dict | None = None,
+    disable_reasoning: bool = False,
 ) -> str:
     """Send a message to the configured LLM provider.
 
@@ -32,6 +34,12 @@ async def llm_complete(
         messages: List of conversation messages
         model: Override the configured model
         max_tokens: Maximum tokens to generate
+        response_format: Optional OpenRouter response_format (e.g.
+            {"type": "json_object"} or a json_schema block) to enforce valid
+            structured output. OpenRouter-only; ignored by the Anthropic path.
+        disable_reasoning: When True, ask reasoning-capable models to skip
+            chain-of-thought so thinking tokens don't consume the output
+            budget. OpenRouter-only.
 
     Returns:
         Text response from the LLM
@@ -41,9 +49,36 @@ async def llm_complete(
 
     match config.LLM_PROVIDER:
         case "openrouter":
-            return await _call_openrouter(messages, resolved_model, max_tokens)
+            return await _call_openrouter(
+                messages,
+                resolved_model,
+                max_tokens,
+                response_format=response_format,
+                disable_reasoning=disable_reasoning,
+            )
         case _:
             return await _call_anthropic(messages, resolved_model, max_tokens)
+
+
+def _openrouter_provider_routing(config, require_parameters: bool) -> dict | None:
+    """Build the OpenRouter `provider` routing block from config.
+
+    Enforces the configured data-collection policy (default "deny" = only
+    providers with zero prompt retention) and an optional provider preference
+    order. Returns None when no routing constraints apply.
+    """
+    provider: dict = {}
+    if config.OPENROUTER_DATA_COLLECTION:
+        provider["data_collection"] = config.OPENROUTER_DATA_COLLECTION
+    if config.OPENROUTER_PROVIDER_ORDER:
+        order = [p.strip() for p in config.OPENROUTER_PROVIDER_ORDER.split(",") if p.strip()]
+        if order:
+            provider["order"] = order
+            provider["allow_fallbacks"] = True
+    if require_parameters:
+        # Only route to providers that support the requested params (e.g. response_format)
+        provider["require_parameters"] = True
+    return provider or None
 
 
 async def _call_anthropic(
@@ -111,6 +146,8 @@ async def _call_openrouter(
     messages: list[LlmMessage],
     model: str,
     max_tokens: int,
+    response_format: dict | None = None,
+    disable_reasoning: bool = False,
 ) -> str:
     """Call the OpenRouter API."""
     config = get_config()
@@ -123,6 +160,23 @@ async def _call_openrouter(
         model, max_tokens, len(messages),
     )
 
+    body: dict = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "messages": [{"role": m.role, "content": m.content} for m in messages],
+    }
+    if response_format is not None:
+        body["response_format"] = response_format
+    if disable_reasoning:
+        # Suppress chain-of-thought on reasoning-capable models so thinking
+        # tokens don't eat into max_tokens (a frequent cause of truncated JSON).
+        body["reasoning"] = {"enabled": False}
+    provider = _openrouter_provider_routing(
+        config, require_parameters=response_format is not None
+    )
+    if provider:
+        body["provider"] = provider
+
     async with httpx.AsyncClient() as client:
         response = await client.post(
             "https://openrouter.ai/api/v1/chat/completions",
@@ -130,11 +184,7 @@ async def _call_openrouter(
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {config.OPENROUTER_API_KEY}",
             },
-            json={
-                "model": model,
-                "max_tokens": max_tokens,
-                "messages": [{"role": m.role, "content": m.content} for m in messages],
-            },
+            json=body,
             timeout=60.0,
         )
 

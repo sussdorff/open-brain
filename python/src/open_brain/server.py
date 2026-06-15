@@ -176,6 +176,25 @@ Text: """
 
 _ENTITY_KEYS = {"people", "orgs", "tech", "locations", "dates"}
 
+# Strict JSON schema so the provider guarantees a complete, well-formed object
+# with exactly these five string-array fields (no truncation, no markdown fences).
+_ENTITY_RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "entities",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                key: {"type": "array", "items": {"type": "string"}}
+                for key in ("people", "orgs", "tech", "locations", "dates")
+            },
+            "required": ["people", "orgs", "tech", "locations", "dates"],
+        },
+    },
+}
+
 
 async def _extract_entities(text: str) -> dict:
     """Extract named entities from text using Haiku.
@@ -195,6 +214,8 @@ async def _extract_entities(text: str) -> dict:
     try:
         response = await llm_complete(
             messages=[LlmMessage(role="user", content=_ENTITY_EXTRACTION_PROMPT + text)],
+            response_format=_ENTITY_RESPONSE_FORMAT,
+            disable_reasoning=True,
         )
         parsed = parse_llm_json(response)
         # Filter to expected keys only; strip non-string items from lists (prevents hallucinated keys/values)
