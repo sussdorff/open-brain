@@ -60,12 +60,20 @@ async def llm_complete(
             return await _call_anthropic(messages, resolved_model, max_tokens)
 
 
-def _openrouter_provider_routing(config, require_parameters: bool) -> dict | None:
+def _openrouter_provider_routing(config) -> dict | None:
     """Build the OpenRouter `provider` routing block from config.
 
     Enforces the configured data-collection policy (default "deny" = only
     providers with zero prompt retention) and an optional provider preference
     order. Returns None when no routing constraints apply.
+
+    Note: we deliberately do NOT set `require_parameters`. It would force every
+    request parameter (including the `reasoning` hint) to be supported by the
+    provider, which excludes non-reasoning models like gpt-4.1-nano whose
+    endpoints don't advertise a `reasoning` parameter (OpenRouter then returns
+    404 "No endpoints found that can handle the requested parameters"). Without
+    it, OpenRouter simply drops unsupported params for the chosen provider, and
+    our callers already degrade gracefully if structured output isn't honored.
     """
     provider: dict = {}
     if config.OPENROUTER_DATA_COLLECTION:
@@ -75,9 +83,6 @@ def _openrouter_provider_routing(config, require_parameters: bool) -> dict | Non
         if order:
             provider["order"] = order
             provider["allow_fallbacks"] = True
-    if require_parameters:
-        # Only route to providers that support the requested params (e.g. response_format)
-        provider["require_parameters"] = True
     return provider or None
 
 
@@ -171,9 +176,7 @@ async def _call_openrouter(
         # Suppress chain-of-thought on reasoning-capable models so thinking
         # tokens don't eat into max_tokens (a frequent cause of truncated JSON).
         body["reasoning"] = {"enabled": False}
-    provider = _openrouter_provider_routing(
-        config, require_parameters=response_format is not None
-    )
+    provider = _openrouter_provider_routing(config)
     if provider:
         body["provider"] = provider
 
