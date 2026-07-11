@@ -195,6 +195,23 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return records
 
 
+def _bundle_records(path: Path) -> dict[str, list[dict[str, Any]]]:
+    """Read and canonicalize all authoritative JSONL records from a bundle."""
+    return _canonical_records({
+        key: _read_jsonl(path / filename)
+        for key, filename in JSONL_FILES.items()
+    })
+
+
+async def _target_matches_bundle(
+    store: PortableBackupStore,
+    records: dict[str, list[dict[str, Any]]],
+) -> bool:
+    """Return True when a populated target already contains exactly the bundle."""
+    existing = _canonical_records(await store.export_portable_records())
+    return existing == records
+
+
 async def export_bundle(
     bundle_path: str | Path,
     store: PortableBackupStore,
@@ -246,29 +263,41 @@ async def restore_bundle(
 ) -> dict[str, Any]:
     """Restore a portable bundle into a store."""
     path = Path(bundle_path)
+    records = _bundle_records(path)
     counts = await store.portable_closure_counts()
     populated = {name: count for name, count in counts.items() if count > 0}
     if populated:
+        try:
+            if await _target_matches_bundle(store, records):
+                return {
+                    "bundle_path": str(path),
+                    "restored": {
+                        "indexes": len(records["indexes"]),
+                        "memories": len(records["memories"]),
+                        "relationships": len(records["relationships"]),
+                    },
+                    "regenerate_embeddings": regenerate_embeddings,
+                    "already_restored": True,
+                }
+        except (AttributeError, TypeError, ValueError):
+            pass
         raise RestoreTargetNotEmptyError(
             "Restore target already contains portable knowledge rows: "
             + ", ".join(f"{name}={count}" for name, count in sorted(populated.items()))
         )
 
-    indexes = _read_jsonl(path / "indexes.jsonl")
-    memories = _read_jsonl(path / "memories.jsonl")
-    relationships = _read_jsonl(path / "relationships.jsonl")
     await store.restore_portable_records(
-        indexes,
-        memories,
-        relationships,
+        records["indexes"],
+        records["memories"],
+        records["relationships"],
         regenerate_embeddings=regenerate_embeddings,
     )
     return {
         "bundle_path": str(path),
         "restored": {
-            "indexes": len(indexes),
-            "memories": len(memories),
-            "relationships": len(relationships),
+            "indexes": len(records["indexes"]),
+            "memories": len(records["memories"]),
+            "relationships": len(records["relationships"]),
         },
         "regenerate_embeddings": regenerate_embeddings,
     }
