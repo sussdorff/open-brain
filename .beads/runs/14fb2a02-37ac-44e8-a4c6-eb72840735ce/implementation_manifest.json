@@ -97,7 +97,7 @@
       "message": "feat(open-brain-slu): green - capture inbox cli and mcp surfaces"
     },
     {
-      "sha": "pending-final-commit",
+      "sha": "fae1b457df3cd819348b36e31b4c9639124fcdec",
       "message": "fix(open-brain-slu): address pair-loop findings iteration 1"
     }
   ],
