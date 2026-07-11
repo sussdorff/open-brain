@@ -31,6 +31,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal, Protocol, TypedDict
 
+from open_brain.data_layer.personal_knowledge_vocabulary import (
+    CANONICAL_PERSONAL_KNOWLEDGE_TYPES,
+)
+
 # ─── Importance constants ─────────────────────────────────────────────────────
 
 IMPORTANCE_VALUES: frozenset[str] = frozenset(["critical", "high", "medium", "low"])
@@ -246,6 +250,32 @@ class PromptMetadata(TypedDict, total=False):
     variables: list[str]
     constraints: list[str]
     last_used_at: str  # ISO datetime
+
+
+# Canonical personal-knowledge type -> its structured-metadata TypedDict.
+#
+# Reads from the single source of truth in personal_knowledge_vocabulary.py
+# instead of re-enumerating the type list here. The assertion below fails
+# loudly at import time if a canonical type is added/removed without a
+# matching TypedDict entry, catching drift between the two mechanically
+# instead of relying on a manual four-location edit.
+PERSONAL_KNOWLEDGE_METADATA_SCHEMAS: dict[str, type] = {
+    "project": ProjectMetadata,
+    "resource": ResourceMetadata,
+    "concept": ConceptMetadata,
+    "journal": JournalMetadata,
+    "correspondence": CorrespondenceMetadata,
+    "prompt": PromptMetadata,
+    "decision": DecisionMetadata,
+    "meeting": MeetingMetadata,
+    "event": EventMetadata,
+    "person": PersonMetadata,
+}
+
+assert set(PERSONAL_KNOWLEDGE_METADATA_SCHEMAS) == set(CANONICAL_PERSONAL_KNOWLEDGE_TYPES), (
+    "PERSONAL_KNOWLEDGE_METADATA_SCHEMAS must cover exactly the canonical "
+    "personal-knowledge vocabulary in personal_knowledge_vocabulary.py"
+)
 
 
 def _is_iso_datetime(value: str) -> bool:
