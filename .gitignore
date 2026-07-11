@@ -33,3 +33,10 @@ src-ts-DEPRECATED/
 
 # Beads JSONL export is local; Dolt is the source of truth.
 .beads/issues.jsonl
+
+# session-close runtime artifacts (never source of truth, must not be committed)
+.session-close.lock
+.session-close-state.json
+.worktree-handoff.json
+.worktree-turns.jsonl
+session-close-summary.txt
