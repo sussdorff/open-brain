@@ -771,6 +771,7 @@ class PostgresDataLayer:
     async def ingest_status_by_source_refs(
         self,
         source_refs: list[str],
+        memory_type: str | None = "meeting",
     ) -> dict[str, dict[str, Any]]:
         """Return ingest status for source references without recording recall usage."""
         unique_refs: list[str] = []
@@ -798,8 +799,40 @@ class PostgresDataLayer:
 
         pool = await get_pool()
         async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                """
+            if memory_type == "meeting":
+                rows = await conn.fetch(
+                    """
+                    SELECT
+                        metadata->>'source_ref' AS source_ref,
+                        id AS memory_id,
+                        metadata->>'run_id' AS run_id,
+                        created_at AS ingested_at,
+                        title
+                    FROM memories
+                    WHERE type = 'meeting'
+                      AND metadata->>'source_ref' = ANY($1::text[])
+                    ORDER BY created_at DESC
+                    """,
+                    unique_refs,
+                )
+            elif memory_type is None:
+                rows = await conn.fetch(
+                    """
+                    SELECT
+                        metadata->>'source_ref' AS source_ref,
+                        id AS memory_id,
+                        metadata->>'run_id' AS run_id,
+                        created_at AS ingested_at,
+                        title
+                    FROM memories
+                    WHERE metadata->>'source_ref' = ANY($1::text[])
+                    ORDER BY created_at DESC
+                    """,
+                    unique_refs,
+                )
+            else:
+                rows = await conn.fetch(
+                    """
                 SELECT
                     metadata->>'source_ref' AS source_ref,
                     id AS memory_id,
@@ -807,12 +840,13 @@ class PostgresDataLayer:
                     created_at AS ingested_at,
                     title
                 FROM memories
-                WHERE type = 'meeting'
+                WHERE type = $2
                   AND metadata->>'source_ref' = ANY($1::text[])
                 ORDER BY created_at DESC
                 """,
-                unique_refs,
-            )
+                    unique_refs,
+                    memory_type,
+                )
 
         for row in rows:
             ref = row["source_ref"]
