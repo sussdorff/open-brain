@@ -1,0 +1,228 @@
+{
+  "contract_version": "1",
+  "bead_id": "open-brain-m8p",
+  "run_id": "06bb2cbf-23c4-458f-b66e-13aeecdd300a",
+  "fix_iteration": 1,
+  "commands": [
+    {
+      "id": "cmd-read-beads-skill",
+      "command": "sed -n '1,240p' /Users/malte/.agents/skills/beads/SKILL.md",
+      "purpose": "Load the required beads skill instructions before acting on bead implementation work.",
+      "exit_code": 0,
+      "observed_result": "Loaded the beads dispatcher instructions, including the scope-creep gate and implementation artifact expectations."
+    },
+    {
+      "id": "cmd-git-status-initial",
+      "command": "git status --short",
+      "purpose": "Confirm the starting tracked worktree state.",
+      "exit_code": 0,
+      "observed_result": "No tracked dirty files were reported at the start of the retry."
+    },
+    {
+      "id": "cmd-current-branch",
+      "command": "git branch --show-current",
+      "purpose": "Confirm the active worktree branch.",
+      "exit_code": 0,
+      "observed_result": "Current branch was worktree-bead-open-brain-m8p."
+    },
+    {
+      "id": "cmd-bead-show",
+      "command": "bd show open-brain-m8p --json",
+      "purpose": "Read the bead context through the bd CLI.",
+      "exit_code": 0,
+      "observed_result": "Bead open-brain-m8p is in_progress and targets the six vulnerable Python dependencies, with AC2 scoped audit and AC3 non-integration suite verification."
+    },
+    {
+      "id": "cmd-initial-cryptography-probe",
+      "command": "rg -n 'name = \"cryptography\"|version = \"48\\.0\\.1\"|cryptography-.*\\.whl|manylinux_.*x86_64' python/uv.lock",
+      "purpose": "Confirm the reported cryptography lockfile defect before relocking.",
+      "exit_code": 0,
+      "observed_result": "python/uv.lock contained cryptography 48.0.1 and exactly one cryptography wheel line: cryptography-48.0.1-cp314-cp314t-macosx_10_9_universal2.whl."
+    },
+    {
+      "id": "cmd-scoped-uv-lock",
+      "command": "cd python && uv lock --upgrade-package cryptography",
+      "purpose": "Perform the requested package-scoped relock without deleting uv.lock or running a broad relock.",
+      "exit_code": 0,
+      "observed_result": "Resolved 63 packages in 185ms. uv reported: Updated cryptography v48.0.1 -> v49.0.0."
+    },
+    {
+      "id": "cmd-status-after-lock",
+      "command": "git status --short",
+      "purpose": "Check the dirty set immediately after the scoped relock.",
+      "exit_code": 0,
+      "observed_result": "Only python/uv.lock was tracked-dirty."
+    },
+    {
+      "id": "cmd-lock-diff-stat",
+      "command": "git diff --stat -- python/uv.lock",
+      "purpose": "Summarize the scoped lockfile diff.",
+      "exit_code": 0,
+      "observed_result": "python/uv.lock changed by 46 lines: 42 insertions and 4 deletions."
+    },
+    {
+      "id": "cmd-lock-diff",
+      "command": "git diff --unified=0 -- python/uv.lock",
+      "purpose": "Inspect exact lockfile changes after the scoped relock.",
+      "exit_code": 0,
+      "observed_result": "cryptography changed from 48.0.1 to 49.0.0; its sdist and single macOS wheel were replaced with the 49.0.0 sdist plus a cross-platform wheel list. One pydantic-settings upload-time timestamp was normalized from 2026-06-19T13:44:55.020Z to 2026-06-19T13:44:55.02Z; its version, URL, hash, and size were unchanged."
+    },
+    {
+      "id": "cmd-cryptography-block",
+      "command": "sed -n '226,290p' uv.lock",
+      "purpose": "Inspect the regenerated cryptography block directly.",
+      "exit_code": 0,
+      "observed_result": "The cryptography block showed version 49.0.0, dependency on cffi, a 49.0.0 sdist, and many wheels including macOS, Windows, manylinux, and musllinux artifacts."
+    },
+    {
+      "id": "cmd-read-manifest-before",
+      "command": "sed -n '1,240p' .beads/runs/06bb2cbf-23c4-458f-b66e-13aeecdd300a/implementation_manifest.json",
+      "purpose": "Read the previous manifest before replacing stale unscoped-relock evidence.",
+      "exit_code": 0,
+      "observed_result": "The previous manifest described an unscoped remove-lock plus uv lock flow and therefore needed replacement for this scoped retry."
+    },
+    {
+      "id": "cmd-read-ledger-before",
+      "command": "sed -n '1,260p' .beads/runs/06bb2cbf-23c4-458f-b66e-13aeecdd300a/evidence_ledger.json",
+      "purpose": "Read the previous evidence ledger before replacing stale unscoped-relock evidence.",
+      "exit_code": 0,
+      "observed_result": "The previous ledger included `rm -f uv.lock` and unscoped `uv lock`; it did not match the requested scoped retry and needed replacement."
+    },
+    {
+      "id": "cmd-structured-lock-compare",
+      "command": "cd python && uv run python - <<'PY' ...",
+      "purpose": "Compare old and new uv.lock package versions with TOML parsing and count cryptography wheels.",
+      "exit_code": 0,
+      "observed_result": "uv synchronized the local environment for the updated lock, then the script reported one package version change: cryptography 48.0.1 -> 49.0.0. It reported cryptography_wheel_count=39 and cryptography_linux_x86_64_wheel_count=12, with sample wheels including cp311-abi3-manylinux2014_x86_64, cp311-abi3-manylinux_2_34_x86_64, and cp314-cp314t-manylinux_2_34_x86_64."
+    },
+    {
+      "id": "cmd-scoped-audit",
+      "command": "cd python && uv export --no-hashes --no-header -o /tmp/open-brain-audit-fix.txt && uv run --with pip-audit pip-audit -r /tmp/open-brain-audit-fix.txt",
+      "purpose": "AC2 - run the exact scoped audit from uv-exported requirements.",
+      "exit_code": 0,
+      "observed_result": "Resolved 63 packages. Export included cryptography 49.0.0, idna 3.15, pydantic-settings 2.14.2, pyjwt 2.13.0, python-multipart 0.0.31, and starlette 1.3.1. pip-audit reported: No known vulnerabilities found. Only skip: local editable open-brain package not found on PyPI."
+    },
+    {
+      "id": "cmd-full-non-integration-tests",
+      "command": "cd python && uv sync && uv run pytest -m \"not integration\"",
+      "purpose": "AC3 - run the complete non-integration suite with the upgraded lock.",
+      "exit_code": 0,
+      "observed_result": "uv sync resolved 63 packages and removed stale local ast-serialize 0.6.0 from the virtualenv. pytest selected 1427 tests and deselected 23 integration tests. Result: 1427 passed, 23 deselected, 52 warnings in 11.84s."
+    },
+    {
+      "id": "cmd-auth-adjacent-tests",
+      "command": "cd python && uv run pytest tests/test_auth.py tests/test_api_key_auth.py -q",
+      "purpose": "Run explicit auth-adjacent tests after the dependency relock.",
+      "exit_code": 0,
+      "observed_result": "60 passed in 4.76s."
+    },
+    {
+      "id": "cmd-status-post-tests",
+      "command": "git status --short",
+      "purpose": "Check dirty files after verification and before artifact updates.",
+      "exit_code": 0,
+      "observed_result": "Only python/uv.lock was tracked-dirty."
+    },
+    {
+      "id": "cmd-diff-name-only-post-tests",
+      "command": "git diff --name-only",
+      "purpose": "Confirm the tracked diff surface after tests.",
+      "exit_code": 0,
+      "observed_result": "Only python/uv.lock was listed."
+    },
+    {
+      "id": "cmd-diff-stat-post-tests",
+      "command": "git diff --stat",
+      "purpose": "Confirm the tracked diff size after tests.",
+      "exit_code": 0,
+      "observed_result": "python/uv.lock changed by 46 lines: 42 insertions and 4 deletions."
+    },
+    {
+      "id": "cmd-list-run-dir",
+      "command": "ls -la .beads/runs/06bb2cbf-23c4-458f-b66e-13aeecdd300a",
+      "purpose": "Inspect the run artifact directory named in the request.",
+      "exit_code": 0,
+      "observed_result": "The run directory exists and contains implementation_manifest.json and evidence_ledger.json among other run files."
+    },
+    {
+      "id": "cmd-artifact-ls-files",
+      "command": "git ls-files .beads/runs/06bb2cbf-23c4-458f-b66e-13aeecdd300a/implementation_manifest.json .beads/runs/06bb2cbf-23c4-458f-b66e-13aeecdd300a/evidence_ledger.json",
+      "purpose": "Check whether the requested run artifacts are currently tracked.",
+      "exit_code": 0,
+      "observed_result": "No tracked paths were printed for this run's two artifact files."
+    },
+    {
+      "id": "cmd-artifact-check-ignore",
+      "command": "git check-ignore -v .beads/runs/06bb2cbf-23c4-458f-b66e-13aeecdd300a/implementation_manifest.json .beads/runs/06bb2cbf-23c4-458f-b66e-13aeecdd300a/evidence_ledger.json",
+      "purpose": "Check why the requested run artifacts did not show in git status.",
+      "exit_code": 0,
+      "observed_result": "Both files are ignored by .gitignore line 20: .beads/."
+    },
+    {
+      "id": "cmd-tracked-beads-runs",
+      "command": "git ls-files .beads | sed -n '1,80p'",
+      "purpose": "Check whether any run artifacts are force-tracked in this repository despite the .beads ignore rule.",
+      "exit_code": 0,
+      "observed_result": "Several prior .beads/runs/*/implementation_manifest.json and evidence_ledger.json files are tracked."
+    },
+    {
+      "id": "cmd-artifact-status-ignored",
+      "command": "git status --short --ignored .beads/runs/06bb2cbf-23c4-458f-b66e-13aeecdd300a/implementation_manifest.json .beads/runs/06bb2cbf-23c4-458f-b66e-13aeecdd300a/evidence_ledger.json",
+      "purpose": "Confirm git's status treatment for the requested run artifacts before editing.",
+      "exit_code": 0,
+      "observed_result": "Git reported the run artifact directory as ignored: !! .beads/runs/06bb2cbf-23c4-458f-b66e-13aeecdd300a/."
+    },
+    {
+      "id": "cmd-json-validate-manifest",
+      "command": "uv run python -m json.tool .beads/runs/06bb2cbf-23c4-458f-b66e-13aeecdd300a/implementation_manifest.json >/dev/null",
+      "purpose": "Validate the updated implementation manifest JSON.",
+      "exit_code": 0,
+      "observed_result": "Command completed with no output, indicating valid JSON."
+    },
+    {
+      "id": "cmd-json-validate-ledger",
+      "command": "uv run python -m json.tool .beads/runs/06bb2cbf-23c4-458f-b66e-13aeecdd300a/evidence_ledger.json >/dev/null",
+      "purpose": "Validate the updated evidence ledger JSON.",
+      "exit_code": 0,
+      "observed_result": "Command completed with no output, indicating valid JSON."
+    },
+    {
+      "id": "cmd-status-after-artifact-edit",
+      "command": "git status --short --ignored .beads/runs/06bb2cbf-23c4-458f-b66e-13aeecdd300a/implementation_manifest.json .beads/runs/06bb2cbf-23c4-458f-b66e-13aeecdd300a/evidence_ledger.json python/uv.lock",
+      "purpose": "Check tracked and ignored status after artifact edits.",
+      "exit_code": 0,
+      "observed_result": "python/uv.lock was tracked-dirty and the run artifact directory was ignored."
+    },
+    {
+      "id": "cmd-diff-stat-after-artifact-edit",
+      "command": "git diff --stat",
+      "purpose": "Check the tracked diff stat after artifact edits.",
+      "exit_code": 0,
+      "observed_result": "Only tracked diff was python/uv.lock with 46 changed lines, because the requested run artifacts are ignored until force-added."
+    }
+  ],
+  "skipped_checks": [],
+  "artifacts": [
+    {
+      "path": "/tmp/open-brain-audit-fix.txt",
+      "description": "uv-exported requirements file used for the scoped pip-audit verification."
+    },
+    {
+      "path": "python/uv.lock",
+      "description": "Lockfile updated by `uv lock --upgrade-package cryptography`. cryptography resolved to 49.0.0 with cross-platform wheels."
+    },
+    {
+      "path": "python/pyproject.toml",
+      "description": "Not touched in this retry."
+    },
+    {
+      "path": ".beads/runs/06bb2cbf-23c4-458f-b66e-13aeecdd300a/implementation_manifest.json",
+      "description": "Updated to reflect this scoped retry and its observed verification results."
+    },
+    {
+      "path": ".beads/runs/06bb2cbf-23c4-458f-b66e-13aeecdd300a/evidence_ledger.json",
+      "description": "Updated with real command, exit-code, and observed-result entries from this scoped retry."
+    }
+  ],
+  "reconciliation_note": "This ledger replaces the stale unscoped-relock artifact content from the discarded attempt. The actual retry used `uv lock --upgrade-package cryptography`; did not remove uv.lock; did not run an unscoped `uv lock`; and changed only the cryptography package version while preserving the rest of the lockfile version set."
+}
