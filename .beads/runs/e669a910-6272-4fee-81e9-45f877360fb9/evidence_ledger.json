@@ -1,0 +1,196 @@
+{
+  "contract_version": "1",
+  "bead_id": "open-brain-hws",
+  "commands": [
+    {
+      "id": "cmd:bead-show",
+      "command": "bd show open-brain-hws --json",
+      "cwd": ".",
+      "purpose": "Confirm bead state and scoped requirements before implementation.",
+      "exit_code": 0,
+      "observed_result": "Bead open-brain-hws was in_progress and claimed for run e669a910-6272-4fee-81e9-45f877360fb9."
+    },
+    {
+      "id": "cmd:red-ac1",
+      "command": "uv run pytest tests/test_capture_router.py::TestCanonicalVocabularyClassification -v",
+      "cwd": "python",
+      "purpose": "RED gate for canonical capture vocabulary prompt coverage.",
+      "exit_code": 1,
+      "observed_result": "6 failed, 4 passed. Failures showed project, resource, concept, journal, correspondence, and prompt were absent from the classifier prompt while existing decision, meeting, event, and person_context cases passed."
+    },
+    {
+      "id": "cmd:red-ac1-hook",
+      "command": "git add python/tests/test_capture_router.py && git commit -m \"test(open-brain-hws): red — canonical capture vocabulary\"",
+      "cwd": ".",
+      "purpose": "Attempt normal red-test commit.",
+      "exit_code": 1,
+      "observed_result": "Commit hook ran the non-integration suite and blocked the intentionally failing red test commit."
+    },
+    {
+      "id": "cmd:red-ac1-commit",
+      "command": "git commit --no-verify -m \"test(open-brain-hws): red — canonical capture vocabulary\"",
+      "cwd": ".",
+      "purpose": "Commit AC1 red tests as required by bead TDD instructions.",
+      "exit_code": 0,
+      "observed_result": "Created commit 53f8713."
+    },
+    {
+      "id": "cmd:green-ac1",
+      "command": "uv run pytest tests/test_capture_router.py::TestCanonicalVocabularyClassification -v",
+      "cwd": "python",
+      "purpose": "GREEN gate for canonical capture vocabulary prompt coverage.",
+      "exit_code": 0,
+      "observed_result": "10 passed."
+    },
+    {
+      "id": "cmd:affected-ac1",
+      "command": "uv run pytest tests/test_capture_router.py tests/test_domain_schemas.py -m \"not integration\" -v",
+      "cwd": "python",
+      "purpose": "Affected-file regression after AC1, excluding integration-marked tests.",
+      "exit_code": 0,
+      "observed_result": "67 passed, 1 deselected."
+    },
+    {
+      "id": "cmd:green-ac1-commit",
+      "command": "git add python/src/open_brain/capture_router.py && git commit -m \"feat(open-brain-hws): green — canonical capture vocabulary\"",
+      "cwd": ".",
+      "purpose": "Commit AC1 green implementation.",
+      "exit_code": 0,
+      "observed_result": "Created commit ce28995 after the commit hook passed the non-integration suite."
+    },
+    {
+      "id": "cmd:red-ac2",
+      "command": "uv run pytest tests/test_domain_metadata.py -v",
+      "cwd": "python",
+      "purpose": "RED gate for new canonical domain metadata schemas and validation.",
+      "exit_code": 1,
+      "observed_result": "6 failed, 40 passed. Failures showed missing new TypedDict exports and missing datetime validation branches for new canonical types."
+    },
+    {
+      "id": "cmd:red-ac2-commit",
+      "command": "git add python/tests/test_domain_metadata.py && git commit --no-verify -m \"test(open-brain-hws): red — canonical domain metadata\"",
+      "cwd": ".",
+      "purpose": "Commit AC2 red tests as required by bead TDD instructions.",
+      "exit_code": 0,
+      "observed_result": "Created commit 4e7f5c7."
+    },
+    {
+      "id": "cmd:green-ac2",
+      "command": "uv run pytest tests/test_domain_metadata.py -v",
+      "cwd": "python",
+      "purpose": "GREEN gate for canonical domain metadata schemas and validation.",
+      "exit_code": 0,
+      "observed_result": "46 passed."
+    },
+    {
+      "id": "cmd:affected-ac2",
+      "command": "uv run pytest tests/test_capture_router.py tests/test_domain_schemas.py tests/test_domain_metadata.py -m \"not integration\" -v",
+      "cwd": "python",
+      "purpose": "Affected-file regression after AC2, excluding integration-marked tests.",
+      "exit_code": 0,
+      "observed_result": "113 passed, 1 deselected."
+    },
+    {
+      "id": "cmd:green-ac2-commit",
+      "command": "git add python/src/open_brain/data_layer/interface.py python/src/open_brain/server.py && git commit -m \"feat(open-brain-hws): green — canonical domain metadata\"",
+      "cwd": ".",
+      "purpose": "Commit AC2 green implementation and save_memory documentation update.",
+      "exit_code": 0,
+      "observed_result": "Created commit da7ee4a after the commit hook passed the non-integration suite."
+    },
+    {
+      "id": "cmd:red-ac3",
+      "command": "uv run pytest tests/test_capture_router.py::TestTypeAliasNormalization tests/test_capture_router.py::TestServerIntegration::test_save_memory_normalizes_alias_type_for_unstructured_capture tests/test_capture_router.py::TestServerIntegration::test_save_memory_preserves_prestructured_capture_template_type_and_metadata -v",
+      "cwd": "python",
+      "purpose": "RED gate for alias normalization and explicit pre-structured capture preservation.",
+      "exit_code": 1,
+      "observed_result": "9 failed, 1 passed. Failures showed normalize_memory_type was missing and save_memory saved alias type note instead of journal for an unstructured capture; pre-structured preservation already passed."
+    },
+    {
+      "id": "cmd:red-ac3-commit",
+      "command": "git add python/tests/test_capture_router.py && git commit --no-verify -m \"test(open-brain-hws): red — explicit capture preservation\"",
+      "cwd": ".",
+      "purpose": "Commit AC3 red tests as required by bead TDD instructions.",
+      "exit_code": 0,
+      "observed_result": "Created commit f22206c."
+    },
+    {
+      "id": "cmd:green-ac3",
+      "command": "uv run pytest tests/test_capture_router.py::TestTypeAliasNormalization tests/test_capture_router.py::TestServerIntegration::test_save_memory_normalizes_alias_type_for_unstructured_capture tests/test_capture_router.py::TestServerIntegration::test_save_memory_preserves_prestructured_capture_template_type_and_metadata -v",
+      "cwd": "python",
+      "purpose": "GREEN gate for alias normalization and explicit pre-structured capture preservation.",
+      "exit_code": 0,
+      "observed_result": "10 passed."
+    },
+    {
+      "id": "cmd:affected-ac3",
+      "command": "uv run pytest tests/test_capture_router.py tests/test_domain_schemas.py tests/test_domain_metadata.py -m \"not integration\" -v",
+      "cwd": "python",
+      "purpose": "Affected-file regression after AC3, excluding integration-marked tests.",
+      "exit_code": 0,
+      "observed_result": "123 passed, 1 deselected."
+    },
+    {
+      "id": "cmd:green-ac3-commit",
+      "command": "git add python/src/open_brain/capture_router.py python/src/open_brain/server.py && git commit -m \"feat(open-brain-hws): green — explicit capture preservation\"",
+      "cwd": ".",
+      "purpose": "Commit AC3 green implementation.",
+      "exit_code": 0,
+      "observed_result": "Created commit 60e9dba after the commit hook passed the non-integration suite."
+    },
+    {
+      "id": "cmd:exact-final",
+      "command": "uv run pytest tests/test_capture_router.py tests/test_domain_schemas.py tests/test_domain_metadata.py -v",
+      "cwd": "python",
+      "purpose": "Run bead-specified exact three-file command and document integration-marker behavior.",
+      "exit_code": 1,
+      "observed_result": "123 passed, 1 failed. The only failure was tests/test_capture_router.py::TestServerIntegration::test_classification_latency_under_200ms, an existing @pytest.mark.integration test outside this bead that asserts save/classify concurrency and also calls real entity extraction, producing an Anthropic 401 in this environment."
+    },
+    {
+      "id": "cmd:affected-final",
+      "command": "uv run pytest tests/test_capture_router.py tests/test_domain_schemas.py tests/test_domain_metadata.py -m \"not integration\" -v",
+      "cwd": "python",
+      "purpose": "Final no-external-dependency affected-file regression gate.",
+      "exit_code": 0,
+      "observed_result": "123 passed, 1 deselected."
+    },
+    {
+      "id": "cmd:git-log",
+      "command": "git log --oneline --decorate -8",
+      "cwd": ".",
+      "purpose": "Capture final implementation commit list before writing artifacts.",
+      "exit_code": 0,
+      "observed_result": "HEAD was 60e9dba with the six red/green commits for this bead on top of origin/main."
+    },
+    {
+      "id": "cmd:git-status-pre-artifacts",
+      "command": "git status --short --branch",
+      "cwd": ".",
+      "purpose": "Verify implementation worktree state before artifact files.",
+      "exit_code": 0,
+      "observed_result": "No uncommitted implementation changes; branch worktree-bead-open-brain-hws."
+    }
+  ],
+  "skipped_checks": [
+    {
+      "check": "tests/test_capture_router.py::TestServerIntegration::test_classification_latency_under_200ms",
+      "reason": "This test is marked integration and is not part of the bead acceptance criteria. It currently asserts pre-existing save/classify concurrency behavior outside this bead and calls real entity extraction unless excluded. The final regression gate used the project-documented no-external-dependency pattern with -m \"not integration\".",
+      "related_command": "cmd:exact-final"
+    },
+    {
+      "check": "metrics insert_agent_call fallback",
+      "reason": "Harness token counters were not available via get_goal, so exact input/output token counts were unavailable. No fabricated metrics were written.",
+      "related_command": null
+    }
+  ],
+  "artifacts": [
+    {
+      "path": ".beads/runs/e669a910-6272-4fee-81e9-45f877360fb9/implementation_manifest.json",
+      "kind": "implementation_manifest"
+    },
+    {
+      "path": ".beads/runs/e669a910-6272-4fee-81e9-45f877360fb9/evidence_ledger.json",
+      "kind": "evidence_ledger"
+    }
+  ]
+}
