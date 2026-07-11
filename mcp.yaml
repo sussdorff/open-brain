@@ -11,13 +11,13 @@
 
 name: open-brain
 description: Stateless memory store via search/save/get — persists observations across sessions
-coding_strategy: cli
+coding_strategy: mcp
 mobile_strategy: mcp
 
 capabilities:
   stateless: true
   streaming: false
-  auth: token
+  auth: oauth
 
 install:
   cli:
@@ -25,14 +25,19 @@ install:
     manager: npm
   mcp:
     claude_code:
-      config_path: ~/.claude/settings.json
+      config_path: ~/.claude.json
       snippet:
-        type: stdio
-        command: open-brain
+        type: http
+        url: https://open-brain.sussdorff.org/mcp
     codex:
       config_path: ~/.codex/config.toml
       snippet:
-        command: open-brain
+        url: https://open-brain.sussdorff.org/mcp
+    opencode:
+      config_path: ~/.config/opencode/opencode.json
+      snippet:
+        type: remote
+        url: https://open-brain.sussdorff.org/mcp
     claude_ai:
       install_url: https://claude.ai/add-mcp/open-brain
     claude_ios:

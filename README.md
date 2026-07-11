@@ -180,28 +180,42 @@ export OB_API_KEY="YOUR_API_KEY"
 
 OAuth bearer tokens are also supported via `OB_TOKEN` or `"token"` in the config file. URL tokens use `OB_URL_TOKEN`, `"url_token"` in the config file, or an explicit `?token=...` in `OB_URL`. API keys use `OB_API_KEY` or `"api_key"` in the config file. Legacy `~/.open-brain/config.json`, `~/.open-brain/token`, and `~/.open-brain/url-token` files still work as fallback.
 
-### 4. Connect Claude Code
+### 4. Connect coding harnesses with OAuth
 
 ```bash
 claude mcp add open-brain \
   --transport http \
-  "https://your-server.example.com/mcp?token=TOKEN_FROM_STEP_2"
+  "https://your-server.example.com/mcp"
+claude mcp login open-brain
 ```
 
-Or manually in `~/.claude/settings.json`:
+Or manually in `~/.claude.json`:
 
 ```json
 {
   "mcpServers": {
     "open-brain": {
       "type": "http",
-      "url": "https://your-server.example.com/mcp?token=TOKEN_FROM_STEP_2"
+      "url": "https://your-server.example.com/mcp"
     }
   }
 }
 ```
 
-To revoke a token later:
+Codex uses the same OAuth-protected HTTP endpoint:
+
+```bash
+codex mcp add open-brain --url "https://your-server.example.com/mcp"
+codex mcp login open-brain --scopes memory
+```
+
+The harness configuration contains no access token. Claude Code and Codex own
+their OAuth session state and refresh flow. Do not add a URL query token, static
+authorization header, or bearer-token environment variable to these MCP
+registrations.
+
+URL tokens remain available for clients that cannot complete OAuth. Revoke such
+a legacy token by its client name:
 
 ```bash
 curl -X DELETE https://your-server.example.com/token/url/my-client \
