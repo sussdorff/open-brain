@@ -148,11 +148,15 @@ class TestCaptureInboxSearch:
         assert "metadata->>'status'" not in fetch_sql
 
     @pytest.mark.asyncio
-    async def test_search_query_capture_status_uses_hybrid_post_filter(
+    async def test_search_query_capture_status_prefiltered_inside_hybrid_search(
         self,
         dl: PostgresDataLayer,
     ) -> None:
-        # Guards against query-mode search validating capture_status but not applying it.
+        # Regression guard (codex adversarial finding): in query mode capture_status must be
+        # threaded into hybrid_search() as $7 so it gates candidate selection BEFORE the
+        # function's internal `LIMIT match_limit * 2` truncation. Applying it only as an outer
+        # post-WHERE filter would drop valid inbox rows that higher-ranked processed/dismissed
+        # memories crowd out of the candidate window.
         conn = AsyncMock()
         conn.fetch.return_value = [
             _make_row({"metadata": {"capture_status": "inbox", "status": "archived"}})
@@ -184,8 +188,12 @@ class TestCaptureInboxSearch:
         assert result.total == 1
         fetch_args = conn.fetch.call_args[0]
         fetch_sql = fetch_args[0]
-        assert "m.metadata->>'capture_status' =" in fetch_sql
+        # capture_status is passed as the 7th positional arg to hybrid_search(), not as an
+        # outer WHERE post-filter.
+        assert "hybrid_search($1, $2::vector, $3, 60, $4, $5, $6, $7)" in fetch_sql
+        assert "m.metadata->>'capture_status' =" not in fetch_sql
         assert "metadata @>" not in fetch_sql
+        # $7 (index 7 in the fetch call args, after the SQL string at index 0) is the bound value.
         assert fetch_args[7] == "inbox"
 
     @pytest.mark.asyncio
