@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from open_brain.cli.main import _build_parser
-from open_brain.data_layer.interface import SaveMemoryResult, SearchResult
+from open_brain.data_layer.interface import SaveMemoryParams, SaveMemoryResult, SearchResult
 
 
 def parse(args: list[str]) -> Any:
@@ -110,3 +110,56 @@ class TestCaptureInboxMcp:
         assert params.memory_id == 42
         assert params.capture_status == "processed"
         assert params.lifecycle_status is None
+
+
+@pytest.mark.integration
+class TestCaptureInboxMcpRoundTrip:
+    @pytest.mark.asyncio
+    async def test_capture_status_round_trip_uses_real_data_layer(self) -> None:
+        import os
+
+        from open_brain.data_layer.postgres import PostgresDataLayer
+        from open_brain.ingest.runs import ingest_run
+        from open_brain.server import search, set_capture_status
+
+        database_url = os.environ.get("DATABASE_URL", "")
+        if not database_url or database_url.startswith("postgresql://test:test@"):
+            pytest.skip("Requires real DATABASE_URL (not the CI test database)")
+
+        dl = PostgresDataLayer()
+        run_id: str | None = None
+        try:
+            with ingest_run() as current_run_id:
+                run_id = current_run_id
+                saved = await dl.save_memory(
+                    SaveMemoryParams(
+                        text=f"capture mcp round trip {run_id}",
+                        capture_status="inbox",
+                    )
+                )
+
+            inbox_payload = json.loads(
+                await search(capture_status="inbox", metadata_filter={"run_id": run_id})
+            )
+            inbox_ids = {row["id"] for row in inbox_payload["results"]}
+            assert saved.id in inbox_ids
+
+            transition_payload = json.loads(
+                await set_capture_status(
+                    memory_id=saved.id,
+                    capture_status="processed",
+                )
+            )
+            assert transition_payload == {
+                "id": saved.id,
+                "message": "Capture status updated",
+            }
+
+            processed_payload = json.loads(
+                await search(capture_status="inbox", metadata_filter={"run_id": run_id})
+            )
+            processed_ids = {row["id"] for row in processed_payload["results"]}
+            assert saved.id not in processed_ids
+        finally:
+            if run_id is not None:
+                await dl.delete_by_run_id(run_id)

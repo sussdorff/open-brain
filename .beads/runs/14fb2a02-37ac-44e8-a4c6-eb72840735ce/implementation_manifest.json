@@ -21,7 +21,9 @@
         "cmd:pair1-red-capture-inbox",
         "cmd:pair1-green-capture-inbox",
         "cmd:pair1-green-focused",
-        "cmd:pair1-green-regression"
+        "cmd:pair1-green-regression",
+        "cmd:final-review-collect-capture-inbox",
+        "cmd:final-review-integration-skip"
       ]
     },
     {
@@ -56,7 +58,11 @@
         "cmd:ac3-red-cli-mcp",
         "cmd:ac3-green-cli-mcp",
         "cmd:ac3-green-combined",
-        "cmd:ac3-green-regression"
+        "cmd:ac3-green-regression",
+        "cmd:final-review-focused-non-integration",
+        "cmd:final-review-regression-non-integration",
+        "cmd:final-review-collect-capture-inbox",
+        "cmd:final-review-integration-skip"
       ]
     }
   ],
@@ -131,6 +137,31 @@
       "command": "cd python && UV_CACHE_DIR=/private/tmp/open-brain-uv-cache uv run pytest -m \"not integration\" -q",
       "status": "passed",
       "evidence_ref": "cmd:pair1-green-regression"
+    },
+    {
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py tests/test_capture_inbox_cli.py -q",
+      "status": "passed",
+      "evidence_ref": "cmd:final-review-pre-focused"
+    },
+    {
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py tests/test_capture_inbox_cli.py -q -m \"not integration\"",
+      "status": "passed",
+      "evidence_ref": "cmd:final-review-focused-non-integration"
+    },
+    {
+      "command": "cd python && uv run pytest -m \"not integration\" -q",
+      "status": "passed",
+      "evidence_ref": "cmd:final-review-regression-non-integration"
+    },
+    {
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py tests/test_capture_inbox_cli.py --collect-only -q",
+      "status": "passed",
+      "evidence_ref": "cmd:final-review-collect-capture-inbox"
+    },
+    {
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py tests/test_capture_inbox_cli.py -q -m integration",
+      "status": "skipped",
+      "evidence_ref": "cmd:final-review-integration-skip"
     }
   ],
   "external_resources": [],
@@ -153,6 +184,11 @@
     "cmd:pair1-red-capture-inbox",
     "cmd:pair1-green-capture-inbox",
     "cmd:pair1-green-focused",
-    "cmd:pair1-green-regression"
+    "cmd:pair1-green-regression",
+    "cmd:final-review-pre-focused",
+    "cmd:final-review-focused-non-integration",
+    "cmd:final-review-regression-non-integration",
+    "cmd:final-review-collect-capture-inbox",
+    "cmd:final-review-integration-skip"
   ]
 }

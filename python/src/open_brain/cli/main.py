@@ -398,8 +398,6 @@ async def _cmd_capture(args: argparse.Namespace) -> Any:
         if args.lifecycle_status:
             kwargs["lifecycle_status"] = args.lifecycle_status
         return await call_tool("set_capture_status", kwargs)
-    _error(f"Unknown capture action: {args.capture_command}")
-    return None
 
 
 async def _cmd_ingest_email(args: argparse.Namespace) -> Any:

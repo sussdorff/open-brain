@@ -218,6 +218,62 @@ class TestCaptureInboxSearch:
             )
 
 
+@pytest.mark.integration
+class TestCaptureInboxSearchRoundTrip:
+    @pytest.mark.asyncio
+    async def test_inbox_query_returns_archived_lifecycle_capture_from_real_db(self) -> None:
+        import os
+
+        from open_brain.ingest.runs import ingest_run
+
+        database_url = os.environ.get("DATABASE_URL", "")
+        if not database_url or database_url.startswith("postgresql://test:test@"):
+            pytest.skip("Requires real DATABASE_URL (not the CI test database)")
+
+        dl = PostgresDataLayer()
+        run_id: str | None = None
+        try:
+            with ingest_run() as current_run_id:
+                run_id = current_run_id
+                inbox = await dl.save_memory(
+                    SaveMemoryParams(
+                        text=f"capture inbox archived round trip {run_id}",
+                        metadata={"status": "archived"},
+                        capture_status="inbox",
+                    )
+                )
+                processed = await dl.save_memory(
+                    SaveMemoryParams(
+                        text=f"capture processed archived round trip {run_id}",
+                        metadata={"status": "archived"},
+                        capture_status="processed",
+                    )
+                )
+
+            result = await dl.search(
+                SearchParams(
+                    capture_status="inbox",
+                    metadata_filter={"run_id": run_id},
+                    limit=10,
+                )
+            )
+
+            result_ids = {memory.id for memory in result.results}
+            assert inbox.id in result_ids
+            assert processed.id not in result_ids
+
+            inbox_memory = next(memory for memory in result.results if memory.id == inbox.id)
+            assert inbox_memory.metadata["capture_status"] == "inbox"
+            assert inbox_memory.metadata["status"] == "archived"
+            assert all(
+                memory.metadata.get("capture_status") == "inbox"
+                for memory in result.results
+            )
+        finally:
+            if run_id is not None:
+                await dl.delete_by_run_id(run_id)
+
+
 class TestCaptureStatusTransition:
     @pytest.fixture
     def dl(self) -> PostgresDataLayer:

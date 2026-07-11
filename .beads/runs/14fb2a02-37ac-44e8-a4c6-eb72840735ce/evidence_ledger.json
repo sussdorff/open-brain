@@ -120,12 +120,51 @@
       "purpose": "Best-effort Phase 5 implementation metrics logging.",
       "exit_code": 1,
       "observed_result": "sqlite3.OperationalError: attempt to write a readonly database."
+    },
+    {
+      "id": "cmd:final-review-pre-focused",
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py tests/test_capture_inbox_cli.py -q",
+      "purpose": "Pre-edit focused baseline for affected capture inbox data-layer, CLI, and MCP tests.",
+      "exit_code": 0,
+      "observed_result": "17 passed, 4 warnings."
+    },
+    {
+      "id": "cmd:final-review-focused-non-integration",
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py tests/test_capture_inbox_cli.py -q -m \"not integration\"",
+      "purpose": "Focused non-integration gate after adding AC1/AC3 real-DB integration tests and capture CLI dead-branch cleanup.",
+      "exit_code": 0,
+      "observed_result": "17 passed, 2 deselected, 8 warnings."
+    },
+    {
+      "id": "cmd:final-review-regression-non-integration",
+      "command": "cd python && uv run pytest -m \"not integration\" -q",
+      "purpose": "Full non-integration regression gate after final-review fixes.",
+      "exit_code": 0,
+      "observed_result": "1282 passed, 24 deselected, 63 warnings."
+    },
+    {
+      "id": "cmd:final-review-collect-capture-inbox",
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py tests/test_capture_inbox_cli.py --collect-only -q",
+      "purpose": "Collection sanity check for the new integration tests and existing focused test files.",
+      "exit_code": 0,
+      "observed_result": "19 tests collected."
+    },
+    {
+      "id": "cmd:final-review-integration-skip",
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py tests/test_capture_inbox_cli.py -q -m integration",
+      "purpose": "Integration-only run for the new AC1/AC3 real Postgres MoC tests in this sandbox.",
+      "exit_code": 0,
+      "observed_result": "2 skipped, 17 deselected because DATABASE_URL is absent in this sandbox."
     }
   ],
   "skipped_checks": [
     {
       "check": "metrics logging persistence",
       "reason": "The orchestrator metrics SQLite database was read-only in the sandbox, so insert_agent_call could not persist the best-effort record."
+    },
+    {
+      "check": "AC1/AC3 real Postgres integration execution",
+      "reason": "New integration tests were added for AC1/AC3 MoC compliance and collected successfully, but their real database assertions skipped in this sandbox because DATABASE_URL is absent. They must run against a real non-CI Postgres database."
     }
   ],
   "artifacts": [
