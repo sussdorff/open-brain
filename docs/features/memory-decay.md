@@ -64,6 +64,12 @@ Recent memories (created within 7 days, default `boost_days=7`) are **not decaye
 **Protection condition:**
 - `created_at >= NOW() - 7 days` (configurable via `boost_days`)
 
+#### 4. **Canonical Entity Memories (always protected)**
+
+Memories carrying `metadata.canonical_entity=true` are permanently exempt from automated decay, compaction, refine/merge, triage demotion, and materialize/archive. This protection is orthogonal to the recency window above — a canonical entity memory is never decayed regardless of age or access count.
+
+To update or archive a canonical entity, use the `approved_canonical_entity_update` MCP tool, which requires an explicit `actor` + `note` and appends an audit record. See [canonical entity protection](#) in the features index for full details.
+
 ### Order of Operations
 
 In a single decay run:

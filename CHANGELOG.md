@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [unreleased]
 
+### Added
+
+- *(open-brain-ccd)* **Canonical entity protection** — Memories can now be marked as canonical entities via `metadata.canonical_entity=true` + `metadata.canonical_kind` (one of `person`, `project`, `organization`, `concept`). Protected canonical entities are immune to automated demotion, deletion, and merging by decay, compaction, refine, triage, and materialize/archive operations.
+  - Read tools (`search`, `timeline`, `get_observations`, `search_by_concept`) now include a `canonical_entity: {id, kind}` identity object in the response payload for protected entities, enabling callers to detect canonical entities without inspecting raw metadata.
+  - New MCP tool `approved_canonical_entity_update` provides the sanctioned maintenance path for protected entities: explicit updates and soft-archival are applied with a required `actor` and `note`, and every change is appended to an immutable `metadata.audit` trail.
+
 ## [0.32.0] - 2026-06-15
 
 ### Bug Fixes
