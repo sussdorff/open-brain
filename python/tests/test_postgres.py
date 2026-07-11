@@ -881,8 +881,8 @@ class TestContentHashDedup:
         assert metadata_arg["content_hash"] == HASH_A
 
     @pytest.mark.asyncio
-    async def test_dedup_metadata_none_becomes_hash_only(self, dl):
-        """Save with metadata=None — INSERT gets metadata={'content_hash': '<sha>'}."""
+    async def test_dedup_metadata_none_gets_hash_and_default_capture_status(self, dl):
+        """Save with metadata=None inserts content_hash and default capture_status."""
         inserted_row = MagicMock()
         inserted_row.__getitem__ = lambda self, key: 9 if key == "id" else None
 
@@ -909,8 +909,8 @@ class TestContentHashDedup:
             (a for a in insert_args if isinstance(a, dict) and "content_hash" in a), None
         )
         assert metadata_arg is not None
-        assert list(metadata_arg.keys()) == ["content_hash"]
         assert metadata_arg["content_hash"] == HASH_A
+        assert metadata_arg["capture_status"] == "inbox"
 
     @pytest.mark.asyncio
     async def test_dedup_session_summary_upsert_bypasses_dedup(self, dl):

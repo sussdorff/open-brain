@@ -35,6 +35,10 @@ from typing import Any, Literal, Protocol, TypedDict
 
 IMPORTANCE_VALUES: frozenset[str] = frozenset(["critical", "high", "medium", "low"])
 
+# ─── Capture status constants ─────────────────────────────────────────────────
+
+CAPTURE_STATUS_VALUES: frozenset[str] = frozenset(["inbox", "processed", "dismissed"])
+
 # ─── Relationship link-type constants ────────────────────────────────────────
 
 VALID_LINK_TYPES: frozenset[str] = frozenset({
@@ -69,6 +73,18 @@ def rank_importance(level: str) -> int:
     except (KeyError, TypeError):
         raise ValueError(
             f"Invalid importance: {level!r}. Must be one of: {sorted(IMPORTANCE_VALUES)}"
+        )
+
+
+def validate_capture_status(status: str) -> None:
+    """Validate a capture inbox status string.
+
+    Raises:
+        ValueError: if *status* is not one of the valid capture status values.
+    """
+    if status not in CAPTURE_STATUS_VALUES:
+        raise ValueError(
+            f"Invalid capture_status: {status!r}. Must be one of: {sorted(CAPTURE_STATUS_VALUES)}"
         )
 
 
@@ -227,6 +243,7 @@ class SearchParams:
     order_by: str | None = None
     file_path: str | None = None
     metadata_filter: dict[str, str] | None = None
+    capture_status: str | None = None
     author: str | None = None  # filter by user_id (contributor)
 
 
@@ -265,6 +282,7 @@ class SaveMemoryParams:
     narrative: str | None = None  # optional prose context / reasoning (supplements text)
     session_ref: str | None = None
     metadata: dict[str, Any] | None = None
+    capture_status: str | None = None
     user_id: str | None = None  # authenticated user who created this memory
     upsert_mode: Literal["append", "replace"] = "append"
     importance: str = "medium"  # caller-declared significance: critical|high|medium|low

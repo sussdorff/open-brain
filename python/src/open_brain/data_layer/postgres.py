@@ -47,6 +47,7 @@ from open_brain.data_layer.interface import (
     TimelineParams,
     TimelineResult,
     rank_importance,
+    validate_capture_status,
 )
 from open_brain.data_layer.refine import analyze_with_llm
 
@@ -237,6 +238,10 @@ async def get_pool() -> asyncpg.Pool:
                 CREATE INDEX IF NOT EXISTS idx_memories_content_hash
                 ON memories ((metadata->>'content_hash'))
                 WHERE metadata->>'content_hash' IS NOT NULL;
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_memory_capture_status
+                ON memories ((metadata->>'capture_status'));
             """)
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS url_tokens (
@@ -460,6 +465,8 @@ class PostgresDataLayer:
             type_value = params.type or params.obs_type
             limit = params.limit or 20
             offset = params.offset or 0
+            if params.capture_status is not None:
+                validate_capture_status(params.capture_status)
 
             # Normalize empty/wildcard queries to None (browse mode)
             query = params.query.strip() if params.query else None
@@ -581,6 +588,10 @@ class PostgresDataLayer:
             if params.metadata_filter:
                 conditions.append(f"m.metadata @> ${param_idx}::jsonb")
                 values.append(params.metadata_filter)
+                param_idx += 1
+            if params.capture_status is not None:
+                conditions.append(f"m.metadata->>'capture_status' = ${param_idx}")
+                values.append(params.capture_status)
                 param_idx += 1
             if params.author:
                 conditions.append(f"m.user_id = ${param_idx}")
@@ -835,6 +846,8 @@ class PostgresDataLayer:
                 f"Invalid importance: {params.importance!r}. "
                 f"Must be one of: {sorted(IMPORTANCE_VALUES)}"
             )
+        if params.capture_status is not None:
+            validate_capture_status(params.capture_status)
 
         # ── Caller-provided duplicate_of short-circuit ──
         # Must run BEFORE any DB access so it wins over all other paths
@@ -1015,6 +1028,7 @@ class PostgresDataLayer:
             # ── Normal insert path ──
             base_metadata = dict(params.metadata) if params.metadata else {}
             base_metadata["content_hash"] = content_hash
+            base_metadata["capture_status"] = params.capture_status or "inbox"
             # Inject run_id if inside an ingest_run context
             if run_id := get_current_run_id():
                 base_metadata["run_id"] = run_id
