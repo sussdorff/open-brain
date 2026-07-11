@@ -1,0 +1,114 @@
+{
+  "contract_version": "1",
+  "bead_id": "open-brain-fhb",
+  "commands": [
+    {
+      "id": "cmd:docker-run-pgvector",
+      "command": "docker run --rm -d --name obfhb-pg-red -e POSTGRES_USER=open_brain -e POSTGRES_PASSWORD=test -e POSTGRES_DB=open_brain_test -p 55432:5432 pgvector/pgvector:pg18-bookworm",
+      "purpose": "Start a disposable real Postgres+pgvector database for RED/GREEN verification.",
+      "exit_code": 0,
+      "observed_result": "Image pgvector/pgvector:pg18-bookworm was pulled with digest sha256:12a379b47ad65289572ea0756efc11b7c241a6662833e8af7038cd3b73d647e0 and container 91192c2bdcb9dceced89fa8f952748b46107a2cbc792742edad20d37a14429cc started."
+    },
+    {
+      "id": "cmd:docker-create-runner",
+      "command": "docker create --name obfhb-runner-red --network container:obfhb-pg-red -e HOME=/tmp -e UV_CACHE_DIR=/tmp/uv-cache -e DATABASE_URL=postgresql://open_brain:test@127.0.0.1:5432/open_brain_test -w /work/python ghcr.io/astral-sh/uv:python3.13-bookworm sleep infinity",
+      "purpose": "Create a disposable pytest runner sharing the pgvector database network namespace because host TCP to the mapped database port was blocked by sandbox policy.",
+      "exit_code": 0,
+      "observed_result": "Runner container 24ef5a629e5837f524819396025ddb2d67ed41d44c5f2cce94b32103ce1a878f was created."
+    },
+    {
+      "id": "cmd:red-pytest-backfill",
+      "command": "docker exec obfhb-runner-red uv run pytest -m integration tests/test_typed_relationships.py::TestBackfillScriptIntegration -v",
+      "purpose": "RED gate: run the existing real-DB backfill integration test against a fresh schema-less pgvector database after the test setup commit.",
+      "exit_code": 1,
+      "observed_result": "Failed for the expected reason: asyncpg.exceptions.UndefinedTableError: relation \"memory_relationships\" does not exist."
+    },
+    {
+      "id": "cmd:green-pytest-backfill",
+      "command": "docker exec obfhb-runner-red uv run pytest -m integration tests/test_typed_relationships.py::TestBackfillScriptIntegration -v",
+      "purpose": "GREEN gate: run the backfill integration test after copying in the bootstrap fixture and SQL script.",
+      "exit_code": 0,
+      "observed_result": "tests/test_typed_relationships.py::TestBackfillScriptIntegration::test_backfill_script_sets_link_type PASSED; 1 passed in 0.99s."
+    },
+    {
+      "id": "cmd:idempotent-pytest-backfill",
+      "command": "docker exec obfhb-runner-red uv run pytest -m integration tests/test_typed_relationships.py::TestBackfillScriptIntegration -v",
+      "purpose": "Verify the bootstrap fixture can run again against an already-bootstrapped database.",
+      "exit_code": 0,
+      "observed_result": "TestBackfillScriptIntegration passed again; 1 passed in 1.07s."
+    },
+    {
+      "id": "cmd:psql-column-and-function-smoke",
+      "command": "docker exec -i obfhb-pg-red psql -v ON_ERROR_STOP=1 -U open_brain -d open_brain_test <<'SQL'\nWITH expected(table_name, column_name) AS (...expected bootstrap columns...), missing AS (SELECT * FROM expected EXCEPT SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'public') SELECT COUNT(*) AS missing_expected_columns FROM missing;\nWITH inserted AS (INSERT INTO memories (content, title, type, metadata) VALUES ('smoke content for bootstrap', 'Bootstrap Smoke', 'observation', '{\"capture_status\":\"inbox\"}'::jsonb) RETURNING id), rel AS (INSERT INTO memory_relationships (source_id, target_id, relation_type, link_type, confidence, metadata) SELECT id, id, 'similar_to', 'similar_to', 1.0, '{}'::jsonb FROM inserted ON CONFLICT (source_id, target_id, relation_type) DO UPDATE SET confidence = EXCLUDED.confidence RETURNING id), usage AS (INSERT INTO memory_usage_log (memory_id, event_type, session_context) SELECT id, 'retrieved', 'bootstrap-smoke' FROM inserted RETURNING id), priority AS (SELECT update_priority(id) FROM inserted), decay AS (SELECT decay_unused_priorities(0, 0.9) AS affected), hybrid AS (SELECT COUNT(*)::int AS matches FROM hybrid_search('bootstrap smoke', NULL::vector, 5, 60, NULL, NULL, NULL, NULL)) SELECT (SELECT COUNT(*) FROM inserted) AS inserted_memories, (SELECT COUNT(*) FROM rel) AS inserted_relationships, (SELECT COUNT(*) FROM usage) AS inserted_usage_events, (SELECT affected FROM decay) AS decay_affected, (SELECT matches FROM hybrid) AS hybrid_matches;\nSQL",
+      "purpose": "Verify expected bootstrap columns and core insert/function behavior directly against the real pgvector database.",
+      "exit_code": 0,
+      "observed_result": "missing_expected_columns=0; inserted_memories=1; inserted_relationships=1; inserted_usage_events=1; decay_affected=0. hybrid_matches was 0 inside the same data-modifying statement snapshot and was checked separately."
+    },
+    {
+      "id": "cmd:hybrid-search-smoke",
+      "command": "docker exec -i obfhb-pg-red psql -v ON_ERROR_STOP=1 -U open_brain -d open_brain_test <<'SQL'\nSELECT COUNT(*)::int AS hybrid_matches\nFROM hybrid_search('bootstrap smoke', NULL::vector, 5, 60, NULL, NULL, NULL, NULL);\nSQL",
+      "purpose": "Verify the bootstrapped hybrid_search function can find the inserted smoke row in a separate read statement.",
+      "exit_code": 0,
+      "observed_result": "hybrid_matches=1."
+    },
+    {
+      "id": "cmd:get-pool-smoke",
+      "command": "docker exec -i -e MCP_SERVER_URL=http://localhost:8091 -e AUTH_USER=testuser -e AUTH_PASSWORD=testpassword123 -e JWT_SECRET=this-is-a-test-secret-that-is-long-enough-32chars -e VOYAGE_API_KEY=test-voyage-key obfhb-runner-red uv run python - <<'PY'\nimport asyncio\nfrom open_brain.data_layer.postgres import close_pool, get_pool\nasync def main() -> None:\n    pool = await get_pool()\n    async with pool.acquire() as conn:\n        row = await conn.fetchrow(\"\"\"SELECT to_regclass('public.memories') IS NOT NULL AS has_memories, to_regclass('public.memory_relationships') IS NOT NULL AS has_relationships, to_regprocedure('public.decay_unused_priorities(integer,double precision)') IS NOT NULL AS has_decay, to_regprocedure('public.update_priority(integer)') IS NOT NULL AS has_update_priority\"\"\")\n        print(dict(row))\n    await close_pool()\nasyncio.run(main())\nPY",
+      "purpose": "Verify current PostgresDataLayer.get_pool() can run against the bootstrapped schema and apply its idempotent migrations without errors.",
+      "exit_code": 0,
+      "observed_result": "{'has_memories': True, 'has_relationships': True, 'has_decay': True, 'has_update_priority': True}."
+    },
+    {
+      "id": "cmd:non-integration-suite",
+      "command": "uv run pytest -m \"not integration\"",
+      "purpose": "Verify no non-integration regressions after the fixture, bootstrap SQL, and docs changes.",
+      "exit_code": 0,
+      "observed_result": "1457 passed, 26 deselected, 62 warnings in 10.63s on explicit run; commit hooks also reran the suite successfully for each commit."
+    },
+    {
+      "id": "cmd:test-postgres-pool-migrations-absent",
+      "command": "rg -n \"class TestPostgresPoolMigrations\" python/tests",
+      "purpose": "Confirm the cross-bead TestPostgresPoolMigrations target is absent from this worktree.",
+      "exit_code": 1,
+      "observed_result": "No matches; python/tests/test_postgres.py::TestPostgresPoolMigrations is not present in this worktree."
+    },
+    {
+      "id": "cmd:metrics-uv-default-cache",
+      "command": "uv run python - <<'PY'\nimport os, sys\nsys.path.insert(0, os.path.join(os.environ['BEADS_RUNTIME'], 'lib', 'orchestrator'))\nfrom metrics import insert_agent_call\ninsert_agent_call(run_id='191a9aa8-4097-49f5-9293-f8a2035b32fe', bead_id='open-brain-fhb', phase_label='p5-impl', agent_label='impl-codex', model='gpt-5.5', iteration=1, input_tokens=0, cached_input_tokens=0, output_tokens=0, reasoning_output_tokens=0, total_tokens=0, duration_ms=0, exit_code=0)\nPY",
+      "purpose": "Attempt required metrics logging.",
+      "exit_code": 2,
+      "observed_result": "Blocked by sandbox: uv could not initialize cache at /Users/malte/.cache/uv (Operation not permitted)."
+    },
+    {
+      "id": "cmd:metrics-uv-tmp-cache",
+      "command": "UV_CACHE_DIR=/tmp/uv-cache uv run python - <<'PY'\nimport os, sys\nsys.path.insert(0, os.path.join(os.environ['BEADS_RUNTIME'], 'lib', 'orchestrator'))\nfrom metrics import insert_agent_call\ninsert_agent_call(run_id='191a9aa8-4097-49f5-9293-f8a2035b32fe', bead_id='open-brain-fhb', phase_label='p5-impl', agent_label='impl-codex', model='gpt-5.5', iteration=1, input_tokens=0, cached_input_tokens=0, output_tokens=0, reasoning_output_tokens=0, total_tokens=0, duration_ms=0, exit_code=0)\nPY",
+      "purpose": "Retry required metrics logging with a writable uv cache.",
+      "exit_code": 1,
+      "observed_result": "metrics.insert_agent_call failed with sqlite3.OperationalError: attempt to write a readonly database."
+    }
+  ],
+  "skipped_checks": [
+    {
+      "check": "python/tests/test_postgres.py::TestPostgresPoolMigrations",
+      "reason": "The class is not present in this worktree; confirmed with rg. This matches the bead's cross-bead coupling note, so fallback verification used TestBackfillScriptIntegration plus direct schema/function smoke checks."
+    },
+    {
+      "check": "Host-to-container DATABASE_URL verification via localhost:55432",
+      "reason": "The sandbox blocked host TCP to the mapped Docker port with Operation not permitted. Verification was run in a disposable uv container sharing the pgvector container network namespace instead."
+    },
+    {
+      "check": "Metrics write",
+      "reason": "Self-reported token counts were unavailable, and metrics insertion failed because the metrics database was read-only from this sandbox. Token fields were zero-filled in the attempted command as instructed."
+    }
+  ],
+  "artifacts": [
+    {
+      "path": ".beads/runs/191a9aa8-4097-49f5-9293-f8a2035b32fe/implementation_manifest.json",
+      "description": "Implementation manifest for open-brain-fhb."
+    },
+    {
+      "path": ".beads/runs/191a9aa8-4097-49f5-9293-f8a2035b32fe/evidence_ledger.json",
+      "description": "Evidence ledger for RED/GREEN integration verification, smoke checks, and skipped checks."
+    }
+  ]
+}
