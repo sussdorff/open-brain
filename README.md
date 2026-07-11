@@ -274,6 +274,7 @@ search(query)          →  compact index with IDs (~50-100 tokens/result)
 |---|---|
 | `save_memory` | Store an observation. `text` + `project` required. Auto-embeds async. **Capture Router** applies domain templates and extracts structured fields concurrently. |
 | `update_memory` | Update fields on an existing memory. Re-embeds if content changes. |
+| `set_capture_status` | Transition a capture's inbox state (`inbox` / `processed` / `dismissed`). Knowledge-lifecycle `metadata.status` is unchanged unless `lifecycle_status` is explicitly passed. |
 | `refine_memories` | Automatic consolidation: dedup, merge, priority adjustment. |
 | `triage_memories` | Human-in-the-loop classification into lifecycle actions. |
 | `materialize_memories` | Execute triage actions (promote to docs, create issues, archive). |
@@ -482,6 +483,8 @@ Current `ob` commands:
 | `ob ingest macwhisper` | List and ingest transcripts from local MacWhisper history |
 | `ob people list` | List person memories and merge candidates through the MCP server |
 | `ob people merge` | Merge duplicate person memories server-side |
+| `ob inbox` | List captures with `capture_status=inbox` |
+| `ob capture set-status` | Transition a capture's inbox status (`inbox` / `processed` / `dismissed`) |
 
 ### `ob people`
 

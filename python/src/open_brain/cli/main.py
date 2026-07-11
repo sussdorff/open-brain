@@ -220,6 +220,16 @@ async def _cmd_search(args: argparse.Namespace) -> Any:
     return await call_tool("search", kwargs)
 
 
+async def _cmd_inbox(args: argparse.Namespace) -> Any:
+    """List pending capture inbox memories."""
+    kwargs: dict[str, Any] = {"capture_status": "inbox"}
+    if args.limit:
+        kwargs["limit"] = args.limit
+    if args.project:
+        kwargs["project"] = args.project
+    return await call_tool("search", kwargs)
+
+
 async def _cmd_concept(args: argparse.Namespace) -> Any:
     """Execute semantic-only search.
 
@@ -376,6 +386,18 @@ async def _cmd_update(args: argparse.Namespace) -> Any:
     if args.title:
         kwargs["title"] = args.title
     return await call_tool("update_memory", kwargs)
+
+
+async def _cmd_capture(args: argparse.Namespace) -> Any:
+    """Manage capture inbox status."""
+    if args.capture_command == "set-status":
+        kwargs: dict[str, Any] = {
+            "memory_id": args.memory_id,
+            "capture_status": args.capture_status,
+        }
+        if args.lifecycle_status:
+            kwargs["lifecycle_status"] = args.lifecycle_status
+        return await call_tool("set_capture_status", kwargs)
 
 
 async def _cmd_ingest_email(args: argparse.Namespace) -> Any:
@@ -823,6 +845,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p_search.add_argument("--project", help="Filter by project")
     p_search.add_argument("--type", help="Filter by memory type")
 
+    # inbox
+    p_inbox = subparsers.add_parser(
+        "inbox",
+        help="List pending capture inbox memories",
+    )
+    p_inbox.add_argument("--limit", type=int, help="Maximum number of results")
+    p_inbox.add_argument("--project", help="Filter by project")
+
     # concept
     p_concept = subparsers.add_parser(
         "concept",
@@ -916,6 +946,29 @@ def _build_parser() -> argparse.ArgumentParser:
     p_update.add_argument("--type", help="New memory type")
     p_update.add_argument("--project", help="New project")
     p_update.add_argument("--title", help="New title")
+
+    # capture
+    p_capture = subparsers.add_parser(
+        "capture",
+        help="Manage capture inbox status",
+    )
+    capture_sub = p_capture.add_subparsers(dest="capture_command", metavar="ACTION")
+    capture_sub.required = True
+
+    p_capture_status = capture_sub.add_parser(
+        "set-status",
+        help="Set capture status for a memory",
+    )
+    p_capture_status.add_argument("memory_id", type=int, help="Memory ID to update")
+    p_capture_status.add_argument(
+        "capture_status",
+        help="Capture status: inbox, processed, or dismissed",
+    )
+    p_capture_status.add_argument(
+        "--lifecycle-status",
+        dest="lifecycle_status",
+        help="Optionally update metadata.status explicitly",
+    )
 
     # ingest
     p_ingest = subparsers.add_parser(
@@ -1180,6 +1233,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 _COMMAND_MAP = {
     "search": _cmd_search,
+    "inbox": _cmd_inbox,
     "concept": _cmd_concept,
     "save": _cmd_save,
     "get": _cmd_get,
@@ -1188,6 +1242,7 @@ _COMMAND_MAP = {
     "stats": _cmd_stats,
     "doctor": _cmd_doctor,
     "update": _cmd_update,
+    "capture": _cmd_capture,
     "ingest": _cmd_ingest,
     "people": _cmd_people,
 }

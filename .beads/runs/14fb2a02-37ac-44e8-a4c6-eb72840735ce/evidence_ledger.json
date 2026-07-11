@@ -1,0 +1,272 @@
+{
+  "contract_version": "1",
+  "bead_id": "open-brain-slu",
+  "commands": [
+    {
+      "id": "cmd:ac1-red-capture-inbox",
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py -q",
+      "purpose": "RED gate for capture_status save/search/defaulting tests before production support.",
+      "exit_code": 1,
+      "observed_result": "4 failed, 1 passed. Failures showed SaveMemoryParams/SearchParams missing capture_status and default insert metadata lacking capture_status."
+    },
+    {
+      "id": "cmd:ac1-green-capture-inbox",
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py -q",
+      "purpose": "GREEN gate for capture_status save/search/defaulting behavior.",
+      "exit_code": 0,
+      "observed_result": "5 passed."
+    },
+    {
+      "id": "cmd:ac1-green-regression",
+      "command": "cd python && uv run pytest -m \"not integration\" -q",
+      "purpose": "Regression gate after AC1 implementation and existing metadata test update.",
+      "exit_code": 0,
+      "observed_result": "1270 passed, 22 deselected."
+    },
+    {
+      "id": "cmd:ac2-red-transition",
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py -q",
+      "purpose": "RED gate for dedicated capture transition independence tests.",
+      "exit_code": 1,
+      "observed_result": "4 failed, 5 passed. Failures showed CaptureTransitionParams was missing."
+    },
+    {
+      "id": "cmd:ac2-green-transition",
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py -q",
+      "purpose": "GREEN gate for set_capture_status data-layer transition behavior.",
+      "exit_code": 0,
+      "observed_result": "9 passed."
+    },
+    {
+      "id": "cmd:ac2-green-regression",
+      "command": "cd python && uv run pytest -m \"not integration\" -q",
+      "purpose": "Regression gate after AC2 implementation.",
+      "exit_code": 0,
+      "observed_result": "1274 passed, 22 deselected."
+    },
+    {
+      "id": "cmd:ac3-red-cli-mcp",
+      "command": "cd python && uv run pytest tests/test_capture_inbox_cli.py -q",
+      "purpose": "RED gate for CLI and MCP capture inbox surfaces.",
+      "exit_code": 1,
+      "observed_result": "6 failed. Failures showed missing inbox/capture parser commands, missing CLI handlers, search() missing capture_status, and missing set_capture_status MCP tool."
+    },
+    {
+      "id": "cmd:ac3-green-cli-mcp",
+      "command": "cd python && uv run pytest tests/test_capture_inbox_cli.py -q",
+      "purpose": "GREEN gate for CLI and MCP capture inbox surfaces.",
+      "exit_code": 0,
+      "observed_result": "6 passed."
+    },
+    {
+      "id": "cmd:ac3-green-combined",
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py tests/test_capture_inbox_cli.py -q",
+      "purpose": "Combined acceptance evidence for capture inbox data-layer, CLI, and MCP behavior.",
+      "exit_code": 0,
+      "observed_result": "15 passed."
+    },
+    {
+      "id": "cmd:ac3-green-regression",
+      "command": "cd python && uv run pytest -m \"not integration\" -q",
+      "purpose": "Final non-integration regression gate.",
+      "exit_code": 0,
+      "observed_result": "1280 passed, 22 deselected."
+    },
+    {
+      "id": "cmd:pair1-pre-focused-cache-fail",
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py tests/test_postgres.py -q",
+      "purpose": "Initial requested pre-fix focused test command before changing files.",
+      "exit_code": 2,
+      "observed_result": "uv could not initialize the default cache at /Users/malte/.cache/uv under sandbox permissions."
+    },
+    {
+      "id": "cmd:pair1-pre-focused",
+      "command": "cd python && UV_CACHE_DIR=/private/tmp/open-brain-uv-cache uv run pytest tests/test_capture_inbox.py tests/test_postgres.py -q",
+      "purpose": "Pre-fix focused test run using a writable uv cache after the sandbox cache failure.",
+      "exit_code": 0,
+      "observed_result": "55 passed, 19 warnings."
+    },
+    {
+      "id": "cmd:pair1-red-capture-inbox",
+      "command": "cd python && UV_CACHE_DIR=/private/tmp/open-brain-uv-cache uv run pytest tests/test_capture_inbox.py -q",
+      "purpose": "RED proof for pair-loop regression tests before production fixes.",
+      "exit_code": 1,
+      "observed_result": "4 failed, 7 passed. Failures showed missing query-mode capture_status filtering, two-step set_capture_status updates, and missing lifecycle_status validation."
+    },
+    {
+      "id": "cmd:pair1-green-capture-inbox",
+      "command": "cd python && UV_CACHE_DIR=/private/tmp/open-brain-uv-cache uv run pytest tests/test_capture_inbox.py -q",
+      "purpose": "GREEN gate for pair-loop capture inbox search and transition fixes.",
+      "exit_code": 0,
+      "observed_result": "11 passed, 7 warnings."
+    },
+    {
+      "id": "cmd:pair1-green-focused",
+      "command": "cd python && UV_CACHE_DIR=/private/tmp/open-brain-uv-cache uv run pytest tests/test_capture_inbox.py tests/test_postgres.py -q",
+      "purpose": "Focused regression gate requested for pair-loop iteration 1.",
+      "exit_code": 0,
+      "observed_result": "57 passed, 25 warnings."
+    },
+    {
+      "id": "cmd:pair1-green-regression",
+      "command": "cd python && UV_CACHE_DIR=/private/tmp/open-brain-uv-cache uv run pytest -m \"not integration\" -q",
+      "purpose": "Full non-integration regression gate requested for pair-loop iteration 1.",
+      "exit_code": 0,
+      "observed_result": "1282 passed, 22 deselected, 64 warnings."
+    },
+    {
+      "id": "cmd:metrics-best-effort",
+      "command": "BEADS_RUNTIME=/Users/malte/.agents/skills/beads UV_CACHE_DIR=/tmp/uv-cache uv run python -c \"import os, sys; sys.path.insert(0, os.path.join(os.environ['BEADS_RUNTIME'], 'lib', 'orchestrator')); from metrics import insert_agent_call; insert_agent_call(run_id='14fb2a02-37ac-44e8-a4c6-eb72840735ce', bead_id='open-brain-slu', phase_label='p5-impl', agent_label='impl-codex', model='gpt-5.5', iteration=1, input_tokens=0, cached_input_tokens=0, output_tokens=0, reasoning_output_tokens=0, total_tokens=0, duration_ms=0, exit_code=0)\"",
+      "purpose": "Best-effort Phase 5 implementation metrics logging.",
+      "exit_code": 1,
+      "observed_result": "sqlite3.OperationalError: attempt to write a readonly database."
+    },
+    {
+      "id": "cmd:final-review-pre-focused",
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py tests/test_capture_inbox_cli.py -q",
+      "purpose": "Pre-edit focused baseline for affected capture inbox data-layer, CLI, and MCP tests.",
+      "exit_code": 0,
+      "observed_result": "17 passed, 4 warnings."
+    },
+    {
+      "id": "cmd:final-review-focused-non-integration",
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py tests/test_capture_inbox_cli.py -q -m \"not integration\"",
+      "purpose": "Focused non-integration gate after adding AC1/AC3 real-DB integration tests and capture CLI dead-branch cleanup.",
+      "exit_code": 0,
+      "observed_result": "17 passed, 2 deselected, 8 warnings."
+    },
+    {
+      "id": "cmd:final-review-regression-non-integration",
+      "command": "cd python && uv run pytest -m \"not integration\" -q",
+      "purpose": "Full non-integration regression gate after final-review fixes.",
+      "exit_code": 0,
+      "observed_result": "1282 passed, 24 deselected, 63 warnings."
+    },
+    {
+      "id": "cmd:final-review-collect-capture-inbox",
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py tests/test_capture_inbox_cli.py --collect-only -q",
+      "purpose": "Collection sanity check for the new integration tests and existing focused test files.",
+      "exit_code": 0,
+      "observed_result": "19 tests collected."
+    },
+    {
+      "id": "cmd:final-review-integration-skip",
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py tests/test_capture_inbox_cli.py -q -m integration",
+      "purpose": "Integration-only run for the new AC1/AC3 real Postgres MoC tests in this sandbox.",
+      "exit_code": 0,
+      "observed_result": "2 skipped, 17 deselected because DATABASE_URL is absent in this sandbox."
+    },
+    {
+      "id": "cmd:codex-fix-green-focused",
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py tests/test_capture_inbox_cli.py tests/test_postgres.py tests/test_search.py -q",
+      "purpose": "GREEN gate after threading capture_status into hybrid_search() as $7 (codex adversarial finding fix) and updating the affected capture_inbox and search SQL-shape tests.",
+      "exit_code": 0,
+      "observed_result": "85 passed, 2 skipped."
+    },
+    {
+      "id": "cmd:codex-fix-green-regression",
+      "command": "cd python && uv run pytest -m \"not integration\" -q",
+      "purpose": "Full non-integration regression gate after the codex-fix pre-filter change.",
+      "exit_code": 0,
+      "observed_result": "1282 passed, 24 deselected."
+    },
+    {
+      "id": "cmd:codex-fix-metrics",
+      "command": "BEADS_RUNTIME=/Users/malte/.agents/skills/beads UV_CACHE_DIR=/private/tmp/open-brain-uv-cache uv run python -c \"import os, sys; sys.path.insert(0, os.path.join(os.environ['BEADS_RUNTIME'], 'lib', 'orchestrator')); from metrics import insert_agent_call; insert_agent_call(run_id='14fb2a02-37ac-44e8-a4c6-eb72840735ce', bead_id='open-brain-slu', phase_label='codex-fix', agent_label='fix-opus', model='claude-opus', iteration=1, ...)\"",
+      "purpose": "Best-effort codex-fix agent metrics logging (BEADS_RUNTIME defaulted to /Users/malte/.agents/skills/beads).",
+      "exit_code": 0,
+      "observed_result": "insert_agent_call completed without error (exit 0); metrics DB writable in this sandbox, unlike the earlier Phase 5 read-only attempt."
+    },
+    {
+      "id": "cmd:vfix-bug-origin",
+      "command": "cd python && DATABASE_URL=<live-postgres> uv run pytest tests/test_capture_inbox_cli.py -q -m integration  (run by orchestrator against a live Postgres+pgvector DB, NOT this sandbox)",
+      "purpose": "Origin of the verification-dispute defect: running the real @pytest.mark.integration test test_capture_status_round_trip_uses_real_data_layer against a live Postgres+pgvector database (production-adjacent LXC116 deployment DB, proper secret handling) exercised set_capture_status end-to-end and surfaced the bug.",
+      "exit_code": 1,
+      "observed_result": "asyncpg.exceptions.IndeterminateDatatypeError: could not determine data type of parameter $2 \u2014 raised at PREPARE time because the bind param was used only as an argument to the polymorphic jsonb_build_object() with no other typed context. Never caught by any mocked unit test (pair-loop, cold, and Codex reviews all mocked conn.fetchrow/execute and never sent real SQL). This run was performed by the orchestrator against live infra, not reproducible in the fix agent's sandbox (no DATABASE_URL here)."
+    },
+    {
+      "id": "cmd:vfix-grep-jsonb",
+      "command": "grep -n \"jsonb_build_object(\" python/src/open_brain/data_layer/postgres.py",
+      "purpose": "Re-confirm the full inventory of jsonb_build_object call sites before applying the ::text cast fix, and check for other latent instances of the same bug.",
+      "exit_code": 0,
+      "observed_result": "Exactly 2 sites, both inside set_capture_status (lines 1166 and 1176): the default path jsonb_build_object('capture_status', $2) and the explicit-lifecycle path jsonb_build_object('capture_status', $2, 'status', $3). grep for jsonb_build_object/json_build_object/COALESCE in interface.py, server.py, cli/main.py returned no matches \u2014 no other bind-param-in-polymorphic-function sites in bead-touched files."
+    },
+    {
+      "id": "cmd:vfix-pre-focused",
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py tests/test_capture_inbox_cli.py -q",
+      "purpose": "Pre-fix baseline for the affected capture inbox tests (confirm current green before applying the ::text cast).",
+      "exit_code": 0,
+      "observed_result": "17 passed, 2 skipped (the two existing @pytest.mark.integration real-DB tests self-skip because DATABASE_URL is absent in this sandbox)."
+    },
+    {
+      "id": "cmd:vfix-green-focused",
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py tests/test_capture_inbox_cli.py tests/test_postgres.py -q",
+      "purpose": "GREEN gate after casting both jsonb_build_object bind params to ::text in set_capture_status and adding the lifecycle-path @pytest.mark.integration regression test.",
+      "exit_code": 0,
+      "observed_result": "63 passed, 3 skipped (the three real-DB integration tests self-skip in this sandbox; count rose from 2 to 3 because the new lifecycle-path integration test was added)."
+    },
+    {
+      "id": "cmd:vfix-green-regression",
+      "command": "cd python && uv run pytest -m \"not integration\" -q",
+      "purpose": "Full non-integration regression gate after the ::text cast fix.",
+      "exit_code": 0,
+      "observed_result": "1282 passed, 25 deselected (integration). No regressions; mocked unit-test SQL-shape assertions still pass because they substring-match jsonb_build_object('capture_status' which is unaffected by the ::text suffix."
+    },
+    {
+      "id": "cmd:vfix-metrics",
+      "command": "BEADS_RUNTIME=/Users/malte/.agents/skills/beads uv run python -c \"...; from metrics import insert_agent_call; insert_agent_call(run_id='14fb2a02-37ac-44e8-a4c6-eb72840735ce', bead_id='open-brain-slu', phase_label='verification-fix', agent_label='fix-opus-vfix', model='claude-opus', iteration=1, ...)\"",
+      "purpose": "Best-effort verification-fix agent token/duration metrics logging (BEADS_RUNTIME unset in env; defaulted to /Users/malte/.agents/skills/beads matching prior codex-fix run).",
+      "exit_code": 0,
+      "observed_result": "METRICS_OK: insert_agent_call completed without error; metrics DB writable in this sandbox."
+    },
+    {
+      "id": "cmd:live-db-verification-ac1",
+      "command": "uv run pytest tests/test_capture_inbox.py::TestCaptureInboxSearchRoundTrip -m integration -v --no-cov",
+      "purpose": "Live-DB verification of AC1 (integ MoC) against a real Postgres+pgvector database, run by the orchestrator inside an ephemeral container on the deployed LXC116 infrastructure (services_default docker network, real DATABASE_URL/VOYAGE_API_KEY loaded via --env-file, never printed/logged). Executed after resuming Phase 9 per explicit user authorization.",
+      "exit_code": 0,
+      "observed_result": "1 passed in 2.36s. Confirms capture_status search filtering (including the Phase 8 hybrid_search pre-filter fix) is correct against real infra."
+    },
+    {
+      "id": "cmd:live-db-verification-ac3-default",
+      "command": "uv run pytest tests/test_capture_inbox_cli.py::TestCaptureInboxMcpRoundTrip::test_capture_status_round_trip_uses_real_data_layer -m integration -v --no-cov",
+      "purpose": "Live-DB verification of AC3 (e2e MoC) default capture_status transition path against real Postgres.",
+      "exit_code": 0,
+      "observed_result": "FIRST RUN (before the ::text cast fix): FAILED with asyncpg.exceptions.IndeterminateDatatypeError: could not determine data type of parameter $2 (jsonb_build_object polymorphic-function type-inference bug in set_capture_status, undetected by all prior mocked unit/pair-loop/cold/adversarial reviews). AFTER fix commit 4f6d18b (::text casts): 1 passed in 1.08s."
+    },
+    {
+      "id": "cmd:live-db-verification-ac3-lifecycle",
+      "command": "uv run pytest tests/test_capture_inbox_cli.py::TestCaptureInboxMcpRoundTrip::test_capture_status_lifecycle_transition_round_trip_uses_real_data_layer -m integration -v --no-cov",
+      "purpose": "Live-DB verification of AC3/AC2 explicit lifecycle_status transition path (new regression test added by the verification-fix) against real Postgres.",
+      "exit_code": 0,
+      "observed_result": "1 passed in 1.08s."
+    }
+  ],
+  "skipped_checks": [
+    {
+      "check": "metrics logging persistence",
+      "reason": "The orchestrator metrics SQLite database was read-only in the sandbox, so insert_agent_call could not persist the best-effort record."
+    },
+    {
+      "check": "AC1/AC3 real Postgres integration execution",
+      "reason": "New integration tests were added for AC1/AC3 MoC compliance and collected successfully, but their real database assertions skipped in this sandbox because DATABASE_URL is absent. They must run against a real non-CI Postgres database."
+    }
+  ],
+  "artifacts": [
+    {
+      "path": ".beads/runs/14fb2a02-37ac-44e8-a4c6-eb72840735ce/implementation_manifest.json",
+      "kind": "implementation_manifest"
+    },
+    {
+      "path": ".beads/runs/14fb2a02-37ac-44e8-a4c6-eb72840735ce/evidence_ledger.json",
+      "kind": "evidence_ledger"
+    },
+    {
+      "path": "python/tests/test_capture_inbox.py",
+      "kind": "test"
+    },
+    {
+      "path": "python/tests/test_capture_inbox_cli.py",
+      "kind": "test"
+    }
+  ]
+}

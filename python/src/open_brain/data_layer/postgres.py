@@ -30,6 +30,7 @@ from open_brain.data_layer.interface import (
     ClusterPlan,
     CompactParams,
     CompactResult,
+    CaptureTransitionParams,
     DecayParams,
     DecayResult,
     DeleteByRunIdResult,
@@ -52,6 +53,7 @@ from open_brain.data_layer.interface import (
     TimelineResult,
     is_canonical_entity,
     rank_importance,
+    validate_capture_status,
 )
 from open_brain.data_layer.refine import analyze_with_llm
 
@@ -252,7 +254,20 @@ _compact_lifecycle_filter = (
     f"{_canonical_entity_protection_filter()}"
 )
 
+_LIFECYCLE_STATUS_VALUES: frozenset[str] = frozenset(
+    ["open", "materialized", "discarded", "archived"]
+)
+
 _pool: asyncpg.Pool | None = None
+
+
+def _validate_lifecycle_status(status: str) -> None:
+    """Validate an explicit metadata.status lifecycle value."""
+    if status not in _LIFECYCLE_STATUS_VALUES:
+        raise ValueError(
+            "Invalid lifecycle_status: "
+            f"{status!r}. Must be one of: {sorted(_LIFECYCLE_STATUS_VALUES)}"
+        )
 
 
 async def _ensure_link_type_column(conn: asyncpg.Connection) -> None:
@@ -381,6 +396,10 @@ async def get_pool() -> asyncpg.Pool:
                 WHERE metadata->>'content_hash' IS NOT NULL;
             """)
             await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_memory_capture_status
+                ON memories ((metadata->>'capture_status'));
+            """)
+            await conn.execute("""
                 CREATE TABLE IF NOT EXISTS url_tokens (
                     id SERIAL PRIMARY KEY,
                     name TEXT NOT NULL UNIQUE,
@@ -399,7 +418,8 @@ async def get_pool() -> asyncpg.Pool:
                     rrf_k integer DEFAULT 60,
                     p_index_id integer DEFAULT NULL,
                     p_user_id text DEFAULT NULL,
-                    p_metadata_filter jsonb DEFAULT NULL
+                    p_metadata_filter jsonb DEFAULT NULL,
+                    p_capture_status text DEFAULT NULL
                 )
                 RETURNS TABLE(id integer, title text, subtitle text, type text, score real, created_at timestamp with time zone)
                 LANGUAGE sql
@@ -415,6 +435,7 @@ async def get_pool() -> asyncpg.Pool:
                       AND (p_index_id IS NULL OR m.index_id = p_index_id)
                       AND (p_user_id IS NULL OR m.user_id = p_user_id)
                       AND (p_metadata_filter IS NULL OR m.metadata @> p_metadata_filter)
+                      AND (p_capture_status IS NULL OR m.metadata->>'capture_status' = p_capture_status)
                     ORDER BY ts_rank_cd(m.search_vector, websearch_to_tsquery('english', query_text)) DESC
                     LIMIT match_limit * 2
                   ),
@@ -426,6 +447,7 @@ async def get_pool() -> asyncpg.Pool:
                       AND (p_index_id IS NULL OR m.index_id = p_index_id)
                       AND (p_user_id IS NULL OR m.user_id = p_user_id)
                       AND (p_metadata_filter IS NULL OR m.metadata @> p_metadata_filter)
+                      AND (p_capture_status IS NULL OR m.metadata->>'capture_status' = p_capture_status)
                     ORDER BY m.embedding <=> query_embedding
                     LIMIT match_limit * 2
                   ),
@@ -603,6 +625,8 @@ class PostgresDataLayer:
             type_value = params.type or params.obs_type
             limit = params.limit or 20
             offset = params.offset or 0
+            if params.capture_status is not None:
+                validate_capture_status(params.capture_status)
 
             # Normalize empty/wildcard queries to None (browse mode)
             query = params.query.strip() if params.query else None
@@ -622,13 +646,15 @@ class PostgresDataLayer:
                     # Use hybrid_search for scoring, join memories for full rows + filters
                     # author (p_user_id) is pre-constrained inside hybrid_search as $5
                     # metadata_filter is pre-constrained inside hybrid_search as $6 (NULL if not set)
+                    # capture_status is pre-constrained inside hybrid_search as $7 (NULL if not set)
+                    # so inbox items are not dropped by the function's internal candidate truncation.
                     metadata_jsonb = params.metadata_filter if params.metadata_filter else None
                     post_conditions: list[str] = []
                     post_values: list[Any] = [
                         query, to_pg_vector(query_embedding), fetch_limit * 3, index_id, params.author,
-                        metadata_jsonb,
+                        metadata_jsonb, params.capture_status,
                     ]
-                    param_idx = 7  # after the 6 hybrid_search params ($1–$6)
+                    param_idx = 8  # after the 7 hybrid_search params ($1–$7)
 
                     if type_value:
                         post_conditions.append(f"m.type = ${param_idx}")
@@ -646,13 +672,15 @@ class PostgresDataLayer:
                         post_conditions.append(f"m.metadata->>'filePath' = ${param_idx}")
                         post_values.append(params.file_path)
                         param_idx += 1
-                    # metadata_filter is now pre-constrained inside hybrid_search ($6), not a post-filter
+                    # metadata_filter ($6) and capture_status ($7) are now pre-constrained inside
+                    # hybrid_search, not post-filters — they must gate candidate selection BEFORE
+                    # the function's internal LIMIT match_limit * 2 truncation.
 
                     post_where = f"AND {' AND '.join(post_conditions)}" if post_conditions else ""
 
                     rows = await conn.fetch(
                         f"""WITH scored AS (
-                            SELECT id, score FROM hybrid_search($1, $2::vector, $3, 60, $4, $5, $6)
+                            SELECT id, score FROM hybrid_search($1, $2::vector, $3, 60, $4, $5, $6, $7)
                         )
                         SELECT m.id, m.index_id, m.session_id, m.type, m.title, m.subtitle,
                                m.narrative, m.content, m.metadata, m.priority, m.stability,
@@ -724,6 +752,10 @@ class PostgresDataLayer:
             if params.metadata_filter:
                 conditions.append(f"m.metadata @> ${param_idx}::jsonb")
                 values.append(params.metadata_filter)
+                param_idx += 1
+            if params.capture_status is not None:
+                conditions.append(f"m.metadata->>'capture_status' = ${param_idx}")
+                values.append(params.capture_status)
                 param_idx += 1
             if params.author:
                 conditions.append(f"m.user_id = ${param_idx}")
@@ -996,6 +1028,8 @@ class PostgresDataLayer:
                 f"Invalid importance: {params.importance!r}. "
                 f"Must be one of: {sorted(IMPORTANCE_VALUES)}"
             )
+        if params.capture_status is not None:
+            validate_capture_status(params.capture_status)
 
         # ── Caller-provided duplicate_of short-circuit ──
         # Must run BEFORE any DB access so it wins over all other paths
@@ -1176,6 +1210,7 @@ class PostgresDataLayer:
             # ── Normal insert path ──
             base_metadata = dict(params.metadata) if params.metadata else {}
             base_metadata["content_hash"] = content_hash
+            base_metadata["capture_status"] = params.capture_status or "inbox"
             # Inject run_id if inside an ingest_run context
             if run_id := get_current_run_id():
                 base_metadata["run_id"] = run_id
@@ -1276,6 +1311,41 @@ class PostgresDataLayer:
             asyncio.create_task(self._embed_and_link(params.id, text_to_embed))
 
         return SaveMemoryResult(id=params.id, message="Memory updated")
+
+    async def set_capture_status(self, params: CaptureTransitionParams) -> SaveMemoryResult:
+        """Change capture inbox status without changing lifecycle status by default."""
+        validate_capture_status(params.capture_status)
+        if params.lifecycle_status is not None:
+            _validate_lifecycle_status(params.lifecycle_status)
+
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            # Concurrent capture transitions are last-writer-wins via the JSONB || merge.
+            if params.lifecycle_status is None:
+                updated = await conn.fetchrow(
+                    """UPDATE memories
+                       SET metadata = metadata || jsonb_build_object('capture_status', $2::text),
+                           updated_at = NOW()
+                       WHERE id = $1
+                       RETURNING id""",
+                    params.memory_id,
+                    params.capture_status,
+                )
+            else:
+                updated = await conn.fetchrow(
+                    """UPDATE memories
+                       SET metadata = metadata || jsonb_build_object('capture_status', $2::text, 'status', $3::text),
+                           updated_at = NOW()
+                       WHERE id = $1
+                       RETURNING id""",
+                    params.memory_id,
+                    params.capture_status,
+                    params.lifecycle_status,
+                )
+            if not updated:
+                raise ValueError(f"Memory {params.memory_id} not found")
+
+        return SaveMemoryResult(id=params.memory_id, message="Capture status updated")
 
     async def approved_update_canonical_entity(
         self, params: ApprovedCanonicalEntityUpdateParams
