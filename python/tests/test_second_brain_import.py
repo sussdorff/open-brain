@@ -14,6 +14,7 @@ import pytest
 
 from open_brain.data_layer.interface import VALID_LINK_TYPES
 from open_brain.data_layer.interface import SaveMemoryParams, SaveMemoryResult
+from open_brain.data_layer.interface import paperless_reference_binary_keys
 from open_brain.data_layer.postgres import PostgresDataLayer
 from open_brain.ingest.runs import get_current_run_id
 from open_brain.paperless import PaperlessResolveResult
@@ -311,3 +312,45 @@ class TestSecondBrainRelationships:
         assert all(row["metadata"]["source_ref"] for row in data_layer.relationships)
         assert all(row["metadata"]["wikilink"].startswith("[[") for row in data_layer.relationships)
         assert report["summary"]["unresolved_links"] == 2
+
+
+class TestSecondBrainAttachments:
+    @pytest.mark.asyncio
+    async def test_only_verified_paperless_references_are_persisted(self):
+        """AC4: attachments persist only as verified Paperless reference metadata."""
+        from open_brain.second_brain_import import import_vault
+
+        data_layer = RecordingDataLayer()
+        paperless_client = FakePaperlessClient()
+
+        report = await import_vault(
+            vault_path=FIXTURE_VAULT,
+            paperless_mapping_path=PAPERLESS_MAPPING,
+            data_layer=data_layer,
+            paperless_client=paperless_client,
+            apply=True,
+        )
+
+        project = next(
+            params for params in data_layer.saved
+            if params.metadata and params.metadata["source_ref"] == "Projects/OpenBrain.md"
+        )
+        assert project.metadata is not None
+        assert project.metadata["paperless_reference"] == {
+            "document_id": 101,
+            "instance": "paperless-test",
+            "title": "OpenBrain migration plan",
+            "added": "2026-07-11T09:30:00Z",
+        }
+        assert project.metadata["paperless_references"] == [
+            project.metadata["paperless_reference"]
+        ]
+        assert "retrieval_targets" not in project.metadata["paperless_reference"]
+        assert paperless_reference_binary_keys(project.metadata) == []
+        assert {
+            (row["attachment"], row["document_id"], row["reason"])
+            for row in report["unresolved_attachments"]
+        } == {
+            ("missing-contract.pdf", 404, "not_found"),
+            ("unmapped-scan.pdf", None, "no_mapping"),
+        }
