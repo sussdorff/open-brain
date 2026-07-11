@@ -259,6 +259,8 @@ _LIFECYCLE_STATUS_VALUES: frozenset[str] = frozenset(
 )
 
 _pool: asyncpg.Pool | None = None
+_migrations_ensured: bool = False
+_migrations_suppressed: bool = False
 
 
 def _validate_lifecycle_status(status: str) -> None:
@@ -352,174 +354,194 @@ def compute_decay_delta(importance: str, access_count: int, base_decay_delta: fl
     return base_decay_delta * mult / damping
 
 
-async def get_pool() -> asyncpg.Pool:
+def suppress_migrations() -> None:
+    """Opt this process out of first-call data-layer migrations."""
+    global _migrations_suppressed
+    _migrations_suppressed = True
+
+
+async def _run_migrations(conn: asyncpg.Connection) -> None:
+    """Run idempotent schema/data migrations for the data layer."""
+    # Idempotent migrations
+    await conn.execute(
+        "ALTER TABLE memories ADD COLUMN IF NOT EXISTS session_ref TEXT;"
+    )
+    await conn.execute(
+        "ALTER TABLE memories ADD COLUMN IF NOT EXISTS user_id TEXT;"
+    )
+    await conn.execute(
+        "ALTER TABLE memories ADD COLUMN IF NOT EXISTS importance VARCHAR(8) NOT NULL DEFAULT 'medium' "
+        "CHECK (importance IN ('critical', 'high', 'medium', 'low'));"
+    )
+    await conn.execute(
+        "ALTER TABLE memories ADD COLUMN IF NOT EXISTS last_decay_at TIMESTAMPTZ;"
+    )
+    await conn.execute(
+        "UPDATE memories SET last_decay_at = updated_at WHERE last_decay_at IS NULL;"
+    )
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS embedding_token_log (
+            id BIGSERIAL PRIMARY KEY,
+            operation TEXT NOT NULL,
+            token_count INT NOT NULL,
+            logged_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    """)
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_embedding_token_log_logged_at
+        ON embedding_token_log(logged_at);
+    """)
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_memories_content_hash
+        ON memories ((metadata->>'content_hash'))
+        WHERE metadata->>'content_hash' IS NOT NULL;
+    """)
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_memory_capture_status
+        ON memories ((metadata->>'capture_status'));
+    """)
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS url_tokens (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            token_hash TEXT NOT NULL UNIQUE,
+            scopes JSONB NOT NULL DEFAULT '[]',
+            expires_at TIMESTAMPTZ NOT NULL,
+            revoked_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    """)
+    await conn.execute("""
+        CREATE OR REPLACE FUNCTION public.hybrid_search(
+            query_text text,
+            query_embedding vector,
+            match_limit integer DEFAULT 20,
+            rrf_k integer DEFAULT 60,
+            p_index_id integer DEFAULT NULL,
+            p_user_id text DEFAULT NULL,
+            p_metadata_filter jsonb DEFAULT NULL,
+            p_capture_status text DEFAULT NULL
+        )
+        RETURNS TABLE(id integer, title text, subtitle text, type text, score real, created_at timestamp with time zone)
+        LANGUAGE sql
+        STABLE
+        AS $fn$
+          WITH fts AS (
+            SELECT m.id,
+                   ROW_NUMBER() OVER (
+                     ORDER BY ts_rank_cd(m.search_vector, websearch_to_tsquery('english', query_text)) DESC
+                   ) AS rank
+            FROM memories m
+            WHERE m.search_vector @@ websearch_to_tsquery('english', query_text)
+              AND (p_index_id IS NULL OR m.index_id = p_index_id)
+              AND (p_user_id IS NULL OR m.user_id = p_user_id)
+              AND (p_metadata_filter IS NULL OR m.metadata @> p_metadata_filter)
+              AND (p_capture_status IS NULL OR m.metadata->>'capture_status' = p_capture_status)
+            ORDER BY ts_rank_cd(m.search_vector, websearch_to_tsquery('english', query_text)) DESC
+            LIMIT match_limit * 2
+          ),
+          vec AS (
+            SELECT m.id,
+                   ROW_NUMBER() OVER (ORDER BY m.embedding <=> query_embedding) AS rank
+            FROM memories m
+            WHERE m.embedding IS NOT NULL
+              AND (p_index_id IS NULL OR m.index_id = p_index_id)
+              AND (p_user_id IS NULL OR m.user_id = p_user_id)
+              AND (p_metadata_filter IS NULL OR m.metadata @> p_metadata_filter)
+              AND (p_capture_status IS NULL OR m.metadata->>'capture_status' = p_capture_status)
+            ORDER BY m.embedding <=> query_embedding
+            LIMIT match_limit * 2
+          ),
+          combined AS (
+            SELECT
+              COALESCE(f.id, v.id) AS id,
+              (COALESCE(1.0 / (rrf_k + f.rank), 0.0) +
+               COALESCE(1.0 / (rrf_k + v.rank), 0.0))::REAL AS score
+            FROM fts f
+            FULL OUTER JOIN vec v ON f.id = v.id
+          )
+          SELECT m.id, m.title, m.subtitle, m.type, c.score, m.created_at
+          FROM combined c
+          JOIN memories m ON m.id = c.id
+          ORDER BY c.score DESC
+          LIMIT match_limit;
+        $fn$;
+    """)
+    # Importance-aware decay function: skips critical (mult=0.0), applies importance
+    # multipliers (high=0.5x, medium=1.0x, low=2.0x), includes 24h race guard via
+    # last_decay_at so concurrent calls are safe without advisory locks.
+    # Typed-relationship schema migration (idempotent)
+    await _ensure_link_type_column(conn)
+    await _ensure_metadata_column(conn)
+    await conn.execute(f"""
+        CREATE OR REPLACE FUNCTION decay_unused_priorities(
+            p_stale_days integer,
+            p_decay_factor float
+        ) RETURNS integer
+        LANGUAGE plpgsql
+        AS $$
+        DECLARE
+            v_updated integer;
+        BEGIN
+            WITH mult_map(importance, mult) AS (
+                VALUES ('critical'::text, 0.0::float),
+                       ('high'::text,     0.5::float),
+                       ('medium'::text,   1.0::float),
+                       ('low'::text,      2.0::float)
+            ),
+            updated AS (
+                UPDATE memories m
+                SET priority = GREATEST(
+                        0.0,
+                        priority - priority * (1.0 - p_decay_factor)
+                                   * mult_map.mult
+                                   / (1.0 + CAST(m.access_count AS float) * 0.1)
+                    ),
+                    last_decay_at = NOW()
+                FROM mult_map
+                WHERE m.importance = mult_map.importance
+                  AND mult_map.mult > 0.0
+                  AND (m.last_accessed_at IS NULL OR m.last_accessed_at < NOW() - (p_stale_days || ' days')::interval)
+                  AND m.created_at < NOW() - (p_stale_days || ' days')::interval
+                  AND (m.last_decay_at IS NULL OR m.last_decay_at < NOW() - interval '24 hours')
+                  AND {canonical_entity_protection_predicate("m")}
+                RETURNING m.id
+            )
+            SELECT COUNT(*) INTO v_updated FROM updated;
+            RETURN v_updated;
+        END;
+        $$;
+    """)
+
+
+async def get_pool(run_migrations: bool | None = None) -> asyncpg.Pool:
     """Return the shared asyncpg connection pool."""
-    global _pool
+    global _pool, _migrations_ensured
     if _pool is None:
         config = get_config()
         _pool = await asyncpg.create_pool(
             config.DATABASE_URL, min_size=2, max_size=10, init=_init_conn
         )
-        # Idempotent migrations
+
+    do_migrate = run_migrations if run_migrations is not None else not _migrations_suppressed
+    if do_migrate and not _migrations_ensured:
         async with _pool.acquire() as conn:
-            await conn.execute(
-                "ALTER TABLE memories ADD COLUMN IF NOT EXISTS session_ref TEXT;"
-            )
-            await conn.execute(
-                "ALTER TABLE memories ADD COLUMN IF NOT EXISTS user_id TEXT;"
-            )
-            await conn.execute(
-                "ALTER TABLE memories ADD COLUMN IF NOT EXISTS importance VARCHAR(8) NOT NULL DEFAULT 'medium' "
-                "CHECK (importance IN ('critical', 'high', 'medium', 'low'));"
-            )
-            await conn.execute(
-                "ALTER TABLE memories ADD COLUMN IF NOT EXISTS last_decay_at TIMESTAMPTZ;"
-            )
-            await conn.execute(
-                "UPDATE memories SET last_decay_at = updated_at WHERE last_decay_at IS NULL;"
-            )
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS embedding_token_log (
-                    id BIGSERIAL PRIMARY KEY,
-                    operation TEXT NOT NULL,
-                    token_count INT NOT NULL,
-                    logged_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                );
-            """)
-            await conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_embedding_token_log_logged_at
-                ON embedding_token_log(logged_at);
-            """)
-            await conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_memories_content_hash
-                ON memories ((metadata->>'content_hash'))
-                WHERE metadata->>'content_hash' IS NOT NULL;
-            """)
-            await conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_memory_capture_status
-                ON memories ((metadata->>'capture_status'));
-            """)
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS url_tokens (
-                    id SERIAL PRIMARY KEY,
-                    name TEXT NOT NULL UNIQUE,
-                    token_hash TEXT NOT NULL UNIQUE,
-                    scopes JSONB NOT NULL DEFAULT '[]',
-                    expires_at TIMESTAMPTZ NOT NULL,
-                    revoked_at TIMESTAMPTZ,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                );
-            """)
-            await conn.execute("""
-                CREATE OR REPLACE FUNCTION public.hybrid_search(
-                    query_text text,
-                    query_embedding vector,
-                    match_limit integer DEFAULT 20,
-                    rrf_k integer DEFAULT 60,
-                    p_index_id integer DEFAULT NULL,
-                    p_user_id text DEFAULT NULL,
-                    p_metadata_filter jsonb DEFAULT NULL,
-                    p_capture_status text DEFAULT NULL
-                )
-                RETURNS TABLE(id integer, title text, subtitle text, type text, score real, created_at timestamp with time zone)
-                LANGUAGE sql
-                STABLE
-                AS $fn$
-                  WITH fts AS (
-                    SELECT m.id,
-                           ROW_NUMBER() OVER (
-                             ORDER BY ts_rank_cd(m.search_vector, websearch_to_tsquery('english', query_text)) DESC
-                           ) AS rank
-                    FROM memories m
-                    WHERE m.search_vector @@ websearch_to_tsquery('english', query_text)
-                      AND (p_index_id IS NULL OR m.index_id = p_index_id)
-                      AND (p_user_id IS NULL OR m.user_id = p_user_id)
-                      AND (p_metadata_filter IS NULL OR m.metadata @> p_metadata_filter)
-                      AND (p_capture_status IS NULL OR m.metadata->>'capture_status' = p_capture_status)
-                    ORDER BY ts_rank_cd(m.search_vector, websearch_to_tsquery('english', query_text)) DESC
-                    LIMIT match_limit * 2
-                  ),
-                  vec AS (
-                    SELECT m.id,
-                           ROW_NUMBER() OVER (ORDER BY m.embedding <=> query_embedding) AS rank
-                    FROM memories m
-                    WHERE m.embedding IS NOT NULL
-                      AND (p_index_id IS NULL OR m.index_id = p_index_id)
-                      AND (p_user_id IS NULL OR m.user_id = p_user_id)
-                      AND (p_metadata_filter IS NULL OR m.metadata @> p_metadata_filter)
-                      AND (p_capture_status IS NULL OR m.metadata->>'capture_status' = p_capture_status)
-                    ORDER BY m.embedding <=> query_embedding
-                    LIMIT match_limit * 2
-                  ),
-                  combined AS (
-                    SELECT
-                      COALESCE(f.id, v.id) AS id,
-                      (COALESCE(1.0 / (rrf_k + f.rank), 0.0) +
-                       COALESCE(1.0 / (rrf_k + v.rank), 0.0))::REAL AS score
-                    FROM fts f
-                    FULL OUTER JOIN vec v ON f.id = v.id
-                  )
-                  SELECT m.id, m.title, m.subtitle, m.type, c.score, m.created_at
-                  FROM combined c
-                  JOIN memories m ON m.id = c.id
-                  ORDER BY c.score DESC
-                  LIMIT match_limit;
-                $fn$;
-            """)
-            # Importance-aware decay function: skips critical (mult=0.0), applies importance
-            # multipliers (high=0.5x, medium=1.0x, low=2.0x), includes 24h race guard via
-            # last_decay_at so concurrent calls are safe without advisory locks.
-            # Typed-relationship schema migration (idempotent)
-            await _ensure_link_type_column(conn)
-            await _ensure_metadata_column(conn)
-            await conn.execute(f"""
-                CREATE OR REPLACE FUNCTION decay_unused_priorities(
-                    p_stale_days integer,
-                    p_decay_factor float
-                ) RETURNS integer
-                LANGUAGE plpgsql
-                AS $$
-                DECLARE
-                    v_updated integer;
-                BEGIN
-                    WITH mult_map(importance, mult) AS (
-                        VALUES ('critical'::text, 0.0::float),
-                               ('high'::text,     0.5::float),
-                               ('medium'::text,   1.0::float),
-                               ('low'::text,      2.0::float)
-                    ),
-                    updated AS (
-                        UPDATE memories m
-                        SET priority = GREATEST(
-                                0.0,
-                                priority - priority * (1.0 - p_decay_factor)
-                                           * mult_map.mult
-                                           / (1.0 + CAST(m.access_count AS float) * 0.1)
-                            ),
-                            last_decay_at = NOW()
-                        FROM mult_map
-                        WHERE m.importance = mult_map.importance
-                          AND mult_map.mult > 0.0
-                          AND (m.last_accessed_at IS NULL OR m.last_accessed_at < NOW() - (p_stale_days || ' days')::interval)
-                          AND m.created_at < NOW() - (p_stale_days || ' days')::interval
-                          AND (m.last_decay_at IS NULL OR m.last_decay_at < NOW() - interval '24 hours')
-                          AND {canonical_entity_protection_predicate("m")}
-                        RETURNING m.id
-                    )
-                    SELECT COUNT(*) INTO v_updated FROM updated;
-                    RETURN v_updated;
-                END;
-                $$;
-            """)
+            await _run_migrations(conn)
+        _migrations_ensured = True
+        logger.info("data-layer migrations applied")
+    elif not do_migrate:
+        logger.debug("data-layer migrations suppressed")
     return _pool
 
 
 async def close_pool() -> None:
     """Close the connection pool."""
-    global _pool
+    global _pool, _migrations_ensured, _migrations_suppressed
     if _pool is not None:
         await _pool.close()
         _pool = None
+    _migrations_ensured = False
+    _migrations_suppressed = False
 
 
 def _row_to_memory(row: asyncpg.Record) -> Memory:

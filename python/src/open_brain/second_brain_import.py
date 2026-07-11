@@ -795,6 +795,9 @@ async def _import_vault_reconcile(
 
 async def _main_async(argv: list[str] | None = None) -> int:
     """CLI entry point for one-shot vault imports."""
+    from open_brain.data_layer.postgres import suppress_migrations
+
+    suppress_migrations()
     parser = argparse.ArgumentParser(description="Import a Second Brain Markdown vault.")
     parser.add_argument("vault_path", help="Path to the vault root.")
     parser.add_argument(

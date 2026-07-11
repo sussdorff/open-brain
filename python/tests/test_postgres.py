@@ -109,6 +109,38 @@ class TestPostgresPoolMigrations:
         finally:
             pg_module._pool = original_pool
 
+    @pytest.mark.asyncio
+    async def test_suppress_migrations_skips_default_get_pool_migrations(self):
+        """Process-level suppression lets PostgresDataLayer callers use default get_pool."""
+        from open_brain.data_layer import postgres as pg_module
+
+        original_pool = pg_module._pool
+        original_migrations_ensured = pg_module._migrations_ensured
+        original_migrations_suppressed = pg_module._migrations_suppressed
+        pg_module._pool = None
+        pg_module._migrations_ensured = False
+        pg_module._migrations_suppressed = False
+        try:
+            conn = AsyncMock()
+            conn.execute = AsyncMock(return_value=None)
+            pool = _make_pool(conn)
+
+            with patch(
+                "open_brain.data_layer.postgres.asyncpg.create_pool",
+                new_callable=AsyncMock,
+                return_value=pool,
+            ):
+                pg_module.suppress_migrations()
+                result = await pg_module.get_pool()
+
+            assert result is pool
+            assert pg_module._migrations_ensured is False
+            conn.execute.assert_not_called()
+        finally:
+            pg_module._pool = original_pool
+            pg_module._migrations_ensured = original_migrations_ensured
+            pg_module._migrations_suppressed = original_migrations_suppressed
+
     @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_get_pool_default_runs_migrations_once_real_database(self):
@@ -1237,14 +1269,14 @@ class TestContentHashDedupIndex:
         return PostgresDataLayer()
 
     def test_dedup_index_migration_sql_present(self, dl):
-        """AK4: Verify get_pool includes the expression index migration for dedup performance.
+        """AK4: Verify migrations include the expression index for dedup performance.
 
-        Inspects the source of get_pool to confirm the CREATE INDEX statement is present.
+        Inspects the migration helper to confirm the CREATE INDEX statement is present.
         This is a static code check (no DB needed) — actual latency is only measurable
         against a live DB with real data volumes.
         """
         from open_brain.data_layer import postgres as pg_module
-        source = inspect.getsource(pg_module.get_pool)
+        source = inspect.getsource(pg_module._run_migrations)
         assert "idx_memories_content_hash" in source, (
-            "get_pool must create idx_memories_content_hash index for dedup performance"
+            "_run_migrations must create idx_memories_content_hash index for dedup performance"
         )
