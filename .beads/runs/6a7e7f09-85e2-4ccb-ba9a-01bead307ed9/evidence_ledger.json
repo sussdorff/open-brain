@@ -1,0 +1,179 @@
+{
+  "contract_version": "1",
+  "bead_id": "open-brain-jhg",
+  "commands": [
+    {
+      "id": "red_restore_refusal",
+      "command": "uv run pytest tests/test_portable_backup.py::test_restore_refuses_populated_target_before_writing",
+      "purpose": "RED gate for security-first restore refusal on populated target stores.",
+      "exit_code": 1,
+      "observed_result": "Failed for the right reason: DID NOT RAISE RestoreTargetNotEmptyError."
+    },
+    {
+      "id": "green_restore_refusal",
+      "command": "uv run pytest tests/test_portable_backup.py::test_restore_refuses_populated_target_before_writing",
+      "purpose": "GREEN gate for fail-closed restore refusal before any write.",
+      "exit_code": 0,
+      "observed_result": "1 passed."
+    },
+    {
+      "id": "red_export_determinism",
+      "command": "uv run pytest tests/test_portable_backup.py::test_export_writes_versioned_deterministic_bundle_with_metadata_and_paperless_refs",
+      "purpose": "RED gate for deterministic portable export manifest and JSONL records.",
+      "exit_code": 1,
+      "observed_result": "Failed for the right reason: AttributeError for missing export_bundle."
+    },
+    {
+      "id": "green_export_determinism",
+      "command": "uv run pytest tests/test_portable_backup.py::test_export_writes_versioned_deterministic_bundle_with_metadata_and_paperless_refs",
+      "purpose": "GREEN gate for deterministic re-export, manifest contents, metadata, relationships, indexes, and Paperless reference fidelity.",
+      "exit_code": 0,
+      "observed_result": "1 passed."
+    },
+    {
+      "id": "red_bundle_absence_scan",
+      "command": "uv run pytest tests/test_portable_backup.py::test_export_rejects_credential_source_label_and_bundle_scan_excludes_binaries",
+      "purpose": "RED gate for credential/binary absence protections.",
+      "exit_code": 1,
+      "observed_result": "Failed for the right reason: DID NOT RAISE ValueError for credential-bearing source label."
+    },
+    {
+      "id": "green_bundle_absence_scan",
+      "command": "uv run pytest tests/test_portable_backup.py::test_export_rejects_credential_source_label_and_bundle_scan_excludes_binaries",
+      "purpose": "GREEN gate for credential-bearing label rejection and full bundle absence scan.",
+      "exit_code": 0,
+      "observed_result": "1 passed."
+    },
+    {
+      "id": "red_restore_idempotency",
+      "command": "uv run pytest tests/test_portable_backup.py::test_restore_recreates_graph_and_same_bundle_rerun_creates_no_duplicates",
+      "purpose": "RED gate for empty-store restore and duplicate-free same-bundle rerun.",
+      "exit_code": 1,
+      "observed_result": "Failed for the right reason: second restore raised RestoreTargetNotEmptyError before idempotent no-op handling existed."
+    },
+    {
+      "id": "green_restore_idempotency",
+      "command": "uv run pytest tests/test_portable_backup.py::test_restore_recreates_graph_and_same_bundle_rerun_creates_no_duplicates",
+      "purpose": "GREEN gate for id-preserving restore and zero duplicate creation on same-bundle rerun.",
+      "exit_code": 0,
+      "observed_result": "1 passed."
+    },
+    {
+      "id": "red_round_trip_report",
+      "command": "uv run pytest tests/test_portable_backup.py::test_verify_round_trip_reports_hashes_edges_and_canonical_ids",
+      "purpose": "RED gate for structured round-trip verification report.",
+      "exit_code": 1,
+      "observed_result": "Failed for the right reason: AttributeError for missing verify_round_trip."
+    },
+    {
+      "id": "green_round_trip_report",
+      "command": "uv run pytest tests/test_portable_backup.py::test_verify_round_trip_reports_hashes_edges_and_canonical_ids",
+      "purpose": "GREEN gate for count, content-hash, full-record-hash, relationship edge-set, and canonical entity preserved-id reporting.",
+      "exit_code": 0,
+      "observed_result": "1 passed after correcting the test to mutate restored metadata after the idempotent rerun assertion."
+    },
+    {
+      "id": "red_postgres_cli_surface",
+      "command": "uv run pytest tests/test_portable_backup.py::test_postgres_export_reads_only_portable_closure_tables tests/test_portable_backup.py::test_postgres_restore_uses_explicit_ids_conflicts_and_sequence_repair tests/test_cli.py::TestPortableBackupCommands::test_export_args",
+      "purpose": "RED gate for Postgres export/restore methods and CLI subparser surface.",
+      "exit_code": 1,
+      "observed_result": "Failed for the right reasons: missing PostgresDataLayer export/restore methods and parser rejected export as invalid choice."
+    },
+    {
+      "id": "green_postgres_cli_surface",
+      "command": "uv run pytest tests/test_portable_backup.py::test_postgres_export_reads_only_portable_closure_tables tests/test_portable_backup.py::test_postgres_restore_uses_explicit_ids_conflicts_and_sequence_repair tests/test_cli.py::TestPortableBackupCommands tests/test_cli.py::TestCommandHandlers::test_export_calls_portable_backup tests/test_cli.py::TestCommandHandlers::test_restore_calls_portable_backup tests/test_cli.py::TestCommandHandlers::test_verify_calls_portable_backup",
+      "purpose": "GREEN gate for Postgres read-path table scoping, id-preserving restore SQL, sequence repair, and CLI dispatch.",
+      "exit_code": 0,
+      "observed_result": "8 passed."
+    },
+    {
+      "id": "focused_portable_cli_suite",
+      "command": "uv run pytest tests/test_portable_backup.py tests/test_cli.py",
+      "purpose": "Focused regression suite for all changed portable backup and CLI tests.",
+      "exit_code": 0,
+      "observed_result": "97 passed."
+    },
+    {
+      "id": "full_non_integration_suite",
+      "command": "uv run pytest -m \"not integration\"",
+      "purpose": "Final full non-integration regression suite.",
+      "exit_code": 0,
+      "observed_result": "1440 passed, 23 deselected, warnings only from existing unawaited coroutine mock patterns."
+    },
+    {
+      "id": "ruff_home_cache_failure",
+      "command": "uv run --with ruff ruff check src/open_brain/portable_backup.py src/open_brain/data_layer/postgres.py src/open_brain/cli/main.py tests/test_portable_backup.py tests/test_cli.py",
+      "purpose": "Initial touched-file lint attempt.",
+      "exit_code": 2,
+      "observed_result": "Did not run Ruff because uv could not initialize /Users/malte/.cache/uv under the workspace sandbox."
+    },
+    {
+      "id": "ruff_network_failure",
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache-open-brain-jhg uv run --with ruff ruff check src/open_brain/portable_backup.py src/open_brain/data_layer/postgres.py src/open_brain/cli/main.py tests/test_portable_backup.py tests/test_cli.py",
+      "purpose": "Retry touched-file lint with writable uv cache.",
+      "exit_code": 2,
+      "observed_result": "Did not run Ruff because network-restricted package resolution could not fetch ruff from PyPI."
+    },
+    {
+      "id": "ruff_findings",
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache-open-brain-jhg uv run ruff check src/open_brain/portable_backup.py src/open_brain/data_layer/postgres.py src/open_brain/cli/main.py tests/test_portable_backup.py tests/test_cli.py",
+      "purpose": "Run project-local Ruff with writable uv cache.",
+      "exit_code": 1,
+      "observed_result": "Ruff ran and reported four mechanical findings in touched files: unused imports, redundant f-string, and an unused variable."
+    },
+    {
+      "id": "touched_file_ruff",
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache-open-brain-jhg uv run ruff check src/open_brain/portable_backup.py src/open_brain/data_layer/postgres.py src/open_brain/cli/main.py tests/test_portable_backup.py tests/test_cli.py",
+      "purpose": "Verify touched-file lint after cleanup.",
+      "exit_code": 0,
+      "observed_result": "All checks passed."
+    },
+    {
+      "id": "focused_suite_after_lint",
+      "command": "uv run pytest tests/test_portable_backup.py tests/test_cli.py",
+      "purpose": "Regression check after lint-only cleanup.",
+      "exit_code": 0,
+      "observed_result": "97 passed."
+    },
+    {
+      "id": "metrics_home_cache_failure",
+      "command": "uv run python -c \"import os, sys; sys.path.insert(0, os.path.join(os.environ['BEADS_RUNTIME'], 'lib', 'orchestrator')); from metrics import insert_agent_call; insert_agent_call(run_id='6a7e7f09-85e2-4ccb-ba9a-01bead307ed9', bead_id='open-brain-jhg', phase_label='p5-impl', agent_label='impl-codex', model='gpt-5.5', iteration=1, input_tokens=0, cached_input_tokens=0, output_tokens=0, reasoning_output_tokens=0, total_tokens=0, duration_ms=0, exit_code=0)\"",
+      "purpose": "Attempt required metrics logging.",
+      "exit_code": 2,
+      "observed_result": "Could not initialize uv home cache in the restricted sandbox."
+    },
+    {
+      "id": "metrics_readonly_database_failure",
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache-open-brain-jhg uv run python -c \"import os, sys; sys.path.insert(0, os.path.join(os.environ['BEADS_RUNTIME'], 'lib', 'orchestrator')); from metrics import insert_agent_call; insert_agent_call(run_id='6a7e7f09-85e2-4ccb-ba9a-01bead307ed9', bead_id='open-brain-jhg', phase_label='p5-impl', agent_label='impl-codex', model='gpt-5.5', iteration=1, input_tokens=0, cached_input_tokens=0, output_tokens=0, reasoning_output_tokens=0, total_tokens=0, duration_ms=0, exit_code=0)\"",
+      "purpose": "Retry required metrics logging with writable uv cache.",
+      "exit_code": 1,
+      "observed_result": "Metrics import succeeded, but insert_agent_call failed with sqlite3.OperationalError: attempt to write a readonly database."
+    }
+  ],
+  "skipped_checks": [
+    {
+      "check": "Exact token usage metrics",
+      "reason": "The Codex goal/token API returned no active goal and no token counters. Exact input/output/cached token values were not exposed, so zero placeholders were used only for the attempted metrics call and this limitation is recorded explicitly."
+    },
+    {
+      "check": "Metrics database insert",
+      "reason": "BEADS_RUNTIME was present, but the orchestrator metrics SQLite database was read-only from this workspace sandbox, so insert_agent_call could not write."
+    },
+    {
+      "check": "Optional generated Markdown bundle view",
+      "reason": "The locked architecture marked markdown/ as optional, lossy, generated last, and droppable. Authoritative JSONL bundle, manifest, restore, and verification paths were implemented."
+    }
+  ],
+  "artifacts": [
+    {
+      "path": ".beads/runs/6a7e7f09-85e2-4ccb-ba9a-01bead307ed9/implementation_manifest.json",
+      "type": "implementation_manifest",
+      "description": "Contract v1 implementation manifest for open-brain-jhg."
+    },
+    {
+      "path": ".beads/runs/6a7e7f09-85e2-4ccb-ba9a-01bead307ed9/evidence_ledger.json",
+      "type": "evidence_ledger",
+      "description": "Contract v1 evidence ledger with TDD red/green gates and verification commands."
+    }
+  ]
+}

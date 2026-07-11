@@ -1,0 +1,191 @@
+{
+  "contract_version": "1",
+  "bead_id": "open-brain-jhg",
+  "acceptance_criteria": [
+    {
+      "criterion": "Export produces a versioned manifest and deterministic records for memories, metadata, relationships, and Paperless references.",
+      "status": "done",
+      "changed_files": [
+        "python/src/open_brain/portable_backup.py",
+        "python/src/open_brain/data_layer/postgres.py",
+        "python/src/open_brain/cli/main.py",
+        "python/tests/test_portable_backup.py",
+        "python/tests/test_cli.py",
+        "CHANGELOG.md"
+      ],
+      "evidence_refs": [
+        "cmd:red_export_determinism",
+        "cmd:green_export_determinism",
+        "cmd:focused_portable_cli_suite",
+        "cmd:full_non_integration_suite"
+      ]
+    },
+    {
+      "criterion": "The portable bundle contains no credentials or document binaries.",
+      "status": "done",
+      "changed_files": [
+        "python/src/open_brain/portable_backup.py",
+        "python/tests/test_portable_backup.py"
+      ],
+      "evidence_refs": [
+        "cmd:red_bundle_absence_scan",
+        "cmd:green_bundle_absence_scan",
+        "cmd:focused_portable_cli_suite",
+        "cmd:touched_file_ruff"
+      ]
+    },
+    {
+      "criterion": "Restore into an empty test store recreates the exported semantic graph without duplicate creation on rerun.",
+      "status": "done",
+      "changed_files": [
+        "python/src/open_brain/portable_backup.py",
+        "python/src/open_brain/data_layer/postgres.py",
+        "python/tests/test_portable_backup.py"
+      ],
+      "evidence_refs": [
+        "cmd:red_restore_refusal",
+        "cmd:green_restore_refusal",
+        "cmd:red_restore_idempotency",
+        "cmd:green_restore_idempotency",
+        "cmd:focused_portable_cli_suite",
+        "cmd:full_non_integration_suite"
+      ]
+    },
+    {
+      "criterion": "Round-trip verification reports record, relationship, and content-hash integrity.",
+      "status": "done",
+      "changed_files": [
+        "python/src/open_brain/portable_backup.py",
+        "python/tests/test_portable_backup.py"
+      ],
+      "evidence_refs": [
+        "cmd:red_round_trip_report",
+        "cmd:green_round_trip_report",
+        "cmd:focused_portable_cli_suite",
+        "cmd:full_non_integration_suite"
+      ]
+    }
+  ],
+  "changed_files": [
+    "CHANGELOG.md",
+    ".beads/runs/6a7e7f09-85e2-4ccb-ba9a-01bead307ed9/evidence_ledger.json",
+    ".beads/runs/6a7e7f09-85e2-4ccb-ba9a-01bead307ed9/implementation_manifest.json",
+    "python/src/open_brain/cli/main.py",
+    "python/src/open_brain/data_layer/postgres.py",
+    "python/src/open_brain/portable_backup.py",
+    "python/tests/test_cli.py",
+    "python/tests/test_portable_backup.py"
+  ],
+  "commits": [
+    {
+      "hash": "8217308",
+      "message": "test(open-brain-jhg): red -- restore refuses populated target"
+    },
+    {
+      "hash": "7c91c10",
+      "message": "feat(open-brain-jhg): green -- refuse populated restore target"
+    },
+    {
+      "hash": "7755de5",
+      "message": "test(open-brain-jhg): red -- deterministic portable export"
+    },
+    {
+      "hash": "0576645",
+      "message": "feat(open-brain-jhg): green -- deterministic portable export"
+    },
+    {
+      "hash": "2d79e06",
+      "message": "test(open-brain-jhg): red -- portable bundle excludes credentials and binaries"
+    },
+    {
+      "hash": "e538adc",
+      "message": "feat(open-brain-jhg): green -- reject credential-bearing bundle labels"
+    },
+    {
+      "hash": "bbb6d5b",
+      "message": "test(open-brain-jhg): red -- restore rerun creates no duplicates"
+    },
+    {
+      "hash": "ca486cd",
+      "message": "feat(open-brain-jhg): green -- idempotent same-bundle restore rerun"
+    },
+    {
+      "hash": "be407b4",
+      "message": "test(open-brain-jhg): red -- round-trip verification report"
+    },
+    {
+      "hash": "7fa9968",
+      "message": "feat(open-brain-jhg): green -- round-trip verification report"
+    },
+    {
+      "hash": "7f77482",
+      "message": "test(open-brain-jhg): red -- postgres and cli portable backup surfaces"
+    },
+    {
+      "hash": "45968db",
+      "message": "feat(open-brain-jhg): green -- postgres and cli portable backup surfaces"
+    },
+    {
+      "hash": "1f846c1",
+      "message": "docs(open-brain-jhg): document portable backup commands"
+    },
+    {
+      "hash": "24242a3",
+      "message": "chore(open-brain-jhg): clean touched-file lint"
+    }
+  ],
+  "tests": [
+    {
+      "command": "uv run pytest tests/test_portable_backup.py tests/test_cli.py",
+      "status": "passed",
+      "observed_result": "97 passed"
+    },
+    {
+      "command": "uv run pytest -m \"not integration\"",
+      "status": "passed",
+      "observed_result": "1440 passed, 23 deselected"
+    },
+    {
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache-open-brain-jhg uv run ruff check src/open_brain/portable_backup.py src/open_brain/data_layer/postgres.py src/open_brain/cli/main.py tests/test_portable_backup.py tests/test_cli.py",
+      "status": "passed",
+      "observed_result": "All checks passed"
+    }
+  ],
+  "external_resources": [],
+  "scope_changes": [
+    {
+      "description": "No merge or force restore mode was added.",
+      "reason": "The bead explicitly scopes merge/force behavior out."
+    },
+    {
+      "description": "A same-bundle rerun against an already restored target is treated as a verified no-write no-op.",
+      "reason": "This preserves the fail-closed non-empty-store refusal for mismatched stores while satisfying the acceptance criterion that rerun creates zero duplicates."
+    },
+    {
+      "description": "The optional lossy Markdown view was not implemented.",
+      "reason": "It was explicitly optional, generated last, and droppable; all authoritative bundle and verification requirements were completed."
+    }
+  ],
+  "downstream_impacts": [
+    "The bundle format starts at bundle_format_version 1.0.0 and includes manifest counts, JSONL hashes, credential/binary assertions, and embedding model metadata.",
+    "verify_round_trip returns the locked structured report for downstream open-brain-m9e consumption.",
+    "Canonical entity metadata and Paperless references round-trip through verbatim metadata export and restore."
+  ],
+  "evidence_refs": [
+    "cmd:red_restore_refusal",
+    "cmd:green_restore_refusal",
+    "cmd:red_export_determinism",
+    "cmd:green_export_determinism",
+    "cmd:red_bundle_absence_scan",
+    "cmd:green_bundle_absence_scan",
+    "cmd:red_restore_idempotency",
+    "cmd:green_restore_idempotency",
+    "cmd:red_round_trip_report",
+    "cmd:green_round_trip_report",
+    "cmd:red_postgres_cli_surface",
+    "cmd:green_postgres_cli_surface",
+    "cmd:focused_portable_cli_suite",
+    "cmd:full_non_integration_suite",
+    "cmd:touched_file_ruff"
+  ]
+}
