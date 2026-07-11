@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import inspect
-import os
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import asyncpg
 import pytest
 
 from open_brain.data_layer.interface import (
@@ -143,20 +141,21 @@ class TestPostgresPoolMigrations:
 
     @pytest.mark.integration
     @pytest.mark.asyncio
-    async def test_get_pool_default_runs_migrations_once_real_database(self):
-        """Real-DB proxy for server semantics: first get_pool migrates, second skips."""
-        db_url = os.environ.get("DATABASE_URL")
-        if not db_url:
-            pytest.skip("DATABASE_URL not set")
+    async def test_get_pool_default_runs_migrations_once_real_database(
+        self, bootstrapped_database_url: str
+    ):
+        """Real-DB proxy for server semantics: first get_pool migrates, second skips.
 
-        try:
-            probe = await asyncpg.connect(db_url)
-        except (OSError, asyncpg.PostgresError) as err:
-            pytest.skip(f"DATABASE_URL not reachable: {err}")
-        else:
-            await probe.close()
-
+        The ``bootstrapped_database_url`` fixture applies
+        ``scripts/bootstrap_test_schema.sql`` against the caller-provided
+        ``DATABASE_URL`` (and skips cleanly when only the test placeholder URL is
+        set), so the migration battery runs against a real, pre-seeded schema.
+        """
+        from open_brain.config import get_config
         from open_brain.data_layer import postgres as pg_module
+
+        # Wire get_pool()'s connection string to the bootstrapped database.
+        get_config().DATABASE_URL = bootstrapped_database_url
 
         await pg_module.close_pool()
         run_migrations = AsyncMock(wraps=pg_module._run_migrations)
