@@ -73,6 +73,48 @@
       "observed_result": "1280 passed, 22 deselected."
     },
     {
+      "id": "cmd:pair1-pre-focused-cache-fail",
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py tests/test_postgres.py -q",
+      "purpose": "Initial requested pre-fix focused test command before changing files.",
+      "exit_code": 2,
+      "observed_result": "uv could not initialize the default cache at /Users/malte/.cache/uv under sandbox permissions."
+    },
+    {
+      "id": "cmd:pair1-pre-focused",
+      "command": "cd python && UV_CACHE_DIR=/private/tmp/open-brain-uv-cache uv run pytest tests/test_capture_inbox.py tests/test_postgres.py -q",
+      "purpose": "Pre-fix focused test run using a writable uv cache after the sandbox cache failure.",
+      "exit_code": 0,
+      "observed_result": "55 passed, 19 warnings."
+    },
+    {
+      "id": "cmd:pair1-red-capture-inbox",
+      "command": "cd python && UV_CACHE_DIR=/private/tmp/open-brain-uv-cache uv run pytest tests/test_capture_inbox.py -q",
+      "purpose": "RED proof for pair-loop regression tests before production fixes.",
+      "exit_code": 1,
+      "observed_result": "4 failed, 7 passed. Failures showed missing query-mode capture_status filtering, two-step set_capture_status updates, and missing lifecycle_status validation."
+    },
+    {
+      "id": "cmd:pair1-green-capture-inbox",
+      "command": "cd python && UV_CACHE_DIR=/private/tmp/open-brain-uv-cache uv run pytest tests/test_capture_inbox.py -q",
+      "purpose": "GREEN gate for pair-loop capture inbox search and transition fixes.",
+      "exit_code": 0,
+      "observed_result": "11 passed, 7 warnings."
+    },
+    {
+      "id": "cmd:pair1-green-focused",
+      "command": "cd python && UV_CACHE_DIR=/private/tmp/open-brain-uv-cache uv run pytest tests/test_capture_inbox.py tests/test_postgres.py -q",
+      "purpose": "Focused regression gate requested for pair-loop iteration 1.",
+      "exit_code": 0,
+      "observed_result": "57 passed, 25 warnings."
+    },
+    {
+      "id": "cmd:pair1-green-regression",
+      "command": "cd python && UV_CACHE_DIR=/private/tmp/open-brain-uv-cache uv run pytest -m \"not integration\" -q",
+      "purpose": "Full non-integration regression gate requested for pair-loop iteration 1.",
+      "exit_code": 0,
+      "observed_result": "1282 passed, 22 deselected, 64 warnings."
+    },
+    {
       "id": "cmd:metrics-best-effort",
       "command": "BEADS_RUNTIME=/Users/malte/.agents/skills/beads UV_CACHE_DIR=/tmp/uv-cache uv run python -c \"import os, sys; sys.path.insert(0, os.path.join(os.environ['BEADS_RUNTIME'], 'lib', 'orchestrator')); from metrics import insert_agent_call; insert_agent_call(run_id='14fb2a02-37ac-44e8-a4c6-eb72840735ce', bead_id='open-brain-slu', phase_label='p5-impl', agent_label='impl-codex', model='gpt-5.5', iteration=1, input_tokens=0, cached_input_tokens=0, output_tokens=0, reasoning_output_tokens=0, total_tokens=0, duration_ms=0, exit_code=0)\"",
       "purpose": "Best-effort Phase 5 implementation metrics logging.",

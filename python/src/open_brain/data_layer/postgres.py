@@ -112,7 +112,20 @@ _compact_lifecycle_filter = (
     "OR metadata->>'do_not_compact' != 'true')"
 )
 
+_LIFECYCLE_STATUS_VALUES: frozenset[str] = frozenset(
+    ["open", "materialized", "discarded", "archived"]
+)
+
 _pool: asyncpg.Pool | None = None
+
+
+def _validate_lifecycle_status(status: str) -> None:
+    """Validate an explicit metadata.status lifecycle value."""
+    if status not in _LIFECYCLE_STATUS_VALUES:
+        raise ValueError(
+            "Invalid lifecycle_status: "
+            f"{status!r}. Must be one of: {sorted(_LIFECYCLE_STATUS_VALUES)}"
+        )
 
 
 async def _ensure_link_type_column(conn: asyncpg.Connection) -> None:
@@ -510,6 +523,10 @@ class PostgresDataLayer:
                     if params.file_path:
                         post_conditions.append(f"m.metadata->>'filePath' = ${param_idx}")
                         post_values.append(params.file_path)
+                        param_idx += 1
+                    if params.capture_status is not None:
+                        post_conditions.append(f"m.metadata->>'capture_status' = ${param_idx}")
+                        post_values.append(params.capture_status)
                         param_idx += 1
                     # metadata_filter is now pre-constrained inside hybrid_search ($6), not a post-filter
 
@@ -1134,35 +1151,35 @@ class PostgresDataLayer:
     async def set_capture_status(self, params: CaptureTransitionParams) -> SaveMemoryResult:
         """Change capture inbox status without changing lifecycle status by default."""
         validate_capture_status(params.capture_status)
+        if params.lifecycle_status is not None:
+            _validate_lifecycle_status(params.lifecycle_status)
 
         pool = await get_pool()
         async with pool.acquire() as conn:
-            existing = await conn.fetchrow(
-                "SELECT id FROM memories WHERE id = $1",
-                params.memory_id,
-            )
-            if not existing:
-                raise ValueError(f"Memory {params.memory_id} not found")
-
+            # Concurrent capture transitions are last-writer-wins via the JSONB || merge.
             if params.lifecycle_status is None:
-                await conn.execute(
+                updated = await conn.fetchrow(
                     """UPDATE memories
                        SET metadata = metadata || jsonb_build_object('capture_status', $2),
                            updated_at = NOW()
-                       WHERE id = $1""",
+                       WHERE id = $1
+                       RETURNING id""",
                     params.memory_id,
                     params.capture_status,
                 )
             else:
-                await conn.execute(
+                updated = await conn.fetchrow(
                     """UPDATE memories
                        SET metadata = metadata || jsonb_build_object('capture_status', $2, 'status', $3),
                            updated_at = NOW()
-                       WHERE id = $1""",
+                       WHERE id = $1
+                       RETURNING id""",
                     params.memory_id,
                     params.capture_status,
                     params.lifecycle_status,
                 )
+            if not updated:
+                raise ValueError(f"Memory {params.memory_id} not found")
 
         return SaveMemoryResult(id=params.memory_id, message="Capture status updated")
 

@@ -16,7 +16,12 @@
       "evidence_refs": [
         "cmd:ac1-red-capture-inbox",
         "cmd:ac1-green-capture-inbox",
-        "cmd:ac1-green-regression"
+        "cmd:ac1-green-regression",
+        "cmd:pair1-pre-focused",
+        "cmd:pair1-red-capture-inbox",
+        "cmd:pair1-green-capture-inbox",
+        "cmd:pair1-green-focused",
+        "cmd:pair1-green-regression"
       ]
     },
     {
@@ -31,7 +36,11 @@
       "evidence_refs": [
         "cmd:ac2-red-transition",
         "cmd:ac2-green-transition",
-        "cmd:ac2-green-regression"
+        "cmd:ac2-green-regression",
+        "cmd:pair1-red-capture-inbox",
+        "cmd:pair1-green-capture-inbox",
+        "cmd:pair1-green-focused",
+        "cmd:pair1-green-regression"
       ]
     },
     {
@@ -86,6 +95,10 @@
     {
       "sha": "a6849be3f8f66c448f57af886214212033bbc2f8",
       "message": "feat(open-brain-slu): green - capture inbox cli and mcp surfaces"
+    },
+    {
+      "sha": "pending-final-commit",
+      "message": "fix(open-brain-slu): address pair-loop findings iteration 1"
     }
   ],
   "tests": [
@@ -108,6 +121,16 @@
       "command": "cd python && uv run pytest -m \"not integration\" -q",
       "status": "passed",
       "evidence_ref": "cmd:ac3-green-regression"
+    },
+    {
+      "command": "cd python && UV_CACHE_DIR=/private/tmp/open-brain-uv-cache uv run pytest tests/test_capture_inbox.py tests/test_postgres.py -q",
+      "status": "passed",
+      "evidence_ref": "cmd:pair1-green-focused"
+    },
+    {
+      "command": "cd python && UV_CACHE_DIR=/private/tmp/open-brain-uv-cache uv run pytest -m \"not integration\" -q",
+      "status": "passed",
+      "evidence_ref": "cmd:pair1-green-regression"
     }
   ],
   "external_resources": [],
@@ -125,6 +148,11 @@
     "cmd:ac3-red-cli-mcp",
     "cmd:ac3-green-cli-mcp",
     "cmd:ac3-green-combined",
-    "cmd:ac3-green-regression"
+    "cmd:ac3-green-regression",
+    "cmd:pair1-pre-focused",
+    "cmd:pair1-red-capture-inbox",
+    "cmd:pair1-green-capture-inbox",
+    "cmd:pair1-green-focused",
+    "cmd:pair1-green-regression"
   ]
 }
