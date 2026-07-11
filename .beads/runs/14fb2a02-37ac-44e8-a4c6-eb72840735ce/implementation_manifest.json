@@ -11,7 +11,8 @@
         "python/src/open_brain/data_layer/postgres.py",
         "python/src/open_brain/server.py",
         "python/tests/test_capture_inbox.py",
-        "python/tests/test_postgres.py"
+        "python/tests/test_postgres.py",
+        "python/tests/test_search.py"
       ],
       "evidence_refs": [
         "cmd:ac1-red-capture-inbox",
@@ -23,7 +24,9 @@
         "cmd:pair1-green-focused",
         "cmd:pair1-green-regression",
         "cmd:final-review-collect-capture-inbox",
-        "cmd:final-review-integration-skip"
+        "cmd:final-review-integration-skip",
+        "cmd:codex-fix-green-focused",
+        "cmd:codex-fix-green-regression"
       ]
     },
     {
@@ -75,7 +78,8 @@
     "python/src/open_brain/server.py",
     "python/tests/test_capture_inbox.py",
     "python/tests/test_capture_inbox_cli.py",
-    "python/tests/test_postgres.py"
+    "python/tests/test_postgres.py",
+    "python/tests/test_search.py"
   ],
   "commits": [
     {
@@ -105,6 +109,10 @@
     {
       "sha": "fae1b457df3cd819348b36e31b4c9639124fcdec",
       "message": "fix(open-brain-slu): address pair-loop findings iteration 1"
+    },
+    {
+      "sha": "cad031004d997936cc6c25478249ef3229f995d3",
+      "message": "fix(open-brain-slu): address codex adversarial finding — pre-filter capture_status inside hybrid_search"
     }
   ],
   "tests": [
@@ -162,6 +170,16 @@
       "command": "cd python && uv run pytest tests/test_capture_inbox.py tests/test_capture_inbox_cli.py -q -m integration",
       "status": "skipped",
       "evidence_ref": "cmd:final-review-integration-skip"
+    },
+    {
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py tests/test_capture_inbox_cli.py tests/test_postgres.py tests/test_search.py -q",
+      "status": "passed",
+      "evidence_ref": "cmd:codex-fix-green-focused"
+    },
+    {
+      "command": "cd python && uv run pytest -m \"not integration\" -q",
+      "status": "passed",
+      "evidence_ref": "cmd:codex-fix-green-regression"
     }
   ],
   "external_resources": [],
@@ -189,6 +207,9 @@
     "cmd:final-review-focused-non-integration",
     "cmd:final-review-regression-non-integration",
     "cmd:final-review-collect-capture-inbox",
-    "cmd:final-review-integration-skip"
+    "cmd:final-review-integration-skip",
+    "cmd:codex-fix-green-focused",
+    "cmd:codex-fix-green-regression",
+    "cmd:codex-fix-metrics"
   ]
 }

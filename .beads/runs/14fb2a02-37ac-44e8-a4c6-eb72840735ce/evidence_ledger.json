@@ -155,6 +155,27 @@
       "purpose": "Integration-only run for the new AC1/AC3 real Postgres MoC tests in this sandbox.",
       "exit_code": 0,
       "observed_result": "2 skipped, 17 deselected because DATABASE_URL is absent in this sandbox."
+    },
+    {
+      "id": "cmd:codex-fix-green-focused",
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py tests/test_capture_inbox_cli.py tests/test_postgres.py tests/test_search.py -q",
+      "purpose": "GREEN gate after threading capture_status into hybrid_search() as $7 (codex adversarial finding fix) and updating the affected capture_inbox and search SQL-shape tests.",
+      "exit_code": 0,
+      "observed_result": "85 passed, 2 skipped."
+    },
+    {
+      "id": "cmd:codex-fix-green-regression",
+      "command": "cd python && uv run pytest -m \"not integration\" -q",
+      "purpose": "Full non-integration regression gate after the codex-fix pre-filter change.",
+      "exit_code": 0,
+      "observed_result": "1282 passed, 24 deselected."
+    },
+    {
+      "id": "cmd:codex-fix-metrics",
+      "command": "BEADS_RUNTIME=/Users/malte/.agents/skills/beads UV_CACHE_DIR=/private/tmp/open-brain-uv-cache uv run python -c \"import os, sys; sys.path.insert(0, os.path.join(os.environ['BEADS_RUNTIME'], 'lib', 'orchestrator')); from metrics import insert_agent_call; insert_agent_call(run_id='14fb2a02-37ac-44e8-a4c6-eb72840735ce', bead_id='open-brain-slu', phase_label='codex-fix', agent_label='fix-opus', model='claude-opus', iteration=1, ...)\"",
+      "purpose": "Best-effort codex-fix agent metrics logging (BEADS_RUNTIME defaulted to /Users/malte/.agents/skills/beads).",
+      "exit_code": 0,
+      "observed_result": "insert_agent_call completed without error (exit 0); metrics DB writable in this sandbox, unlike the earlier Phase 5 read-only attempt."
     }
   ],
   "skipped_checks": [
