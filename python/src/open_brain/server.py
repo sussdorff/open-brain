@@ -51,7 +51,11 @@ from open_brain.data_layer.interface import (
     paperless_reference_binary_keys,
     validate_domain_metadata,
 )
-from open_brain.capture_router import classify_and_extract
+from open_brain.capture_router import (
+    canonical_type_for_capture_template,
+    classify_and_extract,
+    normalize_memory_type,
+)
 from open_brain.ingest import metrics as ingest_metrics
 from open_brain.data_layer.llm import LlmMessage, llm_complete
 from open_brain.paperless import PaperlessClient
@@ -455,6 +459,8 @@ async def resolve_paperless_reference(document_id: int) -> str:
     "project is REQUIRED — use git repo name, folder name, or Claude Desktop project name. If ambiguous, ask the user. "
     "type: check existing types via stats() before inventing new ones. Prefer existing vocabulary "
     "(discovery, change, feature, decision, bugfix, refactor, session_summary). New types are allowed when none fit. "
+    "Canonical personal-knowledge types: project, resource, concept, journal, correspondence, prompt, "
+    "decision, meeting, event, person. "
     "text: PRIMARY content — put the main substance here. Required. Gets embedded and full-text searched. "
     "Do NOT leave text minimal while putting all substance in narrative. "
     "title: short headline (1 line). subtitle: secondary label, tags, or category hint. "
@@ -468,6 +474,12 @@ async def resolve_paperless_reference(document_id: int) -> str:
     "meeting: {attendees: [str], topic: str, key_points: [str], action_items: [str], date: ISO datetime}. "
     "decision: {what: str, context: str, owner: str, alternatives: [str], rationale: str}. "
     "household: {category: str, item: str, location: str, details: str, warranty_expiry: ISO datetime}. "
+    "project: {name: str, status: str, owner: str, goals: [str], next_actions: [str], repository: str, due_date: ISO datetime}. "
+    "resource: {title: str, url: str, source_type: str, author: str, summary: str, published_at: ISO datetime}. "
+    "concept: {name: str, domain: str, summary: str, related_concepts: [str]}. "
+    "journal: {entry_date: ISO datetime, mood: str, themes: [str], reflection: str}. "
+    "correspondence: {with: [str], channel: str, direction: str, subject: str, summary: str, occurred_at: ISO datetime, follow_up_needed: bool}. "
+    "prompt: {purpose: str, prompt_text: str, target_model: str, variables: [str], constraints: [str], last_used_at: ISO datetime}. "
     "paperless_reference: {document_id: int, instance: str, title: str, added: ISO datetime}. "
     "ISO datetime format: 'YYYY-MM-DDTHH:MM:SS' (e.g. '2026-04-15T10:00:00'). "
     "Invalid or missing required datetime fields produce a warning in the response but still save the memory. "
@@ -569,10 +581,14 @@ async def save_memory(
     # unchanged when capture_template already set or type=session_summary).
     # Entity extraction is skipped when "entities" key already present in metadata.
     has_entities = isinstance(metadata, dict) and "entities" in metadata
+    # Pre-structured captures already carry a caller-supplied capture_template;
+    # their domain validation runs against the caller type/metadata only (AC3).
+    has_caller_template = isinstance(metadata, dict) and "capture_template" in metadata
+    normalized_type = normalize_memory_type(type, existing_metadata=metadata)
 
     save_params = SaveMemoryParams(
         text=text,
-        type=type,
+        type=normalized_type,
         project=project,
         title=title,
         subtitle=subtitle,
@@ -590,7 +606,7 @@ async def save_memory(
     # Skip LLM enrichment entirely for duplicates — no wasted API calls, no update_memory.
     if result.duplicate_of is None:
         # Run classification and entity extraction concurrently (non-duplicate path only).
-        classify_coro = classify_and_extract(text, existing_metadata=metadata, memory_type=type)
+        classify_coro = classify_and_extract(text, existing_metadata=metadata, memory_type=normalized_type)
         if not has_entities:
             entities_coro = _extract_entities(text)
             entities_result, classification = await asyncio.gather(entities_coro, classify_coro)
@@ -609,10 +625,43 @@ async def save_memory(
         if entities_result:
             post_save_metadata["entities"] = entities_result
 
+        # Persist the classified canonical type into the memory's `type` column for
+        # raw captures (no caller-supplied capture_template) so type-based retrieval,
+        # stats, and the people machinery see the classification instead of it living
+        # only in metadata.capture_template. Scoped decision (2026-07-11, see the
+        # bead's Design Decision Log):
+        #   - Use the raw classifier capture_template string directly for ALL canonical
+        #     templates (project, resource, concept, journal, correspondence, prompt,
+        #     decision, meeting, event, insight, learning, observation).
+        #   - EXCEPT "person_context": an incidental / LLM-inferred person mention must
+        #     keep type=observation and must NOT auto-activate the people pipeline, so
+        #     it is deliberately NOT routed through canonical_type_for_capture_template()
+        #     here (that mapping is only for the domain-metadata *validation* call below).
+        #   - Skipped for pre-structured captures (has_caller_template=True) AND for
+        #     explicit caller types (normalized_type is not None). Before this bead,
+        #     classification never touched the `type` column, so an explicit caller
+        #     `type` was always DB-preserved; gating on `normalized_type is None`
+        #     restores that invariant — a divergent classifier result must NOT clobber
+        #     an explicit caller-supplied type. The classified type-specific metadata is
+        #     still written below (only the `type` COLUMN write is skipped here).
+        type_to_persist: str | None = None
+        if not has_caller_template and normalized_type is None:
+            classified_capture_template = (
+                classification.get("capture_template")
+                if isinstance(classification, dict)
+                else None
+            )
+            if classified_capture_template not in (None, "person_context"):
+                type_to_persist = classified_capture_template
+
         if post_save_metadata:
             try:
                 await dl.update_memory(
-                    UpdateMemoryParams(id=result.id, metadata=post_save_metadata)
+                    UpdateMemoryParams(
+                        id=result.id,
+                        type=type_to_persist,
+                        metadata=post_save_metadata,
+                    )
                 )
             except Exception:
                 logger.exception("save_memory: post-save metadata update failed (classification/entities)")
@@ -621,8 +670,31 @@ async def save_memory(
     if result.duplicate_of is not None:
         payload["duplicate_of"] = result.duplicate_of
 
-    # Domain metadata validation (warns but never blocks save)
-    domain_warnings = validate_domain_metadata(type, metadata)
+    # Domain metadata validation (warns but never blocks save).
+    # 1) Caller-supplied type + metadata: covers pre-structured captures (AC3)
+    #    and explicit-type captures.
+    domain_warnings = validate_domain_metadata(normalized_type, metadata)
+
+    # 2) Classifier-generated output: for raw captures (no caller-supplied
+    #    capture_template) the LLM assigns a canonical template and extracts
+    #    fields that would otherwise never be validated. Validate the classified
+    #    canonical type (normalized: e.g. person_context -> person) against the
+    #    extracted fields and merge any new, non-duplicate warnings. Skipped for
+    #    pre-structured captures (caller validation already covers them) and for
+    #    duplicates (classification is not computed).
+    if result.duplicate_of is None and not has_caller_template:
+        classified_template = (
+            classification.get("capture_template")
+            if isinstance(classification, dict)
+            else None
+        )
+        if classified_template:
+            classified_type = canonical_type_for_capture_template(classified_template)
+            classified_metadata = {**(metadata or {}), **classification}
+            for warning in validate_domain_metadata(classified_type, classified_metadata):
+                if warning not in domain_warnings:
+                    domain_warnings.append(warning)
+
     if domain_warnings:
         payload["warning"] = "; ".join(domain_warnings)
 

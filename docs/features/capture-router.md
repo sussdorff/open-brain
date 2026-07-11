@@ -48,6 +48,12 @@ Each template defines a set of structured fields extracted by the LLM:
 
 | Template | Trigger | Fields |
 |----------|---------|--------|
+| **project** | Project names, goals, status, roadmap | name, status, owner, goals (list), next_actions (list), repository, due_date |
+| **resource** | URLs, references, articles, books | title, url, source_type, author, summary, published_at |
+| **concept** | Ideas, definitions, domain knowledge | name, domain, summary, related_concepts (list) |
+| **journal** | Daily notes, mood, personal reflection | entry_date, mood, themes (list), reflection |
+| **correspondence** | Emails, messages, letters | with (list), channel, direction, subject, summary, occurred_at, follow_up_needed |
+| **prompt** | Prompt templates, reusable instructions | purpose, prompt_text, target_model, variables (list), constraints (list), last_used_at |
 | **decision** | "decided", "chosen", "selected", "option" | what (string), context (string), owner (string), alternatives (list), rationale (string) |
 | **meeting** | "meeting", "attendee", "discuss", "action" | attendees (list), topic (string), key_points (list), action_items (list) |
 | **person_context** | Names with roles/relationship | person (string), relationship (string), detail (string) |
@@ -55,6 +61,29 @@ Each template defines a set of structured fields extracted by the LLM:
 | **event** | Dates, time references | what (string), when (string), who (string), where (string), recurrence (string) |
 | **learning** | "feedback", "skill", "capability" | feedback_type (string), scope (string), affected_skills (list) |
 | **observation** | Default / no match | (no special fields) |
+
+### Type Aliases
+
+Callers may pass informal type names that are automatically normalized before classification:
+
+| Alias | Resolved to |
+|-------|-------------|
+| `note`, `diary` | `journal` |
+| `reference` | `resource` |
+| `idea` | `concept` |
+| `email`, `letter` | `correspondence` |
+| `prompt_template` | `prompt` |
+
+Aliases are resolved in `normalize_memory_type()` inside `capture_router.py` before any LLM call.
+
+### Type Column Persistence
+
+For raw captures (no caller-supplied `capture_template` in metadata), the classified template name is persisted into the memory's `type` column after the LLM runs. This means type-based retrieval, `stats()`, and the people pipeline all see the classifier-inferred type instead of it living only in `metadata.capture_template`.
+
+Two exceptions apply:
+
+1. **`person_context`** — deliberately excluded from the column write. Incidental person mentions must not auto-activate the people pipeline; they remain `type=observation` in the `type` column.
+2. **Explicit caller type** — if the caller supplied a `type` argument to `save_memory`, that value is always preserved regardless of what the classifier infers. A divergent classifier result updates metadata fields but never overwrites the column.
 
 ### Bypass Conditions
 

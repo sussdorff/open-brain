@@ -4,6 +4,12 @@ Classifies incoming memory text into one of the capture templates and extracts
 structured fields specific to each template type.
 
 Capture templates:
+- project       : name, status, owner, goals, next_actions, repository, due_date
+- resource      : title, url, source_type, author, summary, published_at
+- concept       : name, domain, summary, related_concepts
+- journal       : entry_date, mood, themes, reflection
+- correspondence: with, channel, direction, subject, summary, occurred_at, follow_up_needed
+- prompt        : purpose, prompt_text, target_model, variables, constraints, last_used_at
 - decision      : what, context, owner, alternatives, rationale
 - meeting       : attendees, topic, key_points, action_items
 - person_context: person, relationship, detail
@@ -23,13 +29,41 @@ from open_brain.utils import parse_llm_json
 
 logger = logging.getLogger(__name__)
 
+_MEMORY_TYPE_ALIASES: dict[str, str] = {
+    "note": "journal",
+    "diary": "journal",
+    "reference": "resource",
+    "idea": "concept",
+    "email": "correspondence",
+    "letter": "correspondence",
+    "prompt_template": "prompt",
+}
+
+# Capture-template -> canonical memory-type aliases.
+#
+# Most capture templates already equal their canonical memory type, so they map
+# to themselves. The sole historical exception is ``person_context``: the
+# classifier still emits it (and existing callers/tests depend on the stored
+# ``capture_template`` value), but the canonical personal-knowledge vocabulary
+# calls this ``person``. This alias governs only which canonical type drives
+# domain-metadata validation — the stored ``capture_template`` is left intact.
+_CAPTURE_TEMPLATE_TYPE_ALIASES: dict[str, str] = {
+    "person_context": "person",
+}
+
 _CLASSIFICATION_PROMPT_TEMPLATE = """\
 Classify the following text into one of these capture templates and extract structured fields.
 
 Templates and their fields:
+- project: name, status, owner, goals (list), next_actions (list), repository, due_date
+- resource: title, url, source_type, author, summary, published_at
+- concept: name, domain, summary, related_concepts (list)
+- journal: entry_date, mood, themes (list), reflection
+- correspondence: with (list), channel, direction, subject, summary, occurred_at, follow_up_needed
+- prompt: purpose, prompt_text, target_model, variables (list), constraints (list), last_used_at
 - decision: what, context, owner, alternatives (list), rationale
 - meeting: attendees (list), topic, key_points (list), action_items (list)
-- person_context: person, relationship, detail
+- person_context: person, relationship, detail (use for person knowledge)
 - insight: realization, trigger, domain
 - event: what, when, who, where, recurrence
 - learning: feedback_type, scope, affected_skills (list)
@@ -39,13 +73,47 @@ Rules:
 1. Choose the MOST specific matching template based on the text content.
 2. Extract all relevant fields for that template from the text.
 3. Use null for fields that cannot be determined from the text.
-4. For "observation", only output capture_template = observation with no other fields.
+4. Use person_context for person knowledge to preserve existing callers.
+5. For ambiguous or unclassifiable text, choose observation.
+6. For "observation", only output capture_template = observation with no other fields.
 
 Return ONLY a valid JSON object with "capture_template" key and the template's fields.
 Do not include markdown fences or any explanation.
 
 Text to classify:
 """
+
+
+def normalize_memory_type(
+    memory_type: str | None,
+    existing_metadata: dict[str, Any] | None = None,
+) -> str | None:
+    """Normalize a small set of explicit caller type aliases.
+
+    Pre-structured captures that already carry capture_template metadata are
+    caller-owned and are returned unchanged.
+    """
+    if memory_type is None:
+        return None
+
+    if existing_metadata is not None and "capture_template" in existing_metadata:
+        return memory_type
+
+    return _MEMORY_TYPE_ALIASES.get(memory_type.strip().lower(), memory_type)
+
+
+def canonical_type_for_capture_template(capture_template: str | None) -> str | None:
+    """Map a classifier ``capture_template`` to its canonical memory type.
+
+    Symmetrical to :func:`normalize_memory_type` for explicit caller types, this
+    resolves the canonical type that should drive domain-metadata validation for
+    classifier-generated captures. Templates that already equal their canonical
+    type (the common case) are returned unchanged; ``None`` maps to ``None``.
+    """
+    if capture_template is None:
+        return None
+
+    return _CAPTURE_TEMPLATE_TYPE_ALIASES.get(capture_template, capture_template)
 
 
 async def classify_and_extract(
@@ -101,5 +169,3 @@ async def classify_and_extract(
     except Exception:
         logger.exception("capture_router: classification failed, falling back to observation")
         return {"capture_template": "observation"}
-
-
