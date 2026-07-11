@@ -45,6 +45,7 @@ VALID_LINK_TYPES: frozenset[str] = frozenset({
     "supersedes",       # memory -> older memory it replaces
     "contradicts",      # memory -> contradicted memory
     "co_occurs",        # weak co-mention edge
+    "references",       # generic note/link reference
 })
 
 # ─── Canonical entity metadata contract ───────────────────────────────────────
@@ -796,7 +797,7 @@ class DataLayer(Protocol):
     async def search(self, params: SearchParams) -> SearchResult: ...
 
     async def ingest_status_by_source_refs(
-        self, source_refs: list[str]
+        self, source_refs: list[str], memory_type: str | None = "meeting"
     ) -> dict[str, dict[str, Any]]: ...
 
     async def timeline(self, params: TimelineParams) -> TimelineResult: ...

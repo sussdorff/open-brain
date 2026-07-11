@@ -364,6 +364,11 @@ Then install primitives on demand:
 /library use open-brain-hooks      # Claude/Codex memory hooks bundle
 ```
 
+For bulk Obsidian/Markdown vault migration (historical Second Brain notes), use the standalone
+importer: `python -m open_brain.second_brain_import <vault_path> [--apply]`. See
+`docs/features/second-brain-import.md` for the full reference. For interactive single-note
+capture, `ob-migrate` is the right tool.
+
 Memory CLI routing rules and `save_memory` conventions live in the standards
 `open-brain/cli-routing`, `open-brain/memory-write-patterns`, and
 `open-brain/memory-status-conventions` (auto-loaded via `requires_standards`).

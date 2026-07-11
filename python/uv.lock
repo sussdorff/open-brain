@@ -545,6 +545,7 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "pyjwt" },
     { name = "python-dotenv" },
+    { name = "pyyaml" },
     { name = "tree-sitter-language-pack" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -571,6 +572,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.0.0" },
     { name = "pyjwt", specifier = ">=2.12.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
+    { name = "pyyaml", specifier = ">=6.0.0" },
     { name = "tree-sitter-language-pack", specifier = ">=1.6.2,<1.6.3" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
 ]

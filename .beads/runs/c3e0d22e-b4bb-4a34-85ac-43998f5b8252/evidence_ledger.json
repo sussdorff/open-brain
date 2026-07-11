@@ -1,0 +1,280 @@
+{
+  "contract_version": "1",
+  "bead_id": "open-brain-brt",
+  "commands": [
+    {
+      "id": "red_shared_contracts",
+      "command": "uv run pytest tests/test_second_brain_import.py tests/test_typed_relationships.py::TestValidLinkTypes -q",
+      "purpose": "RED gate for references link type, all-type source_ref status lookup, and importer module existence.",
+      "exit_code": 1,
+      "observed_result": "4 failed, 1 passed. Failures were missing references link type, unexpected memory_type keyword, missing second_brain_import module, and typed relationship expected-set mismatch."
+    },
+    {
+      "id": "green_shared_contracts",
+      "command": "uv run pytest tests/test_second_brain_import.py tests/test_typed_relationships.py::TestValidLinkTypes tests/test_postgres.py::TestPostgresIngestStatus -q",
+      "purpose": "GREEN gate for shared contracts and unchanged default meeting-status behavior.",
+      "exit_code": 0,
+      "observed_result": "7 passed."
+    },
+    {
+      "id": "red_dry_run",
+      "command": "uv run pytest tests/test_second_brain_import.py -q",
+      "purpose": "RED gate for dry-run reconciliation report and fixture manifest comparison.",
+      "exit_code": 1,
+      "observed_result": "1 failed, 3 passed. Failure was ImportError: cannot import name 'import_vault'."
+    },
+    {
+      "id": "uv_lock_default_cache",
+      "command": "uv lock",
+      "purpose": "Attempt to refresh uv.lock after adding pyyaml.",
+      "exit_code": 2,
+      "observed_result": "Failed to initialize cache at /Users/malte/.cache/uv due sandbox permission."
+    },
+    {
+      "id": "uv_lock_writable_cache",
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache-open-brain-brt uv lock",
+      "purpose": "Retry uv.lock refresh with writable cache.",
+      "exit_code": 2,
+      "observed_result": "Network-restricted DNS failure fetching https://pypi.org/simple/mcp/."
+    },
+    {
+      "id": "green_dry_run",
+      "command": "uv run pytest tests/test_second_brain_import.py -q",
+      "purpose": "GREEN gate for deterministic parsing, dry-run report shape, unresolved links, unresolved attachments, duplicate report, malformed YAML skip, and no writes.",
+      "exit_code": 0,
+      "observed_result": "4 passed."
+    },
+    {
+      "id": "red_apply_idempotency",
+      "command": "uv run pytest tests/test_second_brain_import.py -q",
+      "purpose": "RED gate for apply mode and repeated-apply idempotency.",
+      "exit_code": 1,
+      "observed_result": "1 failed, 4 passed. Failure was first['run_id'] is None in apply mode."
+    },
+    {
+      "id": "green_apply_idempotency",
+      "command": "uv run pytest tests/test_second_brain_import.py -q",
+      "purpose": "GREEN gate for apply writes, run_id propagation, preserved source metadata/content, and second-apply duplicate behavior.",
+      "exit_code": 0,
+      "observed_result": "5 passed."
+    },
+    {
+      "id": "red_wikilink_relationships",
+      "command": "uv run pytest tests/test_second_brain_import.py -q",
+      "purpose": "RED gate for generic references relationships from resolvable wikilinks.",
+      "exit_code": 1,
+      "observed_result": "1 failed, 5 passed. Failure was actual_edges == set() while expected four references edges."
+    },
+    {
+      "id": "green_wikilink_relationships",
+      "command": "uv run pytest tests/test_second_brain_import.py -q",
+      "purpose": "GREEN gate for two-pass wikilink relationship creation and unresolved-link reporting.",
+      "exit_code": 0,
+      "observed_result": "6 passed."
+    },
+    {
+      "id": "red_paperless_attachments",
+      "command": "uv run pytest tests/test_second_brain_import.py -q",
+      "purpose": "RED gate for persisting only verified Paperless reference metadata.",
+      "exit_code": 1,
+      "observed_result": "1 failed, 6 passed. Failure was KeyError: 'paperless_reference'."
+    },
+    {
+      "id": "green_paperless_attachments",
+      "command": "uv run pytest tests/test_second_brain_import.py -q",
+      "purpose": "GREEN gate for verified Paperless reference persistence and unresolved attachment reporting.",
+      "exit_code": 0,
+      "observed_result": "7 passed."
+    },
+    {
+      "id": "full_suite_before_cleanup",
+      "command": "uv run pytest -m \"not integration\"",
+      "purpose": "Full non-integration regression suite before formatting cleanup.",
+      "exit_code": 0,
+      "observed_result": "1397 passed, 23 deselected, 56 warnings."
+    },
+    {
+      "id": "long_line_scan",
+      "command": "awk 'length($0) > 100 { print FILENAME \":\" FNR \":\" length($0) }' python/src/open_brain/second_brain_import.py python/tests/test_second_brain_import.py",
+      "purpose": "Verify no long lines remain in new importer/test files after cleanup.",
+      "exit_code": 0,
+      "observed_result": "No output."
+    },
+    {
+      "id": "compile_check",
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache-open-brain-brt uv run python -m py_compile src/open_brain/second_brain_import.py src/open_brain/data_layer/postgres.py src/open_brain/data_layer/interface.py",
+      "purpose": "Syntax compile check for changed Python modules.",
+      "exit_code": 0,
+      "observed_result": "No output."
+    },
+    {
+      "id": "importer_after_cleanup",
+      "command": "uv run pytest tests/test_second_brain_import.py -q",
+      "purpose": "Regression check after formatting cleanup.",
+      "exit_code": 0,
+      "observed_result": "7 passed."
+    },
+    {
+      "id": "full_suite_final",
+      "command": "uv run pytest -m \"not integration\"",
+      "purpose": "Final full non-integration regression suite.",
+      "exit_code": 0,
+      "observed_result": "1397 passed, 23 deselected, 56 warnings before rebase."
+    },
+    {
+      "id": "metrics_default_cache",
+      "command": "uv run python - <<'PY' ... insert_agent_call(...) ... PY",
+      "purpose": "Attempt required metrics logging with default uv cache.",
+      "exit_code": 2,
+      "observed_result": "Failed to initialize uv cache under /Users/malte/.cache/uv due sandbox permission."
+    },
+    {
+      "id": "metrics_canonical_db",
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache-open-brain-brt uv run python - <<'PY' ... insert_agent_call(...) ... PY",
+      "purpose": "Attempt required metrics logging against canonical metrics DB.",
+      "exit_code": 1,
+      "observed_result": "sqlite3.OperationalError: attempt to write a readonly database."
+    },
+    {
+      "id": "metrics_run_local_missing_parent",
+      "command": "CCP_METRICS_DB_PATH=.beads/runs/c3e0d22e-b4bb-4a34-85ac-43998f5b8252/metrics.db UV_CACHE_DIR=/private/tmp/uv-cache-open-brain-brt uv run python - <<'PY' ... insert_agent_call(...) ... PY",
+      "purpose": "Attempt metrics logging to writable run-local DB before seeding bead_runs.",
+      "exit_code": 1,
+      "observed_result": "ValueError: run_id not found in bead_runs."
+    },
+    {
+      "id": "metrics_run_local_logged",
+      "command": "CCP_METRICS_DB_PATH=/Users/malte/code/open-brain/.claude/worktrees/bead-open-brain-brt/.beads/runs/c3e0d22e-b4bb-4a34-85ac-43998f5b8252/metrics.db UV_CACHE_DIR=/private/tmp/uv-cache-open-brain-brt uv run python - <<'PY' ... init_db(); insert_bead_run(...); insert_agent_call(...) ... PY",
+      "purpose": "Required metrics logging with zero token counts into writable run-local DB.",
+      "exit_code": 0,
+      "observed_result": "No output."
+    },
+    {
+      "id": "bd_update_completion_note",
+      "command": "bd update open-brain-brt --append-notes 'Implementation complete in worktree branch worktree-bead-open-brain-brt. Commits 7651b1b..a9ae1d0 cover red/green tests, importer implementation, and evidence artifacts. Full non-integration suite passed: cd python && uv run pytest -m \"not integration\" => 1397 passed, 23 deselected. Metrics logged with zero token counts because exact counts are unavailable in this wrapper.' --json",
+      "purpose": "Record implementation completion summary on the bead without closing it before merge.",
+      "exit_code": 0,
+      "observed_result": "Bead note appended; bead remained in_progress."
+    },
+    {
+      "id": "bd_update_post_rebase_note",
+      "command": "bd update open-brain-brt --append-notes 'Post-rebase correction: implementation commits are now 4a40e08..46d9733, with evidence refreshed on the rebased worktree branch before push. Final non-integration suite after rebase: 1420 passed, 23 deselected.' --json",
+      "purpose": "Correct the bead note after git rebase rewrote local commit SHAs.",
+      "exit_code": 0,
+      "observed_result": "Post-rebase correction note appended; bead remained in_progress."
+    },
+    {
+      "id": "bd_sync_unavailable",
+      "command": "bd sync",
+      "purpose": "Run project-documented bead sync closeout command.",
+      "exit_code": 1,
+      "observed_result": "Installed bd version reported unknown command \"sync\"."
+    },
+    {
+      "id": "bd_dolt_commit",
+      "command": "bd dolt commit -m 'note(open-brain-brt): record implementation completion'",
+      "purpose": "Commit pending bead metadata after bd sync proved unavailable.",
+      "exit_code": 0,
+      "observed_result": "Committed."
+    },
+    {
+      "id": "bd_dolt_push",
+      "command": "bd dolt push",
+      "purpose": "Push bead metadata to the configured Dolt remote.",
+      "exit_code": 0,
+      "observed_result": "Push complete."
+    },
+    {
+      "id": "bd_dolt_commit_post_rebase_note",
+      "command": "bd dolt commit -m 'note(open-brain-brt): record post-rebase completion correction'",
+      "purpose": "Commit the post-rebase correction note in Dolt.",
+      "exit_code": 0,
+      "observed_result": "Committed."
+    },
+    {
+      "id": "bd_dolt_push_post_rebase_note",
+      "command": "bd dolt push",
+      "purpose": "Push the post-rebase correction note to the configured Dolt remote.",
+      "exit_code": 0,
+      "observed_result": "Push complete."
+    },
+    {
+      "id": "git_pull_rebase_origin_main",
+      "command": "git pull --rebase origin main",
+      "purpose": "Rebase worktree branch onto the current origin/main before push.",
+      "exit_code": 0,
+      "observed_result": "Successfully rebased and updated refs/heads/worktree-bead-open-brain-brt."
+    },
+    {
+      "id": "full_suite_after_rebase",
+      "command": "uv run pytest -m \"not integration\"",
+      "purpose": "Final full non-integration regression suite after rebasing onto origin/main.",
+      "exit_code": 0,
+      "observed_result": "1420 passed, 23 deselected, 57 warnings."
+    },
+    {
+      "id": "cold_review_focused_importer_postgres",
+      "command": "uv run pytest tests/test_second_brain_import.py tests/test_postgres.py -q",
+      "purpose": "Focused regression suite for cold-review fixes covering content-hash duplicate reporting, CLI task draining, unreadable notes, attachment exception observability, and ingest-status SQL branch collapse.",
+      "exit_code": 0,
+      "observed_result": "57 passed, 14 warnings."
+    },
+    {
+      "id": "cold_review_full_non_integration",
+      "command": "uv run pytest -m \"not integration\"",
+      "purpose": "Required full non-integration regression suite after cold-review fixes.",
+      "exit_code": 0,
+      "observed_result": "1424 passed, 23 deselected, 55 warnings."
+    },
+    {
+      "id": "codex_fix_focused_importer",
+      "command": "uv run pytest tests/test_second_brain_import.py -q",
+      "purpose": "Focused regression suite for codex adversarial fixes (REGRESSION 2 YAML date serialization, REGRESSION 5 vault path validation, REGRESSION 6 unterminated frontmatter fence), including the three new TestSecondBrainRegressions tests.",
+      "exit_code": 0,
+      "observed_result": "14 passed."
+    },
+    {
+      "id": "codex_fix_full_non_integration",
+      "command": "uv run pytest -m \"not integration\"",
+      "purpose": "Required full non-integration regression suite after codex adversarial fixes.",
+      "exit_code": 0,
+      "observed_result": "1427 passed, 23 deselected, 52 warnings (baseline 1424 + 3 new regression tests)."
+    }
+  ],
+  "skipped_checks": [
+    {
+      "check": "Automated uv lock refresh",
+      "reason": "Network is restricted and uv could not fetch package index data. pyyaml was already present in uv.lock through uvicorn[standard], so only the open-brain package dependency metadata was updated manually."
+    },
+    {
+      "check": "ruff lint",
+      "reason": "ruff is not declared in this project's pyproject dependency groups and network is restricted for transient installation. Syntax compile, focused tests, and full non-integration pytest suite were run instead."
+    },
+    {
+      "check": "Canonical metrics DB write",
+      "reason": "The canonical user-state SQLite database was read-only from this sandbox. Metrics were logged with zero token counts to the writable run-local DB at .beads/runs/c3e0d22e-b4bb-4a34-85ac-43998f5b8252/metrics.db."
+    },
+    {
+      "check": "Project-documented bd sync command",
+      "reason": "This installed bd version does not provide a bd sync command. The equivalent available closeout path was bd dolt commit followed by bd dolt push."
+    }
+  ],
+  "artifacts": [
+    {
+      "path": ".beads/runs/c3e0d22e-b4bb-4a34-85ac-43998f5b8252/implementation_manifest.json",
+      "kind": "implementation_manifest"
+    },
+    {
+      "path": ".beads/runs/c3e0d22e-b4bb-4a34-85ac-43998f5b8252/evidence_ledger.json",
+      "kind": "evidence_ledger"
+    },
+    {
+      "path": "python/tests/fixtures/second_brain/expected_dry_run_manifest.json",
+      "kind": "expected_reconciliation_manifest"
+    },
+    {
+      "path": ".beads/runs/c3e0d22e-b4bb-4a34-85ac-43998f5b8252/metrics.db",
+      "kind": "run_local_metrics_db"
+    }
+  ]
+}
