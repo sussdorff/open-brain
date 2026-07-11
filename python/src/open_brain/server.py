@@ -37,6 +37,7 @@ from open_brain.auth.provider import get_provider
 from open_brain.auth.tokens import verify_token
 from open_brain.config import get_config
 from open_brain.data_layer.interface import (
+    ApprovedCanonicalEntityUpdateParams,
     CompactParams,
     DecayParams,
     DeleteParams,
@@ -635,6 +636,46 @@ async def update_memory(
     result = await dl.update_memory(
         UpdateMemoryParams(
             id=id,
+            text=text,
+            type=type,
+            project=project,
+            title=title,
+            subtitle=subtitle,
+            narrative=narrative,
+            metadata=metadata,
+        )
+    )
+    return json.dumps({"id": result.id, "message": result.message})
+
+
+@mcp.tool(
+    description="Explicitly approved canonical entity update or soft archive. "
+    "This is the sanctioned maintenance path for protected canonical entities and appends audit metadata. "
+    "operation: update or archive. Archive sets metadata.status='archived' and preserves the memory ID. "
+    "Params: id, actor, note, operation, text, type, project, title, subtitle, narrative, metadata"
+)
+@logged_tool
+async def approved_canonical_entity_update(
+    id: int,
+    actor: str,
+    note: str,
+    operation: str = "update",
+    text: str | None = None,
+    type: str | None = None,
+    project: str | None = None,
+    title: str | None = None,
+    subtitle: str | None = None,
+    narrative: str | None = None,
+    metadata: dict | None = None,
+) -> str:
+    """Apply an explicitly approved canonical entity update or soft archive."""
+    dl = get_dl()
+    result = await dl.approved_update_canonical_entity(
+        ApprovedCanonicalEntityUpdateParams(
+            id=id,
+            actor=actor,
+            note=note,
+            operation=operation,
             text=text,
             type=type,
             project=project,

@@ -22,8 +22,11 @@ from open_brain.data_layer.embedding import (
 from open_brain.data_layer.reranker import rerank
 from open_brain.data_layer.interface import (
     CANONICAL_ENTITY_METADATA_KEY,
+    CANONICAL_KIND_METADATA_KEY,
+    CANONICAL_KINDS,
     IMPORTANCE_VALUES,
     VALID_LINK_TYPES,
+    ApprovedCanonicalEntityUpdateParams,
     ClusterPlan,
     CompactParams,
     CompactResult,
@@ -1231,6 +1234,103 @@ class PostgresDataLayer:
             asyncio.create_task(self._embed_and_link(params.id, text_to_embed))
 
         return SaveMemoryResult(id=params.id, message="Memory updated")
+
+    async def approved_update_canonical_entity(
+        self, params: ApprovedCanonicalEntityUpdateParams
+    ) -> SaveMemoryResult:
+        """Apply an explicitly approved canonical entity update or soft archive."""
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            existing = await conn.fetchrow(
+                """
+                SELECT id, content, type, title, subtitle, narrative, metadata
+                FROM memories
+                WHERE id = $1
+                """,
+                params.id,
+            )
+            if not existing:
+                raise ValueError(f"Memory {params.id} not found")
+
+            if not _row_is_protected_canonical_entity(existing):
+                raise ValueError(f"Memory {params.id} is not a canonical entity")
+
+            metadata = _metadata_from_row(existing).copy()
+            metadata.update(params.metadata or {})
+            metadata[CANONICAL_ENTITY_METADATA_KEY] = True
+
+            canonical_kind = metadata.get(CANONICAL_KIND_METADATA_KEY)
+            if canonical_kind not in CANONICAL_KINDS:
+                raise ValueError(
+                    f"canonical_kind must be one of {sorted(CANONICAL_KINDS)!r}"
+                )
+
+            audit_raw = metadata.get("audit")
+            audit = list(audit_raw) if isinstance(audit_raw, list) else []
+            audit.append(
+                {
+                    "op": params.operation,
+                    "at": datetime.now(UTC).isoformat(),
+                    "actor": params.actor,
+                    "note": params.note,
+                }
+            )
+            metadata["audit"] = audit
+            if params.operation == "archive":
+                metadata["status"] = "archived"
+
+            updates: dict[str, Any] = {"metadata": metadata}
+            if params.text is not None:
+                updates["content"] = params.text
+            if params.type is not None:
+                updates["type"] = params.type
+            if params.title is not None:
+                updates["title"] = params.title
+            if params.subtitle is not None:
+                updates["subtitle"] = params.subtitle
+            if params.narrative is not None:
+                updates["narrative"] = params.narrative
+            if params.project is not None:
+                index_id = await self._resolve_index_id(conn, params.project)
+                updates["index_id"] = index_id or 1
+
+            set_parts: list[str] = []
+            values: list[Any] = []
+            param_idx = 1
+            for col, val in updates.items():
+                suffix = "::jsonb" if col == "metadata" else ""
+                set_parts.append(f"{col} = ${param_idx}{suffix}")
+                values.append(val)
+                param_idx += 1
+            set_parts.append("updated_at = NOW()")
+
+            values.append(params.id)
+            query = f"UPDATE memories SET {', '.join(set_parts)} WHERE id = ${param_idx}"
+            await conn.execute(query, *values)
+
+        content_changed = any(
+            field is not None
+            for field in (params.text, params.title, params.subtitle, params.narrative)
+        )
+        if content_changed:
+            text_to_embed = ": ".join(
+                part
+                for part in [
+                    params.title if params.title is not None else existing["title"],
+                    params.subtitle if params.subtitle is not None else existing["subtitle"],
+                    params.narrative if params.narrative is not None else existing["narrative"],
+                    params.text if params.text is not None else existing["content"],
+                ]
+                if part
+            )
+            asyncio.create_task(self._embed_and_link(params.id, text_to_embed))
+
+        message = (
+            "Canonical entity archived"
+            if params.operation == "archive"
+            else "Canonical entity update approved"
+        )
+        return SaveMemoryResult(id=params.id, message=message)
 
     async def decay_memories(self, params: DecayParams) -> DecayResult:
         """Apply priority decay to stale memories and boost frequently accessed ones.

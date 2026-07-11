@@ -319,6 +319,33 @@ class UpdateMemoryParams:
 
 
 @dataclass
+class ApprovedCanonicalEntityUpdateParams:
+    """Parameters for explicitly approved canonical entity updates."""
+
+    id: int
+    actor: str
+    note: str
+    operation: Literal["update", "archive"] = "update"
+    text: str | None = None
+    type: str | None = None
+    project: str | None = None
+    title: str | None = None
+    subtitle: str | None = None
+    narrative: str | None = None
+    metadata: dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if self.operation not in ("update", "archive"):
+            raise ValueError(
+                f"operation must be 'update' or 'archive', got {self.operation!r}"
+            )
+        if not self.actor.strip():
+            raise ValueError("actor is required for approved canonical entity updates")
+        if not self.note.strip():
+            raise ValueError("note is required for approved canonical entity updates")
+
+
+@dataclass
 class Memory:
     """A single memory entry.
 
@@ -625,6 +652,10 @@ class DataLayer(Protocol):
     async def save_memory(self, params: SaveMemoryParams) -> SaveMemoryResult: ...
 
     async def update_memory(self, params: UpdateMemoryParams) -> SaveMemoryResult: ...
+
+    async def approved_update_canonical_entity(
+        self, params: ApprovedCanonicalEntityUpdateParams
+    ) -> SaveMemoryResult: ...
 
     async def search_by_concept(
         self, query: str, limit: int | None = None, project: str | None = None
