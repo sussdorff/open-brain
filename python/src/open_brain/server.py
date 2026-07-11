@@ -50,7 +50,7 @@ from open_brain.data_layer.interface import (
     VALID_LINK_TYPES,
     validate_domain_metadata,
 )
-from open_brain.capture_router import classify_and_extract
+from open_brain.capture_router import classify_and_extract, normalize_memory_type
 from open_brain.ingest import metrics as ingest_metrics
 from open_brain.data_layer.llm import LlmMessage, llm_complete
 from open_brain.people.merge import (
@@ -548,10 +548,11 @@ async def save_memory(
     # unchanged when capture_template already set or type=session_summary).
     # Entity extraction is skipped when "entities" key already present in metadata.
     has_entities = isinstance(metadata, dict) and "entities" in metadata
+    normalized_type = normalize_memory_type(type, existing_metadata=metadata)
 
     save_params = SaveMemoryParams(
         text=text,
-        type=type,
+        type=normalized_type,
         project=project,
         title=title,
         subtitle=subtitle,
@@ -569,7 +570,7 @@ async def save_memory(
     # Skip LLM enrichment entirely for duplicates — no wasted API calls, no update_memory.
     if result.duplicate_of is None:
         # Run classification and entity extraction concurrently (non-duplicate path only).
-        classify_coro = classify_and_extract(text, existing_metadata=metadata, memory_type=type)
+        classify_coro = classify_and_extract(text, existing_metadata=metadata, memory_type=normalized_type)
         if not has_entities:
             entities_coro = _extract_entities(text)
             entities_result, classification = await asyncio.gather(entities_coro, classify_coro)
@@ -601,7 +602,7 @@ async def save_memory(
         payload["duplicate_of"] = result.duplicate_of
 
     # Domain metadata validation (warns but never blocks save)
-    domain_warnings = validate_domain_metadata(type, metadata)
+    domain_warnings = validate_domain_metadata(normalized_type, metadata)
     if domain_warnings:
         payload["warning"] = "; ".join(domain_warnings)
 

@@ -29,6 +29,16 @@ from open_brain.utils import parse_llm_json
 
 logger = logging.getLogger(__name__)
 
+_MEMORY_TYPE_ALIASES: dict[str, str] = {
+    "note": "journal",
+    "diary": "journal",
+    "reference": "resource",
+    "idea": "concept",
+    "email": "correspondence",
+    "letter": "correspondence",
+    "prompt_template": "prompt",
+}
+
 _CLASSIFICATION_PROMPT_TEMPLATE = """\
 Classify the following text into one of these capture templates and extract structured fields.
 
@@ -60,6 +70,24 @@ Do not include markdown fences or any explanation.
 
 Text to classify:
 """
+
+
+def normalize_memory_type(
+    memory_type: str | None,
+    existing_metadata: dict[str, Any] | None = None,
+) -> str | None:
+    """Normalize a small set of explicit caller type aliases.
+
+    Pre-structured captures that already carry capture_template metadata are
+    caller-owned and are returned unchanged.
+    """
+    if memory_type is None:
+        return None
+
+    if existing_metadata is not None and "capture_template" in existing_metadata:
+        return memory_type
+
+    return _MEMORY_TYPE_ALIASES.get(memory_type.strip().lower(), memory_type)
 
 
 async def classify_and_extract(
@@ -115,4 +143,3 @@ async def classify_and_extract(
     except Exception:
         logger.exception("capture_router: classification failed, falling back to observation")
         return {"capture_template": "observation"}
-
