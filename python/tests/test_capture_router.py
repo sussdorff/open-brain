@@ -31,6 +31,158 @@ def _mock_llm(response_dict: dict):
 
 # ─── AK1: Decision classification ─────────────────────────────────────────────
 
+class TestCanonicalVocabularyClassification:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("capture_name", "expected_template", "text", "fields"),
+        [
+            (
+                "project",
+                "project",
+                "Project Atlas needs an owner, a launch status, and next actions.",
+                {
+                    "name": "Project Atlas",
+                    "status": "planning",
+                    "owner": "Malte",
+                    "goals": ["Launch the Atlas workspace"],
+                    "next_actions": ["Assign technical owner"],
+                    "repository": "open-brain",
+                },
+            ),
+            (
+                "resource",
+                "resource",
+                "Resource: the pgvector indexing guide explains HNSW tradeoffs.",
+                {
+                    "title": "pgvector indexing guide",
+                    "url": "https://example.invalid/pgvector",
+                    "source_type": "documentation",
+                    "author": None,
+                    "summary": "Explains HNSW tradeoffs.",
+                    "published_at": None,
+                },
+            ),
+            (
+                "concept",
+                "concept",
+                "Concept: reciprocal rank fusion combines vector and text search.",
+                {
+                    "name": "Reciprocal rank fusion",
+                    "domain": "search",
+                    "summary": "Combines vector and text search rankings.",
+                    "related_concepts": ["hybrid search"],
+                },
+            ),
+            (
+                "journal",
+                "journal",
+                "Journal: today I felt focused while simplifying the memory workflow.",
+                {
+                    "entry_date": "2026-07-11",
+                    "mood": "focused",
+                    "themes": ["memory workflow"],
+                    "reflection": "Simplifying the workflow helped maintain focus.",
+                },
+            ),
+            (
+                "correspondence",
+                "correspondence",
+                "Email from Alice about the Q3 roadmap needs a follow-up tomorrow.",
+                {
+                    "with": ["Alice"],
+                    "channel": "email",
+                    "direction": "inbound",
+                    "subject": "Q3 roadmap",
+                    "summary": "Alice asked about the Q3 roadmap.",
+                    "occurred_at": None,
+                    "follow_up_needed": True,
+                },
+            ),
+            (
+                "prompt",
+                "prompt",
+                "Prompt for Codex: summarize the bead and list the tests to run.",
+                {
+                    "purpose": "Summarize a bead",
+                    "prompt_text": "Summarize the bead and list the tests to run.",
+                    "target_model": "Codex",
+                    "variables": ["bead"],
+                    "constraints": ["list tests"],
+                },
+            ),
+            (
+                "decision",
+                "decision",
+                "Decision: use PostgreSQL because pgvector is available.",
+                {
+                    "what": "Use PostgreSQL",
+                    "context": "pgvector availability",
+                    "owner": "team",
+                    "alternatives": ["SQLite"],
+                    "rationale": "pgvector is available.",
+                },
+            ),
+            (
+                "meeting",
+                "meeting",
+                "Meeting with Alice and Bob about Q3 planning.",
+                {
+                    "attendees": ["Alice", "Bob"],
+                    "topic": "Q3 planning",
+                    "key_points": ["Planning reviewed"],
+                    "action_items": ["Share notes"],
+                },
+            ),
+            (
+                "event",
+                "event",
+                "Event: launch review on 2026-08-01 with the product team.",
+                {
+                    "what": "Launch review",
+                    "when": "2026-08-01T10:00:00",
+                    "who": ["product team"],
+                    "where": None,
+                    "recurrence": None,
+                },
+            ),
+            (
+                "person",
+                "person_context",
+                "Person: Alice is the product owner and prefers concise email updates.",
+                {
+                    "person": "Alice",
+                    "relationship": "product owner",
+                    "detail": "Prefers concise email updates.",
+                },
+            ),
+        ],
+    )
+    async def test_prompt_lists_canonical_template_and_preserves_type_specific_fields(
+        self,
+        capture_name,
+        expected_template,
+        text,
+        fields,
+    ):
+        """Representative personal-knowledge captures are routed through canonical templates."""
+        llm_response = {"capture_template": expected_template, **fields}
+        captured_prompts: list[str] = []
+
+        async def mock_llm(*args, **kwargs):
+            captured_prompts.append(kwargs["messages"][0].content)
+            return json.dumps(llm_response)
+
+        with patch("open_brain.capture_router.llm_complete", new=mock_llm):
+            result = await classify_and_extract(text)
+
+        assert captured_prompts, "classifier did not call the LLM"
+        assert f"- {expected_template}:" in captured_prompts[0]
+        assert capture_name in captured_prompts[0]
+        assert result["capture_template"] == expected_template
+        for field_name, value in fields.items():
+            assert result[field_name] == value
+
+
 class TestDecisionClassification:
     @pytest.mark.asyncio
     async def test_decision_text_returns_decision_template(self):
