@@ -174,3 +174,93 @@ class TestCaptureInboxSearch:
             await dl.save_memory(
                 SaveMemoryParams(text="bad capture", capture_status="pending")
             )
+
+
+class TestCaptureStatusTransition:
+    @pytest.fixture
+    def dl(self) -> PostgresDataLayer:
+        return PostgresDataLayer()
+
+    @pytest.mark.asyncio
+    async def test_set_capture_status_updates_only_capture_status_by_default(
+        self,
+        dl: PostgresDataLayer,
+    ) -> None:
+        from open_brain.data_layer.interface import CaptureTransitionParams
+
+        conn = AsyncMock()
+        conn.fetchrow.return_value = {"id": 7}
+        pool = _make_pool(conn)
+
+        with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
+            result = await dl.set_capture_status(
+                CaptureTransitionParams(memory_id=7, capture_status="processed")
+            )
+
+        assert result.id == 7
+        assert result.message == "Capture status updated"
+        conn.execute.assert_called_once()
+        update_args = conn.execute.call_args[0]
+        update_sql = update_args[0]
+        assert "jsonb_build_object('capture_status'" in update_sql
+        assert "'status'" not in update_sql
+        assert update_args[1:] == (7, "processed")
+
+    @pytest.mark.asyncio
+    async def test_set_capture_status_updates_lifecycle_status_only_when_explicit(
+        self,
+        dl: PostgresDataLayer,
+    ) -> None:
+        from open_brain.data_layer.interface import CaptureTransitionParams
+
+        conn = AsyncMock()
+        conn.fetchrow.return_value = {"id": 8}
+        pool = _make_pool(conn)
+
+        with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
+            result = await dl.set_capture_status(
+                CaptureTransitionParams(
+                    memory_id=8,
+                    capture_status="dismissed",
+                    lifecycle_status="discarded",
+                )
+            )
+
+        assert result.id == 8
+        conn.execute.assert_called_once()
+        update_args = conn.execute.call_args[0]
+        update_sql = update_args[0]
+        assert "jsonb_build_object('capture_status'" in update_sql
+        assert "'status'" in update_sql
+        assert update_args[1:] == (8, "dismissed", "discarded")
+
+    @pytest.mark.asyncio
+    async def test_set_capture_status_rejects_unknown_status_before_db_access(
+        self,
+        dl: PostgresDataLayer,
+    ) -> None:
+        from open_brain.data_layer.interface import CaptureTransitionParams
+
+        with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock) as mock_get_pool:
+            with pytest.raises(ValueError, match="Invalid capture_status"):
+                await dl.set_capture_status(
+                    CaptureTransitionParams(memory_id=7, capture_status="pending")
+                )
+
+        mock_get_pool.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_set_capture_status_rejects_missing_memory(self, dl: PostgresDataLayer) -> None:
+        from open_brain.data_layer.interface import CaptureTransitionParams
+
+        conn = AsyncMock()
+        conn.fetchrow.return_value = None
+        pool = _make_pool(conn)
+
+        with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
+            with pytest.raises(ValueError, match="Memory 404 not found"):
+                await dl.set_capture_status(
+                    CaptureTransitionParams(memory_id=404, capture_status="processed")
+                )
+
+        conn.execute.assert_not_called()
