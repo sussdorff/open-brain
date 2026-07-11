@@ -1,0 +1,136 @@
+{
+  "contract_version": "1",
+  "bead_id": "open-brain-amq",
+  "acceptance_criteria": [
+    {
+      "id": "AC1",
+      "criterion": "A memory can reference a Paperless document using a stable validated identifier and provenance metadata.",
+      "status": "passed",
+      "changed_files": [
+        "python/src/open_brain/data_layer/interface.py",
+        "python/tests/test_paperless_references.py"
+      ],
+      "evidence_refs": [
+        "cmd:targeted-paperless-final",
+        "cmd:full-non-integration-final",
+        "test:TestPaperlessReferenceMetadataValidation"
+      ]
+    },
+    {
+      "id": "AC2",
+      "criterion": "Agents can resolve a referenced document's metadata and retrieval target through the supported integration.",
+      "status": "passed",
+      "changed_files": [
+        "python/src/open_brain/config.py",
+        "python/src/open_brain/paperless.py",
+        "python/src/open_brain/server.py",
+        "python/tests/test_paperless_references.py"
+      ],
+      "evidence_refs": [
+        "cmd:targeted-paperless-final",
+        "cmd:full-non-integration-final",
+        "test:TestPaperlessClientFound",
+        "test:TestResolvePaperlessReferenceTool"
+      ]
+    },
+    {
+      "id": "AC3",
+      "criterion": "Open Brain never persists the referenced document binary in its memory tables or exports.",
+      "status": "passed",
+      "changed_files": [
+        "python/src/open_brain/data_layer/interface.py",
+        "python/src/open_brain/paperless.py",
+        "python/tests/test_paperless_references.py"
+      ],
+      "evidence_refs": [
+        "cmd:targeted-paperless-final",
+        "cmd:full-non-integration-final",
+        "test:TestPaperlessBinaryInvariant.test_resolve_reference_never_fetches_binary_endpoints",
+        "test:TestPaperlessBinaryInvariant.test_reference_metadata_contains_no_binary_payload_keys"
+      ]
+    },
+    {
+      "id": "AC4",
+      "criterion": "Missing or inaccessible Paperless references produce an explicit non-destructive result.",
+      "status": "passed",
+      "changed_files": [
+        "python/src/open_brain/paperless.py",
+        "python/tests/test_paperless_references.py"
+      ],
+      "evidence_refs": [
+        "cmd:targeted-paperless-final",
+        "cmd:full-non-integration-final",
+        "test:TestPaperlessExplicitMissingResults",
+        "test:TestPaperlessTransportAndInputFailures"
+      ]
+    }
+  ],
+  "changed_files": [
+    "python/src/open_brain/config.py",
+    "python/src/open_brain/data_layer/interface.py",
+    "python/src/open_brain/paperless.py",
+    "python/src/open_brain/server.py",
+    "python/tests/test_paperless_references.py",
+    ".beads/runs/4caee63e-27c3-4430-bbe1-1a01c18a89ed/implementation_manifest.json",
+    ".beads/runs/4caee63e-27c3-4430-bbe1-1a01c18a89ed/evidence_ledger.json"
+  ],
+  "commits": [
+    {
+      "hash": "83206b0",
+      "message": "test(open-brain-amq): red - validate Paperless metadata"
+    },
+    {
+      "hash": "bc891d4",
+      "message": "feat(open-brain-amq): green - validate Paperless metadata"
+    },
+    {
+      "hash": "9addbc9",
+      "message": "test(open-brain-amq): red - resolve Paperless references"
+    },
+    {
+      "hash": "dbfd2e3",
+      "message": "feat(open-brain-amq): green - resolve Paperless references"
+    },
+    {
+      "hash": "26fbb16",
+      "message": "test(open-brain-amq): red - report Paperless failures"
+    },
+    {
+      "hash": "233df8d",
+      "message": "feat(open-brain-amq): green - report Paperless failures"
+    }
+  ],
+  "tests": [
+    {
+      "id": "targeted-paperless-final",
+      "command": "uv run pytest tests/test_paperless_references.py -q",
+      "status": "passed",
+      "observed_result": "20 passed, 1 skipped"
+    },
+    {
+      "id": "full-non-integration-final",
+      "command": "uv run pytest -m \"not integration\"",
+      "status": "passed",
+      "observed_result": "1285 passed, 23 deselected"
+    }
+  ],
+  "external_resources": [
+    {
+      "name": "Paperless-ngx REST API reference",
+      "type": "provided verified reference",
+      "path": ".beads/runs/4caee63e-27c3-4430-bbe1-1a01c18a89ed/paperless-api-reference.md",
+      "usage": "Field names and endpoint paths for GET /api/documents/{id}/ and retrieval target URLs."
+    }
+  ],
+  "scope_changes": [],
+  "downstream_impacts": [
+    "New optional PAPERLESS_BASE_URL and PAPERLESS_API_TOKEN config fields default to empty strings.",
+    "New resolve_paperless_reference MCP tool returns typed resolution status, metadata, and retrieval target URLs.",
+    "metadata.paperless_reference is now validated regardless of primary memory type."
+  ],
+  "evidence_refs": {
+    "cmd:targeted-paperless-final": ".beads/runs/4caee63e-27c3-4430-bbe1-1a01c18a89ed/evidence_ledger.json#commands",
+    "cmd:full-non-integration-final": ".beads/runs/4caee63e-27c3-4430-bbe1-1a01c18a89ed/evidence_ledger.json#commands",
+    "artifact:evidence-ledger": ".beads/runs/4caee63e-27c3-4430-bbe1-1a01c18a89ed/evidence_ledger.json"
+  }
+}
