@@ -148,6 +148,27 @@
       "purpose": "Retry required metrics logging with writable uv cache.",
       "exit_code": 1,
       "observed_result": "Metrics import succeeded, but insert_agent_call failed with sqlite3.OperationalError: attempt to write a readonly database."
+    },
+    {
+      "id": "codex_fix_focused_suite",
+      "command": "uv run pytest tests/test_portable_backup.py tests/test_cli.py",
+      "purpose": "Phase 8 fix gate: verify all 8 codex REGRESSION fixes plus their new tests pass (findings 1-8).",
+      "exit_code": 0,
+      "observed_result": "105 passed (8 new tests added: non-empty export dir refusal, nested/deeply-nested forbidden metadata key, tampered-hash restore, record-count-mismatch restore, incompatible-version restore, matching-rerun embedding regeneration, previously-uncovered field corruption)."
+    },
+    {
+      "id": "codex_fix_full_non_integration_suite",
+      "command": "uv run pytest -m \"not integration\"",
+      "purpose": "Phase 8 fix gate: full non-integration regression suite after the 8 fixes.",
+      "exit_code": 0,
+      "observed_result": "1448 passed, 23 deselected."
+    },
+    {
+      "id": "codex_fix_touched_file_ruff",
+      "command": "uv run ruff check src/open_brain/portable_backup.py src/open_brain/data_layer/postgres.py tests/test_portable_backup.py",
+      "purpose": "Phase 8 fix gate: lint the files touched by the codex fixes.",
+      "exit_code": 0,
+      "observed_result": "All checks passed."
     }
   ],
   "skipped_checks": [

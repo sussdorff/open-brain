@@ -138,17 +138,59 @@
     {
       "command": "uv run pytest tests/test_portable_backup.py tests/test_cli.py",
       "status": "passed",
-      "observed_result": "97 passed"
+      "observed_result": "105 passed (post codex-fix; was 97)"
     },
     {
       "command": "uv run pytest -m \"not integration\"",
       "status": "passed",
-      "observed_result": "1440 passed, 23 deselected"
+      "observed_result": "1448 passed, 23 deselected (post codex-fix; was 1440)"
     },
     {
-      "command": "UV_CACHE_DIR=/private/tmp/uv-cache-open-brain-jhg uv run ruff check src/open_brain/portable_backup.py src/open_brain/data_layer/postgres.py src/open_brain/cli/main.py tests/test_portable_backup.py tests/test_cli.py",
+      "command": "uv run ruff check src/open_brain/portable_backup.py src/open_brain/data_layer/postgres.py tests/test_portable_backup.py",
       "status": "passed",
       "observed_result": "All checks passed"
+    }
+  ],
+  "codex_adversarial_fixes": [
+    {
+      "finding": "1 (portable_backup.py:348) export reused non-empty output dir",
+      "fix": "export_bundle raises ExportTargetNotEmptyError on a pre-existing non-empty target directory (fail-closed, no silent deletion), mirroring the restore-side pattern.",
+      "test": "test_export_refuses_non_empty_target_directory"
+    },
+    {
+      "finding": "2 (portable_backup.py:350) verbatim metadata could leak nested credential keys",
+      "fix": "Added recursive _scan_forbidden_keys + _assert_no_forbidden_content; export RAISES ForbiddenExportContentError on credential-shaped keys nested anywhere in exported records (extends the paperless binary-key fail-closed precedent).",
+      "test": "test_export_raises_on_nested_forbidden_metadata_key, test_export_raises_on_deeply_nested_forbidden_key"
+    },
+    {
+      "finding": "3 (portable_backup.py:389) restore did not validate manifest before writing",
+      "fix": "restore_bundle now runs _verify_bundle_manifest (version compatibility, per-file SHA-256, and per-file record counts) before any store call; raises IncompatibleBundleVersionError / BundleIntegrityError.",
+      "test": "test_restore_rejects_bundle_with_tampered_file_hash, test_restore_rejects_bundle_with_record_count_mismatch, test_restore_rejects_incompatible_bundle_version"
+    },
+    {
+      "finding": "4 (portable_backup.py:390) emptiness check ran outside the write transaction (TOCTOU)",
+      "fix": "Moved emptiness/same-bundle check into postgres restore_portable_records under LOCK TABLE ... IN EXCLUSIVE MODE in the same transaction as the write; portable_backup delegates and reports already_restored.",
+      "test": "test_postgres_restore_uses_explicit_ids_conflicts_and_sequence_repair (asserts LOCK TABLE), test_restore_refuses_populated_target_before_writing"
+    },
+    {
+      "finding": "5 (portable_backup.py:324) full-record hash omitted fields; indexes count-only",
+      "fix": "_memory_record_hash now covers all MEMORY_FIELDS; added relationship full-record comparison (record_mismatches) covering link_type/confidence/metadata; indexes compared by (id,name) set (missing/extra).",
+      "test": "test_verify_round_trip_catches_previously_uncovered_field_corruption"
+    },
+    {
+      "finding": "6 (portable_backup.py:394) matching rerun returned success before embedding regen",
+      "fix": "postgres restore_portable_records regenerates embeddings for memories missing an embedding on the already_restored no-op path when regenerate_embeddings=True.",
+      "test": "test_matching_rerun_regenerates_missing_embeddings"
+    },
+    {
+      "finding": "7 (postgres.py:1728) export reads lacked a consistent snapshot",
+      "fix": "export_portable_records wraps the three reads in one REPEATABLE READ transaction via a shared _read_portable_closure helper.",
+      "test": "test_postgres_export_reads_only_portable_closure_tables (asserts isolation=repeatable_read)"
+    },
+    {
+      "finding": "8 (postgres.py:1822) uncoordinated setval race",
+      "fix": "Sequence repair stays in the same transaction as the inserts and now runs under the EXCLUSIVE table lock (finding 4), serializing it against concurrent nextval; GREATEST(MAX(id)+1,1) never collides with an existing row. Documented in code.",
+      "test": "test_postgres_restore_uses_explicit_ids_conflicts_and_sequence_repair"
     }
   ],
   "external_resources": [],
