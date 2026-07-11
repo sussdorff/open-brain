@@ -5,7 +5,7 @@
     {
       "id": "AC1",
       "criterion": "A memory can reference a Paperless document using a stable validated identifier and provenance metadata.",
-      "status": "passed",
+      "status": "done",
       "changed_files": [
         "python/src/open_brain/data_layer/interface.py",
         "python/tests/test_paperless_references.py"
@@ -19,7 +19,7 @@
     {
       "id": "AC2",
       "criterion": "Agents can resolve a referenced document's metadata and retrieval target through the supported integration.",
-      "status": "passed",
+      "status": "done",
       "changed_files": [
         "python/src/open_brain/config.py",
         "python/src/open_brain/paperless.py",
@@ -36,7 +36,7 @@
     {
       "id": "AC3",
       "criterion": "Open Brain never persists the referenced document binary in its memory tables or exports.",
-      "status": "passed",
+      "status": "done",
       "changed_files": [
         "python/src/open_brain/data_layer/interface.py",
         "python/src/open_brain/paperless.py",
@@ -52,7 +52,7 @@
     {
       "id": "AC4",
       "criterion": "Missing or inaccessible Paperless references produce an explicit non-destructive result.",
-      "status": "passed",
+      "status": "done",
       "changed_files": [
         "python/src/open_brain/paperless.py",
         "python/tests/test_paperless_references.py"
@@ -128,9 +128,9 @@
     "New resolve_paperless_reference MCP tool returns typed resolution status, metadata, and retrieval target URLs.",
     "metadata.paperless_reference is now validated regardless of primary memory type."
   ],
-  "evidence_refs": {
-    "cmd:targeted-paperless-final": ".beads/runs/4caee63e-27c3-4430-bbe1-1a01c18a89ed/evidence_ledger.json#commands",
-    "cmd:full-non-integration-final": ".beads/runs/4caee63e-27c3-4430-bbe1-1a01c18a89ed/evidence_ledger.json#commands",
-    "artifact:evidence-ledger": ".beads/runs/4caee63e-27c3-4430-bbe1-1a01c18a89ed/evidence_ledger.json"
-  }
+  "evidence_refs": [
+    "cmd:targeted-paperless-final -> .beads/runs/4caee63e-27c3-4430-bbe1-1a01c18a89ed/evidence_ledger.json#commands",
+    "cmd:full-non-integration-final -> .beads/runs/4caee63e-27c3-4430-bbe1-1a01c18a89ed/evidence_ledger.json#commands",
+    "artifact:evidence-ledger -> .beads/runs/4caee63e-27c3-4430-bbe1-1a01c18a89ed/evidence_ledger.json"
+  ]
 }
