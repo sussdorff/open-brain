@@ -258,7 +258,8 @@ class TestCompactMemoriesSimplePair:
         ]
         sim_rows = [_make_sim_row(1, 2, 0.92)]
         conn.fetchval = AsyncMock(return_value=0)
-        conn.fetch = AsyncMock(side_effect=[rows, sim_rows])
+        # 3rd fetch is the pre-repoint canonical re-check: id 1 is still safe.
+        conn.fetch = AsyncMock(side_effect=[rows, sim_rows, [_make_memory_row(1)]])
         # execute is called 6x: four relationship repoint statements, usage log delete, memories delete
         conn.execute = AsyncMock(
             side_effect=["DELETE 0", "DELETE 0", "DELETE 0", "UPDATE 0", "DELETE 0", "DELETE 1"],

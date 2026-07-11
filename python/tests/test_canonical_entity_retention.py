@@ -161,7 +161,10 @@ async def test_compact_execute_repoints_relationships_before_guarded_delete() ->
     survivor = _row(21, access_count=9)
     conn = AsyncMock()
     conn.fetchval = AsyncMock(return_value=0)
-    conn.fetch = AsyncMock(side_effect=[[loser, survivor], [_sim_row(20, 21)]])
+    # 3rd fetch is the pre-repoint canonical re-check: id 20 is still safe.
+    conn.fetch = AsyncMock(
+        side_effect=[[loser, survivor], [_sim_row(20, 21)], [_id_row(20)]]
+    )
     conn.execute = AsyncMock(
         side_effect=["DELETE 0", "DELETE 0", "DELETE 0", "UPDATE 1", "DELETE 0", "DELETE 1"]
     )
@@ -175,6 +178,78 @@ async def test_compact_execute_repoints_relationships_before_guarded_delete() ->
     assert not any("WHERE source_id = ANY" in sql and "target_id = ANY" in sql for sql in sql_calls)
     assert "canonical_entity" in sql_calls[-1]
     assert result.memories_deleted == 1
+
+
+@pytest.mark.asyncio
+async def test_compact_execute_skips_loser_promoted_to_canonical_before_repoint() -> None:
+    """A loser promoted to canonical between planning and repoint must not be
+    repointed or deleted, and is reported as a protected skip.
+
+    Simulates the TOCTOU window: the candidate plan includes non-canonical
+    loser id 20, but the pre-repoint re-check reports it as newly protected
+    (returns no safe ids). Its relationships must be left intact.
+    """
+    loser = _row(20, access_count=1)
+    survivor = _row(21, access_count=9)
+    conn = AsyncMock()
+    conn.fetchval = AsyncMock(return_value=0)
+    # 1: candidate rows, 2: pairwise similarity, 3: pre-repoint re-check ->
+    #    EMPTY, i.e. id 20 became canonical, so nothing is safe to delete.
+    conn.fetch = AsyncMock(side_effect=[[loser, survivor], [_sim_row(20, 21)], []])
+    conn.execute = AsyncMock(side_effect=["DELETE 0", "DELETE 0"])
+    dl = PostgresDataLayer()
+
+    with (
+        patch("open_brain.data_layer.postgres.get_pool", return_value=_pool(conn)),
+        patch(
+            "open_brain.data_layer.postgres._repoint_relationships",
+            new_callable=AsyncMock,
+        ) as repoint,
+    ):
+        result = await dl.compact_memories(CompactParams(dry_run=False))
+
+    repoint.assert_not_awaited()
+    assert result.deleted_ids == []
+    assert result.memories_deleted == 0
+    assert result.protected_canonical_entities == 1
+    # The now-protected loser and its survivor are both retained.
+    assert 20 in result.memories_kept
+    assert 21 in result.memories_kept
+
+
+@pytest.mark.asyncio
+async def test_refine_merge_skips_loser_promoted_to_canonical_before_repoint() -> None:
+    """A merge loser promoted to canonical after the LLM-merge window must not be
+    repointed or deleted, and is counted in protected_skipped.
+
+    Simulates the TOCTOU window: the mutation-site filter at function entry sees
+    no protected ids, but the pre-repoint re-check reports loser id 42 as newly
+    protected (returns no safe ids).
+    """
+    from open_brain.data_layer.postgres import _execute_refine_action
+
+    conn = AsyncMock()
+    # 1: mutation-site protected check -> none protected at entry.
+    # 2: pre-repoint re-check -> EMPTY, i.e. id 42 became canonical.
+    conn.fetch = AsyncMock(side_effect=[[], []])
+    conn.execute = AsyncMock(return_value="DELETE 0")
+    action = RefineAction(
+        action="merge",
+        memory_ids=[40, 42],
+        reason="LLM suggested a merge",
+        skip_llm_merge=True,
+    )
+
+    with patch(
+        "open_brain.data_layer.postgres._repoint_relationships",
+        new_callable=AsyncMock,
+    ) as repoint:
+        skipped = await _execute_refine_action(conn, action)
+
+    repoint.assert_not_awaited()
+    assert skipped == 1
+    # The guarded DELETE ran against no ids (the loser was dropped by the re-check).
+    assert conn.execute.call_args_list[-1].args[1:] == ([],)
 
 
 @pytest.mark.asyncio
@@ -203,7 +278,9 @@ async def test_refine_merge_skips_protected_ids_and_repoints_remaining_edges() -
     from open_brain.data_layer.postgres import _execute_refine_action
 
     conn = AsyncMock()
-    conn.fetch = AsyncMock(return_value=[_id_row(41)])
+    # 1st fetch: mutation-site protected check flags id 41.
+    # 2nd fetch: pre-repoint re-check confirms id 42 is still safe to remove.
+    conn.fetch = AsyncMock(side_effect=[[_id_row(41)], [_id_row(42)]])
     conn.execute = AsyncMock(
         side_effect=["DELETE 0", "DELETE 0", "DELETE 0", "UPDATE 1", "DELETE 1"]
     )

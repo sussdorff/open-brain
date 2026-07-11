@@ -37,6 +37,8 @@
         "cmd-retention-green",
         "cmd-regression-green",
         "cmd-hook-final-green",
+        "cmd-codex-canonical-green",
+        "cmd-codex-regression-green",
         "commit-de81e33",
         "commit-7436f5a"
       ]
@@ -55,6 +57,7 @@
         "cmd-ac3-red",
         "cmd-ac3-green",
         "cmd-hook-final-green",
+        "cmd-codex-canonical-green",
         "commit-31018c1",
         "commit-590d04d"
       ]
@@ -145,6 +148,26 @@
       "id": "cmd-pairloop1-regression-green",
       "command": "UV_CACHE_DIR=../.uv-cache uv run pytest tests/test_decay.py tests/test_refine.py tests/test_compact_memories.py -q",
       "result": "59 passed"
+    },
+    {
+      "id": "cmd-codex-tdd-red",
+      "command": "git stash push -- src/open_brain/data_layer/postgres.py && UV_CACHE_DIR=../.uv-cache uv run pytest --no-cov <three new codex regression tests>; git stash pop",
+      "result": "3 failed for the intended reasons against pre-fix HEAD: audit key overwrote prior history; compact/refine repointed the loser that became canonical. Fix restored via git stash pop."
+    },
+    {
+      "id": "cmd-codex-canonical-green",
+      "command": "UV_CACHE_DIR=../.uv-cache uv run pytest tests/test_canonical_entities.py tests/test_canonical_entity_retention.py -q",
+      "result": "23 passed (adds audit-key-overwrite and two TOCTOU pre-repoint re-check regression tests)"
+    },
+    {
+      "id": "cmd-codex-regression-green",
+      "command": "UV_CACHE_DIR=../.uv-cache uv run pytest tests/test_decay.py tests/test_refine.py tests/test_compact_memories.py -q",
+      "result": "59 passed"
+    },
+    {
+      "id": "cmd-codex-postgres-green",
+      "command": "UV_CACHE_DIR=../.uv-cache uv run pytest tests/test_postgres.py -q",
+      "result": "46 passed"
     }
   ],
   "external_resources": [],
@@ -152,7 +175,9 @@
     "Implemented relationship repointing for compact/refine merge losers so relationships incident to canonical entities remain connected when the other endpoint is removed.",
     "Added a dedicated approved canonical entity update/archive method and MCP tool; ordinary update_memory remains unchanged.",
     "Pair-loop iteration 1: normalized stray tab characters to spaces inside two SQL string literals in postgres.py (decay_unused_priorities RETURNING clause and _apply_recall_decay UPDATE f-string); no SQL semantics changed.",
-    "Pair-loop iteration 1: extended materialize_archive canonical-entity mutation-site guard so the automated run_lifecycle_pipeline path skips canonical entities (defense-in-depth) using the shared is_canonical_entity helper; added a regression test."
+    "Pair-loop iteration 1: extended materialize_archive canonical-entity mutation-site guard so the automated run_lifecycle_pipeline path skips canonical entities (defense-in-depth) using the shared is_canonical_entity helper; added a regression test.",
+    "Codex adversarial fix: approved_update_canonical_entity now captures the audit trail from the ORIGINAL pre-merge server metadata and always sets metadata['audit'] from that append-only list after merging params.metadata, so a caller-supplied 'audit' key can no longer erase prior audit history (AC3).",
+    "Codex adversarial fix: added shared async helper _filter_out_newly_canonical(conn, ids) reusing canonical_entity_protection_predicate() and called it immediately before the relationship-repoint/usage-log/DELETE steps in compact_memories and in the refine 'merge' case, narrowing the TOCTOU window in which a candidate promoted to a protected canonical entity after planning could still have its relationships repointed and usage logs deleted. Filtered ids are counted (protected_canonical_entities in compact, protected_skipped in refine); the already-guarded final DELETE remains the last line of defense (AC2)."
   ],
   "downstream_impacts": [
     "DataLayer implementations must now provide approved_update_canonical_entity.",

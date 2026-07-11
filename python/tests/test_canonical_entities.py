@@ -199,6 +199,74 @@ async def test_approved_canonical_archive_sets_status_and_preserves_audit() -> N
 
 
 @pytest.mark.asyncio
+async def test_approved_canonical_update_ignores_caller_supplied_audit_key() -> None:
+    """A caller-supplied 'audit' key must not overwrite or truncate prior history.
+
+    Regression: params.metadata was merged into the working metadata BEFORE the
+    audit trail was read, so a stale/fabricated 'audit' key in params.metadata
+    silently erased server-recorded history. The audit list is append-only and
+    server-computed; it must only ever grow via this method's own append.
+    """
+    from open_brain.data_layer.interface import ApprovedCanonicalEntityUpdateParams
+    from open_brain.data_layer.postgres import PostgresDataLayer
+
+    prior_audit = [
+        {"op": "update", "at": "2026-01-01T00:00:00+00:00", "actor": "a", "note": "first"},
+        {"op": "update", "at": "2026-01-02T00:00:00+00:00", "actor": "b", "note": "second"},
+    ]
+    existing = {
+        "id": 703,
+        "metadata": {
+            "canonical_entity": True,
+            "canonical_kind": "concept",
+            "audit": prior_audit,
+        },
+        "title": "Original",
+        "subtitle": None,
+        "narrative": None,
+        "content": "Original content",
+    }
+    conn = AsyncMock()
+    conn.fetchrow = AsyncMock(return_value=existing)
+    conn.execute = AsyncMock(return_value="UPDATE 1")
+    pool = MagicMock()
+    pool.acquire.return_value.__aenter__ = AsyncMock(return_value=conn)
+    pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("open_brain.data_layer.postgres.get_pool", return_value=pool):
+        await PostgresDataLayer().approved_update_canonical_entity(
+            ApprovedCanonicalEntityUpdateParams(
+                id=703,
+                actor="test-runner",
+                note="Approved correction",
+                metadata={
+                    "canonical_kind": "concept",
+                    # A naive caller re-submits a stale/forged audit blob.
+                    "audit": [
+                        {
+                            "op": "fake",
+                            "at": "1999-01-01T00:00:00+00:00",
+                            "actor": "x",
+                            "note": "forged",
+                        }
+                    ],
+                },
+            )
+        )
+
+    stored_audit = conn.execute.call_args.args[1]["audit"]
+    # Prior history preserved, exactly one new server-computed entry appended.
+    assert len(stored_audit) == len(prior_audit) + 1
+    assert stored_audit[0] == prior_audit[0]
+    assert stored_audit[1] == prior_audit[1]
+    assert stored_audit[-1]["op"] == "update"
+    assert stored_audit[-1]["actor"] == "test-runner"
+    assert stored_audit[-1]["note"] == "Approved correction"
+    # The caller's forged entry must never appear.
+    assert all(entry.get("op") != "fake" for entry in stored_audit)
+
+
+@pytest.mark.asyncio
 async def test_approved_canonical_update_tool_uses_dedicated_data_layer_path() -> None:
     """The MCP tool surface uses the explicit approved bypass method."""
     from open_brain import server

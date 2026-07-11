@@ -481,7 +481,11 @@ class TestExecuteRefineAction:
     @pytest.mark.asyncio
     async def test_merge_deletes_all_but_first(self):
         conn = AsyncMock()
-        conn.fetch = AsyncMock(return_value=[])
+        # 1st fetch: mutation-site protected check -> none protected.
+        # 2nd fetch: pre-repoint re-check -> ids 2 and 3 are still safe.
+        conn.fetch = AsyncMock(
+            side_effect=[[], [_make_row({"id": 2}), _make_row({"id": 3})]]
+        )
         action = RefineAction(
             action="merge",
             memory_ids=[1, 2, 3],

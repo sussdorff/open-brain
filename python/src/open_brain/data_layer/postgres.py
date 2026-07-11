@@ -74,6 +74,30 @@ def _canonical_entity_protection_filter(alias: str | None = None) -> str:
     return f"AND {canonical_entity_protection_predicate(alias)}"
 
 
+async def _filter_out_newly_canonical(
+    conn: asyncpg.Connection, ids: list[int]
+) -> list[int]:
+    """Return the subset of ids that are still safe to repoint/delete.
+
+    Re-checks canonical protection immediately before a destructive
+    mutation-site step (relationship repointing, usage-log deletion) to narrow
+    the race window between candidate planning and execution. A memory promoted
+    to a protected canonical entity in that window is dropped here so its
+    relationships and usage history are left intact. The final memories DELETE
+    is still separately guarded by canonical_entity_protection_predicate() as
+    the last line of defense. Input order is preserved.
+    """
+    if not ids:
+        return []
+    rows = await conn.fetch(
+        f"SELECT id FROM memories WHERE id = ANY($1::int[]) "
+        f"AND {canonical_entity_protection_predicate()}",
+        ids,
+    )
+    safe = {row["id"] for row in rows}
+    return [memory_id for memory_id in ids if memory_id in safe]
+
+
 def _parse_execute_count(result: str | None) -> int:
     """Parse asyncpg execute() row-count strings such as 'UPDATE 3'."""
     parts = result.split() if isinstance(result, str) else []
@@ -1255,7 +1279,15 @@ class PostgresDataLayer:
             if not _row_is_protected_canonical_entity(existing):
                 raise ValueError(f"Memory {params.id} is not a canonical entity")
 
-            metadata = _metadata_from_row(existing).copy()
+            # Capture the audit trail from the ORIGINAL server-side metadata
+            # BEFORE merging caller-supplied fields. The audit list is
+            # append-only and server-computed: a caller-supplied "audit" key in
+            # params.metadata must never overwrite or truncate prior history.
+            existing_metadata = _metadata_from_row(existing)
+            audit_raw = existing_metadata.get("audit")
+            audit = list(audit_raw) if isinstance(audit_raw, list) else []
+
+            metadata = existing_metadata.copy()
             metadata.update(params.metadata or {})
             metadata[CANONICAL_ENTITY_METADATA_KEY] = True
 
@@ -1265,8 +1297,6 @@ class PostgresDataLayer:
                     f"canonical_kind must be one of {sorted(CANONICAL_KINDS)!r}"
                 )
 
-            audit_raw = metadata.get("audit")
-            audit = list(audit_raw) if isinstance(audit_raw, list) else []
             audit.append(
                 {
                     "op": params.operation,
@@ -1275,6 +1305,9 @@ class PostgresDataLayer:
                     "note": params.note,
                 }
             )
+            # Always set the server-computed append-only trail last, so any
+            # caller-supplied "audit" key merged above is unconditionally
+            # overwritten and prior history can only ever grow.
             metadata["audit"] = audit
             if params.operation == "archive":
                 metadata["status"] = "archived"
@@ -2062,6 +2095,25 @@ class PostgresDataLayer:
                 for planned in plan
                 for loser in planned.to_delete
             }
+
+            # Re-check canonical protection immediately before the destructive
+            # repoint / usage-log / delete steps. A memory promoted to a
+            # protected canonical entity between planning (Step 5) and here must
+            # not have its relationships repointed or usage logs deleted; the
+            # final guarded DELETE is still the last line of defense.
+            planned_delete = all_to_delete
+            all_to_delete = await _filter_out_newly_canonical(conn, all_to_delete)
+            newly_protected = len(planned_delete) - len(all_to_delete)
+            if newly_protected:
+                protected_canonical_entities += newly_protected
+                delete_set = set(all_to_delete)
+                survivor_by_loser = {
+                    loser: survivor
+                    for loser, survivor in survivor_by_loser.items()
+                    if loser in delete_set
+                }
+                memories_kept = [i for i in all_ids if i not in delete_set]
+
             for loser_id in all_to_delete:
                 await _repoint_relationships(conn, loser_id, survivor_by_loser[loser_id])
 
@@ -2826,6 +2878,16 @@ async def _execute_refine_action(conn: asyncpg.Connection, action: RefineAction)
                         )
                     except Exception as err:
                         logger.warning("Re-embedding failed for %d: %s", keep_id, err)
+
+            # Re-check canonical protection immediately before repoint/delete.
+            # The mutation-site filter ran at function entry, but the LLM merge
+            # and re-embed above open a window in which a loser could be promoted
+            # to a protected canonical entity; drop any such id so its
+            # relationships are not silently disconnected. The guarded DELETE
+            # below remains the last line of defense.
+            before_recheck = ids_to_remove
+            ids_to_remove = await _filter_out_newly_canonical(conn, ids_to_remove)
+            protected_skipped += len(before_recheck) - len(ids_to_remove)
 
             # Repoint relationships, then delete the duplicates.
             for remove_id in ids_to_remove:

@@ -99,6 +99,41 @@
       "purpose": "Confirm the fixes introduce no new lint errors.",
       "exit_code": 1,
       "observed_result": "3 errors reported, all pre-existing and outside changed lines (postgres.py:17 F401, postgres.py:1212 F541, postgres.py:2722 F841); zero errors in materialize.py, the test file, and the edited SQL literals. Not in scope for this iteration."
+    },
+    {
+      "id": "cmd-codex-tdd-red",
+      "command": "git stash push -- src/open_brain/data_layer/postgres.py && UV_CACHE_DIR=../.uv-cache uv run pytest --no-cov tests/test_canonical_entities.py::test_approved_canonical_update_ignores_caller_supplied_audit_key tests/test_canonical_entity_retention.py::test_compact_execute_skips_loser_promoted_to_canonical_before_repoint tests/test_canonical_entity_retention.py::test_refine_merge_skips_loser_promoted_to_canonical_before_repoint; git stash pop",
+      "purpose": "TDD red gate for the three Codex adversarial findings: confirm the new regression tests fail against pre-fix HEAD.",
+      "exit_code": 1,
+      "observed_result": "3 failed for the intended reasons: caller-supplied audit key overwrote prior history; compact and refine both awaited _repoint_relationships for the loser that became canonical after planning. Fix restored via git stash pop."
+    },
+    {
+      "id": "cmd-codex-compile",
+      "command": "UV_CACHE_DIR=../.uv-cache uv run python -m py_compile src/open_brain/data_layer/postgres.py",
+      "purpose": "Syntax check the edited data layer after applying all three Codex fixes.",
+      "exit_code": 0,
+      "observed_result": "compile OK."
+    },
+    {
+      "id": "cmd-codex-canonical-green",
+      "command": "UV_CACHE_DIR=../.uv-cache uv run pytest tests/test_canonical_entities.py tests/test_canonical_entity_retention.py -q",
+      "purpose": "Verify the audit-history and TOCTOU re-check regression tests pass with the fixes.",
+      "exit_code": 0,
+      "observed_result": "23 passed."
+    },
+    {
+      "id": "cmd-codex-regression-green",
+      "command": "UV_CACHE_DIR=../.uv-cache uv run pytest tests/test_decay.py tests/test_refine.py tests/test_compact_memories.py -q",
+      "purpose": "Verify named regression-risk suites still pass after the Codex fixes (including the extra pre-repoint fetch in compact/refine execute paths).",
+      "exit_code": 0,
+      "observed_result": "59 passed."
+    },
+    {
+      "id": "cmd-codex-postgres-green",
+      "command": "UV_CACHE_DIR=../.uv-cache uv run pytest tests/test_postgres.py -q",
+      "purpose": "Verify test_postgres.py merge-execute test still passes after adding the pre-repoint re-check fetch to the refine merge path.",
+      "exit_code": 0,
+      "observed_result": "46 passed."
     }
   ],
   "skipped_checks": [
