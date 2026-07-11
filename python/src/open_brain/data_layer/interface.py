@@ -309,6 +309,19 @@ class UpdateMemoryParams:
 
 
 @dataclass
+class CaptureTransitionParams:
+    """Parameters for changing capture inbox status.
+
+    lifecycle_status is an explicit opt-in for changing metadata.status. When it
+    is None, capture transitions must not change the knowledge lifecycle.
+    """
+
+    memory_id: int
+    capture_status: str
+    lifecycle_status: str | None = None
+
+
+@dataclass
 class Memory:
     """A single memory entry.
 
@@ -589,6 +602,8 @@ class DataLayer(Protocol):
     async def save_memory(self, params: SaveMemoryParams) -> SaveMemoryResult: ...
 
     async def update_memory(self, params: UpdateMemoryParams) -> SaveMemoryResult: ...
+
+    async def set_capture_status(self, params: CaptureTransitionParams) -> SaveMemoryResult: ...
 
     async def search_by_concept(
         self, query: str, limit: int | None = None, project: str | None = None

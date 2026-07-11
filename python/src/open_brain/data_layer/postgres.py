@@ -26,6 +26,7 @@ from open_brain.data_layer.interface import (
     ClusterPlan,
     CompactParams,
     CompactResult,
+    CaptureTransitionParams,
     DecayParams,
     DecayResult,
     DeleteByRunIdResult,
@@ -1129,6 +1130,41 @@ class PostgresDataLayer:
             asyncio.create_task(self._embed_and_link(params.id, text_to_embed))
 
         return SaveMemoryResult(id=params.id, message="Memory updated")
+
+    async def set_capture_status(self, params: CaptureTransitionParams) -> SaveMemoryResult:
+        """Change capture inbox status without changing lifecycle status by default."""
+        validate_capture_status(params.capture_status)
+
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            existing = await conn.fetchrow(
+                "SELECT id FROM memories WHERE id = $1",
+                params.memory_id,
+            )
+            if not existing:
+                raise ValueError(f"Memory {params.memory_id} not found")
+
+            if params.lifecycle_status is None:
+                await conn.execute(
+                    """UPDATE memories
+                       SET metadata = metadata || jsonb_build_object('capture_status', $2),
+                           updated_at = NOW()
+                       WHERE id = $1""",
+                    params.memory_id,
+                    params.capture_status,
+                )
+            else:
+                await conn.execute(
+                    """UPDATE memories
+                       SET metadata = metadata || jsonb_build_object('capture_status', $2, 'status', $3),
+                           updated_at = NOW()
+                       WHERE id = $1""",
+                    params.memory_id,
+                    params.capture_status,
+                    params.lifecycle_status,
+                )
+
+        return SaveMemoryResult(id=params.memory_id, message="Capture status updated")
 
     async def decay_memories(self, params: DecayParams) -> DecayResult:
         """Apply priority decay to stale memories and boost frequently accessed ones.
