@@ -14,6 +14,7 @@ _TEST_ENV = {
     "DATABASE_URL": "postgresql://test:test@localhost:5432/test",
     "ANTHROPIC_API_KEY": "test-anthropic-key",
 }
+_DATABASE_URL_WAS_PROVIDED = bool(os.environ.get("DATABASE_URL"))
 
 # Inject test env vars without polluting the real environment between test runs.
 # Uses setdefault so that values already set in the shell (e.g. a real key in CI)
@@ -83,6 +84,15 @@ def oauth_provider():
     """Return a fresh OAuthProvider instance."""
     from open_brain.auth.provider import OAuthProvider
     return OAuthProvider()
+
+
+@pytest.fixture
+def integration_database_url() -> str:
+    """Return the caller-provided DATABASE_URL for real-DB integration tests."""
+    db_url = os.environ.get("DATABASE_URL", "").strip()
+    if not _DATABASE_URL_WAS_PROVIDED or db_url == _TEST_ENV["DATABASE_URL"]:
+        pytest.skip("Requires real DATABASE_URL (not test placeholder)")
+    return db_url
 
 
 @pytest.fixture
