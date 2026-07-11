@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from unittest.mock import patch
 
 import httpx
@@ -195,3 +196,186 @@ class TestPaperlessBinaryInvariant:
         serialized = json.dumps(payload)
         assert json.loads(serialized) == payload
         assert "\\u0000" not in serialized
+
+
+class TestPaperlessExplicitMissingResults:
+    @pytest.mark.asyncio
+    async def test_not_found_returns_explicit_non_destructive_result(self):
+        """AC4: a missing Paperless document returns not_found without raising."""
+        from open_brain.paperless import PaperlessClient
+
+        called_urls: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            called_urls.append(str(request.url))
+            return httpx.Response(404, request=request)
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            result = await PaperlessClient(
+                base_url="https://paperless.example",
+                api_token="test-token",
+                http_client=http_client,
+            ).resolve_reference(404)
+
+        assert result.status == "not_found"
+        assert result.document_id == 404
+        assert result.error is not None
+        assert "not found" in result.error.lower()
+        assert called_urls == ["https://paperless.example/api/documents/404/"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status_code", [401, 403])
+    async def test_unauthorized_returns_explicit_non_destructive_result(self, status_code: int):
+        """AC4: inaccessible Paperless documents return unauthorized without raising."""
+        from open_brain.paperless import PaperlessClient
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(status_code, request=request)
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            result = await PaperlessClient(
+                base_url="https://paperless.example",
+                api_token="test-token",
+                http_client=http_client,
+            ).resolve_reference(17)
+
+        assert result.status == "unauthorized"
+        assert result.document_id == 17
+        assert result.error is not None
+        assert "unauthorized" in result.error.lower()
+        assert "test-token" not in result.error
+
+
+class TestPaperlessTransportAndInputFailures:
+    @pytest.mark.asyncio
+    async def test_timeout_returns_transport_error(self):
+        """AC4: timeout maps to transport_error, distinct from not_found."""
+        from open_brain.paperless import PaperlessClient
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ReadTimeout("timed out", request=request)
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            result = await PaperlessClient(
+                base_url="https://paperless.example",
+                api_token="test-token",
+                http_client=http_client,
+            ).resolve_reference(17)
+
+        assert result.status == "transport_error"
+        assert result.status != "not_found"
+
+    @pytest.mark.asyncio
+    async def test_connection_error_returns_transport_error(self):
+        """AC4: connection failure maps to transport_error."""
+        from open_brain.paperless import PaperlessClient
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("DNS failure", request=request)
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            result = await PaperlessClient(
+                base_url="https://paperless.example",
+                api_token="test-token",
+                http_client=http_client,
+            ).resolve_reference(17)
+
+        assert result.status == "transport_error"
+
+    @pytest.mark.asyncio
+    async def test_5xx_returns_transport_error(self):
+        """AC4: Paperless server errors map to transport_error."""
+        from open_brain.paperless import PaperlessClient
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(503, request=request)
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            result = await PaperlessClient(
+                base_url="https://paperless.example",
+                api_token="test-token",
+                http_client=http_client,
+            ).resolve_reference(17)
+
+        assert result.status == "transport_error"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("base_url", "api_token"),
+        [
+            ("", "test-token"),
+            ("https://paperless.example", ""),
+            ("", ""),
+        ],
+    )
+    async def test_not_configured_returns_without_http_call(self, base_url: str, api_token: str):
+        """AC4: missing config returns not_configured and never calls HTTP."""
+        from open_brain.paperless import PaperlessClient
+
+        called_urls: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            called_urls.append(str(request.url))
+            return httpx.Response(500, request=request)
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            result = await PaperlessClient(
+                base_url=base_url,
+                api_token=api_token,
+                http_client=http_client,
+            ).resolve_reference(17)
+
+        assert result.status == "not_configured"
+        assert called_urls == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("document_id", [0, -1, "17", True])
+    async def test_malformed_document_id_returns_without_http_call(self, document_id):
+        """AC4: malformed document ids return malformed and never call HTTP."""
+        from open_brain.paperless import PaperlessClient
+
+        called_urls: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            called_urls.append(str(request.url))
+            return httpx.Response(500, request=request)
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            result = await PaperlessClient(
+                base_url="https://paperless.example",
+                api_token="test-token",
+                http_client=http_client,
+            ).resolve_reference(document_id)  # type: ignore[arg-type]
+
+        assert result.status == "malformed"
+        assert called_urls == []
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    not (os.environ.get("PAPERLESS_BASE_URL") and os.environ.get("PAPERLESS_API_TOKEN")),
+    reason="PAPERLESS_BASE_URL and PAPERLESS_API_TOKEN are required for live Paperless smoke test",
+)
+async def test_live_paperless_reference_resolution_boundary():
+    """AC2/AC4: opt-in live Paperless boundary smoke test."""
+    from open_brain.paperless import PaperlessClient
+
+    document_id_raw = os.environ.get("PAPERLESS_DOCUMENT_ID", "1")
+    try:
+        document_id = int(document_id_raw)
+    except ValueError:
+        pytest.skip("PAPERLESS_DOCUMENT_ID must be a positive integer")
+    if document_id <= 0:
+        pytest.skip("PAPERLESS_DOCUMENT_ID must be a positive integer")
+
+    result = await PaperlessClient().resolve_reference(document_id)
+
+    assert result.status in {"found", "not_found", "unauthorized"}
