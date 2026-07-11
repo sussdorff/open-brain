@@ -662,6 +662,10 @@ async def _import_vault_reconcile(
     if mode == "apply":
         for note in importable_notes:
             metadata = dict(note.metadata)
+            if note.paperless_references:
+                references = [dict(reference) for reference in note.paperless_references]
+                metadata["paperless_references"] = references
+                metadata["paperless_reference"] = references[0]
             binary_keys = paperless_reference_binary_keys(metadata)
             if binary_keys:
                 raise ValueError(
