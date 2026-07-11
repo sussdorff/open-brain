@@ -365,6 +365,25 @@ async def test_restore_recreates_graph_and_same_bundle_rerun_creates_no_duplicat
         "memories": 2,
         "relationships": 2,
     }
+    assert target.memories[10]["metadata"]["canonical_entity"] is True
+    assert target.memories[20]["metadata"]["paperless_reference"]["document_id"] == 101
+
+    second_result = await portable_backup.restore_bundle(
+        bundle,
+        target,
+        regenerate_embeddings=False,
+    )
+
+    assert second_result["restored"] == {
+        "indexes": 2,
+        "memories": 2,
+        "relationships": 2,
+    }
+    assert await target.portable_closure_counts() == {
+        "indexes": 2,
+        "memories": 2,
+        "relationships": 2,
+    }
 
 
 @pytest.mark.asyncio
@@ -424,22 +443,3 @@ async def test_verify_round_trip_reports_hashes_edges_and_canonical_ids(
     assert corrupted_report["ok"] is False
     assert corrupted_report["memories"]["content_hash_matches"] == 2
     assert corrupted_report["memories"]["record_hash_mismatches"] == [10]
-    assert target.memories[10]["metadata"]["canonical_entity"] is True
-    assert target.memories[20]["metadata"]["paperless_reference"]["document_id"] == 101
-
-    second_result = await portable_backup.restore_bundle(
-        bundle,
-        target,
-        regenerate_embeddings=False,
-    )
-
-    assert second_result["restored"] == {
-        "indexes": 2,
-        "memories": 2,
-        "relationships": 2,
-    }
-    assert await target.portable_closure_counts() == {
-        "indexes": 2,
-        "memories": 2,
-        "relationships": 2,
-    }

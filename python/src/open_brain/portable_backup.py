@@ -161,6 +161,45 @@ def _sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _sha256_text(value: str) -> str:
+    """Return the SHA-256 hash for a text value."""
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
+def _memory_record_hash(memory: dict[str, Any]) -> str:
+    """Return a full-record hash for semantic memory fields."""
+    payload = {
+        "content": memory.get("content"),
+        "title": memory.get("title"),
+        "subtitle": memory.get("subtitle"),
+        "narrative": memory.get("narrative"),
+        "metadata": memory.get("metadata") or {},
+    }
+    return _sha256_text(_canonical_json(payload))
+
+
+def _relationship_edges(records: list[dict[str, Any]]) -> set[tuple[int, int, str]]:
+    """Return the canonical semantic relationship edge set."""
+    return {
+        (
+            int(record["source_id"]),
+            int(record["target_id"]),
+            str(record["relation_type"]),
+        )
+        for record in records
+    }
+
+
+def _canonical_entity_ids(records: list[dict[str, Any]]) -> set[int]:
+    """Return ids for memories marked as canonical entities."""
+    ids: set[int] = set()
+    for record in records:
+        metadata = record.get("metadata") or {}
+        if isinstance(metadata, dict) and metadata.get("canonical_entity") is True:
+            ids.add(int(record["id"]))
+    return ids
+
+
 def _validate_source_label(source_label: str | None) -> None:
     """Reject source labels that look like credentials or connection strings."""
     if source_label is None:
@@ -210,6 +249,90 @@ async def _target_matches_bundle(
     """Return True when a populated target already contains exactly the bundle."""
     existing = _canonical_records(await store.export_portable_records())
     return existing == records
+
+
+async def verify_round_trip(
+    bundle_path: str | Path,
+    store: PortableBackupStore,
+) -> dict[str, Any]:
+    """Verify that a restored store matches a portable bundle."""
+    path = Path(bundle_path)
+    manifest = json.loads((path / "manifest.json").read_text(encoding="utf-8"))
+    expected = _bundle_records(path)
+    restored = _canonical_records(await store.export_portable_records())
+
+    expected_memories = {record["id"]: record for record in expected["memories"]}
+    restored_memories = {record["id"]: record for record in restored["memories"]}
+    content_hash_matches = 0
+    content_hash_mismatches: list[int] = []
+    record_hash_mismatches: list[int] = []
+    for memory_id, expected_memory in expected_memories.items():
+        restored_memory = restored_memories.get(memory_id)
+        if restored_memory is None:
+            content_hash_mismatches.append(memory_id)
+            record_hash_mismatches.append(memory_id)
+            continue
+
+        expected_metadata = expected_memory.get("metadata") or {}
+        expected_content_hash = expected_metadata.get("content_hash") or _sha256_text(
+            str(expected_memory.get("content") or "")
+        )
+        restored_content_hash = _sha256_text(str(restored_memory.get("content") or ""))
+        if restored_content_hash == expected_content_hash:
+            content_hash_matches += 1
+        else:
+            content_hash_mismatches.append(memory_id)
+
+        if _memory_record_hash(restored_memory) != _memory_record_hash(expected_memory):
+            record_hash_mismatches.append(memory_id)
+
+    expected_edges = _relationship_edges(expected["relationships"])
+    restored_edges = _relationship_edges(restored["relationships"])
+    missing_edges = sorted(expected_edges - restored_edges)
+    extra_edges = sorted(restored_edges - expected_edges)
+
+    expected_canonical_ids = _canonical_entity_ids(expected["memories"])
+    restored_canonical_ids = _canonical_entity_ids(restored["memories"])
+    preserved_ids = sorted(expected_canonical_ids & restored_canonical_ids)
+
+    report = {
+        "bundle_format_version": manifest["bundle_format_version"],
+        "ok": False,
+        "memories": {
+            "expected": len(expected["memories"]),
+            "restored": len(restored["memories"]),
+            "content_hash_matches": content_hash_matches,
+            "content_hash_mismatches": sorted(content_hash_mismatches),
+            "record_hash_mismatches": sorted(record_hash_mismatches),
+        },
+        "relationships": {
+            "expected": len(expected["relationships"]),
+            "restored": len(restored["relationships"]),
+            "missing": missing_edges,
+            "extra": extra_edges,
+        },
+        "indexes": {
+            "expected": len(expected["indexes"]),
+            "restored": len(restored["indexes"]),
+        },
+        "canonical_entities": {
+            "expected": len(expected_canonical_ids),
+            "restored": len(restored_canonical_ids),
+            "preserved_ids": preserved_ids,
+        },
+    }
+    report["ok"] = (
+        report["memories"]["expected"] == report["memories"]["restored"]
+        and report["memories"]["content_hash_matches"] == report["memories"]["expected"]
+        and not report["memories"]["content_hash_mismatches"]
+        and not report["memories"]["record_hash_mismatches"]
+        and report["relationships"]["expected"] == report["relationships"]["restored"]
+        and not report["relationships"]["missing"]
+        and not report["relationships"]["extra"]
+        and report["indexes"]["expected"] == report["indexes"]["restored"]
+        and report["canonical_entities"]["expected"] == len(preserved_ids)
+    )
+    return report
 
 
 async def export_bundle(
