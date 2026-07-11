@@ -152,6 +152,54 @@ class PopulatedRestoreStore:
         self.restore_called = True
 
 
+class EmptyRestoreStore:
+    """In-memory restore store with primary-key conflict behavior."""
+
+    def __init__(self) -> None:
+        self.indexes: dict[int, dict[str, Any]] = {}
+        self.memories: dict[int, dict[str, Any]] = {}
+        self.relationships: dict[tuple[int, int, str], dict[str, Any]] = {}
+        self.restore_calls = 0
+
+    async def export_portable_records(self) -> dict[str, list[dict[str, Any]]]:
+        """Return current in-memory portable records."""
+        return {
+            "indexes": list(self.indexes.values()),
+            "memories": list(self.memories.values()),
+            "relationships": list(self.relationships.values()),
+        }
+
+    async def portable_closure_counts(self) -> dict[str, int]:
+        """Return closure row counts."""
+        return {
+            "indexes": len(self.indexes),
+            "memories": len(self.memories),
+            "relationships": len(self.relationships),
+        }
+
+    async def restore_portable_records(
+        self,
+        indexes: list[dict[str, Any]],
+        memories: list[dict[str, Any]],
+        relationships: list[dict[str, Any]],
+        *,
+        regenerate_embeddings: bool,
+    ) -> None:
+        """Insert records with idempotent conflict handling."""
+        self.restore_calls += 1
+        for index in indexes:
+            self.indexes.setdefault(index["id"], dict(index))
+        for memory in memories:
+            self.memories.setdefault(memory["id"], dict(memory))
+        for relationship in relationships:
+            key = (
+                relationship["source_id"],
+                relationship["target_id"],
+                relationship["relation_type"],
+            )
+            self.relationships.setdefault(key, dict(relationship))
+
+
 @pytest.mark.asyncio
 async def test_restore_refuses_populated_target_before_writing(tmp_path: Path) -> None:
     """Restore fails closed when any portable closure table already has rows."""
@@ -286,3 +334,53 @@ async def test_export_rejects_credential_source_label_and_bundle_scan_excludes_b
         "token_hash",
     ]
     assert all(term not in bundle_text for term in forbidden_terms)
+
+
+@pytest.mark.asyncio
+async def test_restore_recreates_graph_and_same_bundle_rerun_creates_no_duplicates(
+    tmp_path: Path,
+) -> None:
+    """Restore is id-preserving and idempotent for the same portable bundle."""
+    bundle = tmp_path / "bundle"
+    await portable_backup.export_bundle(
+        bundle,
+        FixturePortableStore(),
+        source_label="fixture",
+        created_at=FIXED_EXPORT_TIME,
+    )
+    target = EmptyRestoreStore()
+
+    first_result = await portable_backup.restore_bundle(
+        bundle,
+        target,
+        regenerate_embeddings=False,
+    )
+    assert first_result["restored"] == {
+        "indexes": 2,
+        "memories": 2,
+        "relationships": 2,
+    }
+    assert await target.portable_closure_counts() == {
+        "indexes": 2,
+        "memories": 2,
+        "relationships": 2,
+    }
+    assert target.memories[10]["metadata"]["canonical_entity"] is True
+    assert target.memories[20]["metadata"]["paperless_reference"]["document_id"] == 101
+
+    second_result = await portable_backup.restore_bundle(
+        bundle,
+        target,
+        regenerate_embeddings=False,
+    )
+
+    assert second_result["restored"] == {
+        "indexes": 2,
+        "memories": 2,
+        "relationships": 2,
+    }
+    assert await target.portable_closure_counts() == {
+        "indexes": 2,
+        "memories": 2,
+        "relationships": 2,
+    }
