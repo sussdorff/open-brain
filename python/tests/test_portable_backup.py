@@ -365,6 +365,65 @@ async def test_restore_recreates_graph_and_same_bundle_rerun_creates_no_duplicat
         "memories": 2,
         "relationships": 2,
     }
+
+
+@pytest.mark.asyncio
+async def test_verify_round_trip_reports_hashes_edges_and_canonical_ids(
+    tmp_path: Path,
+) -> None:
+    """Round-trip verification reports record, edge, and content integrity."""
+    bundle = tmp_path / "bundle"
+    await portable_backup.export_bundle(
+        bundle,
+        FixturePortableStore(),
+        source_label="fixture",
+        created_at=FIXED_EXPORT_TIME,
+    )
+    target = EmptyRestoreStore()
+    await portable_backup.restore_bundle(
+        bundle,
+        target,
+        regenerate_embeddings=False,
+    )
+
+    report = await portable_backup.verify_round_trip(bundle, target)
+
+    assert report == {
+        "bundle_format_version": "1.0.0",
+        "ok": True,
+        "memories": {
+            "expected": 2,
+            "restored": 2,
+            "content_hash_matches": 2,
+            "content_hash_mismatches": [],
+            "record_hash_mismatches": [],
+        },
+        "relationships": {
+            "expected": 2,
+            "restored": 2,
+            "missing": [],
+            "extra": [],
+        },
+        "indexes": {
+            "expected": 2,
+            "restored": 2,
+        },
+        "canonical_entities": {
+            "expected": 1,
+            "restored": 1,
+            "preserved_ids": [10],
+        },
+    }
+
+    target.memories[10]["metadata"] = {
+        **target.memories[10]["metadata"],
+        "status": "corrupted",
+    }
+    corrupted_report = await portable_backup.verify_round_trip(bundle, target)
+
+    assert corrupted_report["ok"] is False
+    assert corrupted_report["memories"]["content_hash_matches"] == 2
+    assert corrupted_report["memories"]["record_hash_mismatches"] == [10]
     assert target.memories[10]["metadata"]["canonical_entity"] is True
     assert target.memories[20]["metadata"]["paperless_reference"]["document_id"] == 101
 
