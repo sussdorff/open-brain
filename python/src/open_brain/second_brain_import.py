@@ -797,7 +797,6 @@ async def _main_async(argv: list[str] | None = None) -> int:
     """CLI entry point for one-shot vault imports."""
     from open_brain.data_layer.postgres import suppress_migrations
 
-    suppress_migrations()
     parser = argparse.ArgumentParser(description="Import a Second Brain Markdown vault.")
     parser.add_argument("vault_path", help="Path to the vault root.")
     parser.add_argument(
@@ -816,6 +815,12 @@ async def _main_async(argv: list[str] | None = None) -> int:
         help="Optional path for the machine-readable reconciliation report.",
     )
     args = parser.parse_args(argv)
+
+    # Dry-run is read-only and must perform zero writes, so it opts out of the
+    # migration battery. Apply mode writes memories and relationships, so it keeps
+    # the default migrating behavior to ensure the schema is current before writing.
+    if not args.apply:
+        suppress_migrations()
 
     report = await import_vault(
         vault_path=args.vault_path,
