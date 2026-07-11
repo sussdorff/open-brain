@@ -47,7 +47,9 @@
       "evidence_refs": [
         "cmd:red-ac3",
         "cmd:green-ac3",
-        "cmd:affected-final"
+        "cmd:affected-final",
+        "cmd:red-verfix2",
+        "cmd:green-verfix2"
       ]
     }
   ],
@@ -100,6 +102,10 @@
     {
       "sha": "9a8b4e8",
       "message": "fix(open-brain-hws): green \u2014 persist classified type to type column (except person_context)"
+    },
+    {
+      "sha": "a628b27",
+      "message": "fix(open-brain-hws): preserve explicit caller type from divergent classifier overwrite"
     }
   ],
   "tests": [
@@ -156,6 +162,18 @@
       "cwd": "python",
       "status": "passed",
       "evidence_ref": "cmd:affected-typecol-final"
+    },
+    {
+      "command": "uv run pytest tests/test_capture_router.py::TestRawCaptureTypeColumnPersistence::test_explicit_type_not_overwritten_by_divergent_classifier -m \"not integration\" -v",
+      "cwd": "python",
+      "status": "passed",
+      "evidence_ref": "cmd:green-verfix2"
+    },
+    {
+      "command": "uv run pytest tests/test_capture_router.py tests/test_domain_schemas.py tests/test_domain_metadata.py -m \"not integration\" -v",
+      "cwd": "python",
+      "status": "passed",
+      "evidence_ref": "cmd:affected-verfix2-final"
     }
   ],
   "external_resources": [],
@@ -168,7 +186,8 @@
     "Codex fix: classifier prompt and module docstring now advertise project.due_date and prompt.last_used_at so raw captures reliably extract those canonical fields.",
     "Codex fix: capture_router.canonical_type_for_capture_template maps person_context -> canonical person for domain-metadata validation while preserving the stored capture_template value.",
     "Codex fix: save_memory now runs domain-metadata validation against classifier-generated canonical type + extracted fields for raw captures (no caller capture_template), merging non-duplicate warnings; pre-structured (AC3) and duplicate paths keep caller-only validation.",
-    "Phase 10 fix (VETO resolution): save_memory now persists the classifier capture_template into the memory `type` column for raw captures (no caller capture_template) via the existing post-save update_memory call, so type-based retrieval/stats/people machinery see the canonical classification. Scoped exception: person_context classifications keep type=observation (no auto-promotion to type=person, people pipeline untouched); explicit caller types and pre-structured captures are unaffected."
+    "Phase 10 fix (VETO resolution): save_memory now persists the classifier capture_template into the memory `type` column for raw captures (no caller capture_template) via the existing post-save update_memory call, so type-based retrieval/stats/people machinery see the canonical classification. Scoped exception: person_context classifications keep type=observation (no auto-promotion to type=person, people pipeline untouched); explicit caller types and pre-structured captures are unaffected.",
+    "Phase 10 fix round 2 (verification-agent regression resolution): raw-capture type-column persistence is now additionally gated on normalized_type is None, so an EXPLICIT caller-supplied type (e.g. type=person / type=decision, no capture_template metadata) is no longer overwritten when the classifier diverges (e.g. classifies as meeting). Restores the pre-bead invariant that classification never touches the type column for explicit types; the classified type-specific metadata (post_save_metadata) is still written unchanged. Truly-raw (type=None) persistence path is unaffected."
   ],
   "evidence_refs": [
     "cmd:red-ac1",
@@ -184,6 +203,9 @@
     "cmd:affected-codex-final",
     "cmd:red-typecol",
     "cmd:green-typecol",
-    "cmd:affected-typecol-final"
+    "cmd:affected-typecol-final",
+    "cmd:red-verfix2",
+    "cmd:green-verfix2",
+    "cmd:affected-verfix2-final"
   ]
 }

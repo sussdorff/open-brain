@@ -257,6 +257,38 @@
       "purpose": "Commit Phase 10 green fix.",
       "exit_code": 0,
       "observed_result": "Pre-commit hook ran the non-integration suite (1359 passed, 22 deselected) then created commit 9a8b4e8."
+    },
+    {
+      "id": "cmd:red-verfix2",
+      "command": "uv run pytest tests/test_capture_router.py::TestRawCaptureTypeColumnPersistence::test_explicit_type_not_overwritten_by_divergent_classifier -m \"not integration\" -v",
+      "cwd": "python",
+      "purpose": "Phase 10 round-2 RED gate: prove the regression the verification-agent found — an explicit caller type overwritten by a divergent classifier result.",
+      "exit_code": 1,
+      "observed_result": "2 failed (parametrized person, decision). With the pre-fix guard (only `not has_caller_template`), an explicit type=person / type=decision capture whose classifier returns capture_template=meeting had update_params.type set to 'meeting', clobbering the caller's explicit type. Regression reproduced."
+    },
+    {
+      "id": "cmd:green-verfix2",
+      "command": "uv run pytest tests/test_capture_router.py::TestRawCaptureTypeColumnPersistence::test_explicit_type_not_overwritten_by_divergent_classifier -m \"not integration\" -v",
+      "cwd": "python",
+      "purpose": "Phase 10 round-2 GREEN gate for the divergence regression fix.",
+      "exit_code": 0,
+      "observed_result": "2 passed. After gating persistence on `normalized_type is None` in addition to `not has_caller_template`, the explicit caller type is preserved (update_params.type is None) while the classified meeting metadata is still written."
+    },
+    {
+      "id": "cmd:affected-verfix2-final",
+      "command": "uv run pytest tests/test_capture_router.py tests/test_domain_schemas.py tests/test_domain_metadata.py -m \"not integration\" -v",
+      "cwd": "python",
+      "purpose": "Phase 10 round-2 final affected-file regression gate (no external dependencies). Confirms TestRawCaptureTypeColumnPersistence truly-raw (type=None) path and all prior tests still pass.",
+      "exit_code": 0,
+      "observed_result": "153 passed, 1 deselected (was 151 passed / 1 deselected before this fix; +2 parametrized divergence-regression cases, no regressions)."
+    },
+    {
+      "id": "cmd:green-verfix2-commit",
+      "command": "git add python/src/open_brain/server.py python/tests/test_capture_router.py && git commit -m \"fix(open-brain-hws): preserve explicit caller type from divergent classifier overwrite\"",
+      "cwd": ".",
+      "purpose": "Commit Phase 10 round-2 fix (code + divergence regression test together; the fix makes the new test pass so the pre-commit suite gate is satisfied).",
+      "exit_code": 0,
+      "observed_result": "Pre-commit hook ran the non-integration suite (1361 passed, 22 deselected) then created commit a628b27."
     }
   ],
   "skipped_checks": [
