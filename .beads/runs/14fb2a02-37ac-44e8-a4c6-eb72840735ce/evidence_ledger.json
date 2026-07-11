@@ -1,0 +1,95 @@
+{
+  "contract_version": "1",
+  "bead_id": "open-brain-slu",
+  "commands": [
+    {
+      "id": "cmd:ac1-red-capture-inbox",
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py -q",
+      "purpose": "RED gate for capture_status save/search/defaulting tests before production support.",
+      "exit_code": 1,
+      "observed_result": "4 failed, 1 passed. Failures showed SaveMemoryParams/SearchParams missing capture_status and default insert metadata lacking capture_status."
+    },
+    {
+      "id": "cmd:ac1-green-capture-inbox",
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py -q",
+      "purpose": "GREEN gate for capture_status save/search/defaulting behavior.",
+      "exit_code": 0,
+      "observed_result": "5 passed."
+    },
+    {
+      "id": "cmd:ac1-green-regression",
+      "command": "cd python && uv run pytest -m \"not integration\" -q",
+      "purpose": "Regression gate after AC1 implementation and existing metadata test update.",
+      "exit_code": 0,
+      "observed_result": "1270 passed, 22 deselected."
+    },
+    {
+      "id": "cmd:ac2-red-transition",
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py -q",
+      "purpose": "RED gate for dedicated capture transition independence tests.",
+      "exit_code": 1,
+      "observed_result": "4 failed, 5 passed. Failures showed CaptureTransitionParams was missing."
+    },
+    {
+      "id": "cmd:ac2-green-transition",
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py -q",
+      "purpose": "GREEN gate for set_capture_status data-layer transition behavior.",
+      "exit_code": 0,
+      "observed_result": "9 passed."
+    },
+    {
+      "id": "cmd:ac2-green-regression",
+      "command": "cd python && uv run pytest -m \"not integration\" -q",
+      "purpose": "Regression gate after AC2 implementation.",
+      "exit_code": 0,
+      "observed_result": "1274 passed, 22 deselected."
+    },
+    {
+      "id": "cmd:ac3-red-cli-mcp",
+      "command": "cd python && uv run pytest tests/test_capture_inbox_cli.py -q",
+      "purpose": "RED gate for CLI and MCP capture inbox surfaces.",
+      "exit_code": 1,
+      "observed_result": "6 failed. Failures showed missing inbox/capture parser commands, missing CLI handlers, search() missing capture_status, and missing set_capture_status MCP tool."
+    },
+    {
+      "id": "cmd:ac3-green-cli-mcp",
+      "command": "cd python && uv run pytest tests/test_capture_inbox_cli.py -q",
+      "purpose": "GREEN gate for CLI and MCP capture inbox surfaces.",
+      "exit_code": 0,
+      "observed_result": "6 passed."
+    },
+    {
+      "id": "cmd:ac3-green-combined",
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py tests/test_capture_inbox_cli.py -q",
+      "purpose": "Combined acceptance evidence for capture inbox data-layer, CLI, and MCP behavior.",
+      "exit_code": 0,
+      "observed_result": "15 passed."
+    },
+    {
+      "id": "cmd:ac3-green-regression",
+      "command": "cd python && uv run pytest -m \"not integration\" -q",
+      "purpose": "Final non-integration regression gate.",
+      "exit_code": 0,
+      "observed_result": "1280 passed, 22 deselected."
+    }
+  ],
+  "skipped_checks": [],
+  "artifacts": [
+    {
+      "path": ".beads/runs/14fb2a02-37ac-44e8-a4c6-eb72840735ce/implementation_manifest.json",
+      "kind": "implementation_manifest"
+    },
+    {
+      "path": ".beads/runs/14fb2a02-37ac-44e8-a4c6-eb72840735ce/evidence_ledger.json",
+      "kind": "evidence_ledger"
+    },
+    {
+      "path": "python/tests/test_capture_inbox.py",
+      "kind": "test"
+    },
+    {
+      "path": "python/tests/test_capture_inbox_cli.py",
+      "kind": "test"
+    }
+  ]
+}

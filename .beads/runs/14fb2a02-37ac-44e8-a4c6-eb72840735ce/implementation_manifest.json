@@ -1,0 +1,130 @@
+{
+  "contract_version": "1",
+  "bead_id": "open-brain-slu",
+  "acceptance_criteria": [
+    {
+      "id": 1,
+      "text": "A newly captured inbox item is queryable independently of metadata.status.",
+      "status": "completed",
+      "changed_files": [
+        "python/src/open_brain/data_layer/interface.py",
+        "python/src/open_brain/data_layer/postgres.py",
+        "python/src/open_brain/server.py",
+        "python/tests/test_capture_inbox.py",
+        "python/tests/test_postgres.py"
+      ],
+      "evidence_refs": [
+        "cmd:ac1-red-capture-inbox",
+        "cmd:ac1-green-capture-inbox",
+        "cmd:ac1-green-regression"
+      ]
+    },
+    {
+      "id": 2,
+      "text": "Processing or dismissing a capture does not alter its knowledge lifecycle unless explicitly requested.",
+      "status": "completed",
+      "changed_files": [
+        "python/src/open_brain/data_layer/interface.py",
+        "python/src/open_brain/data_layer/postgres.py",
+        "python/tests/test_capture_inbox.py"
+      ],
+      "evidence_refs": [
+        "cmd:ac2-red-transition",
+        "cmd:ac2-green-transition",
+        "cmd:ac2-green-regression"
+      ]
+    },
+    {
+      "id": 3,
+      "text": "Agents can list and transition inbox captures through supported CLI or MCP operations.",
+      "status": "completed",
+      "changed_files": [
+        "python/src/open_brain/cli/main.py",
+        "python/src/open_brain/server.py",
+        "python/tests/test_capture_inbox_cli.py"
+      ],
+      "evidence_refs": [
+        "cmd:ac3-red-cli-mcp",
+        "cmd:ac3-green-cli-mcp",
+        "cmd:ac3-green-combined",
+        "cmd:ac3-green-regression"
+      ]
+    }
+  ],
+  "changed_files": [
+    ".beads/runs/14fb2a02-37ac-44e8-a4c6-eb72840735ce/evidence_ledger.json",
+    ".beads/runs/14fb2a02-37ac-44e8-a4c6-eb72840735ce/implementation_manifest.json",
+    "python/src/open_brain/cli/main.py",
+    "python/src/open_brain/data_layer/interface.py",
+    "python/src/open_brain/data_layer/postgres.py",
+    "python/src/open_brain/server.py",
+    "python/tests/test_capture_inbox.py",
+    "python/tests/test_capture_inbox_cli.py",
+    "python/tests/test_postgres.py"
+  ],
+  "commits": [
+    {
+      "sha": "3f43ed271ca9d1c6139b80f55b13011f24b392b0",
+      "message": "test(open-brain-slu): red - capture inbox query contract"
+    },
+    {
+      "sha": "cf1833126d76999ef423997a854ed4344153a7b1",
+      "message": "feat(open-brain-slu): green - capture inbox query contract"
+    },
+    {
+      "sha": "a20c20d68ea2a2cf2da8b3406fc6ecca5bcf67cc",
+      "message": "test(open-brain-slu): red - capture status transition independence"
+    },
+    {
+      "sha": "440f326e4c4453200d96e8b7c1207195cfecc299",
+      "message": "feat(open-brain-slu): green - capture status transition independence"
+    },
+    {
+      "sha": "0aa117d0f4758f24c9988e62359826eba0a9db46",
+      "message": "test(open-brain-slu): red - capture inbox cli and mcp surfaces"
+    },
+    {
+      "sha": "a6849be3f8f66c448f57af886214212033bbc2f8",
+      "message": "feat(open-brain-slu): green - capture inbox cli and mcp surfaces"
+    }
+  ],
+  "tests": [
+    {
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py -q",
+      "status": "passed",
+      "evidence_ref": "cmd:ac2-green-transition"
+    },
+    {
+      "command": "cd python && uv run pytest tests/test_capture_inbox_cli.py -q",
+      "status": "passed",
+      "evidence_ref": "cmd:ac3-green-cli-mcp"
+    },
+    {
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py tests/test_capture_inbox_cli.py -q",
+      "status": "passed",
+      "evidence_ref": "cmd:ac3-green-combined"
+    },
+    {
+      "command": "cd python && uv run pytest -m \"not integration\" -q",
+      "status": "passed",
+      "evidence_ref": "cmd:ac3-green-regression"
+    }
+  ],
+  "external_resources": [],
+  "scope_changes": [],
+  "downstream_impacts": [
+    "Adds the published capture_status metadata contract and set_capture_status tool surface consumed by downstream open-brain agent-first knowledge beads."
+  ],
+  "evidence_refs": [
+    "cmd:ac1-red-capture-inbox",
+    "cmd:ac1-green-capture-inbox",
+    "cmd:ac1-green-regression",
+    "cmd:ac2-red-transition",
+    "cmd:ac2-green-transition",
+    "cmd:ac2-green-regression",
+    "cmd:ac3-red-cli-mcp",
+    "cmd:ac3-green-cli-mcp",
+    "cmd:ac3-green-combined",
+    "cmd:ac3-green-regression"
+  ]
+}
