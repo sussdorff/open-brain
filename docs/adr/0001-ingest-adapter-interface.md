@@ -124,3 +124,40 @@ directly by the orchestrator.
 
 This distinction prevents confusion about Protocol compliance requirements: only top-level
 adapters are subject to the Protocol and registry constraints in this ADR.
+
+## Retrieval Clients (Read-Side Lookup)
+
+A third category is a *retrieval client*: a top-level module used for read-side lookup of an
+existing external object by a caller-supplied key. Retrieval clients are not hidden helper
+classes inside an adapter, but they are also not ingest sources driven by the orchestrator.
+
+Retrieval clients follow these criteria:
+
+- They are top-level modules that callers can compose directly.
+- They do **not** call `register()` and are not loaded through the ingest adapter registry.
+- They are not driven by the orchestrator's poll/ingest loop.
+- They do **not** thread `run_id` or create `pipeline_runs` / `IngestRun` associations.
+- They do **not** implement `list_recent()` or `ingest()`.
+- They are called directly by MCP tools, other adapters, or similar callers through a
+  synchronous lookup-by-id shape such as `resolve_reference(id)`, not through a poll loop.
+- They return a typed result object with a status enum for expected error states such as
+  `not_found`, `unauthorized`, or `malformed`, instead of raising exceptions for those cases.
+
+`python/src/open_brain/paperless.py` is the worked example. Its module docstring states that
+the module is intentionally outside the `IngestAdapter` registry because it performs
+lookup-by-id for the MCP tool layer, not poll-loop ingestion, and therefore does not implement
+`list_recent()`, `ingest()`, `run_id` threading, or `register()`. The `PaperlessClient` class
+docstring makes the same boundary explicit: it is a synchronous lookup-by-id client composed
+directly by the MCP tool layer, not driven by the ingest orchestrator's poll loop.
+
+The canonical retrieval-client shape is:
+
+```
+async def resolve_reference(self, document_id: int) -> PaperlessResolveResult
+```
+
+`PaperlessResolveResult` carries a `status: PaperlessResolveStatus`, where the status type
+includes expected outcomes such as `found`, `not_found`, `unauthorized`, `malformed`,
+`transport_error`, and `not_configured`. Future retrieval clients should follow the same
+pattern: direct lookup by caller-supplied identifier, typed result object, explicit expected
+status values, and no adapter registry or ingest-run participation.
