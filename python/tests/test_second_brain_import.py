@@ -174,6 +174,21 @@ class RecordingDataLayer(FakeDataLayer):
         self.existing_refs[source_ref] = memory_id
         return SaveMemoryResult(id=memory_id, message="Memory saved")
 
+    async def create_relationship(
+        self,
+        source_id: int,
+        target_id: int,
+        link_type: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> int:
+        self.relationships.append({
+            "source_id": source_id,
+            "target_id": target_id,
+            "link_type": link_type,
+            "metadata": metadata,
+        })
+        return len(self.relationships)
+
 
 def _normalize_report(report: dict[str, Any]) -> dict[str, Any]:
     """Normalize environment-specific fields before fixture comparison."""
@@ -262,3 +277,37 @@ class TestSecondBrainApply:
             item["action"] in {"duplicate", "skip"}
             for item in second["items"]
         )
+
+
+class TestSecondBrainRelationships:
+    @pytest.mark.asyncio
+    async def test_resolvable_wikilinks_create_generic_reference_edges(self):
+        """AC3: resolvable wikilinks become generic references relationships."""
+        from open_brain.second_brain_import import import_vault
+
+        data_layer = RecordingDataLayer()
+
+        report = await import_vault(
+            vault_path=FIXTURE_VAULT,
+            paperless_mapping_path=PAPERLESS_MAPPING,
+            data_layer=data_layer,
+            paperless_client=FakePaperlessClient(),
+            apply=True,
+        )
+
+        ids = data_layer.existing_refs
+        expected_edges = {
+            (ids["Projects/OpenBrain.md"], ids["People/Ada Lovelace.md"], "references"),
+            (ids["Projects/OpenBrain.md"], ids["Concepts/Knowledge Graph.md"], "references"),
+            (ids["People/Ada Lovelace.md"], ids["Projects/OpenBrain.md"], "references"),
+            (ids["Notes/Untyped.md"], ids["Concepts/Knowledge Graph.md"], "references"),
+        }
+        actual_edges = {
+            (row["source_id"], row["target_id"], row["link_type"])
+            for row in data_layer.relationships
+        }
+
+        assert actual_edges == expected_edges
+        assert all(row["metadata"]["source_ref"] for row in data_layer.relationships)
+        assert all(row["metadata"]["wikilink"].startswith("[[") for row in data_layer.relationships)
+        assert report["summary"]["unresolved_links"] == 2
