@@ -211,6 +211,13 @@
       "purpose": "Full non-integration regression gate after the ::text cast fix.",
       "exit_code": 0,
       "observed_result": "1282 passed, 25 deselected (integration). No regressions; mocked unit-test SQL-shape assertions still pass because they substring-match jsonb_build_object('capture_status' which is unaffected by the ::text suffix."
+    },
+    {
+      "id": "cmd:vfix-metrics",
+      "command": "BEADS_RUNTIME=/Users/malte/.agents/skills/beads uv run python -c \"...; from metrics import insert_agent_call; insert_agent_call(run_id='14fb2a02-37ac-44e8-a4c6-eb72840735ce', bead_id='open-brain-slu', phase_label='verification-fix', agent_label='fix-opus-vfix', model='claude-opus', iteration=1, ...)\"",
+      "purpose": "Best-effort verification-fix agent token/duration metrics logging (BEADS_RUNTIME unset in env; defaulted to /Users/malte/.agents/skills/beads matching prior codex-fix run).",
+      "exit_code": 0,
+      "observed_result": "METRICS_OK: insert_agent_call completed without error; metrics DB writable in this sandbox."
     }
   ],
   "skipped_checks": [
