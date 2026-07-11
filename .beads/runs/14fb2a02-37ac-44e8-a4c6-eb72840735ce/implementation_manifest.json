@@ -5,7 +5,7 @@
     {
       "id": 1,
       "text": "A newly captured inbox item is queryable independently of metadata.status.",
-      "status": "completed",
+      "status": "done",
       "changed_files": [
         "python/src/open_brain/data_layer/interface.py",
         "python/src/open_brain/data_layer/postgres.py",
@@ -22,7 +22,7 @@
     {
       "id": 2,
       "text": "Processing or dismissing a capture does not alter its knowledge lifecycle unless explicitly requested.",
-      "status": "completed",
+      "status": "done",
       "changed_files": [
         "python/src/open_brain/data_layer/interface.py",
         "python/src/open_brain/data_layer/postgres.py",
@@ -37,7 +37,7 @@
     {
       "id": 3,
       "text": "Agents can list and transition inbox captures through supported CLI or MCP operations.",
-      "status": "completed",
+      "status": "done",
       "changed_files": [
         "python/src/open_brain/cli/main.py",
         "python/src/open_brain/server.py",
