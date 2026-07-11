@@ -176,6 +176,41 @@
       "purpose": "Best-effort codex-fix agent metrics logging (BEADS_RUNTIME defaulted to /Users/malte/.agents/skills/beads).",
       "exit_code": 0,
       "observed_result": "insert_agent_call completed without error (exit 0); metrics DB writable in this sandbox, unlike the earlier Phase 5 read-only attempt."
+    },
+    {
+      "id": "cmd:vfix-bug-origin",
+      "command": "cd python && DATABASE_URL=<live-postgres> uv run pytest tests/test_capture_inbox_cli.py -q -m integration  (run by orchestrator against a live Postgres+pgvector DB, NOT this sandbox)",
+      "purpose": "Origin of the verification-dispute defect: running the real @pytest.mark.integration test test_capture_status_round_trip_uses_real_data_layer against a live Postgres+pgvector database (production-adjacent LXC116 deployment DB, proper secret handling) exercised set_capture_status end-to-end and surfaced the bug.",
+      "exit_code": 1,
+      "observed_result": "asyncpg.exceptions.IndeterminateDatatypeError: could not determine data type of parameter $2 — raised at PREPARE time because the bind param was used only as an argument to the polymorphic jsonb_build_object() with no other typed context. Never caught by any mocked unit test (pair-loop, cold, and Codex reviews all mocked conn.fetchrow/execute and never sent real SQL). This run was performed by the orchestrator against live infra, not reproducible in the fix agent's sandbox (no DATABASE_URL here)."
+    },
+    {
+      "id": "cmd:vfix-grep-jsonb",
+      "command": "grep -n \"jsonb_build_object(\" python/src/open_brain/data_layer/postgres.py",
+      "purpose": "Re-confirm the full inventory of jsonb_build_object call sites before applying the ::text cast fix, and check for other latent instances of the same bug.",
+      "exit_code": 0,
+      "observed_result": "Exactly 2 sites, both inside set_capture_status (lines 1166 and 1176): the default path jsonb_build_object('capture_status', $2) and the explicit-lifecycle path jsonb_build_object('capture_status', $2, 'status', $3). grep for jsonb_build_object/json_build_object/COALESCE in interface.py, server.py, cli/main.py returned no matches — no other bind-param-in-polymorphic-function sites in bead-touched files."
+    },
+    {
+      "id": "cmd:vfix-pre-focused",
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py tests/test_capture_inbox_cli.py -q",
+      "purpose": "Pre-fix baseline for the affected capture inbox tests (confirm current green before applying the ::text cast).",
+      "exit_code": 0,
+      "observed_result": "17 passed, 2 skipped (the two existing @pytest.mark.integration real-DB tests self-skip because DATABASE_URL is absent in this sandbox)."
+    },
+    {
+      "id": "cmd:vfix-green-focused",
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py tests/test_capture_inbox_cli.py tests/test_postgres.py -q",
+      "purpose": "GREEN gate after casting both jsonb_build_object bind params to ::text in set_capture_status and adding the lifecycle-path @pytest.mark.integration regression test.",
+      "exit_code": 0,
+      "observed_result": "63 passed, 3 skipped (the three real-DB integration tests self-skip in this sandbox; count rose from 2 to 3 because the new lifecycle-path integration test was added)."
+    },
+    {
+      "id": "cmd:vfix-green-regression",
+      "command": "cd python && uv run pytest -m \"not integration\" -q",
+      "purpose": "Full non-integration regression gate after the ::text cast fix.",
+      "exit_code": 0,
+      "observed_result": "1282 passed, 25 deselected (integration). No regressions; mocked unit-test SQL-shape assertions still pass because they substring-match jsonb_build_object('capture_status' which is unaffected by the ::text suffix."
     }
   ],
   "skipped_checks": [
@@ -186,6 +221,10 @@
     {
       "check": "AC1/AC3 real Postgres integration execution",
       "reason": "New integration tests were added for AC1/AC3 MoC compliance and collected successfully, but their real database assertions skipped in this sandbox because DATABASE_URL is absent. They must run against a real non-CI Postgres database."
+    },
+    {
+      "check": "Live-DB re-verification of the ::text cast fix for set_capture_status",
+      "reason": "The IndeterminateDatatypeError only manifests when real SQL is sent to a real Postgres server at PREPARE time; it cannot be reproduced or re-verified from the fix agent's sandbox because no DATABASE_URL is present here (both the pre-existing and the newly added @pytest.mark.integration tests self-skip). The orchestrator will re-run the live-DB verification against the production-adjacent Postgres+pgvector database after this fix lands. Non-integration suites (1282 passed) and mocked SQL-shape assertions confirm the change is otherwise correct and non-regressing."
     }
   ],
   "artifacts": [

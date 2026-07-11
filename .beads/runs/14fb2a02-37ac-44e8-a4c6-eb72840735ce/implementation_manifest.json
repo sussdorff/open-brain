@@ -36,7 +36,8 @@
       "changed_files": [
         "python/src/open_brain/data_layer/interface.py",
         "python/src/open_brain/data_layer/postgres.py",
-        "python/tests/test_capture_inbox.py"
+        "python/tests/test_capture_inbox.py",
+        "python/tests/test_capture_inbox_cli.py"
       ],
       "evidence_refs": [
         "cmd:ac2-red-transition",
@@ -45,7 +46,11 @@
         "cmd:pair1-red-capture-inbox",
         "cmd:pair1-green-capture-inbox",
         "cmd:pair1-green-focused",
-        "cmd:pair1-green-regression"
+        "cmd:pair1-green-regression",
+        "cmd:vfix-bug-origin",
+        "cmd:vfix-grep-jsonb",
+        "cmd:vfix-green-focused",
+        "cmd:vfix-green-regression"
       ]
     },
     {
@@ -113,6 +118,10 @@
     {
       "sha": "cad031004d997936cc6c25478249ef3229f995d3",
       "message": "fix(open-brain-slu): address codex adversarial finding — pre-filter capture_status inside hybrid_search"
+    },
+    {
+      "sha": "PENDING",
+      "message": "fix(open-brain-slu): cast jsonb_build_object params to ::text to fix asyncpg IndeterminateDatatypeError in set_capture_status"
     }
   ],
   "tests": [
@@ -180,6 +189,16 @@
       "command": "cd python && uv run pytest -m \"not integration\" -q",
       "status": "passed",
       "evidence_ref": "cmd:codex-fix-green-regression"
+    },
+    {
+      "command": "cd python && uv run pytest tests/test_capture_inbox.py tests/test_capture_inbox_cli.py tests/test_postgres.py -q",
+      "status": "passed",
+      "evidence_ref": "cmd:vfix-green-focused"
+    },
+    {
+      "command": "cd python && uv run pytest -m \"not integration\" -q",
+      "status": "passed",
+      "evidence_ref": "cmd:vfix-green-regression"
     }
   ],
   "external_resources": [],
@@ -210,6 +229,11 @@
     "cmd:final-review-integration-skip",
     "cmd:codex-fix-green-focused",
     "cmd:codex-fix-green-regression",
-    "cmd:codex-fix-metrics"
+    "cmd:codex-fix-metrics",
+    "cmd:vfix-bug-origin",
+    "cmd:vfix-grep-jsonb",
+    "cmd:vfix-pre-focused",
+    "cmd:vfix-green-focused",
+    "cmd:vfix-green-regression"
   ]
 }

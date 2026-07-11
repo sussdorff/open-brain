@@ -163,3 +163,58 @@ class TestCaptureInboxMcpRoundTrip:
         finally:
             if run_id is not None:
                 await dl.delete_by_run_id(run_id)
+
+    @pytest.mark.asyncio
+    async def test_capture_status_lifecycle_transition_round_trip_uses_real_data_layer(
+        self,
+    ) -> None:
+        """Guards the explicit-lifecycle SQL path (jsonb_build_object with $2 and $3).
+
+        Regression for asyncpg IndeterminateDatatypeError: the bind params passed
+        to the polymorphic jsonb_build_object must be cast to ::text or Postgres
+        cannot determine their type at PREPARE time. The default-path variant is
+        covered by test_capture_status_round_trip_uses_real_data_layer; this test
+        covers the sibling SQL statement that also sets lifecycle status.
+        """
+        import os
+
+        from open_brain.data_layer.interface import CaptureTransitionParams, SearchParams
+        from open_brain.data_layer.postgres import PostgresDataLayer
+        from open_brain.ingest.runs import ingest_run
+
+        database_url = os.environ.get("DATABASE_URL", "")
+        if not database_url or database_url.startswith("postgresql://test:test@"):
+            pytest.skip("Requires real DATABASE_URL (not the CI test database)")
+
+        dl = PostgresDataLayer()
+        run_id: str | None = None
+        try:
+            with ingest_run() as current_run_id:
+                run_id = current_run_id
+                saved = await dl.save_memory(
+                    SaveMemoryParams(
+                        text=f"capture lifecycle round trip {run_id}",
+                        capture_status="inbox",
+                    )
+                )
+
+            # Exercises the explicit-lifecycle SQL branch against a real server.
+            transition = await dl.set_capture_status(
+                CaptureTransitionParams(
+                    memory_id=saved.id,
+                    capture_status="dismissed",
+                    lifecycle_status="discarded",
+                )
+            )
+            assert transition.id == saved.id
+            assert transition.message == "Capture status updated"
+
+            result = await dl.search(
+                SearchParams(metadata_filter={"run_id": run_id}, limit=10)
+            )
+            updated = next(memory for memory in result.results if memory.id == saved.id)
+            assert updated.metadata["capture_status"] == "dismissed"
+            assert updated.metadata["status"] == "discarded"
+        finally:
+            if run_id is not None:
+                await dl.delete_by_run_id(run_id)

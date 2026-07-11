@@ -1163,7 +1163,7 @@ class PostgresDataLayer:
             if params.lifecycle_status is None:
                 updated = await conn.fetchrow(
                     """UPDATE memories
-                       SET metadata = metadata || jsonb_build_object('capture_status', $2),
+                       SET metadata = metadata || jsonb_build_object('capture_status', $2::text),
                            updated_at = NOW()
                        WHERE id = $1
                        RETURNING id""",
@@ -1173,7 +1173,7 @@ class PostgresDataLayer:
             else:
                 updated = await conn.fetchrow(
                     """UPDATE memories
-                       SET metadata = metadata || jsonb_build_object('capture_status', $2, 'status', $3),
+                       SET metadata = metadata || jsonb_build_object('capture_status', $2::text, 'status', $3::text),
                            updated_at = NOW()
                        WHERE id = $1
                        RETURNING id""",
