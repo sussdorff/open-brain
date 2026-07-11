@@ -799,23 +799,7 @@ class PostgresDataLayer:
 
         pool = await get_pool()
         async with pool.acquire() as conn:
-            if memory_type == "meeting":
-                rows = await conn.fetch(
-                    """
-                    SELECT
-                        metadata->>'source_ref' AS source_ref,
-                        id AS memory_id,
-                        metadata->>'run_id' AS run_id,
-                        created_at AS ingested_at,
-                        title
-                    FROM memories
-                    WHERE type = 'meeting'
-                      AND metadata->>'source_ref' = ANY($1::text[])
-                    ORDER BY created_at DESC
-                    """,
-                    unique_refs,
-                )
-            elif memory_type is None:
+            if memory_type is None:
                 rows = await conn.fetch(
                     """
                     SELECT
@@ -833,17 +817,17 @@ class PostgresDataLayer:
             else:
                 rows = await conn.fetch(
                     """
-                SELECT
-                    metadata->>'source_ref' AS source_ref,
-                    id AS memory_id,
-                    metadata->>'run_id' AS run_id,
-                    created_at AS ingested_at,
-                    title
-                FROM memories
-                WHERE type = $2
-                  AND metadata->>'source_ref' = ANY($1::text[])
-                ORDER BY created_at DESC
-                """,
+                    SELECT
+                        metadata->>'source_ref' AS source_ref,
+                        id AS memory_id,
+                        metadata->>'run_id' AS run_id,
+                        created_at AS ingested_at,
+                        title
+                    FROM memories
+                    WHERE type = $2
+                      AND metadata->>'source_ref' = ANY($1::text[])
+                    ORDER BY created_at DESC
+                    """,
                     unique_refs,
                     memory_type,
                 )

@@ -365,14 +365,20 @@ def _build_metadata(
 def _parse_note(path: Path, vault_path: Path) -> ParsedNote | SkippedNote:
     """Parse a Markdown note or return a skipped-note result."""
     source_ref = _to_posix(path.relative_to(vault_path))
-    text = path.read_text(encoding="utf-8")
     try:
+        text = path.read_text(encoding="utf-8")
         frontmatter, body = _split_frontmatter(text)
+    except (OSError, UnicodeDecodeError):
+        return SkippedNote(source_ref=source_ref, reason="unreadable")
     except (ValueError, yaml.YAMLError):
         return SkippedNote(source_ref=source_ref, reason="malformed_yaml")
 
     title = _as_str(frontmatter.get("title") or frontmatter.get("name")) or path.stem
     memory_type = map_note_type(source_ref, frontmatter)
+    try:
+        metadata = _build_metadata(path, source_ref, frontmatter, memory_type, title)
+    except OSError:
+        return SkippedNote(source_ref=source_ref, reason="unreadable")
     return ParsedNote(
         source_ref=source_ref,
         path=path,
@@ -380,7 +386,7 @@ def _parse_note(path: Path, vault_path: Path) -> ParsedNote | SkippedNote:
         body=body,
         frontmatter=frontmatter,
         memory_type=memory_type,
-        metadata=_build_metadata(path, source_ref, frontmatter, memory_type, title),
+        metadata=metadata,
         wikilinks=_extract_wikilinks(body),
         attachments=_extract_attachments(body, frontmatter),
     )
@@ -493,20 +499,23 @@ async def _verify_attachment(
 
     try:
         result = await paperless_client.resolve_reference(document_id)
-    except Exception:
+    except Exception as exc:
         result = PaperlessResolveResult(
             status="transport_error",
             document_id=document_id,
-            error="Paperless verification raised an exception",
+            error=str(exc),
         )
 
     if result.status != "found":
-        return None, {
+        problem = {
             "source_ref": note.source_ref,
             "attachment": attachment,
             "document_id": document_id,
             "reason": result.status,
         }
+        if result.status == "transport_error" and result.error:
+            problem["error"] = result.error
+        return None, problem
 
     reference = {
         "document_id": result.document_id or document_id,
@@ -688,6 +697,7 @@ async def _import_vault_reconcile(
     )
 
     if mode == "apply":
+        relationship_source_refs: set[str] = set()
         for note in importable_notes:
             metadata = dict(note.metadata)
             if note.paperless_references:
@@ -711,8 +721,20 @@ async def _import_vault_reconcile(
             )
             items_by_source_ref[note.source_ref]["memory_id"] = result.id
             memory_ids_by_source_ref[note.source_ref] = result.id
+            if result.duplicate_of is not None:
+                items_by_source_ref[note.source_ref] = _item(
+                    source_ref=note.source_ref,
+                    memory_type=note.memory_type,
+                    action="duplicate",
+                    memory_id=result.id,
+                    reason="content_hash_collision",
+                )
+                continue
+            relationship_source_refs.add(note.source_ref)
 
         for note in importable_notes:
+            if note.source_ref not in relationship_source_refs:
+                continue
             source_id = memory_ids_by_source_ref.get(note.source_ref)
             if source_id is None:
                 continue
@@ -779,6 +801,10 @@ async def _main_async(argv: list[str] | None = None) -> int:
     if args.output:
         Path(args.output).write_text(payload + "\n", encoding="utf-8")
     print(payload)
+    current = asyncio.current_task()
+    pending = [task for task in asyncio.all_tasks() if task is not current]
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
     return 0
 
 

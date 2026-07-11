@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import asynccontextmanager
+from dataclasses import replace
 import importlib.util
 import json
-from dataclasses import replace
-from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -195,6 +196,54 @@ class RecordingDataLayer(FakeDataLayer):
         return len(self.relationships)
 
 
+class ContentHashCollisionDataLayer(RecordingDataLayer):
+    """DataLayer double that mirrors Postgres content-hash duplicate returns."""
+
+    def __init__(self, duplicate_refs: dict[str, int]) -> None:
+        super().__init__()
+        self.duplicate_refs = duplicate_refs
+        self.save_attempts: list[SaveMemoryParams] = []
+
+    async def save_memory(self, params: SaveMemoryParams) -> SaveMemoryResult:
+        self.save_attempts.append(params)
+        metadata = params.metadata or {}
+        source_ref = metadata["source_ref"]
+        if source_ref in self.duplicate_refs:
+            existing_id = self.duplicate_refs[source_ref]
+            return SaveMemoryResult(
+                id=existing_id,
+                message="Duplicate content detected",
+                duplicate_of=existing_id,
+            )
+        return await super().save_memory(params)
+
+
+class BackgroundTaskDataLayer(RecordingDataLayer):
+    """DataLayer double that schedules a real background task on save."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.background_completed = False
+        self.background_task: asyncio.Task[None] | None = None
+
+    async def save_memory(self, params: SaveMemoryParams) -> SaveMemoryResult:
+        result = await super().save_memory(params)
+
+        async def mark_complete() -> None:
+            await asyncio.sleep(0)
+            self.background_completed = True
+
+        self.background_task = asyncio.create_task(mark_complete())
+        return result
+
+
+class RaisingPaperlessClient:
+    """Paperless double that raises during attachment verification."""
+
+    async def resolve_reference(self, document_id: int) -> PaperlessResolveResult:
+        raise RuntimeError(f"Paperless transport failed for {document_id}")
+
+
 def _normalize_report(report: dict[str, Any]) -> dict[str, Any]:
     """Normalize environment-specific fields before fixture comparison."""
     normalized = json.loads(json.dumps(report, default=str))
@@ -223,6 +272,33 @@ class TestSecondBrainDryRun:
         assert data_layer.relationships == []
         assert paperless_client.resolved_ids == [101, 404]
         assert _normalize_report(report) == json.loads(EXPECTED_DRY_RUN.read_text())
+
+    @pytest.mark.asyncio
+    async def test_unreadable_markdown_file_is_reported_as_skipped(self, tmp_path):
+        """AC1: unreadable notes are skipped without aborting the vault scan."""
+        from open_brain.second_brain_import import import_vault
+
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        (vault / "Unreadable.md").write_bytes(b"\xff\xfe\xfa")
+
+        report = await import_vault(
+            vault_path=vault,
+            data_layer=FakeDataLayer(),
+            paperless_client=FakePaperlessClient(),
+            apply=False,
+        )
+
+        assert report["summary"]["skipped"] == 1
+        assert report["items"] == [
+            {
+                "source_ref": "Unreadable.md",
+                "type": None,
+                "action": "skip",
+                "memory_id": None,
+                "reason": "unreadable",
+            }
+        ]
 
 
 class TestSecondBrainApply:
@@ -282,6 +358,80 @@ class TestSecondBrainApply:
             item["action"] in {"duplicate", "skip"}
             for item in second["items"]
         )
+
+    @pytest.mark.asyncio
+    async def test_content_hash_collision_is_reported_as_duplicate_target(self, tmp_path):
+        """AC2/AC3: content-hash duplicates are reported and remain link targets."""
+        from open_brain.second_brain_import import import_vault
+
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        (vault / "Source.md").write_text("Links to [[Target]].\n", encoding="utf-8")
+        (vault / "Target.md").write_text("Same body as an existing memory.\n", encoding="utf-8")
+        data_layer = ContentHashCollisionDataLayer({"Target.md": 777})
+
+        report = await import_vault(
+            vault_path=vault,
+            data_layer=data_layer,
+            paperless_client=FakePaperlessClient(),
+            apply=True,
+        )
+
+        items = {item["source_ref"]: item for item in report["items"]}
+        assert items["Target.md"] == {
+            "source_ref": "Target.md",
+            "type": "observation",
+            "action": "duplicate",
+            "memory_id": 777,
+            "reason": "content_hash_collision",
+        }
+        assert items["Source.md"]["action"] == "import"
+        assert report["summary"]["imported"] == 1
+        assert report["summary"]["duplicate"] == 1
+        assert [
+            params.metadata["source_ref"]
+            for params in data_layer.saved
+            if params.metadata is not None
+        ] == ["Source.md"]
+        assert data_layer.relationships == [
+            {
+                "source_id": data_layer.existing_refs["Source.md"],
+                "target_id": 777,
+                "link_type": "references",
+                "metadata": {
+                    "source_ref": "Source.md",
+                    "target_source_ref": "Target.md",
+                    "wikilink": "[[Target]]",
+                },
+            }
+        ]
+
+    @pytest.mark.asyncio
+    async def test_cli_drains_pending_background_tasks_before_return(
+        self,
+        tmp_path,
+        capsys,
+    ):
+        """AC2: CLI apply waits for background save tasks before returning."""
+        from open_brain.second_brain_import import _main_async
+
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        (vault / "Note.md").write_text("Body that schedules embedding.\n", encoding="utf-8")
+        data_layer = BackgroundTaskDataLayer()
+
+        with patch(
+            "open_brain.data_layer.postgres.PostgresDataLayer",
+            return_value=data_layer,
+        ):
+            exit_code = await _main_async([str(vault), "--apply"])
+
+        capsys.readouterr()
+        assert exit_code == 0
+        assert data_layer.background_task is not None
+        assert data_layer.background_task.done()
+        assert not data_layer.background_task.cancelled()
+        assert data_layer.background_completed is True
 
 
 class TestSecondBrainRelationships:
@@ -358,3 +508,35 @@ class TestSecondBrainAttachments:
             ("missing-contract.pdf", 404, "not_found"),
             ("unmapped-scan.pdf", None, "no_mapping"),
         }
+
+    @pytest.mark.asyncio
+    async def test_attachment_transport_error_reports_exception_message(self, tmp_path):
+        """AC4: attachment verification failures keep the original exception text."""
+        from open_brain.second_brain_import import import_vault
+
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        (vault / "Note.md").write_text("See ![[contract.pdf]].\n", encoding="utf-8")
+        mapping = tmp_path / "paperless_mapping.json"
+        mapping.write_text(
+            json.dumps({"contract.pdf": {"document_id": 123}}),
+            encoding="utf-8",
+        )
+
+        report = await import_vault(
+            vault_path=vault,
+            paperless_mapping_path=mapping,
+            data_layer=FakeDataLayer(),
+            paperless_client=RaisingPaperlessClient(),
+            apply=False,
+        )
+
+        assert report["unresolved_attachments"] == [
+            {
+                "source_ref": "Note.md",
+                "attachment": "contract.pdf",
+                "document_id": 123,
+                "reason": "transport_error",
+                "error": "Paperless transport failed for 123",
+            }
+        ]

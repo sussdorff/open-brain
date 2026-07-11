@@ -80,6 +80,73 @@
       ]
     }
   ],
+  "cold_review_fixes": [
+    {
+      "finding": "BLOCKING 1",
+      "status": "done",
+      "summary": "Content-hash duplicate returns from save_memory now relabel the note as duplicate with reason content_hash_collision, exclude it from imported counts, keep the resolved existing memory id for incoming wikilink targets, and do not backfill source_ref or duplicate-note relationships.",
+      "changed_files": [
+        "python/src/open_brain/second_brain_import.py",
+        "python/tests/test_second_brain_import.py"
+      ],
+      "evidence_refs": [
+        "evidence_ledger.commands.cold_review_focused_importer_postgres",
+        "python/tests/test_second_brain_import.py::TestSecondBrainApply::test_content_hash_collision_is_reported_as_duplicate_target"
+      ]
+    },
+    {
+      "finding": "BLOCKING 2",
+      "status": "done",
+      "summary": "The Second Brain CLI now drains pending asyncio tasks after printing or writing the reconciliation report, preventing asyncio.run from cancelling embedding-style background tasks at shutdown.",
+      "changed_files": [
+        "python/src/open_brain/second_brain_import.py",
+        "python/tests/test_second_brain_import.py"
+      ],
+      "evidence_refs": [
+        "evidence_ledger.commands.cold_review_focused_importer_postgres",
+        "python/tests/test_second_brain_import.py::TestSecondBrainApply::test_cli_drains_pending_background_tasks_before_return"
+      ]
+    },
+    {
+      "finding": "ADVISORY 1",
+      "status": "done",
+      "summary": "Unreadable or non-UTF-8 Markdown notes are now reported as skipped with reason unreadable instead of aborting the vault scan.",
+      "changed_files": [
+        "python/src/open_brain/second_brain_import.py",
+        "python/tests/test_second_brain_import.py"
+      ],
+      "evidence_refs": [
+        "evidence_ledger.commands.cold_review_focused_importer_postgres",
+        "python/tests/test_second_brain_import.py::TestSecondBrainDryRun::test_unreadable_markdown_file_is_reported_as_skipped"
+      ]
+    },
+    {
+      "finding": "ADVISORY 2",
+      "status": "done",
+      "summary": "Attachment verification transport exceptions now preserve the original exception text in unresolved attachment reports for observability.",
+      "changed_files": [
+        "python/src/open_brain/second_brain_import.py",
+        "python/tests/test_second_brain_import.py"
+      ],
+      "evidence_refs": [
+        "evidence_ledger.commands.cold_review_focused_importer_postgres",
+        "python/tests/test_second_brain_import.py::TestSecondBrainAttachments::test_attachment_transport_error_reports_exception_message"
+      ]
+    },
+    {
+      "finding": "ADVISORY 3",
+      "status": "done",
+      "summary": "ingest_status_by_source_refs now has only two SQL branches: no type filter for memory_type=None and a parameterized type filter for all other memory types, including the default meeting caller.",
+      "changed_files": [
+        "python/src/open_brain/data_layer/postgres.py",
+        "python/tests/test_postgres.py"
+      ],
+      "evidence_refs": [
+        "evidence_ledger.commands.cold_review_focused_importer_postgres",
+        "python/tests/test_postgres.py::TestPostgresIngestStatus"
+      ]
+    }
+  ],
   "changed_files": [
     "python/pyproject.toml",
     "python/uv.lock",
@@ -125,6 +192,16 @@
       "command": "uv run pytest -m \"not integration\"",
       "status": "passed",
       "observed_result": "1420 passed, 23 deselected, 57 warnings after rebasing onto origin/main"
+    },
+    {
+      "command": "uv run pytest tests/test_second_brain_import.py tests/test_postgres.py -q",
+      "status": "passed",
+      "observed_result": "57 passed, 14 warnings"
+    },
+    {
+      "command": "uv run pytest -m \"not integration\"",
+      "status": "passed",
+      "observed_result": "1424 passed, 23 deselected, 55 warnings"
     },
     {
       "command": "UV_CACHE_DIR=/private/tmp/uv-cache-open-brain-brt uv run python -m py_compile src/open_brain/second_brain_import.py src/open_brain/data_layer/postgres.py src/open_brain/data_layer/interface.py",
