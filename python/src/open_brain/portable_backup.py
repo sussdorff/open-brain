@@ -161,6 +161,27 @@ def _sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _validate_source_label(source_label: str | None) -> None:
+    """Reject source labels that look like credentials or connection strings."""
+    if source_label is None:
+        return
+    lowered = source_label.lower()
+    forbidden_markers = (
+        "://",
+        "@",
+        "password",
+        "passwd",
+        "secret",
+        "token",
+        "api_key",
+        "apikey",
+        "database_url",
+        "jwt",
+    )
+    if any(marker in lowered for marker in forbidden_markers):
+        raise ValueError("source_label must be non-identifying and must not contain credentials")
+
+
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     """Read a deterministic JSONL file into record dictionaries."""
     records: list[dict[str, Any]] = []
@@ -182,6 +203,7 @@ async def export_bundle(
     created_at: datetime | None = None,
 ) -> dict[str, Any]:
     """Export a portable Open Brain knowledge bundle."""
+    _validate_source_label(source_label)
     path = Path(bundle_path)
     path.mkdir(parents=True, exist_ok=True)
 
