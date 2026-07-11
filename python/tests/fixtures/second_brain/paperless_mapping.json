@@ -1,0 +1,10 @@
+{
+  "openbrain-plan.pdf": {
+    "document_id": 101,
+    "instance": "paperless-test"
+  },
+  "missing-contract.pdf": {
+    "document_id": 404,
+    "instance": "paperless-test"
+  }
+}
