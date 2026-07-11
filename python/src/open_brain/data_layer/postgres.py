@@ -296,6 +296,15 @@ def _parse_date(value: str | None) -> datetime | None:
         return None
 
 
+def _parse_portable_timestamp(value: Any) -> Any:
+    """Parse portable ISO timestamps for asyncpg timestamptz parameters."""
+    if value is None or isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return value
+
+
 # Importance multipliers for decay rate: critical=0 (no decay), high=0.5x, medium=1.0x, low=2.0x
 _IMPORTANCE_MULTIPLIERS: dict[str, float] = {
     "critical": 0.0,
@@ -1698,6 +1707,168 @@ class PostgresDataLayer:
             "embedding_tokens_today": embedding_tokens_today,
             "estimated_embedding_cost_today": estimated_cost,
         }
+
+    async def portable_closure_counts(self) -> dict[str, int]:
+        """Return row counts for the portable knowledge closure."""
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            indexes = await conn.fetchrow("SELECT COUNT(*)::int AS count FROM memory_indexes")
+            memories = await conn.fetchrow("SELECT COUNT(*)::int AS count FROM memories")
+            relationships = await conn.fetchrow(
+                "SELECT COUNT(*)::int AS count FROM memory_relationships"
+            )
+        return {
+            "indexes": int(indexes["count"]),
+            "memories": int(memories["count"]),
+            "relationships": int(relationships["count"]),
+        }
+
+    async def export_portable_records(self) -> dict[str, list[dict[str, Any]]]:
+        """Read the portable knowledge closure without credentials or embeddings."""
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            indexes = await conn.fetch(
+                "SELECT id, name FROM memory_indexes ORDER BY id"
+            )
+            memories = await conn.fetch(
+                """SELECT id, index_id, session_id, type, title, subtitle, narrative,
+                          content, metadata, priority, stability, access_count,
+                          last_accessed_at, created_at, updated_at, user_id,
+                          importance, last_decay_at, session_ref
+                   FROM memories
+                   ORDER BY id"""
+            )
+            relationships = await conn.fetch(
+                """SELECT id, source_id, target_id, relation_type, link_type, confidence, metadata
+                   FROM memory_relationships
+                   ORDER BY source_id, target_id, relation_type"""
+            )
+        return {
+            "indexes": [dict(row) for row in indexes],
+            "memories": [dict(row) for row in memories],
+            "relationships": [dict(row) for row in relationships],
+        }
+
+    async def restore_portable_records(
+        self,
+        indexes: list[dict[str, Any]],
+        memories: list[dict[str, Any]],
+        relationships: list[dict[str, Any]],
+        *,
+        regenerate_embeddings: bool,
+    ) -> None:
+        """Restore portable records with explicit ids and idempotent conflicts."""
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                for index in indexes:
+                    await conn.execute(
+                        """INSERT INTO memory_indexes (id, name)
+                           VALUES ($1, $2)
+                           ON CONFLICT (id) DO NOTHING""",
+                        index["id"],
+                        index["name"],
+                    )
+
+                for memory in memories:
+                    await conn.execute(
+                        """INSERT INTO memories (
+                               id, index_id, session_id, type, title, subtitle, narrative,
+                               content, metadata, priority, stability, access_count,
+                               last_accessed_at, created_at, updated_at, user_id,
+                               importance, last_decay_at, session_ref
+                           )
+                           VALUES (
+                               $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10,
+                               $11, $12, $13, $14, $15, $16, $17, $18, $19
+                           )
+                           ON CONFLICT (id) DO NOTHING""",
+                        memory["id"],
+                        memory.get("index_id"),
+                        memory.get("session_id"),
+                        memory.get("type"),
+                        memory.get("title"),
+                        memory.get("subtitle"),
+                        memory.get("narrative"),
+                        memory.get("content"),
+                        memory.get("metadata") or {},
+                        memory.get("priority"),
+                        memory.get("stability"),
+                        memory.get("access_count"),
+                        _parse_portable_timestamp(memory.get("last_accessed_at")),
+                        _parse_portable_timestamp(memory.get("created_at")),
+                        _parse_portable_timestamp(memory.get("updated_at")),
+                        memory.get("user_id"),
+                        memory.get("importance"),
+                        _parse_portable_timestamp(memory.get("last_decay_at")),
+                        memory.get("session_ref"),
+                    )
+
+                for relationship in relationships:
+                    await conn.execute(
+                        """INSERT INTO memory_relationships (
+                               id, source_id, target_id, relation_type, link_type, confidence, metadata
+                           )
+                           VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+                           ON CONFLICT (source_id, target_id, relation_type) DO NOTHING""",
+                        relationship.get("id"),
+                        relationship["source_id"],
+                        relationship["target_id"],
+                        relationship["relation_type"],
+                        relationship.get("link_type") or relationship["relation_type"],
+                        relationship.get("confidence"),
+                        relationship.get("metadata"),
+                    )
+
+                await conn.execute(
+                    """SELECT setval(
+                           pg_get_serial_sequence('memory_indexes', 'id'),
+                           GREATEST(COALESCE((SELECT MAX(id) FROM memory_indexes), 0) + 1, 1),
+                           false
+                       )"""
+                )
+                await conn.execute(
+                    """SELECT setval(
+                           pg_get_serial_sequence('memories', 'id'),
+                           GREATEST(COALESCE((SELECT MAX(id) FROM memories), 0) + 1, 1),
+                           false
+                       )"""
+                )
+                await conn.execute(
+                    """SELECT setval(
+                           pg_get_serial_sequence('memory_relationships', 'id'),
+                           GREATEST(COALESCE((SELECT MAX(id) FROM memory_relationships), 0) + 1, 1),
+                           false
+                       )"""
+                )
+
+        if regenerate_embeddings:
+            for memory in memories:
+                text_to_embed = ": ".join(
+                    str(part)
+                    for part in [
+                        memory.get("title"),
+                        memory.get("subtitle"),
+                        memory.get("narrative"),
+                        memory.get("content"),
+                    ]
+                    if part
+                )
+                if text_to_embed:
+                    await self._embed_memory_only(memory["id"], text_to_embed)
+
+    async def _embed_memory_only(self, memory_id: int, text: str) -> None:
+        """Regenerate a restored memory embedding without auto-linking."""
+        embedding, token_count = await embed_with_usage(text)
+        await self._log_embedding_tokens("document", token_count)
+        pg_vec = to_pg_vector(embedding)
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE memories SET embedding = $1 WHERE id = $2",
+                pg_vec,
+                memory_id,
+            )
 
     async def refine_memories(self, params: RefineParams) -> RefineResult:
         """LLM-powered memory consolidation."""

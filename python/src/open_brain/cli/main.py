@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from open_brain.cli.client import MCPError, call_tool
+from open_brain.data_layer.postgres import PostgresDataLayer
+from open_brain.portable_backup import export_bundle, restore_bundle, verify_round_trip
 from open_brain.runtime import run_server
 
 
@@ -324,6 +326,32 @@ async def _cmd_stats(_args: argparse.Namespace) -> Any:
 async def _cmd_doctor(_args: argparse.Namespace) -> Any:
     """Run server diagnostics through the MCP doctor tool."""
     return await call_tool("doctor", {})
+
+
+async def _cmd_export(args: argparse.Namespace) -> Any:
+    """Export a portable knowledge bundle."""
+    return await export_bundle(
+        Path(args.bundle_path),
+        PostgresDataLayer(),
+        source_label=args.source_label,
+    )
+
+
+async def _cmd_restore(args: argparse.Namespace) -> Any:
+    """Restore a portable knowledge bundle."""
+    return await restore_bundle(
+        Path(args.bundle_path),
+        PostgresDataLayer(),
+        regenerate_embeddings=args.regenerate_embeddings,
+    )
+
+
+async def _cmd_verify(args: argparse.Namespace) -> Any:
+    """Verify a portable knowledge bundle against the current store."""
+    return await verify_round_trip(
+        Path(args.bundle_path),
+        PostgresDataLayer(),
+    )
 
 
 def _cmd_server(args: argparse.Namespace) -> None:
@@ -890,6 +918,39 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Run server diagnostics",
     )
 
+    # export
+    p_export = subparsers.add_parser(
+        "export",
+        help="Export a portable knowledge bundle",
+    )
+    p_export.add_argument("bundle_path", help="Bundle directory to write")
+    p_export.add_argument(
+        "--source-label",
+        dest="source_label",
+        help="Optional non-identifying source label for the manifest",
+    )
+
+    # restore
+    p_restore = subparsers.add_parser(
+        "restore",
+        help="Restore a portable knowledge bundle into an empty store",
+    )
+    p_restore.add_argument("bundle_path", help="Bundle directory to restore")
+    p_restore.add_argument(
+        "--skip-embeddings",
+        action="store_false",
+        dest="regenerate_embeddings",
+        default=True,
+        help="Do not regenerate embeddings after restore",
+    )
+
+    # verify
+    p_verify = subparsers.add_parser(
+        "verify",
+        help="Verify a portable bundle against the current store",
+    )
+    p_verify.add_argument("bundle_path", help="Bundle directory to verify")
+
     # server
     p_server = subparsers.add_parser(
         "server",
@@ -1187,6 +1248,9 @@ _COMMAND_MAP = {
     "context": _cmd_context,
     "stats": _cmd_stats,
     "doctor": _cmd_doctor,
+    "export": _cmd_export,
+    "restore": _cmd_restore,
+    "verify": _cmd_verify,
     "update": _cmd_update,
     "ingest": _cmd_ingest,
     "people": _cmd_people,
