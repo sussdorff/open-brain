@@ -5,7 +5,7 @@
     {
       "id": "AC1",
       "criterion": "Representative raw captures are classified into the canonical vocabulary and receive type-specific metadata.",
-      "status": "passed",
+      "status": "done",
       "changed_files": [
         "python/src/open_brain/capture_router.py",
         "python/tests/test_capture_router.py"
@@ -19,7 +19,7 @@
     {
       "id": "AC2",
       "criterion": "Existing capture templates and historical memory types remain readable and valid.",
-      "status": "passed",
+      "status": "done",
       "changed_files": [
         "python/src/open_brain/data_layer/interface.py",
         "python/src/open_brain/server.py",
@@ -34,7 +34,7 @@
     {
       "id": "AC3",
       "criterion": "Callers can explicitly preserve pre-structured captures without classifier overwrite.",
-      "status": "passed",
+      "status": "done",
       "changed_files": [
         "python/src/open_brain/capture_router.py",
         "python/src/open_brain/server.py",
@@ -59,27 +59,27 @@
   "commits": [
     {
       "sha": "53f8713",
-      "message": "test(open-brain-hws): red — canonical capture vocabulary"
+      "message": "test(open-brain-hws): red \u2014 canonical capture vocabulary"
     },
     {
       "sha": "ce28995",
-      "message": "feat(open-brain-hws): green — canonical capture vocabulary"
+      "message": "feat(open-brain-hws): green \u2014 canonical capture vocabulary"
     },
     {
       "sha": "4e7f5c7",
-      "message": "test(open-brain-hws): red — canonical domain metadata"
+      "message": "test(open-brain-hws): red \u2014 canonical domain metadata"
     },
     {
       "sha": "da7ee4a",
-      "message": "feat(open-brain-hws): green — canonical domain metadata"
+      "message": "feat(open-brain-hws): green \u2014 canonical domain metadata"
     },
     {
       "sha": "f22206c",
-      "message": "test(open-brain-hws): red — explicit capture preservation"
+      "message": "test(open-brain-hws): red \u2014 explicit capture preservation"
     },
     {
       "sha": "60e9dba",
-      "message": "feat(open-brain-hws): green — explicit capture preservation"
+      "message": "feat(open-brain-hws): green \u2014 explicit capture preservation"
     }
   ],
   "tests": [
