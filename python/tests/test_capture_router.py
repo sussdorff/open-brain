@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+import open_brain.capture_router as capture_router
 from open_brain.capture_router import classify_and_extract
 
 
@@ -390,6 +391,45 @@ class TestBypassConditions:
         assert call_count["n"] == 1
 
 
+# ─── AC3: Explicit caller type aliases and pre-structured bypass ──────────────
+
+class TestTypeAliasNormalization:
+    @pytest.mark.parametrize(
+        ("raw_type", "canonical_type"),
+        [
+            ("note", "journal"),
+            ("diary", "journal"),
+            ("reference", "resource"),
+            ("idea", "concept"),
+            ("email", "correspondence"),
+            ("letter", "correspondence"),
+            ("prompt_template", "prompt"),
+        ],
+    )
+    def test_explicit_type_aliases_normalize_to_canonical_vocabulary(
+        self,
+        raw_type,
+        canonical_type,
+    ):
+        """Common explicit type aliases normalize to the canonical vocabulary."""
+        assert capture_router.normalize_memory_type(raw_type) == canonical_type
+
+    def test_alias_normalization_preserves_prestructured_capture_template_type(self):
+        """Pre-structured captures bypass alias normalization and keep caller type."""
+        existing_metadata = {
+            "capture_template": "journal",
+            "entry_date": "2026-07-11",
+            "reflection": "Caller already structured this payload.",
+        }
+
+        result = capture_router.normalize_memory_type(
+            "note",
+            existing_metadata=existing_metadata,
+        )
+
+        assert result == "note"
+
+
 # ─── AK6: Unclassifiable → observation ────────────────────────────────────────
 
 class TestObservationFallback:
@@ -549,6 +589,67 @@ class TestServerIntegration:
             )
 
         # Guard skips update_memory: classification ({}) == (metadata or {}) ({})
+        mock_dl.update_memory.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_save_memory_normalizes_alias_type_for_unstructured_capture(self):
+        """save_memory normalizes explicit aliases before saving unstructured captures."""
+        from open_brain.data_layer.interface import SaveMemoryResult
+
+        mock_dl = AsyncMock()
+        mock_dl.save_memory.return_value = SaveMemoryResult(id=88, message="saved")
+        classifier = AsyncMock(return_value={})
+
+        with (
+            patch("open_brain.server.get_dl", return_value=mock_dl),
+            patch("open_brain.server.classify_and_extract", new=classifier),
+            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+        ):
+            from open_brain.server import save_memory
+            await save_memory(
+                text="Diary note about simplifying the capture workflow",
+                type="note",
+            )
+
+        save_params = mock_dl.save_memory.call_args[0][0]
+        assert save_params.type == "journal"
+        classifier.assert_awaited_once_with(
+            "Diary note about simplifying the capture workflow",
+            existing_metadata=None,
+            memory_type="journal",
+        )
+
+    @pytest.mark.asyncio
+    async def test_save_memory_preserves_prestructured_capture_template_type_and_metadata(self):
+        """save_memory preserves caller type and metadata when capture_template is already set."""
+        from open_brain.data_layer.interface import SaveMemoryResult
+
+        existing_metadata = {
+            "capture_template": "journal",
+            "entry_date": "2026-07-11",
+            "reflection": "Caller already structured this payload.",
+        }
+        mock_dl = AsyncMock()
+        mock_dl.save_memory.return_value = SaveMemoryResult(id=89, message="saved")
+
+        with (
+            patch("open_brain.server.get_dl", return_value=mock_dl),
+            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+            patch(
+                "open_brain.capture_router.llm_complete",
+                new=AsyncMock(side_effect=AssertionError("llm_complete must not be called")),
+            ),
+        ):
+            from open_brain.server import save_memory
+            await save_memory(
+                text="Pre-structured journal entry",
+                type="note",
+                metadata=existing_metadata,
+            )
+
+        save_params = mock_dl.save_memory.call_args[0][0]
+        assert save_params.type == "note"
+        assert save_params.metadata == existing_metadata
         mock_dl.update_memory.assert_not_called()
 
     @pytest.mark.asyncio
