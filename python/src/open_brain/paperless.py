@@ -119,9 +119,17 @@ class PaperlessClient:
             )
 
         if response.status_code == 404:
-            return PaperlessResolveResult(status="not_found", document_id=document_id)
+            return PaperlessResolveResult(
+                status="not_found",
+                document_id=document_id,
+                error=f"Paperless document {document_id} was not found",
+            )
         if response.status_code in {401, 403}:
-            return PaperlessResolveResult(status="unauthorized", document_id=document_id)
+            return PaperlessResolveResult(
+                status="unauthorized",
+                document_id=document_id,
+                error="Paperless request was unauthorized or forbidden",
+            )
         if response.status_code >= 500:
             return PaperlessResolveResult(
                 status="transport_error",
