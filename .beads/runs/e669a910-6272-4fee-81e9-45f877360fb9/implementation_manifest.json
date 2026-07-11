@@ -80,6 +80,14 @@
     {
       "sha": "60e9dba",
       "message": "feat(open-brain-hws): green \u2014 explicit capture preservation"
+    },
+    {
+      "sha": "9550cda",
+      "message": "test(open-brain-hws): red \u2014 codex regression coverage"
+    },
+    {
+      "sha": "df30c27",
+      "message": "fix(open-brain-hws): address codex adversarial findings"
     }
   ],
   "tests": [
@@ -112,6 +120,18 @@
       "cwd": "python",
       "status": "failed_expected",
       "evidence_ref": "cmd:exact-final"
+    },
+    {
+      "command": "uv run pytest tests/test_capture_router.py::TestCanonicalTypeForCaptureTemplate tests/test_capture_router.py::TestClassifierPromptCanonicalFields tests/test_capture_router.py::TestServerIntegration -v",
+      "cwd": "python",
+      "status": "failed_expected",
+      "evidence_ref": "cmd:red-codex"
+    },
+    {
+      "command": "uv run pytest tests/test_capture_router.py tests/test_domain_schemas.py tests/test_domain_metadata.py -m \"not integration\" -v",
+      "cwd": "python",
+      "status": "passed",
+      "evidence_ref": "cmd:affected-codex-final"
     }
   ],
   "external_resources": [],
@@ -120,7 +140,10 @@
     "Capture Router prompt now advertises project, resource, concept, journal, correspondence, and prompt templates in addition to existing templates.",
     "save_memory normalizes a small explicit type alias set before saving unstructured captures.",
     "save_memory preserves caller-provided type and metadata when metadata.capture_template is already present.",
-    "validate_domain_metadata gained warning-only branches for new canonical types while unknown and historical types remain permissive pass-through."
+    "validate_domain_metadata gained warning-only branches for new canonical types while unknown and historical types remain permissive pass-through.",
+    "Codex fix: classifier prompt and module docstring now advertise project.due_date and prompt.last_used_at so raw captures reliably extract those canonical fields.",
+    "Codex fix: capture_router.canonical_type_for_capture_template maps person_context -> canonical person for domain-metadata validation while preserving the stored capture_template value.",
+    "Codex fix: save_memory now runs domain-metadata validation against classifier-generated canonical type + extracted fields for raw captures (no caller capture_template), merging non-duplicate warnings; pre-structured (AC3) and duplicate paths keep caller-only validation."
   ],
   "evidence_refs": [
     "cmd:red-ac1",
@@ -130,6 +153,9 @@
     "cmd:red-ac3",
     "cmd:green-ac3",
     "cmd:exact-final",
-    "cmd:affected-final"
+    "cmd:affected-final",
+    "cmd:red-codex",
+    "cmd:green-codex",
+    "cmd:affected-codex-final"
   ]
 }

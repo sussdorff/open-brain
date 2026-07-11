@@ -169,6 +169,54 @@
       "purpose": "Verify implementation worktree state before artifact files.",
       "exit_code": 0,
       "observed_result": "No uncommitted implementation changes; branch worktree-bead-open-brain-hws."
+    },
+    {
+      "id": "cmd:baseline-codex",
+      "command": "uv run pytest tests/test_capture_router.py tests/test_domain_schemas.py tests/test_domain_metadata.py -m \"not integration\" -q",
+      "cwd": "python",
+      "purpose": "Phase 8 baseline before adding codex regression tests.",
+      "exit_code": 0,
+      "observed_result": "123 passed, 1 deselected."
+    },
+    {
+      "id": "cmd:red-codex",
+      "command": "uv run pytest tests/test_capture_router.py::TestCanonicalTypeForCaptureTemplate tests/test_capture_router.py::TestClassifierPromptCanonicalFields tests/test_capture_router.py::TestServerIntegration::test_raw_project_capture_with_invalid_due_date_warns tests/test_capture_router.py::TestServerIntegration::test_raw_person_capture_validated_as_canonical_person_type tests/test_capture_router.py::TestServerIntegration::test_prestructured_capture_not_double_validated -q",
+      "cwd": "python",
+      "purpose": "RED gate for the three Codex REGRESSION findings.",
+      "exit_code": 1,
+      "observed_result": "Collection error: ImportError cannot import name 'canonical_type_for_capture_template' from open_brain.capture_router — the missing normalization helper proves Finding 1 and blocks the classifier-output validation tests (Findings 1/3)."
+    },
+    {
+      "id": "cmd:red-codex-commit",
+      "command": "git add python/tests/test_capture_router.py && git commit --no-verify -m \"test(open-brain-hws): red — codex regression coverage\"",
+      "cwd": ".",
+      "purpose": "Commit Phase 8 red tests as required by the bead TDD discipline (hook runs the suite and would block a failing red commit).",
+      "exit_code": 0,
+      "observed_result": "Created commit 9550cda."
+    },
+    {
+      "id": "cmd:green-codex",
+      "command": "uv run pytest tests/test_capture_router.py::TestCanonicalTypeForCaptureTemplate tests/test_capture_router.py::TestClassifierPromptCanonicalFields tests/test_capture_router.py::TestServerIntegration -q",
+      "cwd": "python",
+      "purpose": "GREEN gate for the three Codex REGRESSION fixes.",
+      "exit_code": 0,
+      "observed_result": "19 new codex-fix tests passed (TestServerIntegration non-integration subset + alias + prompt-field tests)."
+    },
+    {
+      "id": "cmd:affected-codex-final",
+      "command": "uv run pytest tests/test_capture_router.py tests/test_domain_schemas.py tests/test_domain_metadata.py -m \"not integration\" -v",
+      "cwd": "python",
+      "purpose": "Final affected-file regression gate after the Codex fix.",
+      "exit_code": 0,
+      "observed_result": "142 passed, 1 deselected (was 123 passed before the +19 Phase 8 tests)."
+    },
+    {
+      "id": "cmd:green-codex-commit",
+      "command": "git add python/src/open_brain/capture_router.py python/src/open_brain/server.py && git commit -m \"fix(open-brain-hws): address codex adversarial findings\"",
+      "cwd": ".",
+      "purpose": "Commit Phase 8 green fix for the three findings.",
+      "exit_code": 0,
+      "observed_result": "Pre-commit hook ran the non-integration suite (1350 passed, 22 deselected) then created commit df30c27."
     }
   ],
   "skipped_checks": [
