@@ -21,8 +21,12 @@ from open_brain.data_layer.embedding import (
 )
 from open_brain.data_layer.reranker import rerank
 from open_brain.data_layer.interface import (
+    CANONICAL_ENTITY_METADATA_KEY,
+    CANONICAL_KIND_METADATA_KEY,
+    CANONICAL_KINDS,
     IMPORTANCE_VALUES,
     VALID_LINK_TYPES,
+    ApprovedCanonicalEntityUpdateParams,
     ClusterPlan,
     CompactParams,
     CompactResult,
@@ -46,6 +50,7 @@ from open_brain.data_layer.interface import (
     SearchResult,
     TimelineParams,
     TimelineResult,
+    is_canonical_entity,
     rank_importance,
 )
 from open_brain.data_layer.refine import analyze_with_llm
@@ -57,6 +62,139 @@ logger = logging.getLogger(__name__)
 DEDUP_WINDOW_DAYS = 30  # How far back the content-hash dedup check looks
 
 # ─── compact_memories helpers ─────────────────────────────────────────────────
+
+def canonical_entity_protection_predicate(alias: str | None = None) -> str:
+    """Return the shared SQL predicate that excludes protected canonical entities."""
+    metadata_ref = f"{alias}.metadata" if alias else "metadata"
+    return f"({metadata_ref}->>'{CANONICAL_ENTITY_METADATA_KEY}') IS DISTINCT FROM 'true'"
+
+
+def _canonical_entity_protection_filter(alias: str | None = None) -> str:
+    """Return an AND-prefixed canonical entity protection SQL clause."""
+    return f"AND {canonical_entity_protection_predicate(alias)}"
+
+
+async def _filter_out_newly_canonical(
+    conn: asyncpg.Connection, ids: list[int]
+) -> list[int]:
+    """Return the subset of ids that are still safe to repoint/delete.
+
+    Re-checks canonical protection immediately before a destructive
+    mutation-site step (relationship repointing, usage-log deletion) to narrow
+    the race window between candidate planning and execution. A memory promoted
+    to a protected canonical entity in that window is dropped here so its
+    relationships and usage history are left intact. The final memories DELETE
+    is still separately guarded by canonical_entity_protection_predicate() as
+    the last line of defense. Input order is preserved.
+    """
+    if not ids:
+        return []
+    rows = await conn.fetch(
+        f"SELECT id FROM memories WHERE id = ANY($1::int[]) "
+        f"AND {canonical_entity_protection_predicate()}",
+        ids,
+    )
+    safe = {row["id"] for row in rows}
+    return [memory_id for memory_id in ids if memory_id in safe]
+
+
+def _parse_execute_count(result: str | None) -> int:
+    """Parse asyncpg execute() row-count strings such as 'UPDATE 3'."""
+    parts = result.split() if isinstance(result, str) else []
+    if len(parts) >= 2 and parts[-1].isdigit():
+        return int(parts[-1])
+    return 0
+
+
+def _coerce_count(value: Any) -> int:
+    """Convert DB count values to int, treating mock placeholders as zero."""
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _metadata_from_row(row: Any) -> dict[str, Any]:
+    """Return dict metadata from an asyncpg-like row."""
+    raw_metadata = row.get("metadata")
+    if isinstance(raw_metadata, dict):
+        return raw_metadata
+    if isinstance(raw_metadata, str):
+        try:
+            parsed = _json.loads(raw_metadata)
+            return parsed if isinstance(parsed, dict) else {}
+        except (ValueError, TypeError):
+            return {}
+    return {}
+
+
+def _row_is_protected_canonical_entity(row: Any) -> bool:
+    """Return True when a fetched row has the canonical protection marker."""
+    return _metadata_from_row(row).get(CANONICAL_ENTITY_METADATA_KEY) is True
+
+
+async def _repoint_relationships(
+    conn: asyncpg.Connection,
+    source_id: int,
+    target_id: int,
+) -> int:
+    """Repoint memory_relationships rows from source_id to target_id."""
+    total_affected = 0
+    result = await conn.execute(
+        """
+        DELETE FROM memory_relationships
+        WHERE (source_id = $1 AND target_id = $2)
+           OR (source_id = $2 AND target_id = $1)
+        """,
+        source_id,
+        target_id,
+    )
+    total_affected += _parse_execute_count(result)
+
+    result = await conn.execute(
+        """
+        DELETE FROM memory_relationships
+        WHERE source_id = $1
+          AND EXISTS (
+            SELECT 1 FROM memory_relationships r2
+            WHERE r2.source_id = $2
+              AND r2.target_id = memory_relationships.target_id
+              AND r2.relation_type = memory_relationships.relation_type
+          )
+        """,
+        source_id,
+        target_id,
+    )
+    total_affected += _parse_execute_count(result)
+
+    result = await conn.execute(
+        """
+        DELETE FROM memory_relationships
+        WHERE target_id = $1
+          AND EXISTS (
+            SELECT 1 FROM memory_relationships r2
+            WHERE r2.target_id = $2
+              AND r2.source_id = memory_relationships.source_id
+              AND r2.relation_type = memory_relationships.relation_type
+          )
+        """,
+        source_id,
+        target_id,
+    )
+    total_affected += _parse_execute_count(result)
+
+    result = await conn.execute(
+        """
+        UPDATE memory_relationships
+        SET source_id = CASE WHEN source_id = $1 THEN $2 ELSE source_id END,
+            target_id = CASE WHEN target_id = $1 THEN $2 ELSE target_id END
+        WHERE source_id = $1 OR target_id = $1
+        """,
+        source_id,
+        target_id,
+    )
+    total_affected += _parse_execute_count(result)
+    return total_affected
 
 def _build_clusters(ids: list[int], edges: list[tuple[int, int]]) -> list[list[int]]:
     """Union-find over edges; return only clusters with >= 2 members."""
@@ -103,11 +241,15 @@ def _select_canonical(members: list[int], rows: dict[int, Any], strategy: str) -
 
 # compact_memories also excludes 'archived' (in addition to materialized/discarded)
 # because compaction should only touch actively-managed memories.
-_compact_lifecycle_filter = (
+_active_lifecycle_filter = (
     "AND (metadata->>'status' IS NULL "
     "OR metadata->>'status' NOT IN ('materialized', 'discarded', 'archived')) "
     "AND (metadata->>'do_not_compact' IS NULL "
     "OR metadata->>'do_not_compact' != 'true')"
+)
+_compact_lifecycle_filter = (
+    f"{_active_lifecycle_filter} "
+    f"{_canonical_entity_protection_filter()}"
 )
 
 _pool: asyncpg.Pool | None = None
@@ -308,7 +450,7 @@ async def get_pool() -> asyncpg.Pool:
             # Typed-relationship schema migration (idempotent)
             await _ensure_link_type_column(conn)
             await _ensure_metadata_column(conn)
-            await conn.execute("""
+            await conn.execute(f"""
                 CREATE OR REPLACE FUNCTION decay_unused_priorities(
                     p_stale_days integer,
                     p_decay_factor float
@@ -339,6 +481,7 @@ async def get_pool() -> asyncpg.Pool:
                           AND (m.last_accessed_at IS NULL OR m.last_accessed_at < NOW() - (p_stale_days || ' days')::interval)
                           AND m.created_at < NOW() - (p_stale_days || ' days')::interval
                           AND (m.last_decay_at IS NULL OR m.last_decay_at < NOW() - interval '24 hours')
+                          AND {canonical_entity_protection_predicate("m")}
                         RETURNING m.id
                     )
                     SELECT COUNT(*) INTO v_updated FROM updated;
@@ -1116,6 +1259,112 @@ class PostgresDataLayer:
 
         return SaveMemoryResult(id=params.id, message="Memory updated")
 
+    async def approved_update_canonical_entity(
+        self, params: ApprovedCanonicalEntityUpdateParams
+    ) -> SaveMemoryResult:
+        """Apply an explicitly approved canonical entity update or soft archive."""
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            existing = await conn.fetchrow(
+                """
+                SELECT id, content, type, title, subtitle, narrative, metadata
+                FROM memories
+                WHERE id = $1
+                """,
+                params.id,
+            )
+            if not existing:
+                raise ValueError(f"Memory {params.id} not found")
+
+            if not _row_is_protected_canonical_entity(existing):
+                raise ValueError(f"Memory {params.id} is not a canonical entity")
+
+            # Capture the audit trail from the ORIGINAL server-side metadata
+            # BEFORE merging caller-supplied fields. The audit list is
+            # append-only and server-computed: a caller-supplied "audit" key in
+            # params.metadata must never overwrite or truncate prior history.
+            existing_metadata = _metadata_from_row(existing)
+            audit_raw = existing_metadata.get("audit")
+            audit = list(audit_raw) if isinstance(audit_raw, list) else []
+
+            metadata = existing_metadata.copy()
+            metadata.update(params.metadata or {})
+            metadata[CANONICAL_ENTITY_METADATA_KEY] = True
+
+            canonical_kind = metadata.get(CANONICAL_KIND_METADATA_KEY)
+            if canonical_kind not in CANONICAL_KINDS:
+                raise ValueError(
+                    f"canonical_kind must be one of {sorted(CANONICAL_KINDS)!r}"
+                )
+
+            audit.append(
+                {
+                    "op": params.operation,
+                    "at": datetime.now(UTC).isoformat(),
+                    "actor": params.actor,
+                    "note": params.note,
+                }
+            )
+            # Always set the server-computed append-only trail last, so any
+            # caller-supplied "audit" key merged above is unconditionally
+            # overwritten and prior history can only ever grow.
+            metadata["audit"] = audit
+            if params.operation == "archive":
+                metadata["status"] = "archived"
+
+            updates: dict[str, Any] = {"metadata": metadata}
+            if params.text is not None:
+                updates["content"] = params.text
+            if params.type is not None:
+                updates["type"] = params.type
+            if params.title is not None:
+                updates["title"] = params.title
+            if params.subtitle is not None:
+                updates["subtitle"] = params.subtitle
+            if params.narrative is not None:
+                updates["narrative"] = params.narrative
+            if params.project is not None:
+                index_id = await self._resolve_index_id(conn, params.project)
+                updates["index_id"] = index_id or 1
+
+            set_parts: list[str] = []
+            values: list[Any] = []
+            param_idx = 1
+            for col, val in updates.items():
+                suffix = "::jsonb" if col == "metadata" else ""
+                set_parts.append(f"{col} = ${param_idx}{suffix}")
+                values.append(val)
+                param_idx += 1
+            set_parts.append("updated_at = NOW()")
+
+            values.append(params.id)
+            query = f"UPDATE memories SET {', '.join(set_parts)} WHERE id = ${param_idx}"
+            await conn.execute(query, *values)
+
+        content_changed = any(
+            field is not None
+            for field in (params.text, params.title, params.subtitle, params.narrative)
+        )
+        if content_changed:
+            text_to_embed = ": ".join(
+                part
+                for part in [
+                    params.title if params.title is not None else existing["title"],
+                    params.subtitle if params.subtitle is not None else existing["subtitle"],
+                    params.narrative if params.narrative is not None else existing["narrative"],
+                    params.text if params.text is not None else existing["content"],
+                ]
+                if part
+            )
+            asyncio.create_task(self._embed_and_link(params.id, text_to_embed))
+
+        message = (
+            "Canonical entity archived"
+            if params.operation == "archive"
+            else "Canonical entity update approved"
+        )
+        return SaveMemoryResult(id=params.id, message=message)
+
     async def decay_memories(self, params: DecayParams) -> DecayResult:
         """Apply priority decay to stale memories and boost frequently accessed ones.
 
@@ -1140,11 +1389,12 @@ class PostgresDataLayer:
                 # (last_accessed_at IS NULL AND created_at < NOW() - stale_days)
                 # If the DB function changes, update this query too.
                 decayed = await conn.fetchval(
-                    """SELECT COUNT(*) FROM memories
+                    f"""SELECT COUNT(*) FROM memories
                        WHERE (last_accessed_at IS NULL OR last_accessed_at < NOW() - ($1 || ' days')::interval)
                          AND created_at < NOW() - ($1 || ' days')::interval
                          AND importance != 'critical'
-                         AND (last_decay_at IS NULL OR last_decay_at < NOW() - interval '24 hours')""",
+                         AND (last_decay_at IS NULL OR last_decay_at < NOW() - interval '24 hours')
+                         AND {canonical_entity_protection_predicate()}""",
                     str(params.stale_days),
                 )
                 boosted = await conn.fetchval(
@@ -1156,6 +1406,15 @@ class PostgresDataLayer:
                     """SELECT COUNT(*) FROM memories
                        WHERE created_at >= NOW() - ($1 || ' days')::interval""",
                     str(params.boost_days),
+                )
+                protected_canonical_entities = await conn.fetchval(
+                    """SELECT COUNT(*) FROM memories
+                       WHERE (last_accessed_at IS NULL OR last_accessed_at < NOW() - ($1 || ' days')::interval)
+                         AND created_at < NOW() - ($1 || ' days')::interval
+                         AND importance != 'critical'
+                         AND (last_decay_at IS NULL OR last_decay_at < NOW() - interval '24 hours')
+                         AND metadata->>'canonical_entity' = 'true'""",
+                    str(params.stale_days),
                 )
             else:
                 # Apply decay: use existing DB function decay_unused_priorities(stale_days, decay_factor)
@@ -1187,16 +1446,33 @@ class PostgresDataLayer:
                        WHERE created_at >= NOW() - ($1 || ' days')::interval""",
                     str(params.boost_days),
                 )
+                protected_canonical_entities = await conn.fetchval(
+                    """SELECT COUNT(*) FROM memories
+                       WHERE (last_accessed_at IS NULL OR last_accessed_at < NOW() - ($1 || ' days')::interval)
+                         AND created_at < NOW() - ($1 || ' days')::interval
+                         AND importance != 'critical'
+                         AND (last_decay_at IS NULL OR last_decay_at < NOW() - interval '24 hours')
+                         AND metadata->>'canonical_entity' = 'true'""",
+                    str(params.stale_days),
+                )
 
         decayed = int(decayed or 0)
         boosted = int(boosted or 0)
         recent_memories = int(recent_memories or 0)
+        protected_canonical_entities = int(protected_canonical_entities or 0)
         summary = (
             f"Decay run complete: {decayed} memories decayed, "
-            f"{boosted} memories boosted, {recent_memories} recent memories (< {params.boost_days} days)."
+            f"{boosted} memories boosted, {recent_memories} recent memories (< {params.boost_days} days), "
+            f"{protected_canonical_entities} protected canonical entities skipped."
             + (" (dry_run)" if params.dry_run else "")
         )
-        return DecayResult(decayed=decayed, boosted=boosted, recent_memories=recent_memories, summary=summary)
+        return DecayResult(
+            decayed=decayed,
+            boosted=boosted,
+            recent_memories=recent_memories,
+            summary=summary,
+            protected_canonical_entities=protected_canonical_entities,
+        )
 
     async def _apply_recall_decay(
         self,
@@ -1220,12 +1496,13 @@ class PostgresDataLayer:
         if delta == 0.0:
             return
         await conn.execute(
-            """UPDATE memories
+            f"""UPDATE memories
                SET priority = GREATEST(0.0, priority - priority * $1),
                    last_decay_at = NOW()
                WHERE id = $2
                  AND importance != 'critical'
-                 AND (last_decay_at IS NULL OR last_decay_at < NOW() - interval '24 hours')""",
+                 AND (last_decay_at IS NULL OR last_decay_at < NOW() - interval '24 hours')
+                         AND {canonical_entity_protection_predicate()}""",
             delta,
             memory_id,
         )
@@ -1452,6 +1729,10 @@ class PostgresDataLayer:
             return RefineResult(analyzed=0, actions=[], summary="No candidates found")
 
         actions = await analyze_with_llm(candidates)
+        protected_canonical_entities = _filter_protected_refine_actions(
+            actions,
+            {memory.id: memory for memory in candidates},
+        )
 
         # Decide skip_llm_merge per action based on scope + similarity
         merge_actions = [a for a in actions if a.action == "merge"]
@@ -1497,7 +1778,7 @@ class PostgresDataLayer:
                     action.skip_llm_merge = True
 
         if not params.dry_run:
-            await _execute_refine_actions(actions)
+            protected_canonical_entities += await _execute_refine_actions(actions)
 
         executed_actions = [
             RefineAction(
@@ -1517,8 +1798,10 @@ class PostgresDataLayer:
             actions=executed_actions,
             summary=(
                 f"Analyzed {len(candidates)} memories, suggested {len(actions)} actions"
+                f", skipped {protected_canonical_entities} protected canonical entities"
                 f"{' (dry run)' if params.dry_run else ''}"
             ),
+            protected_canonical_entities=protected_canonical_entities,
         )
 
     async def triage_memories(self, params: TriageParams) -> TriageResult:
@@ -1529,13 +1812,8 @@ class PostgresDataLayer:
         limit = params.limit or 50
         scope = params.scope or "recent"
 
-        # Exclude memories already processed (materialized/discarded)
-        _lifecycle_filter = (
-            "AND (metadata->>'status' IS NULL "
-            "OR metadata->>'status' NOT IN ('materialized', 'discarded')) "
-            "AND (metadata->>'do_not_compact' IS NULL "
-            "OR metadata->>'do_not_compact' != 'true')"
-        )
+        # Exclude memories already processed or protected by the shared lifecycle filter.
+        _lifecycle_filter = _compact_lifecycle_filter
 
         async with pool.acquire() as conn:
             if scope.startswith("project:"):
@@ -1664,7 +1942,15 @@ class PostgresDataLayer:
         async with pool.acquire() as conn:
             # Step 1: Fetch memories for scope
             scope = params.scope
+            protected_canonical_entities = 0
             if scope is None:
+                protected_canonical_entities = _coerce_count(
+                    await conn.fetchval(
+                        f"""SELECT COUNT(*) FROM memories
+                            WHERE 1=1 {_active_lifecycle_filter}
+                              AND metadata->>'canonical_entity' = 'true'"""
+                    )
+                )
                 mem_rows = await conn.fetch(
                     f"SELECT * FROM memories WHERE 1=1 {_compact_lifecycle_filter}",
                 )
@@ -1685,14 +1971,31 @@ class PostgresDataLayer:
                         deleted_ids=[],
                         strategy_used=params.strategy,
                         plan=[],
+                        protected_canonical_entities=0,
                     )
                 index_id = index_row["id"]
+                protected_canonical_entities = _coerce_count(
+                    await conn.fetchval(
+                        f"""SELECT COUNT(*) FROM memories
+                            WHERE index_id = $1 {_active_lifecycle_filter}
+                              AND metadata->>'canonical_entity' = 'true'""",
+                        index_id,
+                    )
+                )
                 mem_rows = await conn.fetch(
                     f"SELECT * FROM memories WHERE index_id = $1 {_compact_lifecycle_filter}",
                     index_id,
                 )
             elif scope.startswith("type:"):
                 mem_type = scope[5:]
+                protected_canonical_entities = _coerce_count(
+                    await conn.fetchval(
+                        f"""SELECT COUNT(*) FROM memories
+                            WHERE type = $1 {_active_lifecycle_filter}
+                              AND metadata->>'canonical_entity' = 'true'""",
+                        mem_type,
+                    )
+                )
                 mem_rows = await conn.fetch(
                     f"SELECT * FROM memories WHERE type = $1 {_compact_lifecycle_filter}",
                     mem_type,
@@ -1702,6 +2005,16 @@ class PostgresDataLayer:
                     f"Unknown scope format: {scope!r}. "
                     "Expected None, 'project:<name>', or 'type:<name>'"
                 )
+
+            protected_rows = [row for row in mem_rows if _row_is_protected_canonical_entity(row)]
+            if protected_rows:
+                protected_canonical_entities = max(
+                    protected_canonical_entities,
+                    len(protected_rows),
+                )
+                mem_rows = [
+                    row for row in mem_rows if not _row_is_protected_canonical_entity(row)
+                ]
 
             # Step 2: If fewer than 2 memories → return early
             # (A single existing memory is still retained — report it in memories_kept.)
@@ -1714,6 +2027,7 @@ class PostgresDataLayer:
                     deleted_ids=[],
                     strategy_used=params.strategy,
                     plan=[],
+                    protected_canonical_entities=protected_canonical_entities,
                 )
 
             # Build rows dict for strategy selection
@@ -1770,22 +2084,45 @@ class PostgresDataLayer:
                     deleted_ids=all_to_delete,
                     strategy_used=params.strategy,
                     plan=plan,
+                    protected_canonical_entities=protected_canonical_entities,
                 )
 
-            # Step 7: dry_run=False → DELETE non-canonical IDs.
+            # Step 7: dry_run=False → repoint relationships, then DELETE non-survivor IDs.
             # Schema does NOT use ON DELETE CASCADE, so we must delete
-            # dependent rows first to avoid dangling references.
+            # dependent usage rows first to avoid dangling references.
+            survivor_by_loser = {
+                loser: planned.canonical_id
+                for planned in plan
+                for loser in planned.to_delete
+            }
+
+            # Re-check canonical protection immediately before the destructive
+            # repoint / usage-log / delete steps. A memory promoted to a
+            # protected canonical entity between planning (Step 5) and here must
+            # not have its relationships repointed or usage logs deleted; the
+            # final guarded DELETE is still the last line of defense.
+            planned_delete = all_to_delete
+            all_to_delete = await _filter_out_newly_canonical(conn, all_to_delete)
+            newly_protected = len(planned_delete) - len(all_to_delete)
+            if newly_protected:
+                protected_canonical_entities += newly_protected
+                delete_set = set(all_to_delete)
+                survivor_by_loser = {
+                    loser: survivor
+                    for loser, survivor in survivor_by_loser.items()
+                    if loser in delete_set
+                }
+                memories_kept = [i for i in all_ids if i not in delete_set]
+
+            for loser_id in all_to_delete:
+                await _repoint_relationships(conn, loser_id, survivor_by_loser[loser_id])
+
             await conn.execute(
                 "DELETE FROM memory_usage_log WHERE memory_id = ANY($1::int[])",
                 all_to_delete,
             )
-            await conn.execute(
-                "DELETE FROM memory_relationships "
-                "WHERE source_id = ANY($1::int[]) OR target_id = ANY($1::int[])",
-                all_to_delete,
-            )
             result = await conn.execute(
-                "DELETE FROM memories WHERE id = ANY($1::int[])",
+                f"DELETE FROM memories WHERE id = ANY($1::int[]) {_canonical_entity_protection_filter()}",
                 all_to_delete,
             )
             count = int(result.split()[-1])
@@ -1797,6 +2134,7 @@ class PostgresDataLayer:
                 deleted_ids=all_to_delete,
                 strategy_used=params.strategy,
                 plan=plan,
+                protected_canonical_entities=protected_canonical_entities,
             )
 
     async def get_wake_up_memories(self, limit: int = 500, project: str | None = None) -> list[Memory]:
@@ -2339,7 +2677,73 @@ class PostgresDataLayer:
         return DeleteByRunIdResult(memories=mem_count, relationships=rel_count)
 
 
-async def _execute_refine_actions(actions: list[RefineAction]) -> None:
+_DESTRUCTIVE_REFINE_ACTIONS = {"merge", "demote", "delete"}
+
+
+def _filter_refine_action_protected_ids(
+    action: RefineAction,
+    protected_ids: set[int],
+) -> int:
+    """Remove protected IDs from destructive refine actions."""
+    if action.action not in _DESTRUCTIVE_REFINE_ACTIONS or not protected_ids:
+        return 0
+
+    original_ids = list(action.memory_ids)
+    action.memory_ids = [mid for mid in action.memory_ids if mid not in protected_ids]
+    if action.action == "merge" and len(action.memory_ids) < 2:
+        action.memory_ids = []
+    return sum(1 for mid in original_ids if mid in protected_ids)
+
+
+def _filter_protected_refine_actions(
+    actions: list[RefineAction],
+    memories_by_id: dict[int, Memory],
+) -> int:
+    """Filter protected canonical entities from planned refine actions."""
+    protected_ids = {
+        memory_id
+        for memory_id, memory in memories_by_id.items()
+        if is_canonical_entity(memory)
+    }
+    return sum(
+        _filter_refine_action_protected_ids(action, protected_ids)
+        for action in actions
+    )
+
+
+async def _fetch_protected_canonical_ids(
+    conn: asyncpg.Connection,
+    memory_ids: list[int],
+) -> set[int]:
+    """Fetch protected canonical IDs from the database for mutation-site checks."""
+    if not memory_ids:
+        return set()
+    rows = await conn.fetch(
+        "SELECT id FROM memories WHERE id = ANY($1::int[]) AND metadata->>'canonical_entity' = 'true'",
+        memory_ids,
+    )
+    return {int(row["id"]) for row in rows}
+
+
+async def _filter_refine_action_at_mutation_site(
+    conn: asyncpg.Connection,
+    action: RefineAction,
+) -> int:
+    """Re-check and filter protected IDs immediately before a refine mutation."""
+    if action.action not in _DESTRUCTIVE_REFINE_ACTIONS:
+        return 0
+    protected_ids = await _fetch_protected_canonical_ids(conn, action.memory_ids)
+    skipped = _filter_refine_action_protected_ids(action, protected_ids)
+    if skipped:
+        logger.info(
+            "Skipping %d protected canonical entities for refine action %s",
+            skipped,
+            action.action,
+        )
+    return skipped
+
+
+async def _execute_refine_actions(actions: list[RefineAction]) -> int:
     """Execute refinement actions, parallelizing independent ones.
 
     Groups actions into waves: actions within a wave have no overlapping memory IDs
@@ -2347,6 +2751,7 @@ async def _execute_refine_actions(actions: list[RefineAction]) -> None:
     """
     pool = await get_pool()
     deleted_ids: set[int] = set()
+    protected_skipped = 0
 
     # First pass: filter out actions with already-deleted IDs
     valid_actions: list[RefineAction] = []
@@ -2386,23 +2791,29 @@ async def _execute_refine_actions(actions: list[RefineAction]) -> None:
         logger.info("Executing wave %d/%d (%d actions)", wave_idx + 1, len(waves), len(wave))
         if len(wave) == 1:
             async with pool.acquire() as conn:
-                await _execute_refine_action(conn, wave[0])
+                protected_skipped += await _execute_refine_action(conn, wave[0])
         else:
-            async def _run_action(act: RefineAction) -> None:
+            async def _run_action(act: RefineAction) -> int:
                 async with pool.acquire() as conn:
-                    await _execute_refine_action(conn, act)
+                    return await _execute_refine_action(conn, act)
 
-            await asyncio.gather(*[_run_action(a) for a in wave])
+            protected_skipped += sum(await asyncio.gather(*[_run_action(a) for a in wave]))
+
+    return protected_skipped
 
 
-async def _execute_refine_action(conn: asyncpg.Connection, action: RefineAction) -> None:
+async def _execute_refine_action(conn: asyncpg.Connection, action: RefineAction) -> int:
     """Execute a single refinement action against the database."""
+    protected_skipped = await _filter_refine_action_at_mutation_site(conn, action)
+    if not action.memory_ids or (action.action == "merge" and len(action.memory_ids) < 2):
+        return protected_skipped
+
     match action.action:
         case "merge":
             keep_id = action.memory_ids[0]
             ids_to_remove = action.memory_ids[1:]
             if not ids_to_remove:
-                return
+                return protected_skipped
 
             merged: dict[str, str] = {}
 
@@ -2468,11 +2879,22 @@ async def _execute_refine_action(conn: asyncpg.Connection, action: RefineAction)
                     except Exception as err:
                         logger.warning("Re-embedding failed for %d: %s", keep_id, err)
 
-            # Delete the duplicates
-            del_placeholders = ", ".join(f"${i+1}" for i in range(len(ids_to_remove)))
+            # Re-check canonical protection immediately before repoint/delete.
+            # The mutation-site filter ran at function entry, but the LLM merge
+            # and re-embed above open a window in which a loser could be promoted
+            # to a protected canonical entity; drop any such id so its
+            # relationships are not silently disconnected. The guarded DELETE
+            # below remains the last line of defense.
+            before_recheck = ids_to_remove
+            ids_to_remove = await _filter_out_newly_canonical(conn, ids_to_remove)
+            protected_skipped += len(before_recheck) - len(ids_to_remove)
+
+            # Repoint relationships, then delete the duplicates.
+            for remove_id in ids_to_remove:
+                await _repoint_relationships(conn, remove_id, keep_id)
             await conn.execute(
-                f"DELETE FROM memories WHERE id IN ({del_placeholders})",
-                *ids_to_remove,
+                f"DELETE FROM memories WHERE id = ANY($1::int[]) {_canonical_entity_protection_filter()}",
+                ids_to_remove,
             )
             logger.info(
                 "Merged: updated %d%s, deleted %s",
@@ -2490,14 +2912,16 @@ async def _execute_refine_action(conn: asyncpg.Connection, action: RefineAction)
                     mid,
                 )
         case "demote":
-            placeholders = ", ".join(f"${i+1}" for i in range(len(action.memory_ids)))
             await conn.execute(
-                f"UPDATE memories SET priority = GREATEST(priority - 0.1, 0.05), updated_at = now() WHERE id IN ({placeholders})",
-                *action.memory_ids,
+                f"""UPDATE memories
+                    SET priority = GREATEST(priority - 0.1, 0.05),
+                        updated_at = now()
+                    WHERE id = ANY($1::int[]) {_canonical_entity_protection_filter()}""",
+                action.memory_ids,
             )
         case "delete":
-            placeholders = ", ".join(f"${i+1}" for i in range(len(action.memory_ids)))
             await conn.execute(
-                f"DELETE FROM memories WHERE id IN ({placeholders})",
-                *action.memory_ids,
+                f"DELETE FROM memories WHERE id = ANY($1::int[]) {_canonical_entity_protection_filter()}",
+                action.memory_ids,
             )
+    return protected_skipped

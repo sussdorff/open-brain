@@ -1,0 +1,195 @@
+{
+  "contract_version": "1",
+  "bead_id": "open-brain-ccd",
+  "acceptance_criteria": [
+    {
+      "id": "AC1",
+      "criterion": "Canonical entities expose a stable identifier and entity kind through supported reads.",
+      "status": "done",
+      "changed_files": [
+        "python/src/open_brain/data_layer/interface.py",
+        "python/src/open_brain/server.py",
+        "python/tests/test_canonical_entities.py"
+      ],
+      "evidence_refs": [
+        "cmd-canonical-combined-green",
+        "cmd-hook-final-green",
+        "commit-60a7ce2",
+        "commit-2653681"
+      ]
+    },
+    {
+      "id": "AC2",
+      "criterion": "Automated decay and compaction do not demote, delete, or merge protected canonical entities.",
+      "status": "done",
+      "changed_files": [
+        "python/src/open_brain/data_layer/interface.py",
+        "python/src/open_brain/data_layer/postgres.py",
+        "python/src/open_brain/data_layer/refine.py",
+        "python/src/open_brain/data_layer/triage.py",
+        "python/src/open_brain/server.py",
+        "python/tests/test_canonical_entity_retention.py",
+        "python/tests/test_compact_memories.py",
+        "python/tests/test_decay.py",
+        "python/tests/test_postgres.py"
+      ],
+      "evidence_refs": [
+        "cmd-retention-green",
+        "cmd-regression-green",
+        "cmd-hook-final-green",
+        "cmd-codex-canonical-green",
+        "cmd-codex-regression-green",
+        "commit-de81e33",
+        "commit-7436f5a"
+      ]
+    },
+    {
+      "id": "AC3",
+      "criterion": "Explicitly approved updates and archival remain possible and auditable.",
+      "status": "done",
+      "changed_files": [
+        "python/src/open_brain/data_layer/interface.py",
+        "python/src/open_brain/data_layer/postgres.py",
+        "python/src/open_brain/server.py",
+        "python/tests/test_canonical_entities.py"
+      ],
+      "evidence_refs": [
+        "cmd-ac3-red",
+        "cmd-ac3-green",
+        "cmd-hook-final-green",
+        "cmd-codex-canonical-green",
+        "commit-31018c1",
+        "commit-590d04d"
+      ]
+    }
+  ],
+  "changed_files": [
+    "python/src/open_brain/data_layer/interface.py",
+    "python/src/open_brain/data_layer/materialize.py",
+    "python/src/open_brain/data_layer/postgres.py",
+    "python/src/open_brain/data_layer/refine.py",
+    "python/src/open_brain/data_layer/triage.py",
+    "python/src/open_brain/server.py",
+    "python/tests/test_canonical_entities.py",
+    "python/tests/test_canonical_entity_retention.py",
+    "python/tests/test_compact_memories.py",
+    "python/tests/test_decay.py",
+    "python/tests/test_postgres.py"
+  ],
+  "commits": [
+    {
+      "id": "commit-60a7ce2",
+      "sha": "60a7ce2",
+      "subject": "test(open-brain-ccd): red — canonical entity reads"
+    },
+    {
+      "id": "commit-2653681",
+      "sha": "2653681",
+      "subject": "feat(open-brain-ccd): green — expose canonical entity reads"
+    },
+    {
+      "id": "commit-de81e33",
+      "sha": "de81e33",
+      "subject": "test(open-brain-ccd): red — protect canonical entities"
+    },
+    {
+      "id": "commit-7436f5a",
+      "sha": "7436f5a",
+      "subject": "feat(open-brain-ccd): green — protect canonical entities"
+    },
+    {
+      "id": "commit-31018c1",
+      "sha": "31018c1",
+      "subject": "test(open-brain-ccd): red — approved canonical updates"
+    },
+    {
+      "id": "commit-590d04d",
+      "sha": "590d04d",
+      "subject": "feat(open-brain-ccd): green — approve canonical updates"
+    }
+  ],
+  "tests": [
+    {
+      "id": "cmd-ac3-red",
+      "command": "UV_CACHE_DIR=../.uv-cache uv run pytest tests/test_canonical_entities.py -q",
+      "result": "failed before AC3 implementation for the intended missing contract/tool symbols"
+    },
+    {
+      "id": "cmd-ac3-green",
+      "command": "UV_CACHE_DIR=../.uv-cache uv run pytest tests/test_canonical_entities.py -q",
+      "result": "7 passed"
+    },
+    {
+      "id": "cmd-canonical-combined-green",
+      "command": "UV_CACHE_DIR=../.uv-cache uv run pytest tests/test_canonical_entities.py tests/test_canonical_entity_retention.py -q",
+      "result": "19 passed"
+    },
+    {
+      "id": "cmd-retention-green",
+      "command": "UV_CACHE_DIR=../.uv-cache uv run pytest tests/test_canonical_entity_retention.py -q",
+      "result": "12 passed"
+    },
+    {
+      "id": "cmd-regression-green",
+      "command": "UV_CACHE_DIR=../.uv-cache uv run pytest tests/test_decay.py tests/test_refine.py tests/test_compact_memories.py -q",
+      "result": "59 passed"
+    },
+    {
+      "id": "cmd-hook-final-green",
+      "command": "git add python/src/open_brain/data_layer/interface.py python/src/open_brain/data_layer/postgres.py python/src/open_brain/server.py && git commit -m \"feat(open-brain-ccd): green — approve canonical updates\"",
+      "result": "pre-commit hook ran uv test suite with -m 'not integration': 1284 passed, 22 deselected, 53 warnings"
+    },
+    {
+      "id": "cmd-pairloop1-retention-green",
+      "command": "UV_CACHE_DIR=../.uv-cache uv run pytest tests/test_canonical_entity_retention.py tests/test_canonical_entities.py -q",
+      "result": "20 passed (includes new materialize_archive canonical-guard regression test)"
+    },
+    {
+      "id": "cmd-pairloop1-regression-green",
+      "command": "UV_CACHE_DIR=../.uv-cache uv run pytest tests/test_decay.py tests/test_refine.py tests/test_compact_memories.py -q",
+      "result": "59 passed"
+    },
+    {
+      "id": "cmd-codex-tdd-red",
+      "command": "git stash push -- src/open_brain/data_layer/postgres.py && UV_CACHE_DIR=../.uv-cache uv run pytest --no-cov <three new codex regression tests>; git stash pop",
+      "result": "3 failed for the intended reasons against pre-fix HEAD: audit key overwrote prior history; compact/refine repointed the loser that became canonical. Fix restored via git stash pop."
+    },
+    {
+      "id": "cmd-codex-canonical-green",
+      "command": "UV_CACHE_DIR=../.uv-cache uv run pytest tests/test_canonical_entities.py tests/test_canonical_entity_retention.py -q",
+      "result": "23 passed (adds audit-key-overwrite and two TOCTOU pre-repoint re-check regression tests)"
+    },
+    {
+      "id": "cmd-codex-regression-green",
+      "command": "UV_CACHE_DIR=../.uv-cache uv run pytest tests/test_decay.py tests/test_refine.py tests/test_compact_memories.py -q",
+      "result": "59 passed"
+    },
+    {
+      "id": "cmd-codex-postgres-green",
+      "command": "UV_CACHE_DIR=../.uv-cache uv run pytest tests/test_postgres.py -q",
+      "result": "46 passed"
+    }
+  ],
+  "external_resources": [],
+  "scope_changes": [
+    "Implemented relationship repointing for compact/refine merge losers so relationships incident to canonical entities remain connected when the other endpoint is removed.",
+    "Added a dedicated approved canonical entity update/archive method and MCP tool; ordinary update_memory remains unchanged.",
+    "Pair-loop iteration 1: normalized stray tab characters to spaces inside two SQL string literals in postgres.py (decay_unused_priorities RETURNING clause and _apply_recall_decay UPDATE f-string); no SQL semantics changed.",
+    "Pair-loop iteration 1: extended materialize_archive canonical-entity mutation-site guard so the automated run_lifecycle_pipeline path skips canonical entities (defense-in-depth) using the shared is_canonical_entity helper; added a regression test.",
+    "Codex adversarial fix: approved_update_canonical_entity now captures the audit trail from the ORIGINAL pre-merge server metadata and always sets metadata['audit'] from that append-only list after merging params.metadata, so a caller-supplied 'audit' key can no longer erase prior audit history (AC3).",
+    "Codex adversarial fix: added shared async helper _filter_out_newly_canonical(conn, ids) reusing canonical_entity_protection_predicate() and called it immediately before the relationship-repoint/usage-log/DELETE steps in compact_memories and in the refine 'merge' case, narrowing the TOCTOU window in which a candidate promoted to a protected canonical entity after planning could still have its relationships repointed and usage logs deleted. Filtered ids are counted (protected_canonical_entities in compact, protected_skipped in refine); the already-guarded final DELETE remains the last line of defense (AC2)."
+  ],
+  "downstream_impacts": [
+    "DataLayer implementations must now provide approved_update_canonical_entity.",
+    "DecayResult, CompactResult, and RefineResult include protected_canonical_entities counts.",
+    "Supported read payloads may now include a canonical_entity object with id and kind."
+  ],
+  "evidence_refs": [
+    "cmd-ac3-red",
+    "cmd-ac3-green",
+    "cmd-canonical-combined-green",
+    "cmd-retention-green",
+    "cmd-regression-green",
+    "cmd-hook-final-green"
+  ]
+}

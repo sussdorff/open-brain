@@ -47,6 +47,17 @@ VALID_LINK_TYPES: frozenset[str] = frozenset({
     "co_occurs",        # weak co-mention edge
 })
 
+# ─── Canonical entity metadata contract ───────────────────────────────────────
+
+CANONICAL_ENTITY_METADATA_KEY = "canonical_entity"
+CANONICAL_KIND_METADATA_KEY = "canonical_kind"
+CANONICAL_KINDS: frozenset[str] = frozenset({
+    "person",
+    "project",
+    "organization",
+    "concept",
+})
+
 _IMPORTANCE_RANK: dict[str, int] = {
     "critical": 3,
     "high": 2,
@@ -158,6 +169,15 @@ class InteractionMetadata(TypedDict, total=False):
     summary: str
     occurred_at: str         # ISO 8601 datetime
     follow_up_needed: bool
+
+
+class CanonicalEntityMetadata(TypedDict, total=False):
+    """Metadata contract for protected canonical entity memories."""
+
+    canonical_entity: bool
+    canonical_kind: Literal["person", "project", "organization", "concept"]
+    status: str
+    audit: list[dict[str, Any]]
 
 
 class ProjectMetadata(TypedDict, total=False):
@@ -295,6 +315,14 @@ def validate_domain_metadata(memory_type: str | None, metadata: dict[str, Any] |
     """
     md = metadata or {}
     warnings: list[str] = []
+
+    if md.get(CANONICAL_ENTITY_METADATA_KEY) is True:
+        canonical_kind = md.get(CANONICAL_KIND_METADATA_KEY)
+        if canonical_kind not in CANONICAL_KINDS:
+            warnings.append(
+                "canonical entity metadata requires canonical_kind to be one of: "
+                + ", ".join(sorted(CANONICAL_KINDS))
+            )
 
     if "paperless_reference" in md:
         warnings.extend(_validate_paperless_reference(md["paperless_reference"]))
@@ -445,6 +473,33 @@ class UpdateMemoryParams:
 
 
 @dataclass
+class ApprovedCanonicalEntityUpdateParams:
+    """Parameters for explicitly approved canonical entity updates."""
+
+    id: int
+    actor: str
+    note: str
+    operation: Literal["update", "archive"] = "update"
+    text: str | None = None
+    type: str | None = None
+    project: str | None = None
+    title: str | None = None
+    subtitle: str | None = None
+    narrative: str | None = None
+    metadata: dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if self.operation not in ("update", "archive"):
+            raise ValueError(
+                f"operation must be 'update' or 'archive', got {self.operation!r}"
+            )
+        if not self.actor.strip():
+            raise ValueError("actor is required for approved canonical entity updates")
+        if not self.note.strip():
+            raise ValueError("note is required for approved canonical entity updates")
+
+
+@dataclass
 class Memory:
     """A single memory entry.
 
@@ -478,6 +533,29 @@ class Memory:
     project_name: str | None = None  # populated by get_wake_up_memories JOIN
 
 
+def canonical_entity_kind(memory: Memory) -> str | None:
+    """Return the canonical entity kind when metadata contains a valid marker."""
+    if memory.metadata.get(CANONICAL_ENTITY_METADATA_KEY) is not True:
+        return None
+    kind = memory.metadata.get(CANONICAL_KIND_METADATA_KEY)
+    if not isinstance(kind, str) or kind not in CANONICAL_KINDS:
+        return None
+    return kind
+
+
+def is_canonical_entity(memory: Memory) -> bool:
+    """Return True when a memory has valid canonical entity metadata."""
+    return canonical_entity_kind(memory) is not None
+
+
+def canonical_entity_identity(memory: Memory) -> dict[str, int | str] | None:
+    """Return the stable read identity for a canonical entity memory."""
+    kind = canonical_entity_kind(memory)
+    if kind is None:
+        return None
+    return {"id": memory.id, "kind": kind}
+
+
 @dataclass
 class RefineParams:
     """Parameters for memory refinement."""
@@ -506,6 +584,7 @@ class RefineResult:
     analyzed: int
     actions: list[RefineAction]
     summary: str
+    protected_canonical_entities: int = 0
 
 
 @dataclass
@@ -650,6 +729,7 @@ class DecayResult:
     boosted: int         # count of memories whose priority was boosted
     recent_memories: int  # count of recent memories (< boost_days old); protected from decay but may still be boosted
     summary: str
+    protected_canonical_entities: int = 0  # stale canonical entities skipped by decay
 
 
 @dataclass
@@ -707,6 +787,7 @@ class CompactResult:
     deleted_ids: list[int]
     strategy_used: str
     plan: list[ClusterPlan]   # always populated (dry_run=True: plan only; False: executed)
+    protected_canonical_entities: int = 0
 
 
 class DataLayer(Protocol):
@@ -725,6 +806,10 @@ class DataLayer(Protocol):
     async def save_memory(self, params: SaveMemoryParams) -> SaveMemoryResult: ...
 
     async def update_memory(self, params: UpdateMemoryParams) -> SaveMemoryResult: ...
+
+    async def approved_update_canonical_entity(
+        self, params: ApprovedCanonicalEntityUpdateParams
+    ) -> SaveMemoryResult: ...
 
     async def search_by_concept(
         self, query: str, limit: int | None = None, project: str | None = None

@@ -37,10 +37,12 @@ from open_brain.auth.provider import get_provider
 from open_brain.auth.tokens import verify_token
 from open_brain.config import get_config
 from open_brain.data_layer.interface import (
+    ApprovedCanonicalEntityUpdateParams,
     CompactParams,
     DecayParams,
     DeleteParams,
     MaterializeParams,
+    Memory,
     RefineParams,
     SaveMemoryParams,
     SearchParams,
@@ -48,6 +50,7 @@ from open_brain.data_layer.interface import (
     TriageParams,
     UpdateMemoryParams,
     VALID_LINK_TYPES,
+    canonical_entity_identity,
     paperless_reference_binary_keys,
     validate_domain_metadata,
 )
@@ -89,6 +92,15 @@ _RATE_LIMIT_MAX = 10
 _RATE_LIMIT_WINDOW = 60
 
 _MAX_TURNS_TEXT = 8000
+
+
+def _memory_payload(memory: Memory) -> dict[str, Any]:
+    """Serialize Memory for supported read tools."""
+    payload = vars(memory).copy()
+    identity = canonical_entity_identity(memory)
+    if identity is not None:
+        payload["canonical_entity"] = identity
+    return payload
 
 # ContextVar to track the OAuth scopes for the current request (Bearer token auth only)
 _current_scopes: ContextVar[tuple[str, ...]] = ContextVar("current_scopes", default=())
@@ -388,7 +400,7 @@ async def search(
         )
     )
     return json.dumps(
-        {"total": result.total, "results": [vars(m) for m in result.results]},
+        {"total": result.total, "results": [_memory_payload(m) for m in result.results]},
         default=str,
     )
 
@@ -425,7 +437,7 @@ async def timeline(
     return json.dumps(
         {
             "anchor_id": result.anchor_id,
-            "results": [vars(m) for m in result.results],
+            "results": [_memory_payload(m) for m in result.results],
         },
         default=str,
     )
@@ -440,7 +452,7 @@ async def get_observations(ids: list[int]) -> str:
     """Step 3: Bulk fetch memories by IDs."""
     dl = get_dl()
     memories = await dl.get_observations(ids)
-    return json.dumps([vars(m) for m in memories], default=str)
+    return json.dumps([_memory_payload(m) for m in memories], default=str)
 
 
 @mcp.tool(
@@ -738,6 +750,46 @@ async def update_memory(
 
 
 @mcp.tool(
+    description="Explicitly approved canonical entity update or soft archive. "
+    "This is the sanctioned maintenance path for protected canonical entities and appends audit metadata. "
+    "operation: update or archive. Archive sets metadata.status='archived' and preserves the memory ID. "
+    "Params: id, actor, note, operation, text, type, project, title, subtitle, narrative, metadata"
+)
+@logged_tool
+async def approved_canonical_entity_update(
+    id: int,
+    actor: str,
+    note: str,
+    operation: str = "update",
+    text: str | None = None,
+    type: str | None = None,
+    project: str | None = None,
+    title: str | None = None,
+    subtitle: str | None = None,
+    narrative: str | None = None,
+    metadata: dict | None = None,
+) -> str:
+    """Apply an explicitly approved canonical entity update or soft archive."""
+    dl = get_dl()
+    result = await dl.approved_update_canonical_entity(
+        ApprovedCanonicalEntityUpdateParams(
+            id=id,
+            actor=actor,
+            note=note,
+            operation=operation,
+            text=text,
+            type=type,
+            project=project,
+            title=title,
+            subtitle=subtitle,
+            narrative=narrative,
+            metadata=metadata,
+        )
+    )
+    return json.dumps({"id": result.id, "message": result.message})
+
+
+@mcp.tool(
     description="Semantic search across memories using vector embeddings. "
     "Params: query (required), limit, project"
 )
@@ -751,7 +803,7 @@ async def search_by_concept(
     dl = get_dl()
     result = await dl.search_by_concept(query, limit, project)
     return json.dumps(
-        {"results": [vars(m) for m in result["results"]]}, default=str
+        {"results": [_memory_payload(m) for m in result["results"]]}, default=str
     )
 
 
@@ -1040,6 +1092,7 @@ async def refine_memories(
         {
             "analyzed": result.analyzed,
             "summary": result.summary,
+            "protected_canonical_entities": result.protected_canonical_entities,
             "actions": [vars(a) for a in result.actions],
         }
     )
@@ -1137,6 +1190,7 @@ async def run_lifecycle_pipeline(
         return json.dumps(
             {
                 "decay_summary": decay_result.summary,
+                "decay_protected_canonical_entities": decay_result.protected_canonical_entities,
                 "triage_summary": triage_result.summary,
                 "materialization_summary": "No actions to materialize",
                 "actions_taken": [],
@@ -1159,6 +1213,7 @@ async def run_lifecycle_pipeline(
     return json.dumps(
         {
             "decay_summary": decay_result.summary,
+            "decay_protected_canonical_entities": decay_result.protected_canonical_entities,
             "triage_summary": triage_result.summary,
             "triage_action_counts": action_counts,
             "materialization_summary": mat_result.summary,
@@ -1193,6 +1248,7 @@ async def compact_memories(
             "memories_deleted": result.memories_deleted,
             "memories_kept": result.memories_kept,
             "deleted_ids": result.deleted_ids,
+            "protected_canonical_entities": result.protected_canonical_entities,
             "strategy_used": result.strategy_used,
             "plan": [
                 {
