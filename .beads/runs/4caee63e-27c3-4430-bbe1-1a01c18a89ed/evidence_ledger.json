@@ -101,6 +101,13 @@
       "observed_result": "1285 passed, 23 deselected."
     },
     {
+      "id": "metrics-insert",
+      "command": "env UV_CACHE_DIR=/tmp/open-brain-uv-cache BEADS_RUNTIME=/Users/malte/.agents/skills/beads uv run python -c 'import os, sys; sys.path.insert(0, os.path.join(os.environ[\"BEADS_RUNTIME\"], \"lib\", \"orchestrator\")); from metrics import insert_agent_call; insert_agent_call(run_id=\"4caee63e-27c3-4430-bbe1-1a01c18a89ed\", bead_id=\"open-brain-amq\", phase_label=\"p5-impl\", agent_label=\"impl-gpt-5.5\", model=\"gpt-5.5\", iteration=1, input_tokens=0, cached_input_tokens=0, output_tokens=0, reasoning_output_tokens=0, total_tokens=0, duration_ms=0, exit_code=0)'",
+      "purpose": "Log required p5 implementation metrics.",
+      "exit_code": 1,
+      "observed_result": "Failed with sqlite3.OperationalError: attempt to write a readonly database."
+    },
+    {
       "id": "commit-inventory",
       "command": "git log --oneline --reverse -n 6",
       "purpose": "Collect implementation commit inventory.",
@@ -118,6 +125,11 @@
       "check": "Integration-marked test suite",
       "reason": "Final regression command intentionally used -m \"not integration\" per project guidance; 23 integration tests were deselected.",
       "impact": "No real external services or credentials were required."
+    },
+    {
+      "check": "Metrics database insertion",
+      "reason": "The canonical metrics database resolved by the beads runtime is read-only under the current sandbox, and approval escalation is disabled.",
+      "impact": "The failed insert command and exact error are recorded in this ledger; implementation evidence and commits are complete."
     }
   ],
   "artifacts": [
