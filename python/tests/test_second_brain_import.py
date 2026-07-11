@@ -79,6 +79,71 @@ class TestSecondBrainSharedContracts:
         """AC5: importer is a package module that can emit reconciliation reports."""
         assert importlib.util.find_spec("open_brain.second_brain_import") is not None
 
+    @pytest.mark.asyncio
+    async def test_cli_entrypoint_suppresses_pool_migrations(self, tmp_path, capsys):
+        """One-shot importer CLI opts out before it reaches the data layer."""
+        from open_brain.second_brain_import import _main_async
+
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        report = {
+            "mode": "dry_run",
+            "run_id": None,
+            "vault_path": str(vault),
+            "summary": {},
+            "items": [],
+            "unresolved_links": [],
+            "unresolved_attachments": [],
+        }
+
+        with (
+            patch("open_brain.data_layer.postgres.suppress_migrations") as suppress,
+            patch(
+                "open_brain.second_brain_import.import_vault",
+                new_callable=AsyncMock,
+                return_value=report,
+            ) as import_vault,
+        ):
+            exit_code = await _main_async([str(vault)])
+
+        capsys.readouterr()
+        assert exit_code == 0
+        suppress.assert_called_once_with()
+        import_vault.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_cli_entrypoint_apply_keeps_pool_migrations(self, tmp_path, capsys):
+        """REGRESSION: --apply writes memories, so it must NOT suppress migrations."""
+        from open_brain.second_brain_import import _main_async
+
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        report = {
+            "mode": "apply",
+            "run_id": "run-apply",
+            "vault_path": str(vault),
+            "summary": {},
+            "items": [],
+            "unresolved_links": [],
+            "unresolved_attachments": [],
+        }
+
+        with (
+            patch("open_brain.data_layer.postgres.suppress_migrations") as suppress,
+            patch(
+                "open_brain.second_brain_import.import_vault",
+                new_callable=AsyncMock,
+                return_value=report,
+            ) as import_vault,
+        ):
+            exit_code = await _main_async([str(vault), "--apply"])
+
+        capsys.readouterr()
+        assert exit_code == 0
+        suppress.assert_not_called()
+        import_vault.assert_awaited_once()
+        assert import_vault.await_args.kwargs["apply"] is True
+
 
 class FakeDataLayer:
     """DataLayer test double that rejects writes in dry-run tests."""

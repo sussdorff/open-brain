@@ -74,6 +74,21 @@ def reset_oauth_provider():
     provider_module._provider = None
 
 
+@pytest.fixture(autouse=True)
+def reset_postgres_migration_state():
+    """Reset Postgres migration singleton flags between tests."""
+    import open_brain.data_layer.postgres as postgres_module
+    if hasattr(postgres_module, "_migrations_ensured"):
+        postgres_module._migrations_ensured = False
+    if hasattr(postgres_module, "_migrations_suppressed"):
+        postgres_module._migrations_suppressed = False
+    yield
+    if hasattr(postgres_module, "_migrations_ensured"):
+        postgres_module._migrations_ensured = False
+    if hasattr(postgres_module, "_migrations_suppressed"):
+        postgres_module._migrations_suppressed = False
+
+
 @pytest.fixture
 def config():
     """Return a fresh Config instance."""

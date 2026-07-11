@@ -50,6 +50,130 @@ def _make_row(overrides: dict | None = None) -> MagicMock:
     return row
 
 
+class TestPostgresPoolMigrations:
+    @pytest.mark.asyncio
+    async def test_get_pool_skip_migrations_no_writes(self):
+        """One-shot callers can acquire a pool without running data mutations."""
+        from open_brain.data_layer import postgres as pg_module
+
+        original_pool = pg_module._pool
+        pg_module._pool = None
+        try:
+            conn = AsyncMock()
+            conn.execute = AsyncMock(return_value=None)
+            pool = _make_pool(conn)
+
+            with patch(
+                "open_brain.data_layer.postgres.asyncpg.create_pool",
+                new_callable=AsyncMock,
+                return_value=pool,
+            ):
+                result = await pg_module.get_pool(run_migrations=False)
+
+            assert result is pool
+            conn.execute.assert_not_called()
+        finally:
+            pg_module._pool = original_pool
+
+    @pytest.mark.asyncio
+    async def test_get_pool_default_runs_migrations_once(self):
+        """Default server path applies migrations on first need and skips the second call."""
+        from open_brain.data_layer import postgres as pg_module
+
+        original_pool = pg_module._pool
+        pg_module._pool = None
+        try:
+            conn = AsyncMock()
+            pool = _make_pool(conn)
+            run_migrations = AsyncMock()
+
+            with (
+                patch(
+                    "open_brain.data_layer.postgres.asyncpg.create_pool",
+                    new_callable=AsyncMock,
+                    return_value=pool,
+                ),
+                patch(
+                    "open_brain.data_layer.postgres._run_migrations",
+                    new=run_migrations,
+                ),
+            ):
+                first = await pg_module.get_pool()
+                second = await pg_module.get_pool()
+
+            assert first is pool
+            assert second is pool
+            run_migrations.assert_awaited_once_with(conn)
+        finally:
+            pg_module._pool = original_pool
+
+    @pytest.mark.asyncio
+    async def test_suppress_migrations_skips_default_get_pool_migrations(self):
+        """Process-level suppression lets PostgresDataLayer callers use default get_pool."""
+        from open_brain.data_layer import postgres as pg_module
+
+        original_pool = pg_module._pool
+        original_migrations_ensured = pg_module._migrations_ensured
+        original_migrations_suppressed = pg_module._migrations_suppressed
+        pg_module._pool = None
+        pg_module._migrations_ensured = False
+        pg_module._migrations_suppressed = False
+        try:
+            conn = AsyncMock()
+            conn.execute = AsyncMock(return_value=None)
+            pool = _make_pool(conn)
+
+            with patch(
+                "open_brain.data_layer.postgres.asyncpg.create_pool",
+                new_callable=AsyncMock,
+                return_value=pool,
+            ):
+                pg_module.suppress_migrations()
+                result = await pg_module.get_pool()
+
+            assert result is pool
+            assert pg_module._migrations_ensured is False
+            conn.execute.assert_not_called()
+        finally:
+            pg_module._pool = original_pool
+            pg_module._migrations_ensured = original_migrations_ensured
+            pg_module._migrations_suppressed = original_migrations_suppressed
+
+    @pytest.mark.integration
+    @pytest.mark.asyncio
+    async def test_get_pool_default_runs_migrations_once_real_database(
+        self, bootstrapped_database_url: str
+    ):
+        """Real-DB proxy for server semantics: first get_pool migrates, second skips.
+
+        The ``bootstrapped_database_url`` fixture applies
+        ``scripts/bootstrap_test_schema.sql`` against the caller-provided
+        ``DATABASE_URL`` (and skips cleanly when only the test placeholder URL is
+        set), so the migration battery runs against a real, pre-seeded schema.
+        """
+        from open_brain.config import get_config
+        from open_brain.data_layer import postgres as pg_module
+
+        # Wire get_pool()'s connection string to the bootstrapped database.
+        get_config().DATABASE_URL = bootstrapped_database_url
+
+        await pg_module.close_pool()
+        run_migrations = AsyncMock(wraps=pg_module._run_migrations)
+        try:
+            with patch(
+                "open_brain.data_layer.postgres._run_migrations",
+                new=run_migrations,
+            ):
+                first = await pg_module.get_pool()
+                second = await pg_module.get_pool()
+
+            assert first is second
+            assert pg_module._migrations_ensured is True
+            run_migrations.assert_awaited_once()
+        finally:
+            await pg_module.close_pool()
+
+
 class TestRowToMemory:
     def test_converts_record_to_memory(self):
         row = _make_row()
@@ -1144,14 +1268,14 @@ class TestContentHashDedupIndex:
         return PostgresDataLayer()
 
     def test_dedup_index_migration_sql_present(self, dl):
-        """AK4: Verify get_pool includes the expression index migration for dedup performance.
+        """AK4: Verify migrations include the expression index for dedup performance.
 
-        Inspects the source of get_pool to confirm the CREATE INDEX statement is present.
+        Inspects the migration helper to confirm the CREATE INDEX statement is present.
         This is a static code check (no DB needed) — actual latency is only measurable
         against a live DB with real data volumes.
         """
         from open_brain.data_layer import postgres as pg_module
-        source = inspect.getsource(pg_module.get_pool)
+        source = inspect.getsource(pg_module._run_migrations)
         assert "idx_memories_content_hash" in source, (
-            "get_pool must create idx_memories_content_hash index for dedup performance"
+            "_run_migrations must create idx_memories_content_hash index for dedup performance"
         )

@@ -465,7 +465,13 @@ class TestEnsureMetadataColumn:
 
         # Reset the module-level pool so get_pool() re-runs initialization
         original_pool = pg_module._pool
+        original_migrations_ensured = getattr(pg_module, "_migrations_ensured", None)
+        original_migrations_suppressed = getattr(pg_module, "_migrations_suppressed", None)
         pg_module._pool = None
+        if hasattr(pg_module, "_migrations_ensured"):
+            pg_module._migrations_ensured = False
+        if hasattr(pg_module, "_migrations_suppressed"):
+            pg_module._migrations_suppressed = False
         try:
             conn = AsyncMock()
             conn.fetchval = AsyncMock(return_value=None)
@@ -491,6 +497,10 @@ class TestEnsureMetadataColumn:
             mock_metadata.assert_called_once()
         finally:
             pg_module._pool = original_pool
+            if hasattr(pg_module, "_migrations_ensured"):
+                pg_module._migrations_ensured = original_migrations_ensured
+            if hasattr(pg_module, "_migrations_suppressed"):
+                pg_module._migrations_suppressed = original_migrations_suppressed
 
     @pytest.mark.asyncio
     async def test_create_relationship_with_metadata_none(self):

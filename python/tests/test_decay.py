@@ -448,15 +448,15 @@ async def test_decay_sql_function_has_race_guard() -> None:
     )
 
 
-# ─── AK1/AK5: Importance-aware decay in get_pool SQL function ────────────────
+# ─── AK1/AK5: Importance-aware decay in migration SQL function ──────────────
 
 
 def test_importance_multipliers_in_sql_function() -> None:
-    """AK1: get_pool() defines importance-aware decay SQL function with all four multipliers."""
+    """AK1: migrations define importance-aware decay SQL function with all multipliers."""
     import inspect
     import open_brain.data_layer.postgres as pg_module
 
-    source = inspect.getsource(pg_module.get_pool)
+    source = inspect.getsource(pg_module._run_migrations)
 
     assert "0.0" in source, "Critical multiplier (0.0) must be in SQL function"
     assert "0.5" in source, "High multiplier (0.5) must be in SQL function"
