@@ -1,0 +1,104 @@
+{
+  "contract_version": "1",
+  "bead_id": "open-brain-ccd",
+  "commands": [
+    {
+      "id": "cmd-prime",
+      "command": "bd prime",
+      "purpose": "Reload bead workflow context after compaction.",
+      "exit_code": 0,
+      "observed_result": "Workflow rules loaded; work must use bd and finish with pushed commits."
+    },
+    {
+      "id": "cmd-ac3-red",
+      "command": "UV_CACHE_DIR=../.uv-cache uv run pytest tests/test_canonical_entities.py -q",
+      "purpose": "Verify RED gate for approved canonical update/archive tests before AC3 production code.",
+      "exit_code": 1,
+      "observed_result": "4 passed, 3 failed for intended missing symbols: ApprovedCanonicalEntityUpdateParams import and approved_canonical_entity_update server tool."
+    },
+    {
+      "id": "cmd-ac3-red-commit",
+      "command": "git add python/tests/test_canonical_entities.py && git commit --no-verify -m \"test(open-brain-ccd): red \u2014 approved canonical updates\"",
+      "purpose": "Commit the AC3 failing tests as the mandatory red checkpoint.",
+      "exit_code": 0,
+      "observed_result": "Created commit 31018c1 with test-only AC3 changes."
+    },
+    {
+      "id": "cmd-ac3-green",
+      "command": "UV_CACHE_DIR=../.uv-cache uv run pytest tests/test_canonical_entities.py -q",
+      "purpose": "Verify GREEN gate for canonical entity reads and approved update/archive behavior.",
+      "exit_code": 0,
+      "observed_result": "7 passed."
+    },
+    {
+      "id": "cmd-canonical-combined-green",
+      "command": "UV_CACHE_DIR=../.uv-cache uv run pytest tests/test_canonical_entities.py tests/test_canonical_entity_retention.py -q",
+      "purpose": "Verify canonical read, approved update/archive, and protected retention behavior together.",
+      "exit_code": 0,
+      "observed_result": "19 passed."
+    },
+    {
+      "id": "cmd-retention-green",
+      "command": "UV_CACHE_DIR=../.uv-cache uv run pytest tests/test_canonical_entity_retention.py -q",
+      "purpose": "Verify AC2 canonical protection coverage.",
+      "exit_code": 0,
+      "observed_result": "12 passed."
+    },
+    {
+      "id": "cmd-regression-green",
+      "command": "UV_CACHE_DIR=../.uv-cache uv run pytest tests/test_decay.py tests/test_refine.py tests/test_compact_memories.py -q",
+      "purpose": "Verify named regression-risk suites requested by the bead.",
+      "exit_code": 0,
+      "observed_result": "59 passed."
+    },
+    {
+      "id": "cmd-hook-final-green",
+      "command": "git add python/src/open_brain/data_layer/interface.py python/src/open_brain/data_layer/postgres.py python/src/open_brain/server.py && git commit -m \"feat(open-brain-ccd): green \u2014 approve canonical updates\"",
+      "purpose": "Commit AC3 implementation through the normal project hook.",
+      "exit_code": 0,
+      "observed_result": "Pre-commit hook ran the non-integration test suite: 1284 passed, 22 deselected, 53 warnings; created commit 590d04d."
+    },
+    {
+      "id": "cmd-status-before-artifacts",
+      "command": "git status --short",
+      "purpose": "Confirm code commits were clean before writing run artifacts.",
+      "exit_code": 0,
+      "observed_result": "No uncommitted code changes."
+    },
+    {
+      "id": "cmd-commit-list",
+      "command": "git log --oneline -8",
+      "purpose": "Capture implementation commit sequence.",
+      "exit_code": 0,
+      "observed_result": "Latest commits: 590d04d, 31018c1, 7436f5a, de81e33, 2653681, 60a7ce2."
+    }
+  ],
+  "skipped_checks": [
+    {
+      "check": "Pre-commit hook on red commits",
+      "reason": "The project hook runs the full non-integration suite and cannot pass on intentionally failing RED tests. Red gate failures were run directly first; green commits used the normal hook."
+    },
+    {
+      "check": "Full integration test suite",
+      "reason": "The bead requested affected tests and named regression suites only. Integration checks require external services or credentials and were outside this memory lifecycle scope."
+    },
+    {
+      "check": "External resource verification",
+      "reason": "This bead touches no external resources; no URLs, registries, or service references were introduced."
+    }
+  ],
+  "artifacts": [
+    {
+      "path": ".beads/runs/814a7349-694a-4bb8-8756-b6adc271bb0e/implementation_manifest.json",
+      "description": "Acceptance criterion manifest for this bead run."
+    },
+    {
+      "path": ".beads/runs/814a7349-694a-4bb8-8756-b6adc271bb0e/evidence_ledger.json",
+      "description": "Command and verification ledger for this bead run."
+    },
+    {
+      "path": ".beads/runs/814a7349-694a-4bb8-8756-b6adc271bb0e/standards_full.md",
+      "description": "Loaded standards bundle used during implementation."
+    }
+  ]
+}
