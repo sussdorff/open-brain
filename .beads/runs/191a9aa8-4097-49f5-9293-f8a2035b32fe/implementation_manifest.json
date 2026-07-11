@@ -43,6 +43,10 @@
     {
       "sha": "ca527fa4d25051e7af82d79ae6938b867515dcbd",
       "message": "docs(open-brain-fhb): document integration schema bootstrap"
+    },
+    {
+      "sha": "d84b7080f4c7db4acbfcfb966bd229c27ecb9cb5",
+      "message": "chore(open-brain-fhb): add implementation evidence artifacts"
     }
   ],
   "tests": [
