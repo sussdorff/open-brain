@@ -37,6 +37,11 @@ class Config(BaseSettings):
     # If empty, web search enrichment is disabled.
     SEARXNG_URL: str = ""
 
+    # Paperless-ngx document reference resolution.
+    # If empty, Paperless reference resolution returns not_configured.
+    PAPERLESS_BASE_URL: str = ""
+    PAPERLESS_API_TOKEN: str = ""
+
     # IMAP email ingest settings (cr3.4)
     IMAP_SERVER: str = ""
     IMAP_PORT: int = 993
