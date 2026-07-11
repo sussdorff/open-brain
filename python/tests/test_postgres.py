@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import os
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import asyncpg
 import pytest
 
 from open_brain.data_layer.interface import (
@@ -48,6 +50,97 @@ def _make_row(overrides: dict | None = None) -> MagicMock:
     row.__getitem__ = lambda self, key: data[key]
     row.get = lambda key, default=None: data.get(key, default)
     return row
+
+
+class TestPostgresPoolMigrations:
+    @pytest.mark.asyncio
+    async def test_get_pool_skip_migrations_no_writes(self):
+        """One-shot callers can acquire a pool without running data mutations."""
+        from open_brain.data_layer import postgres as pg_module
+
+        original_pool = pg_module._pool
+        pg_module._pool = None
+        try:
+            conn = AsyncMock()
+            conn.execute = AsyncMock(return_value=None)
+            pool = _make_pool(conn)
+
+            with patch(
+                "open_brain.data_layer.postgres.asyncpg.create_pool",
+                new_callable=AsyncMock,
+                return_value=pool,
+            ):
+                result = await pg_module.get_pool(run_migrations=False)
+
+            assert result is pool
+            conn.execute.assert_not_called()
+        finally:
+            pg_module._pool = original_pool
+
+    @pytest.mark.asyncio
+    async def test_get_pool_default_runs_migrations_once(self):
+        """Default server path applies migrations on first need and skips the second call."""
+        from open_brain.data_layer import postgres as pg_module
+
+        original_pool = pg_module._pool
+        pg_module._pool = None
+        try:
+            conn = AsyncMock()
+            pool = _make_pool(conn)
+            run_migrations = AsyncMock()
+
+            with (
+                patch(
+                    "open_brain.data_layer.postgres.asyncpg.create_pool",
+                    new_callable=AsyncMock,
+                    return_value=pool,
+                ),
+                patch(
+                    "open_brain.data_layer.postgres._run_migrations",
+                    new=run_migrations,
+                ),
+            ):
+                first = await pg_module.get_pool()
+                second = await pg_module.get_pool()
+
+            assert first is pool
+            assert second is pool
+            run_migrations.assert_awaited_once_with(conn)
+        finally:
+            pg_module._pool = original_pool
+
+    @pytest.mark.integration
+    @pytest.mark.asyncio
+    async def test_get_pool_default_runs_migrations_once_real_database(self):
+        """Real-DB proxy for server semantics: first get_pool migrates, second skips."""
+        db_url = os.environ.get("DATABASE_URL")
+        if not db_url:
+            pytest.skip("DATABASE_URL not set")
+
+        try:
+            probe = await asyncpg.connect(db_url)
+        except (OSError, asyncpg.PostgresError) as err:
+            pytest.skip(f"DATABASE_URL not reachable: {err}")
+        else:
+            await probe.close()
+
+        from open_brain.data_layer import postgres as pg_module
+
+        await pg_module.close_pool()
+        run_migrations = AsyncMock(wraps=pg_module._run_migrations)
+        try:
+            with patch(
+                "open_brain.data_layer.postgres._run_migrations",
+                new=run_migrations,
+            ):
+                first = await pg_module.get_pool()
+                second = await pg_module.get_pool()
+
+            assert first is second
+            assert pg_module._migrations_ensured is True
+            run_migrations.assert_awaited_once()
+        finally:
+            await pg_module.close_pool()
 
 
 class TestRowToMemory:
