@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [unreleased]
 
+### Added
+
+- *(open-brain-hws)* **Canonical personal-knowledge vocabulary** — The capture router now classifies raw memories into six additional types beyond the original `decision`, `meeting`, `person_context`, `insight`, `event`, and `learning`: `project` (name, status, goals, next actions, repository, due date), `resource` (title, URL, source type, author, summary, published date), `concept` (name, domain, summary, related concepts), `journal` (entry date, mood, themes, reflection), `correspondence` (participants, channel, direction, subject, summary, occurred at, follow-up needed), and `prompt` (purpose, prompt text, target model, variables, constraints, last used). The canonical vocabulary is surfaced in the `save_memory` tool description so agents can use explicit types without guessing. Type aliases (`note`→`journal`, `email`→`correspondence`, `idea`→`concept`, etc.) are resolved before classification, so callers using informal names are silently normalized.
+- *(open-brain-hws)* **Classified type persisted to the `type` column** — For raw captures (no caller-supplied `capture_template`), the classifier result is now written into the memory's `type` column so type-based retrieval, `stats()`, and the people machinery see the inferred type rather than finding it only in `metadata.capture_template`. `person_context` captures are intentionally excluded from this write to avoid auto-activating the people pipeline for incidental person mentions. An explicit caller-supplied `type` is never overwritten by a divergent classifier result.
+
 ## [0.32.0] - 2026-06-15
 
 ### Bug Fixes

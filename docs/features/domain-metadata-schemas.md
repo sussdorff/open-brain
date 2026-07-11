@@ -1,10 +1,10 @@
 # Domain Metadata Schemas
 
-Structured metadata validation for domain-specific memory types (event, person, household, meeting, decision, mention, interaction). Enables type-aware field validation without blocking saves.
+Structured metadata validation for domain-specific memory types (event, person, household, meeting, decision, mention, interaction, project, resource, concept, journal, correspondence, prompt). Enables type-aware field validation without blocking saves.
 
 ## Was
 
-Domain Metadata Schemas define structured field definitions for seven domain-specific memory types. Each type has a TypedDict schema with optional datetime fields that are validated (but not enforced) when saving memories. The system validates datetime fields and appends warnings to the response if validation fails, but the memory is always saved successfully.
+Domain Metadata Schemas define structured field definitions for thirteen domain-specific memory types. Each type has a TypedDict schema with optional datetime fields that are validated (but not enforced) when saving memories. The system validates datetime fields and appends warnings to the response if validation fails, but the memory is always saved successfully.
 
 No new database tables are added — all metadata is stored in the existing `metadata` JSONB column alongside other metadata like `capture_template` and `entities`.
 
@@ -179,9 +179,90 @@ Response (if `when` is invalid):
 }
 ```
 
+#### **project**
+```python
+class ProjectMetadata(TypedDict, total=False):
+    name: str              # Project name
+    status: str            # e.g., "active", "on hold", "completed"
+    owner: str             # Person or team responsible
+    goals: list[str]       # High-level objectives
+    next_actions: list[str] # Immediate next steps
+    repository: str        # Source code repository URL or path
+    due_date: str          # ISO datetime of target completion
+```
+
+**Validation**: `due_date` is validated as ISO 8601 datetime if provided.
+
+#### **resource**
+```python
+class ResourceMetadata(TypedDict, total=False):
+    title: str             # Title of the resource
+    url: str               # URL or path to the resource
+    source_type: str       # e.g., "article", "book", "video", "paper"
+    author: str            # Author or creator
+    summary: str           # Short summary of the resource
+    published_at: str      # ISO datetime of publication
+```
+
+**Validation**: `published_at` is validated as ISO 8601 datetime if provided.
+
+#### **concept**
+```python
+class ConceptMetadata(TypedDict, total=False):
+    name: str              # Concept name or label
+    domain: str            # Knowledge domain (e.g., "machine learning", "finance")
+    summary: str           # Brief definition or explanation
+    related_concepts: list[str]  # Names of related concepts
+```
+
+**Validation**: No datetime fields — purely documentary.
+
+#### **journal**
+```python
+class JournalMetadata(TypedDict, total=False):
+    entry_date: str        # ISO date or datetime of the journal entry
+    mood: str              # Mood descriptor (e.g., "reflective", "energized")
+    themes: list[str]      # Topics covered in the entry
+    reflection: str        # Key insight or conclusion from the entry
+```
+
+**Validation**: `entry_date` is validated as ISO 8601 datetime if provided.
+
+#### **correspondence**
+```python
+CorrespondenceMetadata = TypedDict(
+    "CorrespondenceMetadata",
+    {
+        "with": list[str],         # Names of the other parties
+        "channel": str,            # e.g., "email", "slack", "letter"
+        "direction": str,          # "inbound", "outbound", or "bidirectional"
+        "subject": str,            # Subject line or topic
+        "summary": str,            # Brief content summary
+        "occurred_at": str,        # ISO datetime of the exchange
+        "follow_up_needed": bool,  # Whether a follow-up action is required
+    },
+    total=False,
+)
+```
+
+**Validation**: `occurred_at` is validated as ISO 8601 datetime if provided.
+
+#### **prompt**
+```python
+class PromptMetadata(TypedDict, total=False):
+    purpose: str           # What the prompt is designed to accomplish
+    prompt_text: str       # The actual prompt or template body
+    target_model: str      # Model family or name it is optimized for
+    variables: list[str]   # Placeholder variable names used in the template
+    constraints: list[str] # Rules or constraints encoded in the prompt
+    last_used_at: str      # ISO datetime when the prompt was last executed
+```
+
+**Validation**: `last_used_at` is validated as ISO 8601 datetime if provided.
+
 ### Unknown Types
 
-Types not in the predefined list (event, person, household, meeting, decision, mention, interaction) pass through validation with **no warnings**:
+Types not in the predefined list (event, person, household, meeting, decision, mention, interaction, project, resource, concept, journal, correspondence, prompt) pass through validation with **no warnings**:
 
 ```python
 # Custom type not in the schema registry — no validation
@@ -372,7 +453,7 @@ def _is_iso_datetime(value: str) -> bool:
 
 ### save_memory Tool Description
 
-The MCP tool's docstring currently documents the original five schemas (`event`, `person`, `meeting`, `decision`, `household`); `mention` and `interaction` are defined in the interface layer and documented here, pending a follow-up bead to update the server tool description. The complete target description (all seven schemas) is shown below:
+The `save_memory` MCP tool description exposes all thirteen schemas to the calling agent. The canonical inline description (as embedded in `server.py`) is:
 
 ```
 DOMAIN SCHEMAS — structured metadata by type:
@@ -383,11 +464,15 @@ decision: {what: str, context: str, owner: str, alternatives: [str], rationale: 
 household: {category: str, item: str, location: str, details: str, warranty_expiry: ISO datetime}.
 mention: {person_ref: str (recommended), context: str, source_memory_ref: str, sentiment_hint: str}.
 interaction: {person_ref: str (recommended), channel: str, direction: str, summary: str, occurred_at: ISO datetime, follow_up_needed: bool}.
+project: {name: str, status: str, owner: str, goals: [str], next_actions: [str], repository: str, due_date: ISO datetime}.
+resource: {title: str, url: str, source_type: str, author: str, summary: str, published_at: ISO datetime}.
+concept: {name: str, domain: str, summary: str, related_concepts: [str]}.
+journal: {entry_date: ISO datetime, mood: str, themes: [str], reflection: str}.
+correspondence: {with: [str], channel: str, direction: str, subject: str, summary: str, occurred_at: ISO datetime, follow_up_needed: bool}.
+prompt: {purpose: str, prompt_text: str, target_model: str, variables: [str], constraints: [str], last_used_at: ISO datetime}.
 ISO datetime format: 'YYYY-MM-DDTHH:MM:SS' (e.g. '2026-04-15T10:00:00').
 Invalid or missing required datetime fields produce a warning in the response but still save the memory.
 ```
-
-This is the canonical specification for domain metadata. Once `server.py` is updated in a follow-up bead, this will also serve as the primary API documentation exposed to LLM agents.
 
 ### No OpenAPI Changes
 
