@@ -111,6 +111,15 @@ class HouseholdMetadata(TypedDict, total=False):
     warranty_expiry: str  # ISO datetime
 
 
+class PaperlessReferenceMetadata(TypedDict, total=False):
+    """Structured metadata for Paperless document references."""
+
+    document_id: int
+    instance: str
+    title: str
+    added: str  # ISO datetime
+
+
 class DecisionMetadata(TypedDict, total=False):
     """Structured metadata for type='decision' memories."""
 
@@ -160,6 +169,56 @@ def _is_iso_datetime(value: str) -> bool:
         return False
 
 
+_FORBIDDEN_PAPERLESS_REFERENCE_KEYS = frozenset({"bytes", "base64", "content", "data", "attachment"})
+
+
+def _validate_paperless_reference(value: Any) -> list[str]:
+    """Validate cross-cutting Paperless reference metadata."""
+    warnings: list[str] = []
+    if not isinstance(value, dict):
+        return ["paperless_reference metadata must be an object"]
+
+    document_id = value.get("document_id")
+    if (
+        not isinstance(document_id, int)
+        or isinstance(document_id, bool)
+        or document_id <= 0
+    ):
+        warnings.append("paperless_reference metadata field 'document_id' must be a positive integer")
+
+    for field_name in ("instance", "title", "added"):
+        field_value = value.get(field_name)
+        if not isinstance(field_value, str) or not field_value.strip():
+            warnings.append(f"paperless_reference metadata missing required field '{field_name}'")
+
+    added = value.get("added")
+    if isinstance(added, str) and added.strip() and not _is_iso_datetime(added):
+        warnings.append(f"paperless_reference metadata field 'added' is not a valid ISO datetime: {added!r}")
+
+    for key in value:
+        if str(key).lower() in _FORBIDDEN_PAPERLESS_REFERENCE_KEYS:
+            warnings.append(f"paperless_reference metadata must not include document content field {key!r}")
+
+    return warnings
+
+
+def paperless_reference_binary_keys(metadata: dict[str, Any] | None) -> list[str]:
+    """Return forbidden binary-payload keys present in metadata['paperless_reference'].
+
+    AC3 is an absolute invariant: Open Brain never persists the referenced document
+    binary in its memory tables or exports. Unlike ``validate_domain_metadata`` — which
+    only *warns* for every domain type per the codebase-wide convention — callers use
+    this helper to HARD-REJECT a write when a ``paperless_reference`` carries a binary
+    payload key (bytes/base64/content/data/attachment), so document bytes can never
+    enter memory tables. Returns an empty list when there is nothing to reject.
+    """
+    md = metadata or {}
+    ref = md.get("paperless_reference")
+    if not isinstance(ref, dict):
+        return []
+    return [str(key) for key in ref if str(key).lower() in _FORBIDDEN_PAPERLESS_REFERENCE_KEYS]
+
+
 def validate_domain_metadata(memory_type: str | None, metadata: dict[str, Any] | None) -> list[str]:
     """Validate domain-specific metadata fields.
 
@@ -167,11 +226,14 @@ def validate_domain_metadata(memory_type: str | None, metadata: dict[str, Any] |
     Unknown types and None type return no warnings (AK4).
     Does not raise exceptions — all validation results are returned as warnings.
     """
-    if memory_type is None:
-        return []
-
     md = metadata or {}
     warnings: list[str] = []
+
+    if "paperless_reference" in md:
+        warnings.extend(_validate_paperless_reference(md["paperless_reference"]))
+
+    if memory_type is None:
+        return warnings
 
     if memory_type == "event":
         when = md.get("when")

@@ -1,0 +1,11 @@
+{
+  "holder": {
+    "bead_id": "open-brain-amq",
+    "surface": "unknown",
+    "pid": 2255,
+    "owner_pid": 2244,
+    "started_at": "2026-07-11T10:42:37Z",
+    "token": "868b0d37b0ec354ae605d563522ad9be"
+  },
+  "queue": []
+}

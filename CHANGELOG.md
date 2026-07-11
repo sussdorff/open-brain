@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [unreleased]
 
+### Added
+
+- *(open-brain-amq)* **Paperless-ngx document references** — New `resolve_paperless_reference` MCP tool lets agents associate memories with Paperless-ngx documents and retrieve their metadata and retrieval URLs on demand. Only identity and provenance are stored in memory (title, MIME type, added date, download/preview/thumb URLs) — document binaries are never persisted. Missing or inaccessible references return an explicit, non-destructive status (`not_found`, `unauthorized`, `not_configured`, `transport_error`) rather than raising. Configured via two new optional environment variables: `PAPERLESS_BASE_URL` and `PAPERLESS_API_TOKEN`. A new `paperless_reference` domain-metadata schema is documented for use in `save_memory` / `update_memory` calls.
+
 ## [0.32.0] - 2026-06-15
 
 ### Bug Fixes
