@@ -123,3 +123,30 @@ All subsequent ingest adapters (Matrix, WhatsApp, Gmail) must follow the same pa
 - If the `op` session expires, ingest adapters will fail at credential resolution time. Monitoring should alert on `subprocess.CalledProcessError` from `op read` calls.
 - PII quarantine adds manual review overhead. A future bead may automate approval workflows, but the default must remain "quarantine first."
 - E2E key rotation for Matrix is a manual process; teams must document the rotation procedure and schedule periodic reviews.
+
+---
+
+## Known Exceptions
+
+### open-brain-amq — Paperless-ngx retrieval adapter (2026-07-11)
+
+The Paperless-ngx document-reference retrieval adapter (bead `open-brain-amq`) does
+**not** use the 1Password CLI / `op://` pattern mandated above. It authenticates using
+only two user-supplied plain environment variables: `PAPERLESS_BASE_URL` and
+`PAPERLESS_API_TOKEN`.
+
+**Reason:** the coding agent operating this codebase runs under a hard, session-wide
+policy ban on 1Password/`op` usage for any purpose (no exceptions). Since credential
+resolution for this adapter must be agent-executable, `op://` is not viable here.
+
+**Authorization:** explicitly approved by the bead owner (malte.sussdorff@cognovis.de)
+as a one-bead exception, scoped to this adapter only. This does not amend the general
+policy in Decision 1 above — all other adapters (IMAP, Matrix, WhatsApp, Gmail, and any
+future adapter) continue to follow the `op://` pattern unless a similar explicit,
+per-bead exception is recorded here.
+
+**Constraints carried over from this exception:**
+- `PAPERLESS_API_TOKEN` must never be logged, persisted to a database column, or
+  written to any exported artifact.
+- The live-boundary integration/smoke test that exercises real Paperless-ngx credentials
+  is opt-in and must skip cleanly (not fail) when either env var is unset.

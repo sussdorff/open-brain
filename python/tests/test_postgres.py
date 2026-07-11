@@ -481,12 +481,25 @@ class TestExecuteRefineAction:
     @pytest.mark.asyncio
     async def test_merge_deletes_all_but_first(self):
         conn = AsyncMock()
-        action = RefineAction(action="merge", memory_ids=[1, 2, 3], reason="dup", executed=False)
-        await _execute_refine_action(conn, action)
-        # Should delete [2, 3]
-        conn.execute.assert_called_once()
-        call_args = conn.execute.call_args[0]
-        assert "DELETE" in call_args[0]
+        # 1st fetch: mutation-site protected check -> none protected.
+        # 2nd fetch: pre-repoint re-check -> ids 2 and 3 are still safe.
+        conn.fetch = AsyncMock(
+            side_effect=[[], [_make_row({"id": 2}), _make_row({"id": 3})]]
+        )
+        action = RefineAction(
+            action="merge",
+            memory_ids=[1, 2, 3],
+            reason="dup",
+            executed=False,
+            skip_llm_merge=True,
+        )
+        skipped = await _execute_refine_action(conn, action)
+
+        assert skipped == 0
+        sql_calls = [call.args[0] for call in conn.execute.call_args_list]
+        assert any("UPDATE memory_relationships" in sql for sql in sql_calls)
+        assert "DELETE FROM memories" in sql_calls[-1]
+        assert conn.execute.call_args_list[-1].args[1] == [2, 3]
 
     @pytest.mark.asyncio
     async def test_merge_single_id_no_delete(self):

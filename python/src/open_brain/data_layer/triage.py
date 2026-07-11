@@ -6,7 +6,12 @@ import json
 import logging
 import re
 
-from open_brain.data_layer.interface import Memory, TriageAction
+from open_brain.data_layer.interface import (
+    Memory,
+    TriageAction,
+    canonical_entity_identity,
+    is_canonical_entity,
+)
 from open_brain.data_layer.llm import LlmMessage, llm_complete
 
 logger = logging.getLogger(__name__)
@@ -51,6 +56,15 @@ async def _triage_batch(memories: list[Memory]) -> list[TriageAction]:
         f"access_count={m.access_count} | {m.title or '(no title)'}: {(m.content or m.narrative or '')[:200]}"
         for m in memories
     )
+    protected_identities = [
+        identity for memory in memories
+        if (identity := canonical_entity_identity(memory)) is not None
+    ]
+    protected_summary = (
+        ", ".join(f"{identity['id']} ({identity['kind']})" for identity in protected_identities)
+        if protected_identities
+        else "none"
+    )
 
     text = await llm_complete(
         [
@@ -61,12 +75,16 @@ async def _triage_batch(memories: list[Memory]) -> list[TriageAction]:
 Memories:
 {memory_summary}
 
+Canonical entity IDs:
+{protected_summary}
+
 Actions and when to use them:
 - "keep": valuable, factual, or recently accessed observation — retain as-is
 - "merge": near-duplicate of another memory in this list — include BOTH IDs in a note
 - "promote": reusable knowledge or a learned pattern that belongs in standards documentation (especially "learning" type)
 - "scaffold": an identified task, todo, or improvement that should become a work item (bead/ticket)
 - "archive": transient or low-value memory (e.g. session summaries, outdated observations)
+- Canonical entity IDs are protected identity records; classify them as keep.
 
 Type-specific guidance:
 - "learning" type:
@@ -113,6 +131,9 @@ Every memory in the input must appear exactly once in the output.""",
 
         seen_ids.add(memory_id)
         mem = memory_by_id[memory_id]
+        if is_canonical_entity(mem) and action != "keep":
+            action = "keep"
+            reason = "Canonical entity is protected from automated lifecycle changes"
         actions.append(
             TriageAction(
                 action=action,
@@ -146,9 +167,13 @@ def _triage_by_type_defaults(memories: list[Memory]) -> list[TriageAction]:
     """Classify memories using type-based heuristics (no LLM)."""
     return [
         TriageAction(
-            action=_default_action_for_type(m.type),
+            action="keep" if is_canonical_entity(m) else _default_action_for_type(m.type),
             memory_id=m.id,
-            reason=f"Type-based default for '{m.type}' (no LLM available)",
+            reason=(
+                "Canonical entity is protected from automated lifecycle changes"
+                if is_canonical_entity(m)
+                else f"Type-based default for '{m.type}' (no LLM available)"
+            ),
             memory_type=m.type,
             memory_title=m.title,
             executed=False,

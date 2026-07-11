@@ -31,6 +31,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal, Protocol, TypedDict
 
+from open_brain.data_layer.personal_knowledge_vocabulary import (
+    CANONICAL_PERSONAL_KNOWLEDGE_TYPES,
+)
+
 # ─── Importance constants ─────────────────────────────────────────────────────
 
 IMPORTANCE_VALUES: frozenset[str] = frozenset(["critical", "high", "medium", "low"])
@@ -49,6 +53,18 @@ VALID_LINK_TYPES: frozenset[str] = frozenset({
     "supersedes",       # memory -> older memory it replaces
     "contradicts",      # memory -> contradicted memory
     "co_occurs",        # weak co-mention edge
+    "references",       # generic note/link reference
+})
+
+# ─── Canonical entity metadata contract ───────────────────────────────────────
+
+CANONICAL_ENTITY_METADATA_KEY = "canonical_entity"
+CANONICAL_KIND_METADATA_KEY = "canonical_kind"
+CANONICAL_KINDS: frozenset[str] = frozenset({
+    "person",
+    "project",
+    "organization",
+    "concept",
 })
 
 _IMPORTANCE_RANK: dict[str, int] = {
@@ -127,6 +143,15 @@ class HouseholdMetadata(TypedDict, total=False):
     warranty_expiry: str  # ISO datetime
 
 
+class PaperlessReferenceMetadata(TypedDict, total=False):
+    """Structured metadata for Paperless document references."""
+
+    document_id: int
+    instance: str
+    title: str
+    added: str  # ISO datetime
+
+
 class DecisionMetadata(TypedDict, total=False):
     """Structured metadata for type='decision' memories."""
 
@@ -167,6 +192,108 @@ class InteractionMetadata(TypedDict, total=False):
     follow_up_needed: bool
 
 
+class CanonicalEntityMetadata(TypedDict, total=False):
+    """Metadata contract for protected canonical entity memories."""
+
+    canonical_entity: bool
+    canonical_kind: Literal["person", "project", "organization", "concept"]
+    status: str
+    audit: list[dict[str, Any]]
+
+
+class ProjectMetadata(TypedDict, total=False):
+    """Structured metadata for type='project' memories."""
+
+    name: str
+    status: str
+    owner: str
+    goals: list[str]
+    next_actions: list[str]
+    repository: str
+    due_date: str  # ISO datetime
+
+
+class ResourceMetadata(TypedDict, total=False):
+    """Structured metadata for type='resource' memories."""
+
+    title: str
+    url: str
+    source_type: str
+    author: str
+    summary: str
+    published_at: str  # ISO datetime
+
+
+class ConceptMetadata(TypedDict, total=False):
+    """Structured metadata for type='concept' memories."""
+
+    name: str
+    domain: str
+    summary: str
+    related_concepts: list[str]
+
+
+class JournalMetadata(TypedDict, total=False):
+    """Structured metadata for type='journal' memories."""
+
+    entry_date: str  # ISO date or datetime
+    mood: str
+    themes: list[str]
+    reflection: str
+
+
+CorrespondenceMetadata = TypedDict(
+    "CorrespondenceMetadata",
+    {
+        "with": list[str],
+        "channel": str,
+        "direction": str,
+        "subject": str,
+        "summary": str,
+        "occurred_at": str,  # ISO datetime
+        "follow_up_needed": bool,
+    },
+    total=False,
+)
+
+
+class PromptMetadata(TypedDict, total=False):
+    """Structured metadata for type='prompt' memories."""
+
+    purpose: str
+    prompt_text: str
+    target_model: str
+    variables: list[str]
+    constraints: list[str]
+    last_used_at: str  # ISO datetime
+
+
+# Canonical personal-knowledge type -> its structured-metadata TypedDict.
+#
+# Reads from the single source of truth in personal_knowledge_vocabulary.py
+# instead of re-enumerating the type list here. The assertion below fails
+# loudly at import time if a canonical type is added/removed without a
+# matching TypedDict entry, catching drift between the two mechanically
+# instead of relying on a manual four-location edit.
+PERSONAL_KNOWLEDGE_METADATA_SCHEMAS: dict[str, type] = {
+    "project": ProjectMetadata,
+    "resource": ResourceMetadata,
+    "concept": ConceptMetadata,
+    "journal": JournalMetadata,
+    "correspondence": CorrespondenceMetadata,
+    "prompt": PromptMetadata,
+    "decision": DecisionMetadata,
+    "meeting": MeetingMetadata,
+    "event": EventMetadata,
+    "person": PersonMetadata,
+}
+
+assert set(PERSONAL_KNOWLEDGE_METADATA_SCHEMAS) == set(CANONICAL_PERSONAL_KNOWLEDGE_TYPES), (
+    "PERSONAL_KNOWLEDGE_METADATA_SCHEMAS must cover exactly the canonical "
+    "personal-knowledge vocabulary in personal_knowledge_vocabulary.py"
+)
+
+
 def _is_iso_datetime(value: str) -> bool:
     """Check if a string is a valid ISO 8601 datetime."""
     try:
@@ -176,6 +303,56 @@ def _is_iso_datetime(value: str) -> bool:
         return False
 
 
+_FORBIDDEN_PAPERLESS_REFERENCE_KEYS = frozenset({"bytes", "base64", "content", "data", "attachment"})
+
+
+def _validate_paperless_reference(value: Any) -> list[str]:
+    """Validate cross-cutting Paperless reference metadata."""
+    warnings: list[str] = []
+    if not isinstance(value, dict):
+        return ["paperless_reference metadata must be an object"]
+
+    document_id = value.get("document_id")
+    if (
+        not isinstance(document_id, int)
+        or isinstance(document_id, bool)
+        or document_id <= 0
+    ):
+        warnings.append("paperless_reference metadata field 'document_id' must be a positive integer")
+
+    for field_name in ("instance", "title", "added"):
+        field_value = value.get(field_name)
+        if not isinstance(field_value, str) or not field_value.strip():
+            warnings.append(f"paperless_reference metadata missing required field '{field_name}'")
+
+    added = value.get("added")
+    if isinstance(added, str) and added.strip() and not _is_iso_datetime(added):
+        warnings.append(f"paperless_reference metadata field 'added' is not a valid ISO datetime: {added!r}")
+
+    for key in value:
+        if str(key).lower() in _FORBIDDEN_PAPERLESS_REFERENCE_KEYS:
+            warnings.append(f"paperless_reference metadata must not include document content field {key!r}")
+
+    return warnings
+
+
+def paperless_reference_binary_keys(metadata: dict[str, Any] | None) -> list[str]:
+    """Return forbidden binary-payload keys present in metadata['paperless_reference'].
+
+    AC3 is an absolute invariant: Open Brain never persists the referenced document
+    binary in its memory tables or exports. Unlike ``validate_domain_metadata`` — which
+    only *warns* for every domain type per the codebase-wide convention — callers use
+    this helper to HARD-REJECT a write when a ``paperless_reference`` carries a binary
+    payload key (bytes/base64/content/data/attachment), so document bytes can never
+    enter memory tables. Returns an empty list when there is nothing to reject.
+    """
+    md = metadata or {}
+    ref = md.get("paperless_reference")
+    if not isinstance(ref, dict):
+        return []
+    return [str(key) for key in ref if str(key).lower() in _FORBIDDEN_PAPERLESS_REFERENCE_KEYS]
+
+
 def validate_domain_metadata(memory_type: str | None, metadata: dict[str, Any] | None) -> list[str]:
     """Validate domain-specific metadata fields.
 
@@ -183,11 +360,22 @@ def validate_domain_metadata(memory_type: str | None, metadata: dict[str, Any] |
     Unknown types and None type return no warnings (AK4).
     Does not raise exceptions — all validation results are returned as warnings.
     """
-    if memory_type is None:
-        return []
-
     md = metadata or {}
     warnings: list[str] = []
+
+    if md.get(CANONICAL_ENTITY_METADATA_KEY) is True:
+        canonical_kind = md.get(CANONICAL_KIND_METADATA_KEY)
+        if canonical_kind not in CANONICAL_KINDS:
+            warnings.append(
+                "canonical entity metadata requires canonical_kind to be one of: "
+                + ", ".join(sorted(CANONICAL_KINDS))
+            )
+
+    if "paperless_reference" in md:
+        warnings.extend(_validate_paperless_reference(md["paperless_reference"]))
+
+    if memory_type is None:
+        return warnings
 
     if memory_type == "event":
         when = md.get("when")
@@ -223,6 +411,31 @@ def validate_domain_metadata(memory_type: str | None, metadata: dict[str, Any] |
         occurred_at = md.get("occurred_at")
         if occurred_at is not None and not _is_iso_datetime(str(occurred_at)):
             warnings.append(f"interaction metadata field 'occurred_at' is not a valid ISO datetime: {occurred_at!r}")
+
+    elif memory_type == "project":
+        due_date = md.get("due_date")
+        if due_date is not None and not _is_iso_datetime(str(due_date)):
+            warnings.append(f"project metadata field 'due_date' is not a valid ISO datetime: {due_date!r}")
+
+    elif memory_type == "resource":
+        published_at = md.get("published_at")
+        if published_at is not None and not _is_iso_datetime(str(published_at)):
+            warnings.append(f"resource metadata field 'published_at' is not a valid ISO datetime: {published_at!r}")
+
+    elif memory_type == "journal":
+        entry_date = md.get("entry_date")
+        if entry_date is not None and not _is_iso_datetime(str(entry_date)):
+            warnings.append(f"journal metadata field 'entry_date' is not a valid ISO datetime: {entry_date!r}")
+
+    elif memory_type == "correspondence":
+        occurred_at = md.get("occurred_at")
+        if occurred_at is not None and not _is_iso_datetime(str(occurred_at)):
+            warnings.append(f"correspondence metadata field 'occurred_at' is not a valid ISO datetime: {occurred_at!r}")
+
+    elif memory_type == "prompt":
+        last_used_at = md.get("last_used_at")
+        if last_used_at is not None and not _is_iso_datetime(str(last_used_at)):
+            warnings.append(f"prompt metadata field 'last_used_at' is not a valid ISO datetime: {last_used_at!r}")
 
     # All other types pass through without validation
     return warnings
@@ -322,6 +535,33 @@ class CaptureTransitionParams:
 
 
 @dataclass
+class ApprovedCanonicalEntityUpdateParams:
+    """Parameters for explicitly approved canonical entity updates."""
+
+    id: int
+    actor: str
+    note: str
+    operation: Literal["update", "archive"] = "update"
+    text: str | None = None
+    type: str | None = None
+    project: str | None = None
+    title: str | None = None
+    subtitle: str | None = None
+    narrative: str | None = None
+    metadata: dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if self.operation not in ("update", "archive"):
+            raise ValueError(
+                f"operation must be 'update' or 'archive', got {self.operation!r}"
+            )
+        if not self.actor.strip():
+            raise ValueError("actor is required for approved canonical entity updates")
+        if not self.note.strip():
+            raise ValueError("note is required for approved canonical entity updates")
+
+
+@dataclass
 class Memory:
     """A single memory entry.
 
@@ -355,6 +595,29 @@ class Memory:
     project_name: str | None = None  # populated by get_wake_up_memories JOIN
 
 
+def canonical_entity_kind(memory: Memory) -> str | None:
+    """Return the canonical entity kind when metadata contains a valid marker."""
+    if memory.metadata.get(CANONICAL_ENTITY_METADATA_KEY) is not True:
+        return None
+    kind = memory.metadata.get(CANONICAL_KIND_METADATA_KEY)
+    if not isinstance(kind, str) or kind not in CANONICAL_KINDS:
+        return None
+    return kind
+
+
+def is_canonical_entity(memory: Memory) -> bool:
+    """Return True when a memory has valid canonical entity metadata."""
+    return canonical_entity_kind(memory) is not None
+
+
+def canonical_entity_identity(memory: Memory) -> dict[str, int | str] | None:
+    """Return the stable read identity for a canonical entity memory."""
+    kind = canonical_entity_kind(memory)
+    if kind is None:
+        return None
+    return {"id": memory.id, "kind": kind}
+
+
 @dataclass
 class RefineParams:
     """Parameters for memory refinement."""
@@ -383,6 +646,7 @@ class RefineResult:
     analyzed: int
     actions: list[RefineAction]
     summary: str
+    protected_canonical_entities: int = 0
 
 
 @dataclass
@@ -527,6 +791,7 @@ class DecayResult:
     boosted: int         # count of memories whose priority was boosted
     recent_memories: int  # count of recent memories (< boost_days old); protected from decay but may still be boosted
     summary: str
+    protected_canonical_entities: int = 0  # stale canonical entities skipped by decay
 
 
 @dataclass
@@ -584,6 +849,7 @@ class CompactResult:
     deleted_ids: list[int]
     strategy_used: str
     plan: list[ClusterPlan]   # always populated (dry_run=True: plan only; False: executed)
+    protected_canonical_entities: int = 0
 
 
 class DataLayer(Protocol):
@@ -592,7 +858,7 @@ class DataLayer(Protocol):
     async def search(self, params: SearchParams) -> SearchResult: ...
 
     async def ingest_status_by_source_refs(
-        self, source_refs: list[str]
+        self, source_refs: list[str], memory_type: str | None = "meeting"
     ) -> dict[str, dict[str, Any]]: ...
 
     async def timeline(self, params: TimelineParams) -> TimelineResult: ...
@@ -604,6 +870,10 @@ class DataLayer(Protocol):
     async def update_memory(self, params: UpdateMemoryParams) -> SaveMemoryResult: ...
 
     async def set_capture_status(self, params: CaptureTransitionParams) -> SaveMemoryResult: ...
+
+    async def approved_update_canonical_entity(
+        self, params: ApprovedCanonicalEntityUpdateParams
+    ) -> SaveMemoryResult: ...
 
     async def search_by_concept(
         self, query: str, limit: int | None = None, project: str | None = None

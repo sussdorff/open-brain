@@ -1,0 +1,90 @@
+{
+  "mode": "dry_run",
+  "run_id": null,
+  "vault_path": "<vault>",
+  "summary": {
+    "importable": 5,
+    "imported": 0,
+    "duplicate": 1,
+    "skipped": 1,
+    "unresolved_links": 2,
+    "unresolved_attachments": 2
+  },
+  "items": [
+    {
+      "source_ref": "Archive/OpenBrain.md",
+      "type": "resource",
+      "action": "import",
+      "memory_id": null,
+      "reason": null
+    },
+    {
+      "source_ref": "Bad/Malformed.md",
+      "type": null,
+      "action": "skip",
+      "memory_id": null,
+      "reason": "malformed_yaml"
+    },
+    {
+      "source_ref": "Concepts/Knowledge Graph.md",
+      "type": "concept",
+      "action": "import",
+      "memory_id": null,
+      "reason": null
+    },
+    {
+      "source_ref": "Daily/2026-07-10.md",
+      "type": "journal",
+      "action": "import",
+      "memory_id": null,
+      "reason": null
+    },
+    {
+      "source_ref": "Notes/Untyped.md",
+      "type": "observation",
+      "action": "import",
+      "memory_id": null,
+      "reason": null
+    },
+    {
+      "source_ref": "People/Ada Lovelace.md",
+      "type": "person",
+      "action": "duplicate",
+      "memory_id": 900,
+      "reason": "already_ingested"
+    },
+    {
+      "source_ref": "Projects/OpenBrain.md",
+      "type": "project",
+      "action": "import",
+      "memory_id": null,
+      "reason": null
+    }
+  ],
+  "unresolved_links": [
+    {
+      "source_ref": "Daily/2026-07-10.md",
+      "wikilink": "[[OpenBrain]]",
+      "reason": "ambiguous_basename"
+    },
+    {
+      "source_ref": "Projects/OpenBrain.md",
+      "wikilink": "[[Missing Note]]",
+      "reason": "target_not_found"
+    }
+  ],
+  "unresolved_attachments": [
+    {
+      "source_ref": "Projects/OpenBrain.md",
+      "attachment": "missing-contract.pdf",
+      "document_id": 404,
+      "reason": "not_found"
+    },
+    {
+      "source_ref": "Projects/OpenBrain.md",
+      "attachment": "unmapped-scan.pdf",
+      "document_id": null,
+      "reason": "no_mapping"
+    }
+  ]
+}
