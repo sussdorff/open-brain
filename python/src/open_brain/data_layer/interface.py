@@ -31,9 +31,17 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal, Protocol, TypedDict
 
+from open_brain.data_layer.personal_knowledge_vocabulary import (
+    CANONICAL_PERSONAL_KNOWLEDGE_TYPES,
+)
+
 # ─── Importance constants ─────────────────────────────────────────────────────
 
 IMPORTANCE_VALUES: frozenset[str] = frozenset(["critical", "high", "medium", "low"])
+
+# ─── Capture status constants ─────────────────────────────────────────────────
+
+CAPTURE_STATUS_VALUES: frozenset[str] = frozenset(["inbox", "processed", "dismissed"])
 
 # ─── Relationship link-type constants ────────────────────────────────────────
 
@@ -81,6 +89,18 @@ def rank_importance(level: str) -> int:
     except (KeyError, TypeError):
         raise ValueError(
             f"Invalid importance: {level!r}. Must be one of: {sorted(IMPORTANCE_VALUES)}"
+        )
+
+
+def validate_capture_status(status: str) -> None:
+    """Validate a capture inbox status string.
+
+    Raises:
+        ValueError: if *status* is not one of the valid capture status values.
+    """
+    if status not in CAPTURE_STATUS_VALUES:
+        raise ValueError(
+            f"Invalid capture_status: {status!r}. Must be one of: {sorted(CAPTURE_STATUS_VALUES)}"
         )
 
 
@@ -248,6 +268,32 @@ class PromptMetadata(TypedDict, total=False):
     last_used_at: str  # ISO datetime
 
 
+# Canonical personal-knowledge type -> its structured-metadata TypedDict.
+#
+# Reads from the single source of truth in personal_knowledge_vocabulary.py
+# instead of re-enumerating the type list here. The assertion below fails
+# loudly at import time if a canonical type is added/removed without a
+# matching TypedDict entry, catching drift between the two mechanically
+# instead of relying on a manual four-location edit.
+PERSONAL_KNOWLEDGE_METADATA_SCHEMAS: dict[str, type] = {
+    "project": ProjectMetadata,
+    "resource": ResourceMetadata,
+    "concept": ConceptMetadata,
+    "journal": JournalMetadata,
+    "correspondence": CorrespondenceMetadata,
+    "prompt": PromptMetadata,
+    "decision": DecisionMetadata,
+    "meeting": MeetingMetadata,
+    "event": EventMetadata,
+    "person": PersonMetadata,
+}
+
+assert set(PERSONAL_KNOWLEDGE_METADATA_SCHEMAS) == set(CANONICAL_PERSONAL_KNOWLEDGE_TYPES), (
+    "PERSONAL_KNOWLEDGE_METADATA_SCHEMAS must cover exactly the canonical "
+    "personal-knowledge vocabulary in personal_knowledge_vocabulary.py"
+)
+
+
 def _is_iso_datetime(value: str) -> bool:
     """Check if a string is a valid ISO 8601 datetime."""
     try:
@@ -410,6 +456,7 @@ class SearchParams:
     order_by: str | None = None
     file_path: str | None = None
     metadata_filter: dict[str, str] | None = None
+    capture_status: str | None = None
     author: str | None = None  # filter by user_id (contributor)
 
 
@@ -448,6 +495,7 @@ class SaveMemoryParams:
     narrative: str | None = None  # optional prose context / reasoning (supplements text)
     session_ref: str | None = None
     metadata: dict[str, Any] | None = None
+    capture_status: str | None = None
     user_id: str | None = None  # authenticated user who created this memory
     upsert_mode: Literal["append", "replace"] = "append"
     importance: str = "medium"  # caller-declared significance: critical|high|medium|low
@@ -471,6 +519,19 @@ class UpdateMemoryParams:
     subtitle: str | None = None  # secondary label / tags
     narrative: str | None = None  # optional prose context / reasoning (supplements text)
     metadata: dict[str, Any] | None = None  # JSONB-merged into existing metadata
+
+
+@dataclass
+class CaptureTransitionParams:
+    """Parameters for changing capture inbox status.
+
+    lifecycle_status is an explicit opt-in for changing metadata.status. When it
+    is None, capture transitions must not change the knowledge lifecycle.
+    """
+
+    memory_id: int
+    capture_status: str
+    lifecycle_status: str | None = None
 
 
 @dataclass
@@ -807,6 +868,8 @@ class DataLayer(Protocol):
     async def save_memory(self, params: SaveMemoryParams) -> SaveMemoryResult: ...
 
     async def update_memory(self, params: UpdateMemoryParams) -> SaveMemoryResult: ...
+
+    async def set_capture_status(self, params: CaptureTransitionParams) -> SaveMemoryResult: ...
 
     async def approved_update_canonical_entity(
         self, params: ApprovedCanonicalEntityUpdateParams

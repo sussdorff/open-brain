@@ -38,6 +38,7 @@ from open_brain.auth.tokens import verify_token
 from open_brain.config import get_config
 from open_brain.data_layer.interface import (
     ApprovedCanonicalEntityUpdateParams,
+    CaptureTransitionParams,
     CompactParams,
     DecayParams,
     DeleteParams,
@@ -58,6 +59,9 @@ from open_brain.capture_router import (
     canonical_type_for_capture_template,
     classify_and_extract,
     normalize_memory_type,
+)
+from open_brain.data_layer.personal_knowledge_vocabulary import (
+    CANONICAL_PERSONAL_KNOWLEDGE_TYPES,
 )
 from open_brain.ingest import metrics as ingest_metrics
 from open_brain.data_layer.llm import LlmMessage, llm_complete
@@ -364,7 +368,7 @@ async def __IMPORTANT() -> str:  # noqa: N802
 @mcp.tool(
     description="Step 1: Search memory (hybrid: vector + FTS). Returns index with IDs. "
     "Browse mode: omit query (or use '*') to list memories with filters only. "
-    "Params: query, limit, project, type, obs_type, dateStart, dateEnd, offset, orderBy, filePath, metadata_filter, author"
+    "Params: query, limit, project, type, obs_type, dateStart, dateEnd, offset, orderBy, filePath, metadata_filter, capture_status, author"
 )
 @logged_tool
 async def search(
@@ -379,6 +383,7 @@ async def search(
     order_by: str | None = None,
     file_path: str | None = None,
     metadata_filter: dict | None = None,
+    capture_status: str | None = None,
     author: str | None = None,
 ) -> str:
     """Step 1: Hybrid memory search or browse mode."""
@@ -396,6 +401,7 @@ async def search(
             order_by=order_by,
             file_path=file_path,
             metadata_filter=metadata_filter,
+            capture_status=capture_status,
             author=author,
         )
     )
@@ -471,8 +477,7 @@ async def resolve_paperless_reference(document_id: int) -> str:
     "project is REQUIRED — use git repo name, folder name, or Claude Desktop project name. If ambiguous, ask the user. "
     "type: check existing types via stats() before inventing new ones. Prefer existing vocabulary "
     "(discovery, change, feature, decision, bugfix, refactor, session_summary). New types are allowed when none fit. "
-    "Canonical personal-knowledge types: project, resource, concept, journal, correspondence, prompt, "
-    "decision, meeting, event, person. "
+    f"Canonical personal-knowledge types: {', '.join(CANONICAL_PERSONAL_KNOWLEDGE_TYPES)}. "
     "text: PRIMARY content — put the main substance here. Required. Gets embedded and full-text searched. "
     "Do NOT leave text minimal while putting all substance in narrative. "
     "title: short headline (1 line). subtitle: secondary label, tags, or category hint. "
@@ -744,6 +749,30 @@ async def update_memory(
             subtitle=subtitle,
             narrative=narrative,
             metadata=metadata,
+        )
+    )
+    return json.dumps({"id": result.id, "message": result.message})
+
+
+@mcp.tool(
+    description="Set capture inbox status for one memory. "
+    "capture_status: inbox|processed|dismissed. "
+    "lifecycle_status is optional and only changes metadata.status when explicitly provided. "
+    "Params: memory_id (required), capture_status (required), lifecycle_status"
+)
+@logged_tool
+async def set_capture_status(
+    memory_id: int,
+    capture_status: str,
+    lifecycle_status: str | None = None,
+) -> str:
+    """Set capture inbox status without changing lifecycle status by default."""
+    dl = get_dl()
+    result = await dl.set_capture_status(
+        CaptureTransitionParams(
+            memory_id=memory_id,
+            capture_status=capture_status,
+            lifecycle_status=lifecycle_status,
         )
     )
     return json.dumps({"id": result.id, "message": result.message})

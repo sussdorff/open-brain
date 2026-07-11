@@ -274,6 +274,7 @@ search(query)          →  compact index with IDs (~50-100 tokens/result)
 |---|---|
 | `save_memory` | Store an observation. `text` + `project` required. Auto-embeds async. **Capture Router** applies domain templates and extracts structured fields concurrently. |
 | `update_memory` | Update fields on an existing memory. Re-embeds if content changes. |
+| `set_capture_status` | Transition a capture's inbox state (`inbox` / `processed` / `dismissed`). Knowledge-lifecycle `metadata.status` is unchanged unless `lifecycle_status` is explicitly passed. |
 | `refine_memories` | Automatic consolidation: dedup, merge, priority adjustment. |
 | `triage_memories` | Human-in-the-loop classification into lifecycle actions. |
 | `materialize_memories` | Execute triage actions (promote to docs, create issues, archive). |
@@ -485,6 +486,8 @@ Current `ob` commands:
 | `ob export <bundle>` | Export all memories, relationships, and metadata to a portable JSONL bundle |
 | `ob restore <bundle>` | Restore a portable bundle into an empty store (idempotent rerun) |
 | `ob verify <bundle>` | Verify round-trip integrity of a bundle (content hashes, relationships, entity ids) |
+| `ob inbox` | List captures with `capture_status=inbox` |
+| `ob capture set-status` | Transition a capture's inbox status (`inbox` / `processed` / `dismissed`) |
 
 ### `ob people`
 

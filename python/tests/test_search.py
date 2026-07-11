@@ -363,7 +363,8 @@ class TestMetadataFilterPreCondition:
         values: tuple = call_args[0][1:]
 
         # The hybrid_search call must include a 6th argument ($6) for metadata filter
-        assert "hybrid_search($1, $2::vector, $3, 60, $4, $5, $6)" in sql, (
+        # (and a trailing $7 for capture_status, always passed for consistency).
+        assert "hybrid_search($1, $2::vector, $3, 60, $4, $5, $6, $7)" in sql, (
             "metadata_filter must be passed as $6 to hybrid_search(), not applied as a post-filter"
         )
 
@@ -401,11 +402,15 @@ class TestMetadataFilterPreCondition:
         sql: str = call_args[0][0]
         values: tuple = call_args[0][1:]
 
-        # Must still pass $6 (NULL) for consistency
-        assert "hybrid_search($1, $2::vector, $3, 60, $4, $5, $6)" in sql, (
+        # Must still pass $6 (NULL) for consistency, plus the trailing $7 for capture_status
+        assert "hybrid_search($1, $2::vector, $3, 60, $4, $5, $6, $7)" in sql, (
             "hybrid_search() must always receive $6 (NULL when no metadata_filter)"
         )
         # The 6th value (index 5) should be None
         assert values[5] is None, (
             f"Expected None as 6th positional value when no metadata_filter, got: {values[5]!r}"
+        )
+        # The 7th value (index 6) should be None when no capture_status is requested
+        assert values[6] is None, (
+            f"Expected None as 7th positional value when no capture_status, got: {values[6]!r}"
         )
