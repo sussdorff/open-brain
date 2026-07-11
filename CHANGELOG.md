@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- *(open-brain-jhg)* **Portable knowledge backup and restore** — New `ob export <bundle>`, `ob restore <bundle>`, and `ob verify <bundle>` commands create a vendor-neutral bundle for Open Brain memories, metadata, relationships, and Paperless references. Bundles include a versioned manifest, deterministic JSONL files, per-file SHA-256 hashes, explicit no-binary/no-credential assertions, id-preserving restore into empty stores, safe same-bundle reruns, and round-trip integrity reports covering content hashes, full-record hashes, relationship edge sets, and canonical entity ids.
 - *(capture-inbox)* **Capture inbox triage** — `save_memory` calls that set `capture_status` are now first-class inbox items. A new `set_capture_status(memory_id, capture_status, lifecycle_status=None)` MCP tool transitions a capture through `inbox` → `processed` / `dismissed` without touching the existing knowledge-lifecycle `metadata.status` field unless `lifecycle_status` is explicitly passed. The `search` tool gains an optional `capture_status` filter (exact-match, independent of `metadata_filter`) applied inside the SQL ranking function so it correctly filters before candidate-ranking truncation. New CLI commands: `ob inbox` (list captures with `capture_status=inbox`) and `ob capture set-status` (transition a capture). Legacy memories without a `capture_status` key are excluded from inbox listings but remain fully searchable.
 - *(open-brain-brt)* **Second Brain vault importer** — Deterministic bulk importer for historical Obsidian/Markdown vault notes via `python -m open_brain.second_brain_import <vault_path> [--apply] [--paperless-map <json>] [--output <report.json>]`.
   - Dry-run mode (default, no `--apply`) reports importable, duplicate, skipped, and unresolved items without any database writes.
@@ -1575,5 +1576,4 @@ All notable changes to this project will be documented in this file.
 ### Init
 
 - Scaffold open-brain repo with TypeScript + MCP server structure
-
 

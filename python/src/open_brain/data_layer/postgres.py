@@ -14,7 +14,6 @@ import asyncpg
 from open_brain.config import get_config
 from open_brain.data_layer.embedding import (
     embed,
-    embed_query,
     embed_with_usage,
     embed_query_with_usage,
     to_pg_vector,
@@ -309,6 +308,15 @@ def _parse_date(value: str | None) -> datetime | None:
         return datetime.fromisoformat(value)
     except ValueError:
         return None
+
+
+def _parse_portable_timestamp(value: Any) -> Any:
+    """Parse portable ISO timestamps for asyncpg timestamptz parameters."""
+    if value is None or isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return value
 
 
 # Importance multipliers for decay rate: critical=0 (no decay), high=0.5x, medium=1.0x, low=2.0x
@@ -1286,7 +1294,7 @@ class PostgresDataLayer:
                 set_parts.append(f"metadata = metadata || ${param_idx}::jsonb")
                 values.append(params.metadata)
                 param_idx += 1
-            set_parts.append(f"updated_at = NOW()")
+            set_parts.append("updated_at = NOW()")
 
             values.append(params.id)
             query = f"UPDATE memories SET {', '.join(set_parts)} WHERE id = ${param_idx}"
@@ -1768,6 +1776,278 @@ class PostgresDataLayer:
             "embedding_tokens_today": embedding_tokens_today,
             "estimated_embedding_cost_today": estimated_cost,
         }
+
+    async def portable_closure_counts(self) -> dict[str, int]:
+        """Return row counts for the portable knowledge closure."""
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            indexes = await conn.fetchrow("SELECT COUNT(*)::int AS count FROM memory_indexes")
+            memories = await conn.fetchrow("SELECT COUNT(*)::int AS count FROM memories")
+            relationships = await conn.fetchrow(
+                "SELECT COUNT(*)::int AS count FROM memory_relationships"
+            )
+        return {
+            "indexes": int(indexes["count"]),
+            "memories": int(memories["count"]),
+            "relationships": int(relationships["count"]),
+        }
+
+    async def _read_portable_closure(
+        self, conn: asyncpg.Connection
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Read the portable knowledge closure (no credentials, no embeddings).
+
+        Uses the caller-provided connection so the three reads can be scoped to a
+        single transaction/snapshot by the caller (export snapshot / restore
+        emptiness check).
+        """
+        indexes = await conn.fetch("SELECT id, name FROM memory_indexes ORDER BY id")
+        memories = await conn.fetch(
+            """SELECT id, index_id, session_id, type, title, subtitle, narrative,
+                      content, metadata, priority, stability, access_count,
+                      last_accessed_at, created_at, updated_at, user_id,
+                      importance, last_decay_at, session_ref
+               FROM memories
+               ORDER BY id"""
+        )
+        relationships = await conn.fetch(
+            """SELECT id, source_id, target_id, relation_type, link_type, confidence, metadata
+               FROM memory_relationships
+               ORDER BY source_id, target_id, relation_type"""
+        )
+        return {
+            "indexes": [dict(row) for row in indexes],
+            "memories": [dict(row) for row in memories],
+            "relationships": [dict(row) for row in relationships],
+        }
+
+    async def export_portable_records(self) -> dict[str, list[dict[str, Any]]]:
+        """Read the portable knowledge closure without credentials or embeddings.
+
+        All three reads run in one REPEATABLE READ transaction so they observe a
+        single consistent snapshot; a concurrent mutation cannot produce an
+        internally inconsistent bundle (e.g. a relationship referencing a memory
+        that was not included in the same snapshot).
+        """
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction(isolation="repeatable_read"):
+                return await self._read_portable_closure(conn)
+
+    async def _memories_missing_embeddings(self, ids: list[int]) -> set[int]:
+        """Return the subset of ids whose memory row currently lacks an embedding."""
+        if not ids:
+            return set()
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT id FROM memories WHERE id = ANY($1::bigint[]) AND embedding IS NULL",
+                ids,
+            )
+        return {int(row["id"]) for row in rows}
+
+    async def restore_portable_records(
+        self,
+        indexes: list[dict[str, Any]],
+        memories: list[dict[str, Any]],
+        relationships: list[dict[str, Any]],
+        *,
+        regenerate_embeddings: bool,
+    ) -> dict[str, Any]:
+        """Restore portable records atomically with explicit ids and idempotent conflicts.
+
+        Findings 4 & 8 (race elimination): the emptiness/same-bundle check, the
+        id-preserving inserts, and the sequence repair all run inside ONE
+        transaction that first takes an EXCLUSIVE lock on the three closure
+        tables. That lock blocks concurrent INSERT/UPDATE/DELETE (and therefore
+        ``nextval`` via ``save_memory``) for the duration of the restore, so
+        check-then-write is atomic and the sequence repair cannot be moved behind
+        an id allocated by a concurrent transaction. On a populated target we
+        refuse unless the existing closure matches the bundle exactly (idempotent
+        rerun), in which case no rows are written.
+
+        Returns ``{"already_restored": bool}``.
+        """
+        from open_brain.portable_backup import (
+            RestoreTargetNotEmptyError,
+            _canonical_records,
+        )
+
+        expected = _canonical_records(
+            {
+                "indexes": indexes,
+                "memories": memories,
+                "relationships": relationships,
+            }
+        )
+
+        pool = await get_pool()
+        already_restored = False
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                # Serialize the whole restore against concurrent writers so the
+                # emptiness check below and the writes are atomic (findings 4 & 8).
+                await conn.execute(
+                    "LOCK TABLE memory_indexes, memories, memory_relationships "
+                    "IN EXCLUSIVE MODE"
+                )
+
+                existing = await self._read_portable_closure(conn)
+                populated = any(
+                    existing[key] for key in ("indexes", "memories", "relationships")
+                )
+                if populated:
+                    if _canonical_records(existing) == expected:
+                        # Idempotent same-bundle rerun: leave rows untouched.
+                        already_restored = True
+                    else:
+                        raise RestoreTargetNotEmptyError(
+                            "Restore target already contains portable knowledge rows "
+                            "that do not match the bundle"
+                        )
+
+                if not already_restored:
+                    await self._insert_portable_records(
+                        conn, indexes, memories, relationships
+                    )
+
+        if regenerate_embeddings:
+            memories_to_embed = memories
+            if already_restored:
+                # No-op restore path: the record data already matched, but the
+                # caller asked for embeddings. Regenerate only for memories that
+                # are actually missing an embedding (finding 6) so a prior
+                # skip-embeddings restore or a partial failure is repaired.
+                missing_ids = await self._memories_missing_embeddings(
+                    [m["id"] for m in memories if m.get("id") is not None]
+                )
+                memories_to_embed = [
+                    m for m in memories if m.get("id") in missing_ids
+                ]
+            for memory in memories_to_embed:
+                text_to_embed = ": ".join(
+                    str(part)
+                    for part in [
+                        memory.get("title"),
+                        memory.get("subtitle"),
+                        memory.get("narrative"),
+                        memory.get("content"),
+                    ]
+                    if part
+                )
+                if text_to_embed:
+                    await self._embed_memory_only(memory["id"], text_to_embed)
+
+        return {"already_restored": already_restored}
+
+    async def _insert_portable_records(
+        self,
+        conn: asyncpg.Connection,
+        indexes: list[dict[str, Any]],
+        memories: list[dict[str, Any]],
+        relationships: list[dict[str, Any]],
+    ) -> None:
+        """Insert id-preserving portable rows and repair sequences (in caller's txn).
+
+        The sequence repair runs in the SAME transaction as the inserts and under
+        the EXCLUSIVE table lock held by the caller, so it is serialized against
+        concurrent ``nextval`` and cannot be moved behind a concurrently
+        allocated id. ``GREATEST(MAX(id)+1, 1)`` never produces a value that
+        collides with an existing row (no row has id > MAX(id)).
+        """
+        for index in indexes:
+            await conn.execute(
+                """INSERT INTO memory_indexes (id, name)
+                   VALUES ($1, $2)
+                   ON CONFLICT (id) DO NOTHING""",
+                index["id"],
+                index["name"],
+            )
+
+        for memory in memories:
+            await conn.execute(
+                """INSERT INTO memories (
+                       id, index_id, session_id, type, title, subtitle, narrative,
+                       content, metadata, priority, stability, access_count,
+                       last_accessed_at, created_at, updated_at, user_id,
+                       importance, last_decay_at, session_ref
+                   )
+                   VALUES (
+                       $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10,
+                       $11, $12, $13, $14, $15, $16, $17, $18, $19
+                   )
+                   ON CONFLICT (id) DO NOTHING""",
+                memory["id"],
+                memory.get("index_id"),
+                memory.get("session_id"),
+                memory.get("type"),
+                memory.get("title"),
+                memory.get("subtitle"),
+                memory.get("narrative"),
+                memory.get("content"),
+                memory.get("metadata") or {},
+                memory.get("priority"),
+                memory.get("stability"),
+                memory.get("access_count"),
+                _parse_portable_timestamp(memory.get("last_accessed_at")),
+                _parse_portable_timestamp(memory.get("created_at")),
+                _parse_portable_timestamp(memory.get("updated_at")),
+                memory.get("user_id"),
+                memory.get("importance"),
+                _parse_portable_timestamp(memory.get("last_decay_at")),
+                memory.get("session_ref"),
+            )
+
+        for relationship in relationships:
+            await conn.execute(
+                """INSERT INTO memory_relationships (
+                       id, source_id, target_id, relation_type, link_type, confidence, metadata
+                   )
+                   VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+                   ON CONFLICT (source_id, target_id, relation_type) DO NOTHING""",
+                relationship.get("id"),
+                relationship["source_id"],
+                relationship["target_id"],
+                relationship["relation_type"],
+                relationship.get("link_type") or relationship["relation_type"],
+                relationship.get("confidence"),
+                relationship.get("metadata"),
+            )
+
+        await conn.execute(
+            """SELECT setval(
+                   pg_get_serial_sequence('memory_indexes', 'id'),
+                   GREATEST(COALESCE((SELECT MAX(id) FROM memory_indexes), 0) + 1, 1),
+                   false
+               )"""
+        )
+        await conn.execute(
+            """SELECT setval(
+                   pg_get_serial_sequence('memories', 'id'),
+                   GREATEST(COALESCE((SELECT MAX(id) FROM memories), 0) + 1, 1),
+                   false
+               )"""
+        )
+        await conn.execute(
+            """SELECT setval(
+                   pg_get_serial_sequence('memory_relationships', 'id'),
+                   GREATEST(COALESCE((SELECT MAX(id) FROM memory_relationships), 0) + 1, 1),
+                   false
+               )"""
+        )
+
+    async def _embed_memory_only(self, memory_id: int, text: str) -> None:
+        """Regenerate a restored memory embedding without auto-linking."""
+        embedding, token_count = await embed_with_usage(text)
+        await self._log_embedding_tokens("document", token_count)
+        pg_vec = to_pg_vector(embedding)
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE memories SET embedding = $1 WHERE id = $2",
+                pg_vec,
+                memory_id,
+            )
 
     async def refine_memories(self, params: RefineParams) -> RefineResult:
         """LLM-powered memory consolidation."""
@@ -2859,7 +3139,6 @@ async def _execute_refine_actions(actions: list[RefineAction]) -> int:
 
     # Build waves of non-overlapping actions for parallel execution
     waves: list[list[RefineAction]] = []
-    assigned: set[int] = set()
 
     for action in valid_actions:
         action_ids = set(action.memory_ids)
