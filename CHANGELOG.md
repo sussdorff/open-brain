@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [unreleased]
 
+### Security
+
+- *(open-brain-m8p)* **Dependency security upgrades** — Six packages updated to resolve known CVEs:
+  - `cryptography` 47.0.0 → 49.0.0 (GHSA-537c-gmf6-5ccf)
+  - `idna` 3.13 → 3.15 (PYSEC-2026-215)
+  - `pydantic-settings` 2.14.0 → 2.14.2 (GHSA-4xgf-cpjx-pc3j)
+  - `pyjwt` 2.12.1 → 2.13.0 (PYSEC-2026-175/176/177/178/179)
+  - `python-multipart` 0.0.26 → 0.0.31 (CVE-2026-42561/53538/53539/53540)
+  - `starlette` 1.0.0 → 1.3.1 (PYSEC-2026-161/248/249, CVE-2026-48817/48818)
+
 ### Added
 
 - *(open-brain-jhg)* **Portable knowledge backup and restore** — New `ob export <bundle>`, `ob restore <bundle>`, and `ob verify <bundle>` commands create a vendor-neutral bundle for Open Brain memories, metadata, relationships, and Paperless references. Bundles include a versioned manifest, deterministic JSONL files, per-file SHA-256 hashes, explicit no-binary/no-credential assertions, id-preserving restore into empty stores, safe same-bundle reruns, and round-trip integrity reports covering content hashes, full-record hashes, relationship edge sets, and canonical entity ids.
