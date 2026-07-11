@@ -41,6 +41,7 @@ from open_brain.data_layer.interface import (
     DecayParams,
     DeleteParams,
     MaterializeParams,
+    Memory,
     RefineParams,
     SaveMemoryParams,
     SearchParams,
@@ -48,6 +49,7 @@ from open_brain.data_layer.interface import (
     TriageParams,
     UpdateMemoryParams,
     VALID_LINK_TYPES,
+    canonical_entity_identity,
     validate_domain_metadata,
 )
 from open_brain.capture_router import classify_and_extract
@@ -83,6 +85,15 @@ _RATE_LIMIT_MAX = 10
 _RATE_LIMIT_WINDOW = 60
 
 _MAX_TURNS_TEXT = 8000
+
+
+def _memory_payload(memory: Memory) -> dict[str, Any]:
+    """Serialize Memory for supported read tools."""
+    payload = vars(memory).copy()
+    identity = canonical_entity_identity(memory)
+    if identity is not None:
+        payload["canonical_entity"] = identity
+    return payload
 
 # ContextVar to track the OAuth scopes for the current request (Bearer token auth only)
 _current_scopes: ContextVar[tuple[str, ...]] = ContextVar("current_scopes", default=())
@@ -382,7 +393,7 @@ async def search(
         )
     )
     return json.dumps(
-        {"total": result.total, "results": [vars(m) for m in result.results]},
+        {"total": result.total, "results": [_memory_payload(m) for m in result.results]},
         default=str,
     )
 
@@ -419,7 +430,7 @@ async def timeline(
     return json.dumps(
         {
             "anchor_id": result.anchor_id,
-            "results": [vars(m) for m in result.results],
+            "results": [_memory_payload(m) for m in result.results],
         },
         default=str,
     )
@@ -434,7 +445,7 @@ async def get_observations(ids: list[int]) -> str:
     """Step 3: Bulk fetch memories by IDs."""
     dl = get_dl()
     memories = await dl.get_observations(ids)
-    return json.dumps([vars(m) for m in memories], default=str)
+    return json.dumps([_memory_payload(m) for m in memories], default=str)
 
 
 @mcp.tool(
@@ -650,7 +661,7 @@ async def search_by_concept(
     dl = get_dl()
     result = await dl.search_by_concept(query, limit, project)
     return json.dumps(
-        {"results": [vars(m) for m in result["results"]]}, default=str
+        {"results": [_memory_payload(m) for m in result["results"]]}, default=str
     )
 
 
