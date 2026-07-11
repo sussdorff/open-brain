@@ -180,6 +180,73 @@ class CanonicalEntityMetadata(TypedDict, total=False):
     audit: list[dict[str, Any]]
 
 
+class ProjectMetadata(TypedDict, total=False):
+    """Structured metadata for type='project' memories."""
+
+    name: str
+    status: str
+    owner: str
+    goals: list[str]
+    next_actions: list[str]
+    repository: str
+    due_date: str  # ISO datetime
+
+
+class ResourceMetadata(TypedDict, total=False):
+    """Structured metadata for type='resource' memories."""
+
+    title: str
+    url: str
+    source_type: str
+    author: str
+    summary: str
+    published_at: str  # ISO datetime
+
+
+class ConceptMetadata(TypedDict, total=False):
+    """Structured metadata for type='concept' memories."""
+
+    name: str
+    domain: str
+    summary: str
+    related_concepts: list[str]
+
+
+class JournalMetadata(TypedDict, total=False):
+    """Structured metadata for type='journal' memories."""
+
+    entry_date: str  # ISO date or datetime
+    mood: str
+    themes: list[str]
+    reflection: str
+
+
+CorrespondenceMetadata = TypedDict(
+    "CorrespondenceMetadata",
+    {
+        "with": list[str],
+        "channel": str,
+        "direction": str,
+        "subject": str,
+        "summary": str,
+        "occurred_at": str,  # ISO datetime
+        "follow_up_needed": bool,
+    },
+    total=False,
+)
+
+
+class PromptMetadata(TypedDict, total=False):
+    """Structured metadata for type='prompt' memories."""
+
+    purpose: str
+    prompt_text: str
+    target_model: str
+    variables: list[str]
+    constraints: list[str]
+    last_used_at: str  # ISO datetime
+
+
 def _is_iso_datetime(value: str) -> bool:
     """Check if a string is a valid ISO 8601 datetime."""
     try:
@@ -297,6 +364,31 @@ def validate_domain_metadata(memory_type: str | None, metadata: dict[str, Any] |
         occurred_at = md.get("occurred_at")
         if occurred_at is not None and not _is_iso_datetime(str(occurred_at)):
             warnings.append(f"interaction metadata field 'occurred_at' is not a valid ISO datetime: {occurred_at!r}")
+
+    elif memory_type == "project":
+        due_date = md.get("due_date")
+        if due_date is not None and not _is_iso_datetime(str(due_date)):
+            warnings.append(f"project metadata field 'due_date' is not a valid ISO datetime: {due_date!r}")
+
+    elif memory_type == "resource":
+        published_at = md.get("published_at")
+        if published_at is not None and not _is_iso_datetime(str(published_at)):
+            warnings.append(f"resource metadata field 'published_at' is not a valid ISO datetime: {published_at!r}")
+
+    elif memory_type == "journal":
+        entry_date = md.get("entry_date")
+        if entry_date is not None and not _is_iso_datetime(str(entry_date)):
+            warnings.append(f"journal metadata field 'entry_date' is not a valid ISO datetime: {entry_date!r}")
+
+    elif memory_type == "correspondence":
+        occurred_at = md.get("occurred_at")
+        if occurred_at is not None and not _is_iso_datetime(str(occurred_at)):
+            warnings.append(f"correspondence metadata field 'occurred_at' is not a valid ISO datetime: {occurred_at!r}")
+
+    elif memory_type == "prompt":
+        last_used_at = md.get("last_used_at")
+        if last_used_at is not None and not _is_iso_datetime(str(last_used_at)):
+            warnings.append(f"prompt metadata field 'last_used_at' is not a valid ISO datetime: {last_used_at!r}")
 
     # All other types pass through without validation
     return warnings

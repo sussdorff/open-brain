@@ -1,0 +1,211 @@
+{
+  "contract_version": "1",
+  "bead_id": "open-brain-hws",
+  "acceptance_criteria": [
+    {
+      "id": "AC1",
+      "criterion": "Representative raw captures are classified into the canonical vocabulary and receive type-specific metadata.",
+      "status": "done",
+      "changed_files": [
+        "python/src/open_brain/capture_router.py",
+        "python/src/open_brain/server.py",
+        "python/tests/test_capture_router.py"
+      ],
+      "evidence_refs": [
+        "cmd:red-ac1",
+        "cmd:green-ac1",
+        "cmd:affected-final",
+        "cmd:red-typecol",
+        "cmd:green-typecol",
+        "cmd:affected-typecol-final"
+      ]
+    },
+    {
+      "id": "AC2",
+      "criterion": "Existing capture templates and historical memory types remain readable and valid.",
+      "status": "done",
+      "changed_files": [
+        "python/src/open_brain/data_layer/interface.py",
+        "python/src/open_brain/server.py",
+        "python/tests/test_domain_metadata.py"
+      ],
+      "evidence_refs": [
+        "cmd:red-ac2",
+        "cmd:green-ac2",
+        "cmd:affected-final"
+      ]
+    },
+    {
+      "id": "AC3",
+      "criterion": "Callers can explicitly preserve pre-structured captures without classifier overwrite.",
+      "status": "done",
+      "changed_files": [
+        "python/src/open_brain/capture_router.py",
+        "python/src/open_brain/server.py",
+        "python/tests/test_capture_router.py"
+      ],
+      "evidence_refs": [
+        "cmd:red-ac3",
+        "cmd:green-ac3",
+        "cmd:affected-final",
+        "cmd:red-verfix2",
+        "cmd:green-verfix2"
+      ]
+    }
+  ],
+  "changed_files": [
+    ".beads/runs/e669a910-6272-4fee-81e9-45f877360fb9/evidence_ledger.json",
+    ".beads/runs/e669a910-6272-4fee-81e9-45f877360fb9/implementation_manifest.json",
+    "python/src/open_brain/capture_router.py",
+    "python/src/open_brain/data_layer/interface.py",
+    "python/src/open_brain/server.py",
+    "python/tests/test_capture_router.py",
+    "python/tests/test_domain_metadata.py"
+  ],
+  "commits": [
+    {
+      "sha": "53f8713",
+      "message": "test(open-brain-hws): red \u2014 canonical capture vocabulary"
+    },
+    {
+      "sha": "ce28995",
+      "message": "feat(open-brain-hws): green \u2014 canonical capture vocabulary"
+    },
+    {
+      "sha": "4e7f5c7",
+      "message": "test(open-brain-hws): red \u2014 canonical domain metadata"
+    },
+    {
+      "sha": "da7ee4a",
+      "message": "feat(open-brain-hws): green \u2014 canonical domain metadata"
+    },
+    {
+      "sha": "f22206c",
+      "message": "test(open-brain-hws): red \u2014 explicit capture preservation"
+    },
+    {
+      "sha": "60e9dba",
+      "message": "feat(open-brain-hws): green \u2014 explicit capture preservation"
+    },
+    {
+      "sha": "9550cda",
+      "message": "test(open-brain-hws): red \u2014 codex regression coverage"
+    },
+    {
+      "sha": "df30c27",
+      "message": "fix(open-brain-hws): address codex adversarial findings"
+    },
+    {
+      "sha": "756176d",
+      "message": "test(open-brain-hws): red \u2014 raw-capture type-column persistence"
+    },
+    {
+      "sha": "9a8b4e8",
+      "message": "fix(open-brain-hws): green \u2014 persist classified type to type column (except person_context)"
+    },
+    {
+      "sha": "a628b27",
+      "message": "fix(open-brain-hws): preserve explicit caller type from divergent classifier overwrite"
+    }
+  ],
+  "tests": [
+    {
+      "command": "uv run pytest tests/test_capture_router.py::TestCanonicalVocabularyClassification -v",
+      "cwd": "python",
+      "status": "passed",
+      "evidence_ref": "cmd:green-ac1"
+    },
+    {
+      "command": "uv run pytest tests/test_domain_metadata.py -v",
+      "cwd": "python",
+      "status": "passed",
+      "evidence_ref": "cmd:green-ac2"
+    },
+    {
+      "command": "uv run pytest tests/test_capture_router.py::TestTypeAliasNormalization tests/test_capture_router.py::TestServerIntegration::test_save_memory_normalizes_alias_type_for_unstructured_capture tests/test_capture_router.py::TestServerIntegration::test_save_memory_preserves_prestructured_capture_template_type_and_metadata -v",
+      "cwd": "python",
+      "status": "passed",
+      "evidence_ref": "cmd:green-ac3"
+    },
+    {
+      "command": "uv run pytest tests/test_capture_router.py tests/test_domain_schemas.py tests/test_domain_metadata.py -m \"not integration\" -v",
+      "cwd": "python",
+      "status": "passed",
+      "evidence_ref": "cmd:affected-final"
+    },
+    {
+      "command": "uv run pytest tests/test_capture_router.py tests/test_domain_schemas.py tests/test_domain_metadata.py -v",
+      "cwd": "python",
+      "status": "failed_expected",
+      "evidence_ref": "cmd:exact-final"
+    },
+    {
+      "command": "uv run pytest tests/test_capture_router.py::TestCanonicalTypeForCaptureTemplate tests/test_capture_router.py::TestClassifierPromptCanonicalFields tests/test_capture_router.py::TestServerIntegration -v",
+      "cwd": "python",
+      "status": "failed_expected",
+      "evidence_ref": "cmd:red-codex"
+    },
+    {
+      "command": "uv run pytest tests/test_capture_router.py tests/test_domain_schemas.py tests/test_domain_metadata.py -m \"not integration\" -v",
+      "cwd": "python",
+      "status": "passed",
+      "evidence_ref": "cmd:affected-codex-final"
+    },
+    {
+      "command": "uv run pytest tests/test_capture_router.py::TestRawCaptureTypeColumnPersistence -v",
+      "cwd": "python",
+      "status": "passed",
+      "evidence_ref": "cmd:green-typecol"
+    },
+    {
+      "command": "uv run pytest tests/test_capture_router.py tests/test_domain_schemas.py tests/test_domain_metadata.py -m \"not integration\"",
+      "cwd": "python",
+      "status": "passed",
+      "evidence_ref": "cmd:affected-typecol-final"
+    },
+    {
+      "command": "uv run pytest tests/test_capture_router.py::TestRawCaptureTypeColumnPersistence::test_explicit_type_not_overwritten_by_divergent_classifier -m \"not integration\" -v",
+      "cwd": "python",
+      "status": "passed",
+      "evidence_ref": "cmd:green-verfix2"
+    },
+    {
+      "command": "uv run pytest tests/test_capture_router.py tests/test_domain_schemas.py tests/test_domain_metadata.py -m \"not integration\" -v",
+      "cwd": "python",
+      "status": "passed",
+      "evidence_ref": "cmd:affected-verfix2-final"
+    }
+  ],
+  "external_resources": [],
+  "scope_changes": [],
+  "downstream_impacts": [
+    "Capture Router prompt now advertises project, resource, concept, journal, correspondence, and prompt templates in addition to existing templates.",
+    "save_memory normalizes a small explicit type alias set before saving unstructured captures.",
+    "save_memory preserves caller-provided type and metadata when metadata.capture_template is already present.",
+    "validate_domain_metadata gained warning-only branches for new canonical types while unknown and historical types remain permissive pass-through.",
+    "Codex fix: classifier prompt and module docstring now advertise project.due_date and prompt.last_used_at so raw captures reliably extract those canonical fields.",
+    "Codex fix: capture_router.canonical_type_for_capture_template maps person_context -> canonical person for domain-metadata validation while preserving the stored capture_template value.",
+    "Codex fix: save_memory now runs domain-metadata validation against classifier-generated canonical type + extracted fields for raw captures (no caller capture_template), merging non-duplicate warnings; pre-structured (AC3) and duplicate paths keep caller-only validation.",
+    "Phase 10 fix (VETO resolution): save_memory now persists the classifier capture_template into the memory `type` column for raw captures (no caller capture_template) via the existing post-save update_memory call, so type-based retrieval/stats/people machinery see the canonical classification. Scoped exception: person_context classifications keep type=observation (no auto-promotion to type=person, people pipeline untouched); explicit caller types and pre-structured captures are unaffected.",
+    "Phase 10 fix round 2 (verification-agent regression resolution): raw-capture type-column persistence is now additionally gated on normalized_type is None, so an EXPLICIT caller-supplied type (e.g. type=person / type=decision, no capture_template metadata) is no longer overwritten when the classifier diverges (e.g. classifies as meeting). Restores the pre-bead invariant that classification never touches the type column for explicit types; the classified type-specific metadata (post_save_metadata) is still written unchanged. Truly-raw (type=None) persistence path is unaffected."
+  ],
+  "evidence_refs": [
+    "cmd:red-ac1",
+    "cmd:green-ac1",
+    "cmd:red-ac2",
+    "cmd:green-ac2",
+    "cmd:red-ac3",
+    "cmd:green-ac3",
+    "cmd:exact-final",
+    "cmd:affected-final",
+    "cmd:red-codex",
+    "cmd:green-codex",
+    "cmd:affected-codex-final",
+    "cmd:red-typecol",
+    "cmd:green-typecol",
+    "cmd:affected-typecol-final",
+    "cmd:red-verfix2",
+    "cmd:green-verfix2",
+    "cmd:affected-verfix2-final"
+  ]
+}

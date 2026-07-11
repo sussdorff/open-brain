@@ -16,7 +16,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from open_brain.capture_router import classify_and_extract
+import open_brain.capture_router as capture_router
+from open_brain.capture_router import (
+    canonical_type_for_capture_template,
+    classify_and_extract,
+)
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -30,6 +34,158 @@ def _mock_llm(response_dict: dict):
 
 
 # ─── AK1: Decision classification ─────────────────────────────────────────────
+
+class TestCanonicalVocabularyClassification:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("capture_name", "expected_template", "text", "fields"),
+        [
+            (
+                "project",
+                "project",
+                "Project Atlas needs an owner, a launch status, and next actions.",
+                {
+                    "name": "Project Atlas",
+                    "status": "planning",
+                    "owner": "Malte",
+                    "goals": ["Launch the Atlas workspace"],
+                    "next_actions": ["Assign technical owner"],
+                    "repository": "open-brain",
+                },
+            ),
+            (
+                "resource",
+                "resource",
+                "Resource: the pgvector indexing guide explains HNSW tradeoffs.",
+                {
+                    "title": "pgvector indexing guide",
+                    "url": "https://example.invalid/pgvector",
+                    "source_type": "documentation",
+                    "author": None,
+                    "summary": "Explains HNSW tradeoffs.",
+                    "published_at": None,
+                },
+            ),
+            (
+                "concept",
+                "concept",
+                "Concept: reciprocal rank fusion combines vector and text search.",
+                {
+                    "name": "Reciprocal rank fusion",
+                    "domain": "search",
+                    "summary": "Combines vector and text search rankings.",
+                    "related_concepts": ["hybrid search"],
+                },
+            ),
+            (
+                "journal",
+                "journal",
+                "Journal: today I felt focused while simplifying the memory workflow.",
+                {
+                    "entry_date": "2026-07-11",
+                    "mood": "focused",
+                    "themes": ["memory workflow"],
+                    "reflection": "Simplifying the workflow helped maintain focus.",
+                },
+            ),
+            (
+                "correspondence",
+                "correspondence",
+                "Email from Alice about the Q3 roadmap needs a follow-up tomorrow.",
+                {
+                    "with": ["Alice"],
+                    "channel": "email",
+                    "direction": "inbound",
+                    "subject": "Q3 roadmap",
+                    "summary": "Alice asked about the Q3 roadmap.",
+                    "occurred_at": None,
+                    "follow_up_needed": True,
+                },
+            ),
+            (
+                "prompt",
+                "prompt",
+                "Prompt for Codex: summarize the bead and list the tests to run.",
+                {
+                    "purpose": "Summarize a bead",
+                    "prompt_text": "Summarize the bead and list the tests to run.",
+                    "target_model": "Codex",
+                    "variables": ["bead"],
+                    "constraints": ["list tests"],
+                },
+            ),
+            (
+                "decision",
+                "decision",
+                "Decision: use PostgreSQL because pgvector is available.",
+                {
+                    "what": "Use PostgreSQL",
+                    "context": "pgvector availability",
+                    "owner": "team",
+                    "alternatives": ["SQLite"],
+                    "rationale": "pgvector is available.",
+                },
+            ),
+            (
+                "meeting",
+                "meeting",
+                "Meeting with Alice and Bob about Q3 planning.",
+                {
+                    "attendees": ["Alice", "Bob"],
+                    "topic": "Q3 planning",
+                    "key_points": ["Planning reviewed"],
+                    "action_items": ["Share notes"],
+                },
+            ),
+            (
+                "event",
+                "event",
+                "Event: launch review on 2026-08-01 with the product team.",
+                {
+                    "what": "Launch review",
+                    "when": "2026-08-01T10:00:00",
+                    "who": ["product team"],
+                    "where": None,
+                    "recurrence": None,
+                },
+            ),
+            (
+                "person",
+                "person_context",
+                "Person: Alice is the product owner and prefers concise email updates.",
+                {
+                    "person": "Alice",
+                    "relationship": "product owner",
+                    "detail": "Prefers concise email updates.",
+                },
+            ),
+        ],
+    )
+    async def test_prompt_lists_canonical_template_and_preserves_type_specific_fields(
+        self,
+        capture_name,
+        expected_template,
+        text,
+        fields,
+    ):
+        """Representative personal-knowledge captures are routed through canonical templates."""
+        llm_response = {"capture_template": expected_template, **fields}
+        captured_prompts: list[str] = []
+
+        async def mock_llm(*args, **kwargs):
+            captured_prompts.append(kwargs["messages"][0].content)
+            return json.dumps(llm_response)
+
+        with patch("open_brain.capture_router.llm_complete", new=mock_llm):
+            result = await classify_and_extract(text)
+
+        assert captured_prompts, "classifier did not call the LLM"
+        assert f"- {expected_template}:" in captured_prompts[0]
+        assert capture_name in captured_prompts[0]
+        assert result["capture_template"] == expected_template
+        for field_name, value in fields.items():
+            assert result[field_name] == value
+
 
 class TestDecisionClassification:
     @pytest.mark.asyncio
@@ -238,6 +394,45 @@ class TestBypassConditions:
         assert call_count["n"] == 1
 
 
+# ─── AC3: Explicit caller type aliases and pre-structured bypass ──────────────
+
+class TestTypeAliasNormalization:
+    @pytest.mark.parametrize(
+        ("raw_type", "canonical_type"),
+        [
+            ("note", "journal"),
+            ("diary", "journal"),
+            ("reference", "resource"),
+            ("idea", "concept"),
+            ("email", "correspondence"),
+            ("letter", "correspondence"),
+            ("prompt_template", "prompt"),
+        ],
+    )
+    def test_explicit_type_aliases_normalize_to_canonical_vocabulary(
+        self,
+        raw_type,
+        canonical_type,
+    ):
+        """Common explicit type aliases normalize to the canonical vocabulary."""
+        assert capture_router.normalize_memory_type(raw_type) == canonical_type
+
+    def test_alias_normalization_preserves_prestructured_capture_template_type(self):
+        """Pre-structured captures bypass alias normalization and keep caller type."""
+        existing_metadata = {
+            "capture_template": "journal",
+            "entry_date": "2026-07-11",
+            "reflection": "Caller already structured this payload.",
+        }
+
+        result = capture_router.normalize_memory_type(
+            "note",
+            existing_metadata=existing_metadata,
+        )
+
+        assert result == "note"
+
+
 # ─── AK6: Unclassifiable → observation ────────────────────────────────────────
 
 class TestObservationFallback:
@@ -400,6 +595,186 @@ class TestServerIntegration:
         mock_dl.update_memory.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_save_memory_normalizes_alias_type_for_unstructured_capture(self):
+        """save_memory normalizes explicit aliases before saving unstructured captures."""
+        from open_brain.data_layer.interface import SaveMemoryResult
+
+        mock_dl = AsyncMock()
+        mock_dl.save_memory.return_value = SaveMemoryResult(id=88, message="saved")
+        classifier = AsyncMock(return_value={})
+
+        with (
+            patch("open_brain.server.get_dl", return_value=mock_dl),
+            patch("open_brain.server.classify_and_extract", new=classifier),
+            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+        ):
+            from open_brain.server import save_memory
+            await save_memory(
+                text="Diary note about simplifying the capture workflow",
+                type="note",
+            )
+
+        save_params = mock_dl.save_memory.call_args[0][0]
+        assert save_params.type == "journal"
+        classifier.assert_awaited_once_with(
+            "Diary note about simplifying the capture workflow",
+            existing_metadata=None,
+            memory_type="journal",
+        )
+
+    @pytest.mark.asyncio
+    async def test_save_memory_preserves_prestructured_capture_template_type_and_metadata(self):
+        """save_memory preserves caller type and metadata when capture_template is already set."""
+        from open_brain.data_layer.interface import SaveMemoryResult
+
+        existing_metadata = {
+            "capture_template": "journal",
+            "entry_date": "2026-07-11",
+            "reflection": "Caller already structured this payload.",
+        }
+        mock_dl = AsyncMock()
+        mock_dl.save_memory.return_value = SaveMemoryResult(id=89, message="saved")
+
+        with (
+            patch("open_brain.server.get_dl", return_value=mock_dl),
+            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+            patch(
+                "open_brain.capture_router.llm_complete",
+                new=AsyncMock(side_effect=AssertionError("llm_complete must not be called")),
+            ),
+        ):
+            from open_brain.server import save_memory
+            await save_memory(
+                text="Pre-structured journal entry",
+                type="note",
+                metadata=existing_metadata,
+            )
+
+        save_params = mock_dl.save_memory.call_args[0][0]
+        assert save_params.type == "note"
+        assert save_params.metadata == existing_metadata
+        mock_dl.update_memory.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_raw_project_capture_with_invalid_due_date_warns(self):
+        """REGRESSION (Finding 3): classifier-extracted invalid due_date on a raw
+        capture (no caller type/metadata) must produce a domain warning."""
+        from open_brain.data_layer.interface import SaveMemoryResult
+
+        mock_dl = AsyncMock()
+        mock_dl.save_memory.return_value = SaveMemoryResult(id=101, message="saved")
+        mock_dl.update_memory.return_value = SaveMemoryResult(id=101, message="updated")
+        classification = {
+            "capture_template": "project",
+            "name": "Atlas",
+            "due_date": "soon",
+        }
+
+        with (
+            patch("open_brain.server.get_dl", return_value=mock_dl),
+            patch(
+                "open_brain.server.classify_and_extract",
+                new=AsyncMock(return_value=classification),
+            ),
+            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+        ):
+            from open_brain.server import save_memory
+            result_json = await save_memory(text="Project Atlas is due soon")
+
+        data = json.loads(result_json)
+        assert data["id"] == 101
+        assert "warning" in data
+        assert "due_date" in data["warning"]
+
+    @pytest.mark.asyncio
+    async def test_raw_person_capture_validated_as_canonical_person_type(self):
+        """REGRESSION (Findings 1+3): a person_context classification is validated
+        under the canonical ``person`` vocabulary, so an invalid last_contact warns."""
+        from open_brain.data_layer.interface import SaveMemoryResult
+
+        mock_dl = AsyncMock()
+        mock_dl.save_memory.return_value = SaveMemoryResult(id=102, message="saved")
+        mock_dl.update_memory.return_value = SaveMemoryResult(id=102, message="updated")
+        classification = {
+            "capture_template": "person_context",
+            "person": "Alice",
+            "last_contact": "last week",
+        }
+
+        with (
+            patch("open_brain.server.get_dl", return_value=mock_dl),
+            patch(
+                "open_brain.server.classify_and_extract",
+                new=AsyncMock(return_value=classification),
+            ),
+            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+        ):
+            from open_brain.server import save_memory
+            result_json = await save_memory(text="Alice is a colleague I spoke to last week")
+
+        data = json.loads(result_json)
+        assert "warning" in data
+        assert "last_contact" in data["warning"]
+
+    @pytest.mark.asyncio
+    async def test_raw_capture_with_valid_classified_fields_no_warning(self):
+        """A raw capture whose classified canonical fields are valid produces no
+        spurious warning."""
+        from open_brain.data_layer.interface import SaveMemoryResult
+
+        mock_dl = AsyncMock()
+        mock_dl.save_memory.return_value = SaveMemoryResult(id=103, message="saved")
+        mock_dl.update_memory.return_value = SaveMemoryResult(id=103, message="updated")
+        classification = {
+            "capture_template": "project",
+            "name": "Atlas",
+            "due_date": "2026-08-01T00:00:00",
+        }
+
+        with (
+            patch("open_brain.server.get_dl", return_value=mock_dl),
+            patch(
+                "open_brain.server.classify_and_extract",
+                new=AsyncMock(return_value=classification),
+            ),
+            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+        ):
+            from open_brain.server import save_memory
+            result_json = await save_memory(text="Project Atlas launches on schedule")
+
+        data = json.loads(result_json)
+        assert "warning" not in data
+
+    @pytest.mark.asyncio
+    async def test_prestructured_capture_not_double_validated(self):
+        """Pre-structured captures (AC3) use only caller-supplied validation — no
+        duplicate warnings for the same field."""
+        from open_brain.data_layer.interface import SaveMemoryResult
+
+        mock_dl = AsyncMock()
+        mock_dl.save_memory.return_value = SaveMemoryResult(id=104, message="saved")
+        existing = {"capture_template": "project", "due_date": "soon"}
+
+        with (
+            patch("open_brain.server.get_dl", return_value=mock_dl),
+            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+            patch(
+                "open_brain.capture_router.llm_complete",
+                new=AsyncMock(side_effect=AssertionError("llm_complete must not be called")),
+            ),
+        ):
+            from open_brain.server import save_memory
+            result_json = await save_memory(
+                text="Pre-structured project payload",
+                type="project",
+                metadata=existing,
+            )
+
+        data = json.loads(result_json)
+        # Exactly one due_date warning — caller validation only, classifier path skipped.
+        assert data.get("warning", "").count("due_date") == 1
+
+    @pytest.mark.asyncio
     @pytest.mark.integration
     async def test_classification_latency_under_200ms(self):
         """AK5: Classification adds <200ms latency by running concurrently with save.
@@ -445,3 +820,260 @@ class TestServerIntegration:
             f"Total latency {elapsed_ms:.0f}ms suggests sequential execution "
             f"(expected <450ms for concurrent save+classify)"
         )
+
+
+# ─── Finding 1: capture_template → canonical type alias ───────────────────────
+
+class TestCanonicalTypeForCaptureTemplate:
+    def test_person_context_template_maps_to_canonical_person_type(self):
+        """REGRESSION (Finding 1): the historical person_context template maps to
+        the canonical ``person`` type for domain-metadata validation."""
+        assert canonical_type_for_capture_template("person_context") == "person"
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "project",
+            "resource",
+            "concept",
+            "journal",
+            "correspondence",
+            "prompt",
+            "decision",
+            "meeting",
+            "event",
+            "insight",
+            "learning",
+            "observation",
+        ],
+    )
+    def test_canonical_templates_map_to_themselves(self, template):
+        """Templates that already equal their canonical type are returned unchanged."""
+        assert canonical_type_for_capture_template(template) == template
+
+    def test_none_maps_to_none(self):
+        """None input yields None (no explicit type to validate)."""
+        assert canonical_type_for_capture_template(None) is None
+
+
+# ─── Finding 2: classifier prompt advertises canonical schema fields ──────────
+
+class TestClassifierPromptCanonicalFields:
+    @pytest.mark.asyncio
+    async def test_prompt_lists_project_due_date_and_prompt_last_used_at(self):
+        """REGRESSION (Finding 2): the classifier prompt must advertise
+        ``project.due_date`` and ``prompt.last_used_at`` so raw captures reliably
+        extract those canonical fields."""
+        captured_prompts: list[str] = []
+
+        async def mock_llm(*args, **kwargs):
+            captured_prompts.append(kwargs["messages"][0].content)
+            return json.dumps({"capture_template": "observation"})
+
+        with patch("open_brain.capture_router.llm_complete", new=mock_llm):
+            await classify_and_extract("Some project text")
+
+        assert captured_prompts, "classifier did not call the LLM"
+        prompt = captured_prompts[0]
+
+        project_line = next(
+            line for line in prompt.splitlines() if line.startswith("- project:")
+        )
+        assert "due_date" in project_line
+
+        prompt_line = next(
+            line for line in prompt.splitlines() if line.startswith("- prompt:")
+        )
+        assert "last_used_at" in prompt_line
+
+
+# ─── Phase 10: raw-capture type-column persistence (Design Decision Log 2026-07-11) ──
+
+
+class TestRawCaptureTypeColumnPersistence:
+    """save_memory persists the classified canonical type into the memory's ``type``
+    column for raw captures (no caller-supplied capture_template), so type-based
+    retrieval / stats / people machinery actually see the classification instead of
+    it living only in metadata.capture_template.
+
+    Scoped exception (product decision, 2026-07-11): a raw capture classified as
+    ``person_context`` (an incidental / LLM-inferred person mention) MUST keep
+    ``type=observation`` and MUST NOT auto-activate the people pipeline — only an
+    explicit, caller-structured person capture may set ``type=person``.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "template",
+        ["journal", "project", "concept", "correspondence", "decision", "event"],
+    )
+    async def test_raw_capture_persists_classified_type_to_type_column(self, template):
+        """A raw capture classified as a non-person canonical template updates the
+        memory's ``type`` column to that template (not the ``observation`` default)."""
+        from open_brain.data_layer.interface import SaveMemoryResult
+
+        mock_dl = AsyncMock()
+        mock_dl.save_memory.return_value = SaveMemoryResult(id=201, message="saved")
+        mock_dl.update_memory.return_value = SaveMemoryResult(id=201, message="updated")
+        classification = {"capture_template": template}
+
+        with (
+            patch("open_brain.server.get_dl", return_value=mock_dl),
+            patch(
+                "open_brain.server.classify_and_extract",
+                new=AsyncMock(return_value=classification),
+            ),
+            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+        ):
+            from open_brain.server import save_memory
+            await save_memory(text=f"A raw {template} capture")
+
+        mock_dl.update_memory.assert_called_once()
+        update_params = mock_dl.update_memory.call_args[0][0]
+        assert update_params.type == template
+        assert update_params.metadata["capture_template"] == template
+
+    @pytest.mark.asyncio
+    async def test_raw_person_context_capture_keeps_observation_type(self):
+        """A raw capture classified as person_context must NOT be promoted to
+        type=person — the ``type`` column is left untouched (stays the observation
+        default) while metadata.capture_template=person_context is still recorded.
+        Regression guard for the scoped exception / people pipeline."""
+        from open_brain.data_layer.interface import SaveMemoryResult
+
+        mock_dl = AsyncMock()
+        mock_dl.save_memory.return_value = SaveMemoryResult(id=202, message="saved")
+        mock_dl.update_memory.return_value = SaveMemoryResult(id=202, message="updated")
+        classification = {
+            "capture_template": "person_context",
+            "person": "Alice",
+            "detail": "a colleague",
+        }
+
+        with (
+            patch("open_brain.server.get_dl", return_value=mock_dl),
+            patch(
+                "open_brain.server.classify_and_extract",
+                new=AsyncMock(return_value=classification),
+            ),
+            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+        ):
+            from open_brain.server import save_memory
+            await save_memory(text="Alice is a colleague I spoke to")
+
+        mock_dl.update_memory.assert_called_once()
+        update_params = mock_dl.update_memory.call_args[0][0]
+        # type column left at its observation default — NOT promoted to person.
+        assert update_params.type is None
+        # classification is still recorded in metadata.
+        assert update_params.metadata["capture_template"] == "person_context"
+
+    @pytest.mark.asyncio
+    async def test_explicit_person_type_capture_unaffected(self):
+        """An explicit caller type=person is saved as person and is NOT overwritten
+        by the classifier's person_context template (regression guard for AC3 and the
+        people pipeline)."""
+        from open_brain.data_layer.interface import SaveMemoryResult
+
+        mock_dl = AsyncMock()
+        mock_dl.save_memory.return_value = SaveMemoryResult(id=203, message="saved")
+        mock_dl.update_memory.return_value = SaveMemoryResult(id=203, message="updated")
+        classification = {"capture_template": "person_context", "person": "Bob"}
+
+        with (
+            patch("open_brain.server.get_dl", return_value=mock_dl),
+            patch(
+                "open_brain.server.classify_and_extract",
+                new=AsyncMock(return_value=classification),
+            ),
+            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+        ):
+            from open_brain.server import save_memory
+            await save_memory(text="Bob is my manager", type="person")
+
+        # Saved with the explicit caller type.
+        save_params = mock_dl.save_memory.call_args[0][0]
+        assert save_params.type == "person"
+        # The post-save update must NOT overwrite the type column (person_context skip).
+        mock_dl.update_memory.assert_called_once()
+        update_params = mock_dl.update_memory.call_args[0][0]
+        assert update_params.type is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("caller_type", ["person", "decision"])
+    async def test_explicit_type_not_overwritten_by_divergent_classifier(self, caller_type):
+        """An explicit caller ``type`` (no caller-supplied capture_template) whose
+        classifier result DIVERGES to a different canonical template must NOT have its
+        ``type`` column overwritten. Before this bead, classification never touched the
+        ``type`` column, so an explicit type was always DB-preserved; the raw-capture
+        type-column persistence must stay gated on the caller having supplied NO explicit
+        type at all (normalized_type is None). Regression guard for the bead's Scenario:
+        an explicit person/decision capture retains its caller-supplied type even when
+        the classifier disagrees (e.g. classifies as ``meeting``)."""
+        from open_brain.data_layer.interface import SaveMemoryResult
+
+        mock_dl = AsyncMock()
+        mock_dl.save_memory.return_value = SaveMemoryResult(id=205, message="saved")
+        mock_dl.update_memory.return_value = SaveMemoryResult(id=205, message="updated")
+        # Classifier diverges from the explicit caller type: returns a non-person,
+        # non-matching canonical template (meeting) with type-specific fields.
+        classification = {
+            "capture_template": "meeting",
+            "attendees": ["A", "B"],
+            "meeting_date": "2026-07-11",
+        }
+
+        with (
+            patch("open_brain.server.get_dl", return_value=mock_dl),
+            patch(
+                "open_brain.server.classify_and_extract",
+                new=AsyncMock(return_value=classification),
+            ),
+            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+        ):
+            from open_brain.server import save_memory
+            await save_memory(text="Some explicit capture", type=caller_type)
+
+        # Saved with the explicit caller type.
+        save_params = mock_dl.save_memory.call_args[0][0]
+        assert save_params.type == caller_type
+        # Post-save update still writes the classified type-specific metadata,
+        # but MUST NOT overwrite the caller's explicit type column.
+        mock_dl.update_memory.assert_called_once()
+        update_params = mock_dl.update_memory.call_args[0][0]
+        assert update_params.type is None, (
+            f"explicit caller type={caller_type!r} must not be overwritten by "
+            f"divergent classifier template={classification['capture_template']!r}"
+        )
+        # Classified metadata is still recorded (metadata write unaffected).
+        assert update_params.metadata["capture_template"] == "meeting"
+
+    @pytest.mark.asyncio
+    async def test_prestructured_person_capture_unaffected(self):
+        """A pre-structured capture (caller-supplied capture_template=person) bypasses
+        classification entirely; this fix does not touch its type column."""
+        from open_brain.data_layer.interface import SaveMemoryResult
+
+        existing_metadata = {"capture_template": "person", "person": "Carol"}
+        mock_dl = AsyncMock()
+        mock_dl.save_memory.return_value = SaveMemoryResult(id=204, message="saved")
+
+        with (
+            patch("open_brain.server.get_dl", return_value=mock_dl),
+            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+            patch(
+                "open_brain.capture_router.llm_complete",
+                new=AsyncMock(side_effect=AssertionError("llm_complete must not be called")),
+            ),
+        ):
+            from open_brain.server import save_memory
+            await save_memory(
+                text="Carol pre-structured person payload",
+                type="person",
+                metadata=existing_metadata,
+            )
+
+        save_params = mock_dl.save_memory.call_args[0][0]
+        assert save_params.type == "person"
+        # Bypass path: no post-save update (classification == metadata unchanged).
+        mock_dl.update_memory.assert_not_called()
