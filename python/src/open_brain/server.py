@@ -50,7 +50,11 @@ from open_brain.data_layer.interface import (
     VALID_LINK_TYPES,
     validate_domain_metadata,
 )
-from open_brain.capture_router import classify_and_extract, normalize_memory_type
+from open_brain.capture_router import (
+    canonical_type_for_capture_template,
+    classify_and_extract,
+    normalize_memory_type,
+)
 from open_brain.ingest import metrics as ingest_metrics
 from open_brain.data_layer.llm import LlmMessage, llm_complete
 from open_brain.people.merge import (
@@ -548,6 +552,9 @@ async def save_memory(
     # unchanged when capture_template already set or type=session_summary).
     # Entity extraction is skipped when "entities" key already present in metadata.
     has_entities = isinstance(metadata, dict) and "entities" in metadata
+    # Pre-structured captures already carry a caller-supplied capture_template;
+    # their domain validation runs against the caller type/metadata only (AC3).
+    has_caller_template = isinstance(metadata, dict) and "capture_template" in metadata
     normalized_type = normalize_memory_type(type, existing_metadata=metadata)
 
     save_params = SaveMemoryParams(
@@ -601,8 +608,31 @@ async def save_memory(
     if result.duplicate_of is not None:
         payload["duplicate_of"] = result.duplicate_of
 
-    # Domain metadata validation (warns but never blocks save)
+    # Domain metadata validation (warns but never blocks save).
+    # 1) Caller-supplied type + metadata: covers pre-structured captures (AC3)
+    #    and explicit-type captures.
     domain_warnings = validate_domain_metadata(normalized_type, metadata)
+
+    # 2) Classifier-generated output: for raw captures (no caller-supplied
+    #    capture_template) the LLM assigns a canonical template and extracts
+    #    fields that would otherwise never be validated. Validate the classified
+    #    canonical type (normalized: e.g. person_context -> person) against the
+    #    extracted fields and merge any new, non-duplicate warnings. Skipped for
+    #    pre-structured captures (caller validation already covers them) and for
+    #    duplicates (classification is not computed).
+    if result.duplicate_of is None and not has_caller_template:
+        classified_template = (
+            classification.get("capture_template")
+            if isinstance(classification, dict)
+            else None
+        )
+        if classified_template:
+            classified_type = canonical_type_for_capture_template(classified_template)
+            classified_metadata = {**(metadata or {}), **classification}
+            for warning in validate_domain_metadata(classified_type, classified_metadata):
+                if warning not in domain_warnings:
+                    domain_warnings.append(warning)
+
     if domain_warnings:
         payload["warning"] = "; ".join(domain_warnings)
 

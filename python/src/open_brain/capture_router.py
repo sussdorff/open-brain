@@ -4,12 +4,12 @@ Classifies incoming memory text into one of the capture templates and extracts
 structured fields specific to each template type.
 
 Capture templates:
-- project       : name, status, owner, goals, next_actions, repository
+- project       : name, status, owner, goals, next_actions, repository, due_date
 - resource      : title, url, source_type, author, summary, published_at
 - concept       : name, domain, summary, related_concepts
 - journal       : entry_date, mood, themes, reflection
 - correspondence: with, channel, direction, subject, summary, occurred_at, follow_up_needed
-- prompt        : purpose, prompt_text, target_model, variables, constraints
+- prompt        : purpose, prompt_text, target_model, variables, constraints, last_used_at
 - decision      : what, context, owner, alternatives, rationale
 - meeting       : attendees, topic, key_points, action_items
 - person_context: person, relationship, detail
@@ -39,16 +39,28 @@ _MEMORY_TYPE_ALIASES: dict[str, str] = {
     "prompt_template": "prompt",
 }
 
+# Capture-template -> canonical memory-type aliases.
+#
+# Most capture templates already equal their canonical memory type, so they map
+# to themselves. The sole historical exception is ``person_context``: the
+# classifier still emits it (and existing callers/tests depend on the stored
+# ``capture_template`` value), but the canonical personal-knowledge vocabulary
+# calls this ``person``. This alias governs only which canonical type drives
+# domain-metadata validation — the stored ``capture_template`` is left intact.
+_CAPTURE_TEMPLATE_TYPE_ALIASES: dict[str, str] = {
+    "person_context": "person",
+}
+
 _CLASSIFICATION_PROMPT_TEMPLATE = """\
 Classify the following text into one of these capture templates and extract structured fields.
 
 Templates and their fields:
-- project: name, status, owner, goals (list), next_actions (list), repository
+- project: name, status, owner, goals (list), next_actions (list), repository, due_date
 - resource: title, url, source_type, author, summary, published_at
 - concept: name, domain, summary, related_concepts (list)
 - journal: entry_date, mood, themes (list), reflection
 - correspondence: with (list), channel, direction, subject, summary, occurred_at, follow_up_needed
-- prompt: purpose, prompt_text, target_model, variables (list), constraints (list)
+- prompt: purpose, prompt_text, target_model, variables (list), constraints (list), last_used_at
 - decision: what, context, owner, alternatives (list), rationale
 - meeting: attendees (list), topic, key_points (list), action_items (list)
 - person_context: person, relationship, detail (use for person knowledge)
@@ -88,6 +100,20 @@ def normalize_memory_type(
         return memory_type
 
     return _MEMORY_TYPE_ALIASES.get(memory_type.strip().lower(), memory_type)
+
+
+def canonical_type_for_capture_template(capture_template: str | None) -> str | None:
+    """Map a classifier ``capture_template`` to its canonical memory type.
+
+    Symmetrical to :func:`normalize_memory_type` for explicit caller types, this
+    resolves the canonical type that should drive domain-metadata validation for
+    classifier-generated captures. Templates that already equal their canonical
+    type (the common case) are returned unchanged; ``None`` maps to ``None``.
+    """
+    if capture_template is None:
+        return None
+
+    return _CAPTURE_TEMPLATE_TYPE_ALIASES.get(capture_template, capture_template)
 
 
 async def classify_and_extract(
