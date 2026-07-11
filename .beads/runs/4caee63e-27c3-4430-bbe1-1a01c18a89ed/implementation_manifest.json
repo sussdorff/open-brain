@@ -40,13 +40,15 @@
       "changed_files": [
         "python/src/open_brain/data_layer/interface.py",
         "python/src/open_brain/paperless.py",
+        "python/src/open_brain/server.py",
         "python/tests/test_paperless_references.py"
       ],
       "evidence_refs": [
-        "cmd:targeted-paperless-final",
-        "cmd:full-non-integration-final",
+        "cmd:codex-fix-targeted",
+        "cmd:codex-fix-full-non-integration",
         "test:TestPaperlessBinaryInvariant.test_resolve_reference_never_fetches_binary_endpoints",
-        "test:TestPaperlessBinaryInvariant.test_reference_metadata_contains_no_binary_payload_keys"
+        "test:TestPaperlessBinaryInvariant.test_reference_metadata_contains_no_binary_payload_keys",
+        "test:TestPaperlessBinaryInvariant.test_save_memory_rejects_forbidden_binary_payload_key"
       ]
     },
     {
@@ -58,10 +60,11 @@
         "python/tests/test_paperless_references.py"
       ],
       "evidence_refs": [
-        "cmd:targeted-paperless-final",
-        "cmd:full-non-integration-final",
+        "cmd:codex-fix-targeted",
+        "cmd:codex-fix-full-non-integration",
         "test:TestPaperlessExplicitMissingResults",
-        "test:TestPaperlessTransportAndInputFailures"
+        "test:TestPaperlessTransportAndInputFailures",
+        "test:TestPaperlessTransportAndInputFailures.test_non_object_json_body_returns_malformed"
       ]
     }
   ],
@@ -112,6 +115,18 @@
       "command": "uv run pytest -m \"not integration\"",
       "status": "passed",
       "observed_result": "1285 passed, 23 deselected"
+    },
+    {
+      "id": "codex-fix-targeted",
+      "command": "uv run pytest tests/test_paperless_references.py -q",
+      "status": "passed",
+      "observed_result": "29 passed, 1 skipped (after codex adversarial fixes)"
+    },
+    {
+      "id": "codex-fix-full-non-integration",
+      "command": "uv run pytest -m \"not integration\"",
+      "status": "passed",
+      "observed_result": "1294 passed, 23 deselected (after codex adversarial fixes)"
     }
   ],
   "external_resources": [

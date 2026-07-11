@@ -197,6 +197,36 @@ class TestPaperlessBinaryInvariant:
         assert json.loads(serialized) == payload
         assert "\\u0000" not in serialized
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "forbidden_key", ["bytes", "base64", "content", "data", "attachment"]
+    )
+    async def test_save_memory_rejects_forbidden_binary_payload_key(self, forbidden_key):
+        """AC3: save_memory HARD-REJECTS a paperless_reference carrying a binary payload.
+
+        A forbidden binary key must abort the write with an explicit error response —
+        never persist with only a warning — so document bytes cannot enter memory
+        tables or exports. The guard runs before any persistence, so no DB is needed.
+        """
+        import open_brain.server as srv
+
+        metadata = {
+            "paperless_reference": {
+                **_valid_reference_metadata(),
+                forbidden_key: "SGVsbG8gd29ybGQ=",  # would be the document binary
+            }
+        }
+
+        raw = await srv.save_memory(text="A memory citing a document", metadata=metadata)
+        data = json.loads(raw)
+
+        assert data.get("error") == "paperless_reference_binary_payload", (
+            f"expected hard rejection for forbidden key {forbidden_key!r}, got {data!r}"
+        )
+        assert forbidden_key in data.get("message", "")
+        # Nothing was persisted: a successful save returns an id, a rejection must not.
+        assert "id" not in data
+
 
 class TestPaperlessExplicitMissingResults:
     @pytest.mark.asyncio
@@ -333,6 +363,32 @@ class TestPaperlessTransportAndInputFailures:
 
         assert result.status == "not_configured"
         assert called_urls == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("body", [b"[]", b"null", b'"just a string"', b"42"])
+    async def test_non_object_json_body_returns_malformed(self, body):
+        """AC4: a valid-JSON but non-object body returns malformed, never AttributeError.
+
+        A 200 response whose body parses to null/list/string/number has no .get(),
+        so it must map to the explicit non-destructive 'malformed' result instead of
+        raising.
+        """
+        from open_brain.paperless import PaperlessClient
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=body, request=request)
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            result = await PaperlessClient(
+                base_url="https://paperless.example",
+                api_token="test-token",
+                http_client=http_client,
+            ).resolve_reference(17)
+
+        assert result.status == "malformed"
+        assert result.document_id == 17
+        assert result.error is not None
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("document_id", [0, -1, "17", True])

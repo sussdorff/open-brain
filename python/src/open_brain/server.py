@@ -48,6 +48,7 @@ from open_brain.data_layer.interface import (
     TriageParams,
     UpdateMemoryParams,
     VALID_LINK_TYPES,
+    paperless_reference_binary_keys,
     validate_domain_metadata,
 )
 from open_brain.capture_router import classify_and_extract
@@ -509,6 +510,21 @@ async def save_memory(
             **(metadata or {}),
             **memory_metadata_from_judged_proposal(proposal, judge_outcome),
         }
+
+    # ── AC3 hard invariant: never persist referenced document binaries ─────────
+    # paperless_reference metadata may only carry identity/provenance. A binary
+    # payload key (bytes/base64/content/data/attachment) is rejected outright —
+    # not merely warned — so document bytes can never enter memory tables or exports.
+    forbidden_reference_keys = paperless_reference_binary_keys(metadata)
+    if forbidden_reference_keys:
+        return json.dumps({
+            "error": "paperless_reference_binary_payload",
+            "message": (
+                "paperless_reference must not include document content fields "
+                f"{sorted(forbidden_reference_keys)}; store an identity reference only, "
+                "not the document binary."
+            ),
+        })
 
     # ── Rate limit check (per-user sliding window, 10/60s) ─────────────────────
     # Note: not atomic — concurrent coroutines may slightly exceed the limit. Acceptable for soft guardrail.

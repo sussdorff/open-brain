@@ -202,6 +202,23 @@ def _validate_paperless_reference(value: Any) -> list[str]:
     return warnings
 
 
+def paperless_reference_binary_keys(metadata: dict[str, Any] | None) -> list[str]:
+    """Return forbidden binary-payload keys present in metadata['paperless_reference'].
+
+    AC3 is an absolute invariant: Open Brain never persists the referenced document
+    binary in its memory tables or exports. Unlike ``validate_domain_metadata`` — which
+    only *warns* for every domain type per the codebase-wide convention — callers use
+    this helper to HARD-REJECT a write when a ``paperless_reference`` carries a binary
+    payload key (bytes/base64/content/data/attachment), so document bytes can never
+    enter memory tables. Returns an empty list when there is nothing to reject.
+    """
+    md = metadata or {}
+    ref = md.get("paperless_reference")
+    if not isinstance(ref, dict):
+        return []
+    return [str(key) for key in ref if str(key).lower() in _FORBIDDEN_PAPERLESS_REFERENCE_KEYS]
+
+
 def validate_domain_metadata(memory_type: str | None, metadata: dict[str, Any] | None) -> list[str]:
     """Validate domain-specific metadata fields.
 

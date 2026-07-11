@@ -113,6 +113,34 @@
       "purpose": "Collect implementation commit inventory.",
       "exit_code": 0,
       "observed_result": "Listed commits 83206b0, bc891d4, 9addbc9, dbfd2e3, 26fbb16, 233df8d."
+    },
+    {
+      "id": "codex-fix-ac3-hard-reject",
+      "command": "edit python/src/open_brain/data_layer/interface.py + python/src/open_brain/server.py",
+      "purpose": "Close AC3 gap (REGRESSION interface.py:178): forbidden binary payload keys in metadata['paperless_reference'] now HARD-REJECT the save_memory write (new paperless_reference_binary_keys helper + guard returning error 'paperless_reference_binary_payload') instead of only appending a warning; the codebase-wide warn-only convention for other domain types is unchanged.",
+      "exit_code": 0,
+      "observed_result": "save_memory returns {\"error\": \"paperless_reference_binary_payload\", ...} and persists nothing when a binary key is present."
+    },
+    {
+      "id": "codex-fix-ac4-non-object-json",
+      "command": "edit python/src/open_brain/paperless.py",
+      "purpose": "Fix REGRESSION paperless.py:155: added isinstance(payload, dict) guard after response.json() so a valid-but-non-object JSON body (null/list/string/number) returns status='malformed' instead of raising AttributeError on payload.get(...).",
+      "exit_code": 0,
+      "observed_result": "resolve_reference returns PaperlessResolveResult(status='malformed', error='Paperless returned a non-object JSON body') for non-dict bodies; no AttributeError."
+    },
+    {
+      "id": "codex-fix-targeted",
+      "command": "uv run pytest tests/test_paperless_references.py -q",
+      "purpose": "Verify both codex adversarial fixes and their new tests pass.",
+      "exit_code": 0,
+      "observed_result": "29 passed, 1 skipped."
+    },
+    {
+      "id": "codex-fix-full-non-integration",
+      "command": "uv run pytest -m \"not integration\"",
+      "purpose": "Full non-integration regression suite after codex adversarial fixes.",
+      "exit_code": 0,
+      "observed_result": "1294 passed, 23 deselected."
     }
   ],
   "skipped_checks": [

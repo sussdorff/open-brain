@@ -152,6 +152,16 @@ class PaperlessClient:
                 error="Paperless returned invalid JSON",
             )
 
+        # A syntactically valid JSON body can still be null/list/string/number.
+        # None of those support .get(...); treat them as malformed (non-destructive)
+        # rather than raising AttributeError.
+        if not isinstance(payload, dict):
+            return PaperlessResolveResult(
+                status="malformed",
+                document_id=document_id,
+                error="Paperless returned a non-object JSON body",
+            )
+
         resolved_document_id = payload.get("id", document_id)
         if not isinstance(resolved_document_id, int) or isinstance(resolved_document_id, bool):
             resolved_document_id = document_id
