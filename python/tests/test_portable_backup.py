@@ -243,3 +243,46 @@ async def test_export_writes_versioned_deterministic_bundle_with_metadata_and_pa
         (record["source_id"], record["target_id"], record["relation_type"])
         for record in relationships
     ] == [(10, 20, "mentioned_in"), (20, 10, "references")]
+
+
+@pytest.mark.asyncio
+async def test_export_rejects_credential_source_label_and_bundle_scan_excludes_binaries(
+    tmp_path: Path,
+) -> None:
+    """Export refuses credential-like labels and keeps binary columns out of files."""
+    unsafe_bundle = tmp_path / "unsafe"
+    secret_source_label = "postgresql://user:secret-password@localhost/open-brain"
+
+    with pytest.raises(ValueError, match="source_label"):
+        await portable_backup.export_bundle(
+            unsafe_bundle,
+            FixturePortableStore(),
+            source_label=secret_source_label,
+            created_at=FIXED_EXPORT_TIME,
+        )
+
+    assert not unsafe_bundle.exists()
+
+    safe_bundle = tmp_path / "safe"
+    store = FixturePortableStore()
+    store.records["memories"][0]["embedding"] = "DOCUMENT_BINARY_SENTINEL"
+    store.records["memories"][1]["token_hash"] = "CREDENTIAL_SENTINEL"
+    await portable_backup.export_bundle(
+        safe_bundle,
+        store,
+        source_label="fixture",
+        created_at=FIXED_EXPORT_TIME,
+    )
+
+    bundle_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted(safe_bundle.rglob("*"))
+        if path.is_file()
+    )
+    forbidden_terms = [
+        "DOCUMENT_BINARY_SENTINEL",
+        "CREDENTIAL_SENTINEL",
+        "secret-password",
+        "token_hash",
+    ]
+    assert all(term not in bundle_text for term in forbidden_terms)
