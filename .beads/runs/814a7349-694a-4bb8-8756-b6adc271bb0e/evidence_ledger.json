@@ -71,6 +71,34 @@
       "purpose": "Capture implementation commit sequence.",
       "exit_code": 0,
       "observed_result": "Latest commits: 590d04d, 31018c1, 7436f5a, de81e33, 2653681, 60a7ce2."
+    },
+    {
+      "id": "cmd-pairloop1-tdd-red",
+      "command": "git stash push -- src/open_brain/data_layer/materialize.py && UV_CACHE_DIR=../.uv-cache uv run pytest tests/test_canonical_entity_retention.py::test_materialize_archive_skips_canonical_entity_at_mutation_site -q; git stash pop",
+      "purpose": "TDD red gate: confirm the new materialize_archive canonical-guard regression test fails against the unguarded HEAD code.",
+      "exit_code": 1,
+      "observed_result": "1 failed for the intended reason: canonical entity was archived (detail == 'Priority set to 0.1') instead of skipped. Fix restored via git stash pop."
+    },
+    {
+      "id": "cmd-pairloop1-retention-green",
+      "command": "UV_CACHE_DIR=../.uv-cache uv run pytest tests/test_canonical_entity_retention.py tests/test_canonical_entities.py -q",
+      "purpose": "Verify canonical retention/read suites pass with the new mutation-site guard and regression test.",
+      "exit_code": 0,
+      "observed_result": "20 passed."
+    },
+    {
+      "id": "cmd-pairloop1-regression-green",
+      "command": "UV_CACHE_DIR=../.uv-cache uv run pytest tests/test_decay.py tests/test_refine.py tests/test_compact_memories.py -q",
+      "purpose": "Verify named regression-risk suites still pass after the tab normalization and archive-guard changes.",
+      "exit_code": 0,
+      "observed_result": "59 passed."
+    },
+    {
+      "id": "cmd-pairloop1-ruff",
+      "command": "UV_CACHE_DIR=../.uv-cache uv run ruff check src/open_brain/data_layer/materialize.py src/open_brain/data_layer/postgres.py tests/test_canonical_entity_retention.py",
+      "purpose": "Confirm the fixes introduce no new lint errors.",
+      "exit_code": 1,
+      "observed_result": "3 errors reported, all pre-existing and outside changed lines (postgres.py:17 F401, postgres.py:1212 F541, postgres.py:2722 F841); zero errors in materialize.py, the test file, and the edited SQL literals. Not in scope for this iteration."
     }
   ],
   "skipped_checks": [

@@ -5,7 +5,7 @@
     {
       "id": "AC1",
       "criterion": "Canonical entities expose a stable identifier and entity kind through supported reads.",
-      "status": "passed",
+      "status": "done",
       "changed_files": [
         "python/src/open_brain/data_layer/interface.py",
         "python/src/open_brain/server.py",
@@ -21,7 +21,7 @@
     {
       "id": "AC2",
       "criterion": "Automated decay and compaction do not demote, delete, or merge protected canonical entities.",
-      "status": "passed",
+      "status": "done",
       "changed_files": [
         "python/src/open_brain/data_layer/interface.py",
         "python/src/open_brain/data_layer/postgres.py",
@@ -44,7 +44,7 @@
     {
       "id": "AC3",
       "criterion": "Explicitly approved updates and archival remain possible and auditable.",
-      "status": "passed",
+      "status": "done",
       "changed_files": [
         "python/src/open_brain/data_layer/interface.py",
         "python/src/open_brain/data_layer/postgres.py",
@@ -62,6 +62,7 @@
   ],
   "changed_files": [
     "python/src/open_brain/data_layer/interface.py",
+    "python/src/open_brain/data_layer/materialize.py",
     "python/src/open_brain/data_layer/postgres.py",
     "python/src/open_brain/data_layer/refine.py",
     "python/src/open_brain/data_layer/triage.py",
@@ -76,32 +77,32 @@
     {
       "id": "commit-60a7ce2",
       "sha": "60a7ce2",
-      "subject": "test(open-brain-ccd): red \u2014 canonical entity reads"
+      "subject": "test(open-brain-ccd): red — canonical entity reads"
     },
     {
       "id": "commit-2653681",
       "sha": "2653681",
-      "subject": "feat(open-brain-ccd): green \u2014 expose canonical entity reads"
+      "subject": "feat(open-brain-ccd): green — expose canonical entity reads"
     },
     {
       "id": "commit-de81e33",
       "sha": "de81e33",
-      "subject": "test(open-brain-ccd): red \u2014 protect canonical entities"
+      "subject": "test(open-brain-ccd): red — protect canonical entities"
     },
     {
       "id": "commit-7436f5a",
       "sha": "7436f5a",
-      "subject": "feat(open-brain-ccd): green \u2014 protect canonical entities"
+      "subject": "feat(open-brain-ccd): green — protect canonical entities"
     },
     {
       "id": "commit-31018c1",
       "sha": "31018c1",
-      "subject": "test(open-brain-ccd): red \u2014 approved canonical updates"
+      "subject": "test(open-brain-ccd): red — approved canonical updates"
     },
     {
       "id": "commit-590d04d",
       "sha": "590d04d",
-      "subject": "feat(open-brain-ccd): green \u2014 approve canonical updates"
+      "subject": "feat(open-brain-ccd): green — approve canonical updates"
     }
   ],
   "tests": [
@@ -132,14 +133,26 @@
     },
     {
       "id": "cmd-hook-final-green",
-      "command": "git add python/src/open_brain/data_layer/interface.py python/src/open_brain/data_layer/postgres.py python/src/open_brain/server.py && git commit -m \"feat(open-brain-ccd): green \u2014 approve canonical updates\"",
+      "command": "git add python/src/open_brain/data_layer/interface.py python/src/open_brain/data_layer/postgres.py python/src/open_brain/server.py && git commit -m \"feat(open-brain-ccd): green — approve canonical updates\"",
       "result": "pre-commit hook ran uv test suite with -m 'not integration': 1284 passed, 22 deselected, 53 warnings"
+    },
+    {
+      "id": "cmd-pairloop1-retention-green",
+      "command": "UV_CACHE_DIR=../.uv-cache uv run pytest tests/test_canonical_entity_retention.py tests/test_canonical_entities.py -q",
+      "result": "20 passed (includes new materialize_archive canonical-guard regression test)"
+    },
+    {
+      "id": "cmd-pairloop1-regression-green",
+      "command": "UV_CACHE_DIR=../.uv-cache uv run pytest tests/test_decay.py tests/test_refine.py tests/test_compact_memories.py -q",
+      "result": "59 passed"
     }
   ],
   "external_resources": [],
   "scope_changes": [
     "Implemented relationship repointing for compact/refine merge losers so relationships incident to canonical entities remain connected when the other endpoint is removed.",
-    "Added a dedicated approved canonical entity update/archive method and MCP tool; ordinary update_memory remains unchanged."
+    "Added a dedicated approved canonical entity update/archive method and MCP tool; ordinary update_memory remains unchanged.",
+    "Pair-loop iteration 1: normalized stray tab characters to spaces inside two SQL string literals in postgres.py (decay_unused_priorities RETURNING clause and _apply_recall_decay UPDATE f-string); no SQL semantics changed.",
+    "Pair-loop iteration 1: extended materialize_archive canonical-entity mutation-site guard so the automated run_lifecycle_pipeline path skips canonical entities (defense-in-depth) using the shared is_canonical_entity helper; added a regression test."
   ],
   "downstream_impacts": [
     "DataLayer implementations must now provide approved_update_canonical_entity.",

@@ -265,6 +265,33 @@ def test_refine_duplicate_fallback_ignores_canonical_entities() -> None:
 
 
 @pytest.mark.asyncio
+async def test_materialize_archive_skips_canonical_entity_at_mutation_site() -> None:
+    """materialize_archive must guard canonical entities at the mutation site.
+
+    A canonical entity (non-critical importance) must be skipped as a success
+    without invoking the archive/update callback, while an ordinary,
+    non-critical memory is archived (priority -> 0.1) as before.
+    """
+    from open_brain.data_layer.materialize import materialize_archive
+
+    update_fn = AsyncMock()
+
+    canonical = _memory(80, metadata=_canonical_metadata("concept"))
+    canonical_result = await materialize_archive(canonical, update_fn)
+
+    assert canonical_result.success is True
+    assert canonical_result.detail == "skipped: protected canonical entity"
+    update_fn.assert_not_awaited()
+
+    ordinary = _memory(81)
+    ordinary_result = await materialize_archive(ordinary, update_fn)
+
+    assert ordinary_result.success is True
+    assert ordinary_result.detail == "Priority set to 0.1"
+    update_fn.assert_awaited_once_with(81, 0.1)
+
+
+@pytest.mark.asyncio
 async def test_triage_prompt_marks_canonical_entities_as_keep_only() -> None:
     """The triage LLM prompt should direct canonical entities to keep."""
     from open_brain.data_layer import triage

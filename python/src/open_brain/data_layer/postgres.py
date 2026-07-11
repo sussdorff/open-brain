@@ -458,8 +458,8 @@ async def get_pool() -> asyncpg.Pool:
                           AND m.created_at < NOW() - (p_stale_days || ' days')::interval
                           AND (m.last_decay_at IS NULL OR m.last_decay_at < NOW() - interval '24 hours')
                           AND {canonical_entity_protection_predicate("m")}
-	                        RETURNING m.id
-	                    )
+                        RETURNING m.id
+                    )
                     SELECT COUNT(*) INTO v_updated FROM updated;
                     RETURN v_updated;
                 END;
@@ -1464,11 +1464,11 @@ class PostgresDataLayer:
             return
         await conn.execute(
             f"""UPDATE memories
-	               SET priority = GREATEST(0.0, priority - priority * $1),
-	                   last_decay_at = NOW()
-		               WHERE id = $2
-		                 AND importance != 'critical'
-		                 AND (last_decay_at IS NULL OR last_decay_at < NOW() - interval '24 hours')
+               SET priority = GREATEST(0.0, priority - priority * $1),
+                   last_decay_at = NOW()
+               WHERE id = $2
+                 AND importance != 'critical'
+                 AND (last_decay_at IS NULL OR last_decay_at < NOW() - interval '24 hours')
                          AND {canonical_entity_protection_predicate()}""",
             delta,
             memory_id,

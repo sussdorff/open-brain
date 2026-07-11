@@ -10,6 +10,7 @@ from open_brain.data_layer.interface import (
     MaterializeActionResult,
     Memory,
     TriageAction,
+    is_canonical_entity,
 )
 
 logger = logging.getLogger(__name__)
@@ -162,20 +163,30 @@ async def materialize_archive(
 ) -> MaterializeActionResult:
     """Deprioritize a memory (archive = set priority to 0.1).
 
-    Critical and high importance memories are protected from archiving and
-    returned as a skipped success to preserve the retention rule.
+    Critical and high importance memories, as well as protected canonical
+    entities, are protected from archiving and returned as a skipped success to
+    preserve the retention rule. The canonical guard is enforced here at the
+    mutation site (defense-in-depth) so an upstream triage recommendation can
+    never demote a canonical entity via the automated lifecycle pipeline.
     """
-    if memory.importance in ("critical", "high"):
+    canonical = is_canonical_entity(memory)
+    if memory.importance in ("critical", "high") or canonical:
         logger.info(
-            "Skipping archive for memory %d (importance=%s: protected from pruning)",
+            "Skipping archive for memory %d (importance=%s, canonical=%s: protected from pruning)",
             memory.id,
             memory.importance,
+            canonical,
+        )
+        detail = (
+            "skipped: protected importance"
+            if memory.importance in ("critical", "high")
+            else "skipped: protected canonical entity"
         )
         return MaterializeActionResult(
             memory_id=memory.id,
             action="archive",
             success=True,
-            detail="skipped: protected importance",
+            detail=detail,
         )
 
     try:
