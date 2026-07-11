@@ -27,6 +27,7 @@ from open_brain.data_layer.interface import (
     SaveMemoryParams,
     paperless_reference_binary_keys,
 )
+from open_brain.ingest.runs import ingest_run
 from open_brain.paperless import PaperlessClient, PaperlessResolveResult
 
 ImportMode = Literal["dry_run", "apply"]
@@ -569,9 +570,40 @@ async def import_vault(
     if paperless_client is None:
         paperless_client = PaperlessClient()
 
+    if apply:
+        with ingest_run() as run_id:
+            return await _import_vault_reconcile(
+                vault_path=resolved_vault_path,
+                paperless_mapping_path=paperless_mapping_path,
+                data_layer=data_layer,
+                paperless_client=paperless_client,
+                mode="apply",
+                run_id=run_id,
+            )
+
+    return await _import_vault_reconcile(
+        vault_path=resolved_vault_path,
+        paperless_mapping_path=paperless_mapping_path,
+        data_layer=data_layer,
+        paperless_client=paperless_client,
+        mode="dry_run",
+        run_id=None,
+    )
+
+
+async def _import_vault_reconcile(
+    *,
+    vault_path: Path,
+    paperless_mapping_path: str | Path | None,
+    data_layer: DataLayer,
+    paperless_client: PaperlessClient,
+    mode: ImportMode,
+    run_id: str | None,
+) -> dict[str, Any]:
+    """Run reconciliation and optional writes for a vault import."""
     mapping_path = Path(paperless_mapping_path).expanduser().resolve() if paperless_mapping_path else None
     mapping = _load_paperless_mapping(mapping_path)
-    notes, skipped_notes = _scan_vault(resolved_vault_path)
+    notes, skipped_notes = _scan_vault(vault_path)
     statuses = await data_layer.ingest_status_by_source_refs(
         [note.source_ref for note in notes],
         memory_type=None,
@@ -623,15 +655,34 @@ async def import_vault(
         paperless_client,
     )
 
+    if mode == "apply":
+        for note in importable_notes:
+            metadata = dict(note.metadata)
+            binary_keys = paperless_reference_binary_keys(metadata)
+            if binary_keys:
+                raise ValueError(
+                    "paperless_reference metadata must not include binary payload keys: "
+                    + ", ".join(sorted(binary_keys))
+                )
+            result = await data_layer.save_memory(
+                SaveMemoryParams(
+                    text=note.body,
+                    type=note.memory_type,
+                    title=note.title,
+                    metadata=metadata,
+                    dedup_mode="skip",
+                )
+            )
+            items_by_source_ref[note.source_ref]["memory_id"] = result.id
+
     items = [items_by_source_ref[source_ref] for source_ref in sorted(items_by_source_ref)]
     unresolved_links.sort(key=lambda row: (row["source_ref"], row["wikilink"]))
     unresolved_attachments.sort(key=lambda row: (row["source_ref"], row["attachment"]))
-    mode: ImportMode = "apply" if apply else "dry_run"
 
     return {
         "mode": mode,
-        "run_id": None,
-        "vault_path": str(resolved_vault_path),
+        "run_id": run_id,
+        "vault_path": str(vault_path),
         "summary": _summary(items, unresolved_links, unresolved_attachments),
         "items": items,
         "unresolved_links": unresolved_links,
