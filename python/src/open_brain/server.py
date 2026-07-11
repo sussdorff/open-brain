@@ -608,10 +608,15 @@ async def save_memory(
         #     keep type=observation and must NOT auto-activate the people pipeline, so
         #     it is deliberately NOT routed through canonical_type_for_capture_template()
         #     here (that mapping is only for the domain-metadata *validation* call below).
-        #   - Skipped for pre-structured captures (has_caller_template=True) and explicit
-        #     caller types, which already flow through normalize_memory_type() unchanged.
+        #   - Skipped for pre-structured captures (has_caller_template=True) AND for
+        #     explicit caller types (normalized_type is not None). Before this bead,
+        #     classification never touched the `type` column, so an explicit caller
+        #     `type` was always DB-preserved; gating on `normalized_type is None`
+        #     restores that invariant — a divergent classifier result must NOT clobber
+        #     an explicit caller-supplied type. The classified type-specific metadata is
+        #     still written below (only the `type` COLUMN write is skipped here).
         type_to_persist: str | None = None
-        if not has_caller_template:
+        if not has_caller_template and normalized_type is None:
             classified_capture_template = (
                 classification.get("capture_template")
                 if isinstance(classification, dict)

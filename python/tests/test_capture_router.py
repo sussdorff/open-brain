@@ -1000,6 +1000,55 @@ class TestRawCaptureTypeColumnPersistence:
         assert update_params.type is None
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("caller_type", ["person", "decision"])
+    async def test_explicit_type_not_overwritten_by_divergent_classifier(self, caller_type):
+        """An explicit caller ``type`` (no caller-supplied capture_template) whose
+        classifier result DIVERGES to a different canonical template must NOT have its
+        ``type`` column overwritten. Before this bead, classification never touched the
+        ``type`` column, so an explicit type was always DB-preserved; the raw-capture
+        type-column persistence must stay gated on the caller having supplied NO explicit
+        type at all (normalized_type is None). Regression guard for the bead's Scenario:
+        an explicit person/decision capture retains its caller-supplied type even when
+        the classifier disagrees (e.g. classifies as ``meeting``)."""
+        from open_brain.data_layer.interface import SaveMemoryResult
+
+        mock_dl = AsyncMock()
+        mock_dl.save_memory.return_value = SaveMemoryResult(id=205, message="saved")
+        mock_dl.update_memory.return_value = SaveMemoryResult(id=205, message="updated")
+        # Classifier diverges from the explicit caller type: returns a non-person,
+        # non-matching canonical template (meeting) with type-specific fields.
+        classification = {
+            "capture_template": "meeting",
+            "attendees": ["A", "B"],
+            "meeting_date": "2026-07-11",
+        }
+
+        with (
+            patch("open_brain.server.get_dl", return_value=mock_dl),
+            patch(
+                "open_brain.server.classify_and_extract",
+                new=AsyncMock(return_value=classification),
+            ),
+            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+        ):
+            from open_brain.server import save_memory
+            await save_memory(text="Some explicit capture", type=caller_type)
+
+        # Saved with the explicit caller type.
+        save_params = mock_dl.save_memory.call_args[0][0]
+        assert save_params.type == caller_type
+        # Post-save update still writes the classified type-specific metadata,
+        # but MUST NOT overwrite the caller's explicit type column.
+        mock_dl.update_memory.assert_called_once()
+        update_params = mock_dl.update_memory.call_args[0][0]
+        assert update_params.type is None, (
+            f"explicit caller type={caller_type!r} must not be overwritten by "
+            f"divergent classifier template={classification['capture_template']!r}"
+        )
+        # Classified metadata is still recorded (metadata write unaffected).
+        assert update_params.metadata["capture_template"] == "meeting"
+
+    @pytest.mark.asyncio
     async def test_prestructured_person_capture_unaffected(self):
         """A pre-structured capture (caller-supplied capture_template=person) bypasses
         classification entirely; this fix does not touch its type column."""
