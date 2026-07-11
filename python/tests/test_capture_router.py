@@ -17,7 +17,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 import open_brain.capture_router as capture_router
-from open_brain.capture_router import classify_and_extract
+from open_brain.capture_router import (
+    canonical_type_for_capture_template,
+    classify_and_extract,
+)
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -653,6 +656,125 @@ class TestServerIntegration:
         mock_dl.update_memory.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_raw_project_capture_with_invalid_due_date_warns(self):
+        """REGRESSION (Finding 3): classifier-extracted invalid due_date on a raw
+        capture (no caller type/metadata) must produce a domain warning."""
+        from open_brain.data_layer.interface import SaveMemoryResult
+
+        mock_dl = AsyncMock()
+        mock_dl.save_memory.return_value = SaveMemoryResult(id=101, message="saved")
+        mock_dl.update_memory.return_value = SaveMemoryResult(id=101, message="updated")
+        classification = {
+            "capture_template": "project",
+            "name": "Atlas",
+            "due_date": "soon",
+        }
+
+        with (
+            patch("open_brain.server.get_dl", return_value=mock_dl),
+            patch(
+                "open_brain.server.classify_and_extract",
+                new=AsyncMock(return_value=classification),
+            ),
+            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+        ):
+            from open_brain.server import save_memory
+            result_json = await save_memory(text="Project Atlas is due soon")
+
+        data = json.loads(result_json)
+        assert data["id"] == 101
+        assert "warning" in data
+        assert "due_date" in data["warning"]
+
+    @pytest.mark.asyncio
+    async def test_raw_person_capture_validated_as_canonical_person_type(self):
+        """REGRESSION (Findings 1+3): a person_context classification is validated
+        under the canonical ``person`` vocabulary, so an invalid last_contact warns."""
+        from open_brain.data_layer.interface import SaveMemoryResult
+
+        mock_dl = AsyncMock()
+        mock_dl.save_memory.return_value = SaveMemoryResult(id=102, message="saved")
+        mock_dl.update_memory.return_value = SaveMemoryResult(id=102, message="updated")
+        classification = {
+            "capture_template": "person_context",
+            "person": "Alice",
+            "last_contact": "last week",
+        }
+
+        with (
+            patch("open_brain.server.get_dl", return_value=mock_dl),
+            patch(
+                "open_brain.server.classify_and_extract",
+                new=AsyncMock(return_value=classification),
+            ),
+            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+        ):
+            from open_brain.server import save_memory
+            result_json = await save_memory(text="Alice is a colleague I spoke to last week")
+
+        data = json.loads(result_json)
+        assert "warning" in data
+        assert "last_contact" in data["warning"]
+
+    @pytest.mark.asyncio
+    async def test_raw_capture_with_valid_classified_fields_no_warning(self):
+        """A raw capture whose classified canonical fields are valid produces no
+        spurious warning."""
+        from open_brain.data_layer.interface import SaveMemoryResult
+
+        mock_dl = AsyncMock()
+        mock_dl.save_memory.return_value = SaveMemoryResult(id=103, message="saved")
+        mock_dl.update_memory.return_value = SaveMemoryResult(id=103, message="updated")
+        classification = {
+            "capture_template": "project",
+            "name": "Atlas",
+            "due_date": "2026-08-01T00:00:00",
+        }
+
+        with (
+            patch("open_brain.server.get_dl", return_value=mock_dl),
+            patch(
+                "open_brain.server.classify_and_extract",
+                new=AsyncMock(return_value=classification),
+            ),
+            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+        ):
+            from open_brain.server import save_memory
+            result_json = await save_memory(text="Project Atlas launches on schedule")
+
+        data = json.loads(result_json)
+        assert "warning" not in data
+
+    @pytest.mark.asyncio
+    async def test_prestructured_capture_not_double_validated(self):
+        """Pre-structured captures (AC3) use only caller-supplied validation — no
+        duplicate warnings for the same field."""
+        from open_brain.data_layer.interface import SaveMemoryResult
+
+        mock_dl = AsyncMock()
+        mock_dl.save_memory.return_value = SaveMemoryResult(id=104, message="saved")
+        existing = {"capture_template": "project", "due_date": "soon"}
+
+        with (
+            patch("open_brain.server.get_dl", return_value=mock_dl),
+            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+            patch(
+                "open_brain.capture_router.llm_complete",
+                new=AsyncMock(side_effect=AssertionError("llm_complete must not be called")),
+            ),
+        ):
+            from open_brain.server import save_memory
+            result_json = await save_memory(
+                text="Pre-structured project payload",
+                type="project",
+                metadata=existing,
+            )
+
+        data = json.loads(result_json)
+        # Exactly one due_date warning — caller validation only, classifier path skipped.
+        assert data.get("warning", "").count("due_date") == 1
+
+    @pytest.mark.asyncio
     @pytest.mark.integration
     async def test_classification_latency_under_200ms(self):
         """AK5: Classification adds <200ms latency by running concurrently with save.
@@ -698,3 +820,68 @@ class TestServerIntegration:
             f"Total latency {elapsed_ms:.0f}ms suggests sequential execution "
             f"(expected <450ms for concurrent save+classify)"
         )
+
+
+# ─── Finding 1: capture_template → canonical type alias ───────────────────────
+
+class TestCanonicalTypeForCaptureTemplate:
+    def test_person_context_template_maps_to_canonical_person_type(self):
+        """REGRESSION (Finding 1): the historical person_context template maps to
+        the canonical ``person`` type for domain-metadata validation."""
+        assert canonical_type_for_capture_template("person_context") == "person"
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "project",
+            "resource",
+            "concept",
+            "journal",
+            "correspondence",
+            "prompt",
+            "decision",
+            "meeting",
+            "event",
+            "insight",
+            "learning",
+            "observation",
+        ],
+    )
+    def test_canonical_templates_map_to_themselves(self, template):
+        """Templates that already equal their canonical type are returned unchanged."""
+        assert canonical_type_for_capture_template(template) == template
+
+    def test_none_maps_to_none(self):
+        """None input yields None (no explicit type to validate)."""
+        assert canonical_type_for_capture_template(None) is None
+
+
+# ─── Finding 2: classifier prompt advertises canonical schema fields ──────────
+
+class TestClassifierPromptCanonicalFields:
+    @pytest.mark.asyncio
+    async def test_prompt_lists_project_due_date_and_prompt_last_used_at(self):
+        """REGRESSION (Finding 2): the classifier prompt must advertise
+        ``project.due_date`` and ``prompt.last_used_at`` so raw captures reliably
+        extract those canonical fields."""
+        captured_prompts: list[str] = []
+
+        async def mock_llm(*args, **kwargs):
+            captured_prompts.append(kwargs["messages"][0].content)
+            return json.dumps({"capture_template": "observation"})
+
+        with patch("open_brain.capture_router.llm_complete", new=mock_llm):
+            await classify_and_extract("Some project text")
+
+        assert captured_prompts, "classifier did not call the LLM"
+        prompt = captured_prompts[0]
+
+        project_line = next(
+            line for line in prompt.splitlines() if line.startswith("- project:")
+        )
+        assert "due_date" in project_line
+
+        prompt_line = next(
+            line for line in prompt.splitlines() if line.startswith("- prompt:")
+        )
+        assert "last_used_at" in prompt_line
