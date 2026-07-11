@@ -1,0 +1,119 @@
+{
+  "contract_version": "1",
+  "bead_id": "open-brain-m8p",
+  "run_id": "06bb2cbf-23c4-458f-b66e-13aeecdd300a",
+  "fix_iteration": 1,
+  "retry_scope": "package-scoped cryptography relock only",
+  "acceptance_criteria": [
+    {
+      "id": 1,
+      "status": "done",
+      "summary": "The scoped relock command `uv lock --upgrade-package cryptography` updated only the cryptography package version, from 48.0.1 to 49.0.0. A structured comparison against HEAD showed no other package version changes. The regenerated cryptography block has 39 wheels, including 12 Linux x86_64 wheels such as cp311-abi3 manylinux and cp314-cp314t manylinux artifacts.",
+      "changed_files": [
+        "python/uv.lock"
+      ],
+      "evidence_refs": [
+        "cmd-scoped-uv-lock",
+        "cmd-lock-diff",
+        "cmd-structured-lock-compare",
+        "cmd-cryptography-block"
+      ]
+    },
+    {
+      "id": 2,
+      "status": "done",
+      "summary": "The exact scoped audit command exited 0 and reported `No known vulnerabilities found`. The exported requirements included cryptography 49.0.0, idna 3.15, pydantic-settings 2.14.2, pyjwt 2.13.0, python-multipart 0.0.31, and starlette 1.3.1.",
+      "changed_files": [],
+      "evidence_refs": [
+        "cmd-scoped-audit"
+      ]
+    },
+    {
+      "id": 3,
+      "status": "done",
+      "summary": "The complete non-integration suite passed with the scoped lockfile: 1427 passed, 23 deselected, 52 warnings. The explicit auth-adjacent suites also passed: 60 passed.",
+      "changed_files": [],
+      "evidence_refs": [
+        "cmd-full-non-integration-tests",
+        "cmd-auth-adjacent-tests"
+      ]
+    }
+  ],
+  "changed_files": [
+    "python/uv.lock",
+    ".beads/runs/06bb2cbf-23c4-458f-b66e-13aeecdd300a/implementation_manifest.json",
+    ".beads/runs/06bb2cbf-23c4-458f-b66e-13aeecdd300a/evidence_ledger.json"
+  ],
+  "commits": [],
+  "commit_status": {
+    "status": "prepared_for_final_commit",
+    "reason": "This manifest records implementation and verification results before creating the requested final commit, avoiding a self-referential commit hash inside the committed artifact."
+  },
+  "tests": [
+    {
+      "command_ref": "cmd-scoped-audit",
+      "status": "passed"
+    },
+    {
+      "command_ref": "cmd-full-non-integration-tests",
+      "status": "passed"
+    },
+    {
+      "command_ref": "cmd-auth-adjacent-tests",
+      "status": "passed"
+    }
+  ],
+  "external_resources": [
+    {
+      "url": "https://pypi.org/simple",
+      "purpose": "Used by uv during the package-scoped cryptography resolve."
+    },
+    {
+      "url": "https://files.pythonhosted.org",
+      "purpose": "Artifact URLs recorded by genuine uv lock output for the cryptography 49.0.0 sdist and wheels."
+    }
+  ],
+  "scope_changes": [
+    "No source-code compatibility changes were needed.",
+    "python/pyproject.toml was not touched.",
+    "python/uv.lock was updated by `uv lock --upgrade-package cryptography`; lockfile TOML was not hand-edited.",
+    "No unscoped `uv lock` or lockfile deletion was performed in this retry.",
+    "The only package version change detected in python/uv.lock was cryptography 48.0.1 to 49.0.0. uv also normalized one pydantic-settings upload-time timestamp without changing its URL, hash, size, or version; pydantic-settings is one of the six in-scope packages."
+  ],
+  "downstream_impacts": [
+    "Frozen Linux installs no longer need to build cryptography from sdist because the lock includes manylinux and musllinux x86_64 wheels for cryptography 49.0.0.",
+    "The scoped audit confirms cryptography 49.0.0 has no known vulnerabilities in the exported requirements set.",
+    "Auth and API-key authentication paths were exercised after the cryptography relock with no regressions."
+  ],
+  "evidence_refs": [
+    "cmd-read-beads-skill",
+    "cmd-git-status-initial",
+    "cmd-current-branch",
+    "cmd-bead-show",
+    "cmd-initial-cryptography-probe",
+    "cmd-scoped-uv-lock",
+    "cmd-status-after-lock",
+    "cmd-lock-diff-stat",
+    "cmd-lock-diff",
+    "cmd-cryptography-block",
+    "cmd-read-manifest-before",
+    "cmd-read-ledger-before",
+    "cmd-structured-lock-compare",
+    "cmd-scoped-audit",
+    "cmd-full-non-integration-tests",
+    "cmd-auth-adjacent-tests",
+    "cmd-status-post-tests",
+    "cmd-diff-name-only-post-tests",
+    "cmd-diff-stat-post-tests",
+    "cmd-list-run-dir",
+    "cmd-artifact-ls-files",
+    "cmd-artifact-check-ignore",
+    "cmd-tracked-beads-runs",
+    "cmd-artifact-status-ignored",
+    "cmd-json-validate-manifest",
+    "cmd-json-validate-ledger",
+    "cmd-status-after-artifact-edit",
+    "cmd-diff-stat-after-artifact-edit"
+  ],
+  "reconciliation_note": "This retry supersedes the discarded unscoped relock evidence. The actual fix command was `cd python && uv lock --upgrade-package cryptography`, which resolved cryptography 49.0.0 and produced the full cross-platform wheel set while leaving all other package versions unchanged."
+}
