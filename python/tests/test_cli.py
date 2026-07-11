@@ -149,6 +149,28 @@ class TestDoctorCommand:
         assert args.command == "doctor"
 
 
+class TestPortableBackupCommands:
+    def test_export_args(self, tmp_path: Path):
+        bundle = tmp_path / "bundle"
+        args = parse(["export", str(bundle), "--source-label", "fixture"])
+        assert args.command == "export"
+        assert args.bundle_path == str(bundle)
+        assert args.source_label == "fixture"
+
+    def test_restore_args(self, tmp_path: Path):
+        bundle = tmp_path / "bundle"
+        args = parse(["restore", str(bundle), "--skip-embeddings"])
+        assert args.command == "restore"
+        assert args.bundle_path == str(bundle)
+        assert args.regenerate_embeddings is False
+
+    def test_verify_args(self, tmp_path: Path):
+        bundle = tmp_path / "bundle"
+        args = parse(["verify", str(bundle)])
+        assert args.command == "verify"
+        assert args.bundle_path == str(bundle)
+
+
 class TestServerCommand:
     def test_defaults(self):
         args = parse(["server"])
@@ -780,6 +802,59 @@ class TestCommandHandlers:
             from open_brain.cli.main import _cmd_doctor
             await _cmd_doctor(args)
             mock_call.assert_called_once_with("doctor", {})
+
+    @pytest.mark.asyncio
+    async def test_export_calls_portable_backup(self, tmp_path: Path):
+        args = parse(["export", str(tmp_path / "bundle"), "--source-label", "fixture"])
+        with (
+            patch("open_brain.cli.main.PostgresDataLayer") as mock_data_layer,
+            patch("open_brain.cli.main.export_bundle", new_callable=AsyncMock) as mock_export,
+        ):
+            mock_export.return_value = {"bundle_format_version": "1.0.0"}
+            from open_brain.cli.main import _cmd_export
+            result = await _cmd_export(args)
+
+        mock_export.assert_called_once_with(
+            Path(args.bundle_path),
+            mock_data_layer.return_value,
+            source_label="fixture",
+        )
+        assert result == {"bundle_format_version": "1.0.0"}
+
+    @pytest.mark.asyncio
+    async def test_restore_calls_portable_backup(self, tmp_path: Path):
+        args = parse(["restore", str(tmp_path / "bundle"), "--skip-embeddings"])
+        with (
+            patch("open_brain.cli.main.PostgresDataLayer") as mock_data_layer,
+            patch("open_brain.cli.main.restore_bundle", new_callable=AsyncMock) as mock_restore,
+        ):
+            mock_restore.return_value = {"restored": {"memories": 2}}
+            from open_brain.cli.main import _cmd_restore
+            result = await _cmd_restore(args)
+
+        mock_restore.assert_called_once_with(
+            Path(args.bundle_path),
+            mock_data_layer.return_value,
+            regenerate_embeddings=False,
+        )
+        assert result == {"restored": {"memories": 2}}
+
+    @pytest.mark.asyncio
+    async def test_verify_calls_portable_backup(self, tmp_path: Path):
+        args = parse(["verify", str(tmp_path / "bundle")])
+        with (
+            patch("open_brain.cli.main.PostgresDataLayer") as mock_data_layer,
+            patch("open_brain.cli.main.verify_round_trip", new_callable=AsyncMock) as mock_verify,
+        ):
+            mock_verify.return_value = {"ok": True}
+            from open_brain.cli.main import _cmd_verify
+            result = await _cmd_verify(args)
+
+        mock_verify.assert_called_once_with(
+            Path(args.bundle_path),
+            mock_data_layer.return_value,
+        )
+        assert result == {"ok": True}
 
     def test_server_calls_runtime(self):
         args = parse(["server", "--host", "127.0.0.1", "--port", "9000"])

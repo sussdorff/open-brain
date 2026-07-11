@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 import hashlib
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 import open_brain.portable_backup as portable_backup
+from open_brain.data_layer.postgres import PostgresDataLayer
 from open_brain.portable_backup import RestoreTargetNotEmptyError, restore_bundle
 
 
@@ -25,6 +28,28 @@ def _content_hash(content: str) -> str:
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     """Read fixture JSONL records."""
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def _make_pool(conn: AsyncMock) -> MagicMock:
+    """Build a mocked asyncpg pool."""
+
+    @asynccontextmanager
+    async def fake_acquire():
+        yield conn
+
+    pool = MagicMock()
+    pool.acquire = fake_acquire
+    return pool
+
+
+def _transaction_context():
+    """Build a mocked asyncpg transaction context manager."""
+
+    @asynccontextmanager
+    async def fake_transaction():
+        yield
+
+    return fake_transaction()
 
 
 class FixturePortableStore:
@@ -443,3 +468,92 @@ async def test_verify_round_trip_reports_hashes_edges_and_canonical_ids(
     assert corrupted_report["ok"] is False
     assert corrupted_report["memories"]["content_hash_matches"] == 2
     assert corrupted_report["memories"]["record_hash_mismatches"] == [10]
+
+
+@pytest.mark.asyncio
+async def test_postgres_export_reads_only_portable_closure_tables() -> None:
+    """Postgres export reads indexes, memories without embeddings, and relationships."""
+    conn = AsyncMock()
+    conn.fetch.side_effect = [
+        [{"id": 1, "name": "alpha"}],
+        [
+            {
+                "id": 10,
+                "index_id": 1,
+                "session_id": None,
+                "type": "observation",
+                "title": "T",
+                "subtitle": None,
+                "narrative": None,
+                "content": "C",
+                "metadata": {"content_hash": _content_hash("C")},
+                "priority": 0.5,
+                "stability": "stable",
+                "access_count": 0,
+                "last_accessed_at": None,
+                "created_at": "2026-07-11T09:00:00+00:00",
+                "updated_at": "2026-07-11T09:00:00+00:00",
+                "user_id": None,
+                "importance": "medium",
+                "last_decay_at": None,
+                "session_ref": None,
+            }
+        ],
+        [
+            {
+                "id": 7,
+                "source_id": 10,
+                "target_id": 20,
+                "relation_type": "references",
+                "link_type": "references",
+                "confidence": 1.0,
+                "metadata": {"source": "fixture"},
+            }
+        ],
+    ]
+    pool = _make_pool(conn)
+
+    with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
+        records = await PostgresDataLayer().export_portable_records()
+
+    assert records["indexes"] == [{"id": 1, "name": "alpha"}]
+    assert records["memories"][0]["id"] == 10
+    assert "embedding" not in records["memories"][0]
+    assert records["relationships"][0]["relation_type"] == "references"
+
+    export_sql = "\n".join(call.args[0] for call in conn.fetch.call_args_list).lower()
+    for forbidden_table in (
+        "url_tokens",
+        "memory_usage_log",
+        "embedding_token_log",
+        "sessions",
+        "session_summaries",
+    ):
+        assert forbidden_table not in export_sql
+    assert "embedding" not in export_sql
+
+
+@pytest.mark.asyncio
+async def test_postgres_restore_uses_explicit_ids_conflicts_and_sequence_repair() -> None:
+    """Postgres restore bypasses save_memory and writes explicit ids transactionally."""
+    conn = AsyncMock()
+    conn.transaction = MagicMock(return_value=_transaction_context())
+    pool = _make_pool(conn)
+    fixture = FixturePortableStore().records
+
+    with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
+        await PostgresDataLayer().restore_portable_records(
+            fixture["indexes"],
+            fixture["memories"],
+            fixture["relationships"],
+            regenerate_embeddings=False,
+        )
+
+    restore_sql = "\n".join(call.args[0] for call in conn.execute.call_args_list)
+    assert "INSERT INTO memory_indexes (id, name)" in restore_sql
+    assert "INSERT INTO memories (" in restore_sql
+    assert "ON CONFLICT (id) DO NOTHING" in restore_sql
+    assert "INSERT INTO memory_relationships" in restore_sql
+    assert "ON CONFLICT (source_id, target_id, relation_type) DO NOTHING" in restore_sql
+    assert "pg_get_serial_sequence('memories', 'id')" in restore_sql
+    assert "pg_get_serial_sequence('memory_relationships', 'id')" in restore_sql
