@@ -1077,3 +1077,29 @@ class TestRawCaptureTypeColumnPersistence:
         assert save_params.type == "person"
         # Bypass path: no post-save update (classification == metadata unchanged).
         mock_dl.update_memory.assert_not_called()
+
+
+class TestVocabularyConsolidation:
+    """AC1: canonical type list + alias maps live in exactly one source
+    location (open_brain.data_layer.personal_knowledge_vocabulary), and
+    capture_router.py reads from it instead of redefining the literals."""
+
+    def test_alias_maps_are_imported_from_shared_registry(self):
+        from open_brain.data_layer.personal_knowledge_vocabulary import (
+            CAPTURE_TEMPLATE_TYPE_ALIASES,
+            MEMORY_TYPE_ALIASES,
+        )
+
+        assert capture_router._MEMORY_TYPE_ALIASES is MEMORY_TYPE_ALIASES
+        assert capture_router._CAPTURE_TEMPLATE_TYPE_ALIASES is CAPTURE_TEMPLATE_TYPE_ALIASES
+
+    def test_capture_template_type_aliases_values_are_canonical(self):
+        """Every alias target in CAPTURE_TEMPLATE_TYPE_ALIASES must itself be a
+        canonical personal-knowledge type (guards against future drift)."""
+        from open_brain.data_layer.personal_knowledge_vocabulary import (
+            CANONICAL_PERSONAL_KNOWLEDGE_TYPES,
+            CAPTURE_TEMPLATE_TYPE_ALIASES,
+        )
+
+        for canonical_target in CAPTURE_TEMPLATE_TYPE_ALIASES.values():
+            assert canonical_target in CANONICAL_PERSONAL_KNOWLEDGE_TYPES

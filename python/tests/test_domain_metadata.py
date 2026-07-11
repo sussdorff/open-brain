@@ -212,3 +212,43 @@ class TestHistoricalMetadataCompatibility:
 
         assert memory.type == memory_type
         assert memory.metadata["capture_template"] == memory_type
+
+
+class TestVocabularyConsolidation:
+    """AC1/AC2: interface.py's personal-knowledge TypedDict schemas stay in
+    sync with the single canonical vocabulary source
+    (open_brain.data_layer.personal_knowledge_vocabulary), and the existing
+    validation behavior is unchanged after consolidation."""
+
+    def test_personal_knowledge_schemas_cover_exactly_the_canonical_types(self):
+        from open_brain.data_layer.interface import PERSONAL_KNOWLEDGE_METADATA_SCHEMAS
+        from open_brain.data_layer.personal_knowledge_vocabulary import (
+            CANONICAL_PERSONAL_KNOWLEDGE_TYPES,
+        )
+
+        assert set(PERSONAL_KNOWLEDGE_METADATA_SCHEMAS) == set(CANONICAL_PERSONAL_KNOWLEDGE_TYPES)
+
+    @pytest.mark.parametrize(
+        "memory_type",
+        [
+            "project",
+            "resource",
+            "concept",
+            "journal",
+            "correspondence",
+            "prompt",
+            "decision",
+            "meeting",
+            "event",
+            "person",
+        ],
+    )
+    def test_canonical_types_still_validate_without_regression(self, memory_type):
+        """Every canonical type is still accepted by validate_domain_metadata
+        with no metadata (i.e. no crash / no unexpected required-field warning
+        beyond the pre-existing 'event' contract)."""
+        warnings = validate_domain_metadata(memory_type, {})
+        if memory_type == "event":
+            assert warnings == ["event metadata missing required field 'when' (expected ISO datetime, e.g. '2026-04-15T10:00:00')"]
+        else:
+            assert warnings == []

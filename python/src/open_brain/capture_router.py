@@ -25,31 +25,17 @@ import logging
 from typing import Any
 
 from open_brain.data_layer.llm import LlmMessage, llm_complete
+from open_brain.data_layer.personal_knowledge_vocabulary import (
+    CAPTURE_TEMPLATE_TYPE_ALIASES as _CAPTURE_TEMPLATE_TYPE_ALIASES,
+    MEMORY_TYPE_ALIASES as _MEMORY_TYPE_ALIASES,
+)
 from open_brain.utils import parse_llm_json
 
 logger = logging.getLogger(__name__)
 
-_MEMORY_TYPE_ALIASES: dict[str, str] = {
-    "note": "journal",
-    "diary": "journal",
-    "reference": "resource",
-    "idea": "concept",
-    "email": "correspondence",
-    "letter": "correspondence",
-    "prompt_template": "prompt",
-}
-
-# Capture-template -> canonical memory-type aliases.
-#
-# Most capture templates already equal their canonical memory type, so they map
-# to themselves. The sole historical exception is ``person_context``: the
-# classifier still emits it (and existing callers/tests depend on the stored
-# ``capture_template`` value), but the canonical personal-knowledge vocabulary
-# calls this ``person``. This alias governs only which canonical type drives
-# domain-metadata validation — the stored ``capture_template`` is left intact.
-_CAPTURE_TEMPLATE_TYPE_ALIASES: dict[str, str] = {
-    "person_context": "person",
-}
+# Canonical personal-knowledge vocabulary + alias maps now live in
+# open_brain.data_layer.personal_knowledge_vocabulary (single source of
+# truth) — see that module's docstring for the full duplication history.
 
 _CLASSIFICATION_PROMPT_TEMPLATE = """\
 Classify the following text into one of these capture templates and extract structured fields.

@@ -59,6 +59,9 @@ from open_brain.capture_router import (
     classify_and_extract,
     normalize_memory_type,
 )
+from open_brain.data_layer.personal_knowledge_vocabulary import (
+    CANONICAL_PERSONAL_KNOWLEDGE_TYPES,
+)
 from open_brain.ingest import metrics as ingest_metrics
 from open_brain.data_layer.llm import LlmMessage, llm_complete
 from open_brain.paperless import PaperlessClient
@@ -471,8 +474,7 @@ async def resolve_paperless_reference(document_id: int) -> str:
     "project is REQUIRED — use git repo name, folder name, or Claude Desktop project name. If ambiguous, ask the user. "
     "type: check existing types via stats() before inventing new ones. Prefer existing vocabulary "
     "(discovery, change, feature, decision, bugfix, refactor, session_summary). New types are allowed when none fit. "
-    "Canonical personal-knowledge types: project, resource, concept, journal, correspondence, prompt, "
-    "decision, meeting, event, person. "
+    f"Canonical personal-knowledge types: {', '.join(CANONICAL_PERSONAL_KNOWLEDGE_TYPES)}. "
     "text: PRIMARY content — put the main substance here. Required. Gets embedded and full-text searched. "
     "Do NOT leave text minimal while putting all substance in narrative. "
     "title: short headline (1 line). subtitle: secondary label, tags, or category hint. "
