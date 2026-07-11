@@ -612,6 +612,7 @@ async def _import_vault_reconcile(
     by_path, by_basename = _build_note_index(notes)
     items_by_source_ref: dict[str, dict[str, Any]] = {}
     importable_notes: list[ParsedNote] = []
+    memory_ids_by_source_ref: dict[str, int] = {}
     for skipped in skipped_notes:
         items_by_source_ref[skipped.source_ref] = _item(
             source_ref=skipped.source_ref,
@@ -623,11 +624,14 @@ async def _import_vault_reconcile(
     for note in notes:
         status = statuses.get(note.source_ref, {})
         if status.get("ingested"):
+            memory_id = status.get("memory_id")
+            if isinstance(memory_id, int):
+                memory_ids_by_source_ref[note.source_ref] = memory_id
             items_by_source_ref[note.source_ref] = _item(
                 source_ref=note.source_ref,
                 memory_type=note.memory_type,
                 action="duplicate",
-                memory_id=status.get("memory_id"),
+                memory_id=memory_id,
                 reason="already_ingested",
             )
             continue
@@ -674,6 +678,29 @@ async def _import_vault_reconcile(
                 )
             )
             items_by_source_ref[note.source_ref]["memory_id"] = result.id
+            memory_ids_by_source_ref[note.source_ref] = result.id
+
+        for note in importable_notes:
+            source_id = memory_ids_by_source_ref.get(note.source_ref)
+            if source_id is None:
+                continue
+            for link in note.wikilinks:
+                resolution = _resolve_note_target(link.target, by_path, by_basename)
+                if resolution.note is None:
+                    continue
+                target_id = memory_ids_by_source_ref.get(resolution.note.source_ref)
+                if target_id is None:
+                    continue
+                await data_layer.create_relationship(
+                    source_id=source_id,
+                    target_id=target_id,
+                    link_type="references",
+                    metadata={
+                        "source_ref": note.source_ref,
+                        "target_source_ref": resolution.note.source_ref,
+                        "wikilink": link.raw,
+                    },
+                )
 
     items = [items_by_source_ref[source_ref] for source_ref in sorted(items_by_source_ref)]
     unresolved_links.sort(key=lambda row: (row["source_ref"], row["wikilink"]))
