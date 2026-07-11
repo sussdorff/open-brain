@@ -1,0 +1,158 @@
+{
+  "contract_version": "1",
+  "bead_id": "open-brain-brt",
+  "acceptance_criteria": [
+    {
+      "id": 1,
+      "status": "done",
+      "summary": "Dry-run mode scans the fixture vault, reports importable, duplicate, skipped, unresolved link, and unresolved attachment items, and performs no Open Brain writes.",
+      "changed_files": [
+        "python/src/open_brain/second_brain_import.py",
+        "python/tests/test_second_brain_import.py",
+        "python/tests/fixtures/second_brain/expected_dry_run_manifest.json"
+      ],
+      "evidence_refs": [
+        "evidence_ledger.commands.red_dry_run",
+        "evidence_ledger.commands.green_dry_run",
+        "python/tests/test_second_brain_import.py::TestSecondBrainDryRun::test_dry_run_reports_all_dispositions_without_store_writes"
+      ]
+    },
+    {
+      "id": 2,
+      "status": "done",
+      "summary": "Apply mode stores supported notes once with stable source_ref provenance, timestamps, canonical type metadata, and preserved Markdown body; a second apply reports duplicates and writes no new memories.",
+      "changed_files": [
+        "python/src/open_brain/second_brain_import.py",
+        "python/src/open_brain/data_layer/postgres.py",
+        "python/src/open_brain/data_layer/interface.py",
+        "python/tests/test_second_brain_import.py"
+      ],
+      "evidence_refs": [
+        "evidence_ledger.commands.red_apply_idempotency",
+        "evidence_ledger.commands.green_apply_idempotency",
+        "python/tests/test_second_brain_import.py::TestSecondBrainApply::test_apply_twice_imports_supported_notes_once_with_provenance"
+      ]
+    },
+    {
+      "id": 3,
+      "status": "done",
+      "summary": "Resolvable wikilinks are created as generic references relationships using two-pass resolution; broken and ambiguous wikilinks are reported without guessed edges.",
+      "changed_files": [
+        "python/src/open_brain/second_brain_import.py",
+        "python/src/open_brain/data_layer/interface.py",
+        "python/tests/test_second_brain_import.py",
+        "python/tests/test_typed_relationships.py"
+      ],
+      "evidence_refs": [
+        "evidence_ledger.commands.red_wikilink_relationships",
+        "evidence_ledger.commands.green_wikilink_relationships",
+        "python/tests/test_second_brain_import.py::TestSecondBrainRelationships::test_resolvable_wikilinks_create_generic_reference_edges"
+      ]
+    },
+    {
+      "id": 4,
+      "status": "done",
+      "summary": "Attachment references are verified through an injected PaperlessClient; found documents persist only Paperless identity/provenance metadata, while missing or unmapped attachments are reported and skipped.",
+      "changed_files": [
+        "python/src/open_brain/second_brain_import.py",
+        "python/tests/test_second_brain_import.py",
+        "python/tests/fixtures/second_brain/paperless_mapping.json"
+      ],
+      "evidence_refs": [
+        "evidence_ledger.commands.red_paperless_attachments",
+        "evidence_ledger.commands.green_paperless_attachments",
+        "python/tests/test_second_brain_import.py::TestSecondBrainAttachments::test_only_verified_paperless_references_are_persisted"
+      ]
+    },
+    {
+      "id": 5,
+      "status": "done",
+      "summary": "The importer returns and prints a machine-readable JSON reconciliation report with mode, run_id, vault_path, summary, item dispositions, unresolved links, and unresolved attachments.",
+      "changed_files": [
+        "python/src/open_brain/second_brain_import.py",
+        "python/tests/test_second_brain_import.py",
+        "python/tests/fixtures/second_brain/expected_dry_run_manifest.json"
+      ],
+      "evidence_refs": [
+        "evidence_ledger.commands.green_dry_run",
+        "python/tests/fixtures/second_brain/expected_dry_run_manifest.json",
+        "python/src/open_brain/second_brain_import.py"
+      ]
+    }
+  ],
+  "changed_files": [
+    "python/pyproject.toml",
+    "python/uv.lock",
+    "python/src/open_brain/data_layer/interface.py",
+    "python/src/open_brain/data_layer/postgres.py",
+    "python/src/open_brain/second_brain_import.py",
+    "python/tests/test_second_brain_import.py",
+    "python/tests/test_typed_relationships.py",
+    "python/tests/fixtures/second_brain/expected_dry_run_manifest.json",
+    "python/tests/fixtures/second_brain/paperless_mapping.json",
+    "python/tests/fixtures/second_brain/vault/Archive/OpenBrain.md",
+    "python/tests/fixtures/second_brain/vault/Bad/Malformed.md",
+    "python/tests/fixtures/second_brain/vault/Concepts/Knowledge Graph.md",
+    "python/tests/fixtures/second_brain/vault/Daily/2026-07-10.md",
+    "python/tests/fixtures/second_brain/vault/Notes/Untyped.md",
+    "python/tests/fixtures/second_brain/vault/People/Ada Lovelace.md",
+    "python/tests/fixtures/second_brain/vault/Projects/OpenBrain.md"
+  ],
+  "commits": [
+    {"sha": "4a40e08", "message": "test(open-brain-brt): red - shared importer contracts"},
+    {"sha": "22a2f65", "message": "feat(open-brain-brt): green - shared importer contracts"},
+    {"sha": "8e3e01a", "message": "test(open-brain-brt): red - dry run reconciliation report"},
+    {"sha": "4d8be30", "message": "feat(open-brain-brt): green - dry run reconciliation report"},
+    {"sha": "9e8486d", "message": "test(open-brain-brt): red - apply idempotency"},
+    {"sha": "576cc65", "message": "feat(open-brain-brt): green - apply idempotently"},
+    {"sha": "09e771a", "message": "test(open-brain-brt): red - wikilink relationships"},
+    {"sha": "eaa2504", "message": "feat(open-brain-brt): green - wikilink relationships"},
+    {"sha": "7a5559f", "message": "test(open-brain-brt): red - paperless attachment references"},
+    {"sha": "46d9733", "message": "feat(open-brain-brt): green - paperless attachment references"}
+  ],
+  "tests": [
+    {
+      "command": "uv run pytest tests/test_second_brain_import.py -q",
+      "status": "passed",
+      "observed_result": "7 passed"
+    },
+    {
+      "command": "uv run pytest tests/test_second_brain_import.py tests/test_typed_relationships.py::TestValidLinkTypes tests/test_postgres.py::TestPostgresIngestStatus -q",
+      "status": "passed",
+      "observed_result": "7 passed"
+    },
+    {
+      "command": "uv run pytest -m \"not integration\"",
+      "status": "passed",
+      "observed_result": "1420 passed, 23 deselected, 57 warnings after rebasing onto origin/main"
+    },
+    {
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache-open-brain-brt uv run python -m py_compile src/open_brain/second_brain_import.py src/open_brain/data_layer/postgres.py src/open_brain/data_layer/interface.py",
+      "status": "passed",
+      "observed_result": "exit 0"
+    }
+  ],
+  "external_resources": [
+    {
+      "resource": "Paperless document ids in python/tests/fixtures/second_brain/paperless_mapping.json",
+      "status": "fixture_only",
+      "note": "Document ids 101 and 404 are invented test data, not claims about live Paperless resources."
+    },
+    {
+      "resource": "PyPI package metadata for pyyaml",
+      "status": "not_fetched",
+      "note": "Network was restricted. pyyaml was already present in uv.lock through uvicorn[standard]; pyproject.toml and open-brain lock metadata were updated to make it a direct dependency."
+    }
+  ],
+  "scope_changes": [],
+  "downstream_impacts": [
+    "VALID_LINK_TYPES now includes references for generic note relationships.",
+    "PostgresDataLayer.ingest_status_by_source_refs accepts memory_type: str | None = \"meeting\"; default preserves the existing meeting-status caller, while memory_type=None supports all-type importer idempotency.",
+    "The reconciliation report shape is suitable for downstream archival-safety checks in open-brain-m9e."
+  ],
+  "evidence_refs": [
+    ".beads/runs/c3e0d22e-b4bb-4a34-85ac-43998f5b8252/evidence_ledger.json",
+    "python/tests/test_second_brain_import.py",
+    "python/tests/fixtures/second_brain/expected_dry_run_manifest.json"
+  ]
+}

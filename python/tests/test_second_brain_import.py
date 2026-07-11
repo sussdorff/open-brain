@@ -59,7 +59,11 @@ class TestSecondBrainSharedContracts:
         conn.fetch.return_value = [row]
         pool = _make_pool(conn)
 
-        with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
+        with patch(
+            "open_brain.data_layer.postgres.get_pool",
+            new_callable=AsyncMock,
+            return_value=pool,
+        ):
             result = await PostgresDataLayer().ingest_status_by_source_refs(
                 ["Projects/OpenBrain.md"],
                 memory_type=None,

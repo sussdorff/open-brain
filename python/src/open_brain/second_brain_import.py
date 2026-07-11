@@ -150,7 +150,8 @@ def _extract_wikilinks(body: str) -> list[ParsedWikilink]:
 
 def _is_attachment_target(value: str) -> bool:
     """Return true when a link target looks like an attachment reference."""
-    return Path(value.split("#", 1)[0].split("|", 1)[0].strip()).suffix.lower() in _ATTACHMENT_SUFFIXES
+    suffix = Path(value.split("#", 1)[0].split("|", 1)[0].strip()).suffix.lower()
+    return suffix in _ATTACHMENT_SUFFIXES
 
 
 def _extract_attachments(body: str, frontmatter: dict[str, Any]) -> list[str]:
@@ -339,7 +340,13 @@ def _type_specific_metadata(
     return {}
 
 
-def _build_metadata(path: Path, source_ref: str, frontmatter: dict[str, Any], memory_type: str, title: str) -> dict[str, Any]:
+def _build_metadata(
+    path: Path,
+    source_ref: str,
+    frontmatter: dict[str, Any],
+    memory_type: str,
+    title: str,
+) -> dict[str, Any]:
     """Build Open Brain memory metadata for a note."""
     stat = path.stat()
     created_at = getattr(stat, "st_birthtime", stat.st_ctime)
@@ -392,7 +399,9 @@ def _scan_vault(vault_path: Path) -> tuple[list[ParsedNote], list[SkippedNote]]:
     return notes, skipped
 
 
-def _build_note_index(notes: list[ParsedNote]) -> tuple[dict[str, ParsedNote], dict[str, list[ParsedNote]]]:
+def _build_note_index(
+    notes: list[ParsedNote],
+) -> tuple[dict[str, ParsedNote], dict[str, list[ParsedNote]]]:
     """Build exact-path and basename indexes for two-pass wikilink resolution."""
     by_path: dict[str, ParsedNote] = {}
     by_basename: dict[str, list[ParsedNote]] = {}
@@ -406,7 +415,11 @@ def _build_note_index(notes: list[ParsedNote]) -> tuple[dict[str, ParsedNote], d
     return by_path, by_basename
 
 
-def _resolve_note_target(target: str, by_path: dict[str, ParsedNote], by_basename: dict[str, list[ParsedNote]]) -> NoteResolution:
+def _resolve_note_target(
+    target: str,
+    by_path: dict[str, ParsedNote],
+    by_basename: dict[str, list[ParsedNote]],
+) -> NoteResolution:
     """Resolve a normalized wikilink target to a parsed note."""
     target_path = target if target.endswith(".md") else f"{target}.md"
     if target in by_path:
@@ -439,7 +452,10 @@ def _load_paperless_mapping(path: Path | None) -> dict[str, dict[str, Any]]:
     return mapping
 
 
-def _lookup_attachment_mapping(attachment: str, mapping: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
+def _lookup_attachment_mapping(
+    attachment: str,
+    mapping: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
     """Find a Paperless mapping entry by path or basename."""
     normalized = _to_posix(Path(attachment))
     candidates = [normalized, Path(normalized).name]
@@ -541,11 +557,19 @@ def _item(
     }
 
 
-def _summary(items: list[dict[str, Any]], unresolved_links: list[dict[str, Any]], unresolved_attachments: list[dict[str, Any]]) -> dict[str, int]:
+def _summary(
+    items: list[dict[str, Any]],
+    unresolved_links: list[dict[str, Any]],
+    unresolved_attachments: list[dict[str, Any]],
+) -> dict[str, int]:
     """Build reconciliation summary counts."""
     return {
         "importable": sum(1 for item in items if item["action"] == "import"),
-        "imported": sum(1 for item in items if item["action"] == "import" and item["memory_id"] is not None),
+        "imported": sum(
+            1
+            for item in items
+            if item["action"] == "import" and item["memory_id"] is not None
+        ),
         "duplicate": sum(1 for item in items if item["action"] == "duplicate"),
         "skipped": sum(1 for item in items if item["action"] == "skip"),
         "unresolved_links": len(unresolved_links),
@@ -601,7 +625,11 @@ async def _import_vault_reconcile(
     run_id: str | None,
 ) -> dict[str, Any]:
     """Run reconciliation and optional writes for a vault import."""
-    mapping_path = Path(paperless_mapping_path).expanduser().resolve() if paperless_mapping_path else None
+    mapping_path = (
+        Path(paperless_mapping_path).expanduser().resolve()
+        if paperless_mapping_path
+        else None
+    )
     mapping = _load_paperless_mapping(mapping_path)
     notes, skipped_notes = _scan_vault(vault_path)
     statuses = await data_layer.ingest_status_by_source_refs(
