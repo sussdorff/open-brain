@@ -5,7 +5,12 @@ import logging
 import re
 
 from open_brain.config import get_config
-from open_brain.data_layer.interface import Memory, RefineAction
+from open_brain.data_layer.interface import (
+    Memory,
+    RefineAction,
+    canonical_entity_identity,
+    is_canonical_entity,
+)
 from open_brain.data_layer.llm import LlmMessage, llm_complete
 
 logger = logging.getLogger(__name__)
@@ -39,6 +44,15 @@ async def _analyze_batch(memories: list[Memory]) -> list[RefineAction]:
         f"{m.title or ''}: {(m.content or m.narrative or '')[:200]}"
         for m in memories
     )
+    protected_identities = [
+        identity for memory in memories
+        if (identity := canonical_entity_identity(memory)) is not None
+    ]
+    protected_summary = (
+        ", ".join(f"{identity['id']} ({identity['kind']})" for identity in protected_identities)
+        if protected_identities
+        else "none"
+    )
 
     text = await llm_complete(
         [
@@ -49,11 +63,15 @@ async def _analyze_batch(memories: list[Memory]) -> list[RefineAction]:
 Memories:
 {memory_summary}
 
+Canonical entity IDs:
+{protected_summary}
+
 Rules:
 - "merge": combine near-duplicate memories (keep the better one, delete others). Requires at least 2 IDs.
 - "promote": change stability from tentative->stable or stable->canonical for high-quality, frequently-accessed memories
 - "demote": lower priority for outdated or low-quality memories
 - "delete": remove truly redundant or obsolete memories
+- Protected canonical entity IDs must not appear in merge, demote, or delete actions.
 - IMPORTANT: Each memory ID must appear in AT MOST ONE action. Never reference the same ID in multiple actions.
 
 Return ONLY a JSON array like:
@@ -172,6 +190,8 @@ def find_obvious_duplicates(memories: list[Memory]) -> list[RefineAction]:
     """
     by_title: dict[str, list[Memory]] = {}
     for m in memories:
+        if is_canonical_entity(m):
+            continue
         key = (m.title or m.content[:50]).lower().strip()
         by_title.setdefault(key, []).append(m)
 

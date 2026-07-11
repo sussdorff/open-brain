@@ -257,10 +257,11 @@ class TestCompactMemoriesSimplePair:
             _make_memory_row(2, access_count=7),
         ]
         sim_rows = [_make_sim_row(1, 2, 0.92)]
+        conn.fetchval = AsyncMock(return_value=0)
         conn.fetch = AsyncMock(side_effect=[rows, sim_rows])
-        # execute is called 3x: memory_usage_log, memory_relationships, memories
+        # execute is called 6x: four relationship repoint statements, usage log delete, memories delete
         conn.execute = AsyncMock(
-            side_effect=["DELETE 0", "DELETE 0", "DELETE 1"],
+            side_effect=["DELETE 0", "DELETE 0", "DELETE 0", "UPDATE 0", "DELETE 0", "DELETE 1"],
         )
         pool = _make_pool(conn)
 
@@ -272,17 +273,15 @@ class TestCompactMemoriesSimplePair:
         assert result.memories_deleted == 1
         assert 2 in result.memories_kept
         assert 1 in result.deleted_ids
-        # Verify dependent rows are deleted BEFORE the memories row
-        # (schema has no ON DELETE CASCADE → manual order required).
-        assert conn.execute.call_count == 3
+        # Verify relationships are repointed before the loser memory row is deleted.
+        assert conn.execute.call_count == 6
         call_args_list = conn.execute.call_args_list
-        assert "memory_usage_log" in call_args_list[0][0][0]
-        assert "memory_relationships" in call_args_list[1][0][0]
-        assert "DELETE FROM memories" in call_args_list[2][0][0]
-        # All three deletes target the same IDs
-        assert call_args_list[0][0][1] == [1]
-        assert call_args_list[1][0][1] == [1]
-        assert call_args_list[2][0][1] == [1]
+        assert "UPDATE memory_relationships" in call_args_list[3][0][0]
+        assert "memory_usage_log" in call_args_list[4][0][0]
+        assert "DELETE FROM memories" in call_args_list[5][0][0]
+        assert "canonical_entity" in call_args_list[5][0][0]
+        assert call_args_list[4][0][1] == [1]
+        assert call_args_list[5][0][1] == [1]
 
 
 class TestCompactMemoriesTransitive:

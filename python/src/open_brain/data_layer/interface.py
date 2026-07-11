@@ -403,6 +403,7 @@ class RefineResult:
     analyzed: int
     actions: list[RefineAction]
     summary: str
+    protected_canonical_entities: int = 0
 
 
 @dataclass
@@ -547,6 +548,7 @@ class DecayResult:
     boosted: int         # count of memories whose priority was boosted
     recent_memories: int  # count of recent memories (< boost_days old); protected from decay but may still be boosted
     summary: str
+    protected_canonical_entities: int = 0  # stale canonical entities skipped by decay
 
 
 @dataclass
@@ -604,6 +606,7 @@ class CompactResult:
     deleted_ids: list[int]
     strategy_used: str
     plan: list[ClusterPlan]   # always populated (dry_run=True: plan only; False: executed)
+    protected_canonical_entities: int = 0
 
 
 class DataLayer(Protocol):

@@ -95,7 +95,7 @@ async def test_decay_unaccessed():
     params = DecayParams(stale_days=30, decay_factor=0.9, dry_run=True)
 
     conn = AsyncMock()
-    conn.fetchval.side_effect = [1, 0, 0]  # decayed=1, boosted=0, recent_memories=0
+    conn.fetchval.side_effect = [1, 0, 0, 0]  # decayed=1, boosted=0, recent_memories=0, protected=0
     pool = _make_pool(conn)
 
     with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
@@ -124,7 +124,7 @@ async def test_decay_boost():
     params = DecayParams(boost_threshold=10, boost_factor=1.1, dry_run=True)
 
     conn = AsyncMock()
-    conn.fetchval.side_effect = [0, 1, 0]  # decayed=0, boosted=1, recent_memories=0
+    conn.fetchval.side_effect = [0, 1, 0, 0]  # decayed=0, boosted=1, recent_memories=0, protected=0
     pool = _make_pool(conn)
 
     with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
@@ -153,7 +153,7 @@ async def test_decay_recent_protected():
     params = DecayParams(stale_days=30, boost_days=7, dry_run=True)
 
     conn = AsyncMock()
-    conn.fetchval.side_effect = [0, 0, 1]  # decayed=0, boosted=0, recent_memories=1
+    conn.fetchval.side_effect = [0, 0, 1, 0]  # decayed=0, boosted=0, recent_memories=1, protected=0
     pool = _make_pool(conn)
 
     with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
@@ -220,7 +220,7 @@ async def test_decay_reversible():
 
     # First run: 1 decayed, 0 boosted
     conn1 = AsyncMock()
-    conn1.fetchval.side_effect = [1, 0, 0]
+    conn1.fetchval.side_effect = [1, 0, 0, 0]
     pool1 = _make_pool(conn1)
 
     with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool1):
@@ -228,7 +228,7 @@ async def test_decay_reversible():
 
     # Second run: memory now has high access_count → 0 decayed, 1 boosted
     conn2 = AsyncMock()
-    conn2.fetchval.side_effect = [0, 1, 0]
+    conn2.fetchval.side_effect = [0, 1, 0, 0]
     pool2 = _make_pool(conn2)
 
     with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool2):
@@ -253,7 +253,7 @@ async def test_decay_compound_runs():
 
     # First call: 1 memory decayed
     conn1 = AsyncMock()
-    conn1.fetchval.side_effect = [1, 0, 0]
+    conn1.fetchval.side_effect = [1, 0, 0, 0]
     pool1 = _make_pool(conn1)
 
     with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool1):
@@ -263,7 +263,7 @@ async def test_decay_compound_runs():
 
     # Second call: same memory still stale → decayed again (priority *= decay_factor a second time)
     conn2 = AsyncMock()
-    conn2.fetchval.side_effect = [1, 0, 0]
+    conn2.fetchval.side_effect = [1, 0, 0, 0]
     pool2 = _make_pool(conn2)
 
     with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool2):
@@ -301,7 +301,7 @@ async def test_decay_overlap_behavior():
 
     conn = AsyncMock()
     # DB returns 1 decayed AND 1 boosted — the same memory matched both criteria
-    conn.fetchval.side_effect = [1, 1, 0]
+    conn.fetchval.side_effect = [1, 1, 0, 0]
     pool = _make_pool(conn)
 
     with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
@@ -381,7 +381,7 @@ async def test_dry_run_count_excludes_critical() -> None:
     params = DecayParams(stale_days=7, decay_factor=0.9, dry_run=True)
 
     conn = AsyncMock()
-    conn.fetchval.side_effect = [0, 0, 0]
+    conn.fetchval.side_effect = [0, 0, 0, 0]
     pool = _make_pool(conn)
 
     with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
@@ -410,7 +410,7 @@ async def test_concurrent_decay_race_guard() -> None:
     params = DecayParams(stale_days=7, decay_factor=0.9, dry_run=False)
 
     conn = AsyncMock()
-    conn.fetchval.side_effect = [1, 0, 0]
+    conn.fetchval.side_effect = [1, 0, 0, 0]
     pool = _make_pool(conn)
 
     with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
@@ -435,7 +435,7 @@ async def test_decay_sql_function_has_race_guard() -> None:
     params = DecayParams(stale_days=7, decay_factor=0.9, dry_run=True)
 
     conn = AsyncMock()
-    conn.fetchval.side_effect = [0, 0, 0]
+    conn.fetchval.side_effect = [0, 0, 0, 0]
     pool = _make_pool(conn)
 
     with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):

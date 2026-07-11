@@ -950,6 +950,7 @@ async def refine_memories(
         {
             "analyzed": result.analyzed,
             "summary": result.summary,
+            "protected_canonical_entities": result.protected_canonical_entities,
             "actions": [vars(a) for a in result.actions],
         }
     )
@@ -1047,6 +1048,7 @@ async def run_lifecycle_pipeline(
         return json.dumps(
             {
                 "decay_summary": decay_result.summary,
+                "decay_protected_canonical_entities": decay_result.protected_canonical_entities,
                 "triage_summary": triage_result.summary,
                 "materialization_summary": "No actions to materialize",
                 "actions_taken": [],
@@ -1069,6 +1071,7 @@ async def run_lifecycle_pipeline(
     return json.dumps(
         {
             "decay_summary": decay_result.summary,
+            "decay_protected_canonical_entities": decay_result.protected_canonical_entities,
             "triage_summary": triage_result.summary,
             "triage_action_counts": action_counts,
             "materialization_summary": mat_result.summary,
@@ -1103,6 +1106,7 @@ async def compact_memories(
             "memories_deleted": result.memories_deleted,
             "memories_kept": result.memories_kept,
             "deleted_ids": result.deleted_ids,
+            "protected_canonical_entities": result.protected_canonical_entities,
             "strategy_used": result.strategy_used,
             "plan": [
                 {
