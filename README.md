@@ -482,6 +482,9 @@ Current `ob` commands:
 | `ob ingest macwhisper` | List and ingest transcripts from local MacWhisper history |
 | `ob people list` | List person memories and merge candidates through the MCP server |
 | `ob people merge` | Merge duplicate person memories server-side |
+| `ob export <bundle>` | Export all memories, relationships, and metadata to a portable JSONL bundle |
+| `ob restore <bundle>` | Restore a portable bundle into an empty store (idempotent rerun) |
+| `ob verify <bundle>` | Verify round-trip integrity of a bundle (content hashes, relationships, entity ids) |
 
 ### `ob people`
 
