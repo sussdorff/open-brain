@@ -4,6 +4,12 @@ Classifies incoming memory text into one of the capture templates and extracts
 structured fields specific to each template type.
 
 Capture templates:
+- project       : name, status, owner, goals, next_actions, repository
+- resource      : title, url, source_type, author, summary, published_at
+- concept       : name, domain, summary, related_concepts
+- journal       : entry_date, mood, themes, reflection
+- correspondence: with, channel, direction, subject, summary, occurred_at, follow_up_needed
+- prompt        : purpose, prompt_text, target_model, variables, constraints
 - decision      : what, context, owner, alternatives, rationale
 - meeting       : attendees, topic, key_points, action_items
 - person_context: person, relationship, detail
@@ -27,9 +33,15 @@ _CLASSIFICATION_PROMPT_TEMPLATE = """\
 Classify the following text into one of these capture templates and extract structured fields.
 
 Templates and their fields:
+- project: name, status, owner, goals (list), next_actions (list), repository
+- resource: title, url, source_type, author, summary, published_at
+- concept: name, domain, summary, related_concepts (list)
+- journal: entry_date, mood, themes (list), reflection
+- correspondence: with (list), channel, direction, subject, summary, occurred_at, follow_up_needed
+- prompt: purpose, prompt_text, target_model, variables (list), constraints (list)
 - decision: what, context, owner, alternatives (list), rationale
 - meeting: attendees (list), topic, key_points (list), action_items (list)
-- person_context: person, relationship, detail
+- person_context: person, relationship, detail (use for person knowledge)
 - insight: realization, trigger, domain
 - event: what, when, who, where, recurrence
 - learning: feedback_type, scope, affected_skills (list)
@@ -39,7 +51,9 @@ Rules:
 1. Choose the MOST specific matching template based on the text content.
 2. Extract all relevant fields for that template from the text.
 3. Use null for fields that cannot be determined from the text.
-4. For "observation", only output capture_template = observation with no other fields.
+4. Use person_context for person knowledge to preserve existing callers.
+5. For ambiguous or unclassifiable text, choose observation.
+6. For "observation", only output capture_template = observation with no other fields.
 
 Return ONLY a valid JSON object with "capture_template" key and the template's fields.
 Do not include markdown fences or any explanation.
@@ -101,5 +115,4 @@ async def classify_and_extract(
     except Exception:
         logger.exception("capture_router: classification failed, falling back to observation")
         return {"capture_template": "observation"}
-
 
