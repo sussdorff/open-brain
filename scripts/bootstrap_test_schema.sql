@@ -183,7 +183,19 @@ CREATE TABLE IF NOT EXISTS url_tokens (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-DROP FUNCTION IF EXISTS hybrid_search(TEXT, vector, INTEGER, INTEGER, INTEGER);
+-- Drop every historical hybrid_search overload before recreating the canonical
+-- 8-argument version below. Legacy migrations 004/005 created a 5-argument
+-- hybrid_search(TEXT, vector, INTEGER, INTEGER, INTEGER); the current server
+-- (postgres.py get_pool) and this bootstrap install an 8-argument overload.
+-- Postgres identifies functions by (name, argument types), so a different
+-- argument list is a SEPARATE overload rather than a replacement. A stale 5-arg
+-- overload left in place would make hybrid_search(...) calls ambiguous once the
+-- 8-arg version's trailing DEFAULTs overlap it, and CREATE OR REPLACE cannot
+-- change an existing function's return type. Dropping BOTH known signatures
+-- (schema-qualified, and independent of return type) guarantees an idempotent
+-- rebuild from ANY of this codebase's historical hybrid_search states.
+DROP FUNCTION IF EXISTS public.hybrid_search(TEXT, vector, INTEGER, INTEGER, INTEGER);
+DROP FUNCTION IF EXISTS public.hybrid_search(TEXT, vector, INTEGER, INTEGER, INTEGER, TEXT, JSONB, TEXT);
 CREATE OR REPLACE FUNCTION public.hybrid_search(
   query_text TEXT,
   query_embedding vector,
@@ -263,7 +275,17 @@ LANGUAGE sql AS $fn$
   WHERE id = memory_id;
 $fn$;
 
-DROP FUNCTION IF EXISTS decay_unused_priorities(INTEGER, REAL);
+-- Drop every historical decay_unused_priorities overload before recreating it.
+-- Legacy migration 004 created decay_unused_priorities(INTEGER, REAL) — REAL is
+-- float4 — while this bootstrap and postgres.py get_pool create the
+-- (INTEGER, FLOAT) overload. FLOAT with no precision is DOUBLE PRECISION (float8)
+-- in Postgres, which is a DISTINCT overload from REAL. Because the two differ only
+-- by the float width, recreating just the float8 version would leave any
+-- pre-existing float4 overload in place, making decay_unused_priorities(<int>,
+-- <numeric literal>) ambiguous. Drop BOTH float widths (schema-qualified, and
+-- independent of return type) for an idempotent rebuild from ANY historical state.
+DROP FUNCTION IF EXISTS public.decay_unused_priorities(INTEGER, REAL);
+DROP FUNCTION IF EXISTS public.decay_unused_priorities(INTEGER, DOUBLE PRECISION);
 CREATE OR REPLACE FUNCTION decay_unused_priorities(
   p_stale_days INTEGER,
   p_decay_factor FLOAT

@@ -21,6 +21,27 @@
         "cmd:non-integration-suite",
         "cmd:test-postgres-pool-migrations-absent"
       ]
+    },
+    {
+      "id": "AC2",
+      "status": "done",
+      "summary": "Codex adversarial fix pass (commit 'fix(open-brain-fhb): address codex adversarial findings'). Finding #1: hardened the idempotent DROPs in scripts/bootstrap_test_schema.sql so hybrid_search and decay_unused_priorities rebuild cleanly from ANY historical signature. hybrid_search now drops BOTH the legacy 5-arg (TEXT, vector, INTEGER, INTEGER, INTEGER) and the current 8-arg (..., TEXT, JSONB, TEXT) overloads (schema-qualified as public.hybrid_search to match the CREATE); decay_unused_priorities now drops BOTH float widths (INTEGER, REAL = float4 and INTEGER, DOUBLE PRECISION = float8), because FLOAT-with-no-precision is DOUBLE PRECISION, a distinct overload from REAL. Verified against a real pgvector:pg18-bookworm instance that (a) fresh bootstrap works, (b) an injected legacy-overload DB reproduces the 'function hybrid_search(...) is not unique' ambiguity and the hardened bootstrap removes the orphans leaving exactly one overload each, (c) the CREATE-OR-REPLACE return-type trap is avoided by the added 8-arg DROP, (d) TestBackfillScriptIntegration passes and the non-integration suite stays green (1457 passed). Findings #2 and #3: corrected evidence_ledger.json — replaced the '...expected bootstrap columns...' placeholder with the real reproducible column-check SQL, and annotated the non-reproducible runner-container entry, re-verifying its claims from scratch via direct host-to-container connectivity.",
+      "changed_files": [
+        "scripts/bootstrap_test_schema.sql",
+        ".beads/runs/191a9aa8-4097-49f5-9293-f8a2035b32fe/evidence_ledger.json",
+        ".beads/runs/191a9aa8-4097-49f5-9293-f8a2035b32fe/implementation_manifest.json"
+      ],
+      "evidence_refs": [
+        "cmd:fix-docker-run-pgvector",
+        "cmd:fix-fresh-bootstrap",
+        "cmd:fix-orphan-scenario",
+        "cmd:fix-return-type-trap",
+        "cmd:fix-column-smoke",
+        "cmd:fix-insert-function-smoke",
+        "cmd:fix-hybrid-search-smoke",
+        "cmd:fix-integration-backfill",
+        "cmd:fix-non-integration-suite"
+      ]
     }
   ],
   "changed_files": [
@@ -113,6 +134,15 @@
     "cmd:non-integration-suite",
     "cmd:test-postgres-pool-migrations-absent",
     "cmd:metrics-uv-default-cache",
-    "cmd:metrics-uv-tmp-cache"
+    "cmd:metrics-uv-tmp-cache",
+    "cmd:fix-docker-run-pgvector",
+    "cmd:fix-fresh-bootstrap",
+    "cmd:fix-orphan-scenario",
+    "cmd:fix-return-type-trap",
+    "cmd:fix-column-smoke",
+    "cmd:fix-insert-function-smoke",
+    "cmd:fix-hybrid-search-smoke",
+    "cmd:fix-integration-backfill",
+    "cmd:fix-non-integration-suite"
   ]
 }
