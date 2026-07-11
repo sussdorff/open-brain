@@ -1,0 +1,148 @@
+{
+  "contract_version": "1",
+  "bead_id": "open-brain-fhb",
+  "acceptance_criteria": [
+    {
+      "id": "AC1",
+      "status": "done",
+      "summary": "A repository-owned Postgres+pgvector test-schema bootstrap now creates the base memories schema and current data-layer additions; TestBackfillScriptIntegration passes against a disposable real pgvector database after the bootstrap fixture runs.",
+      "changed_files": [
+        "python/tests/conftest.py",
+        "python/tests/test_typed_relationships.py",
+        "scripts/bootstrap_test_schema.sql",
+        "python/tests/README.md"
+      ],
+      "evidence_refs": [
+        "cmd:red-pytest-backfill",
+        "cmd:green-pytest-backfill",
+        "cmd:idempotent-pytest-backfill",
+        "cmd:psql-column-and-function-smoke",
+        "cmd:get-pool-smoke",
+        "cmd:non-integration-suite",
+        "cmd:test-postgres-pool-migrations-absent"
+      ]
+    },
+    {
+      "id": "AC2",
+      "status": "done",
+      "summary": "Codex adversarial fix pass (commit 'fix(open-brain-fhb): address codex adversarial findings'). Finding #1: hardened the idempotent DROPs in scripts/bootstrap_test_schema.sql so hybrid_search and decay_unused_priorities rebuild cleanly from ANY historical signature. hybrid_search now drops BOTH the legacy 5-arg (TEXT, vector, INTEGER, INTEGER, INTEGER) and the current 8-arg (..., TEXT, JSONB, TEXT) overloads (schema-qualified as public.hybrid_search to match the CREATE); decay_unused_priorities now drops BOTH float widths (INTEGER, REAL = float4 and INTEGER, DOUBLE PRECISION = float8), because FLOAT-with-no-precision is DOUBLE PRECISION, a distinct overload from REAL. Verified against a real pgvector:pg18-bookworm instance that (a) fresh bootstrap works, (b) an injected legacy-overload DB reproduces the 'function hybrid_search(...) is not unique' ambiguity and the hardened bootstrap removes the orphans leaving exactly one overload each, (c) the CREATE-OR-REPLACE return-type trap is avoided by the added 8-arg DROP, (d) TestBackfillScriptIntegration passes and the non-integration suite stays green (1457 passed). Findings #2 and #3: corrected evidence_ledger.json — replaced the '...expected bootstrap columns...' placeholder with the real reproducible column-check SQL, and annotated the non-reproducible runner-container entry, re-verifying its claims from scratch via direct host-to-container connectivity.",
+      "changed_files": [
+        "scripts/bootstrap_test_schema.sql",
+        ".beads/runs/191a9aa8-4097-49f5-9293-f8a2035b32fe/evidence_ledger.json",
+        ".beads/runs/191a9aa8-4097-49f5-9293-f8a2035b32fe/implementation_manifest.json"
+      ],
+      "evidence_refs": [
+        "cmd:fix-docker-run-pgvector",
+        "cmd:fix-fresh-bootstrap",
+        "cmd:fix-orphan-scenario",
+        "cmd:fix-return-type-trap",
+        "cmd:fix-column-smoke",
+        "cmd:fix-insert-function-smoke",
+        "cmd:fix-hybrid-search-smoke",
+        "cmd:fix-integration-backfill",
+        "cmd:fix-non-integration-suite"
+      ]
+    }
+  ],
+  "changed_files": [
+    "python/tests/conftest.py",
+    "python/tests/test_typed_relationships.py",
+    "scripts/bootstrap_test_schema.sql",
+    "python/tests/README.md",
+    ".beads/runs/191a9aa8-4097-49f5-9293-f8a2035b32fe/implementation_manifest.json",
+    ".beads/runs/191a9aa8-4097-49f5-9293-f8a2035b32fe/evidence_ledger.json"
+  ],
+  "commits": [
+    {
+      "sha": "1789b5023024e7f44885d0bfbfcb554633204db8",
+      "message": "test(open-brain-fhb): red -- require real database URL for backfill integration"
+    },
+    {
+      "sha": "c8096d0f2b7e561c00d24a3e9dba6fe0aec20171",
+      "message": "feat(open-brain-fhb): green -- bootstrap integration test schema"
+    },
+    {
+      "sha": "ca527fa4d25051e7af82d79ae6938b867515dcbd",
+      "message": "docs(open-brain-fhb): document integration schema bootstrap"
+    },
+    {
+      "sha": "d84b7080f4c7db4acbfcfb966bd229c27ecb9cb5",
+      "message": "chore(open-brain-fhb): add implementation evidence artifacts"
+    }
+  ],
+  "tests": [
+    {
+      "name": "RED TestBackfillScriptIntegration against fresh pgvector DB",
+      "command_ref": "cmd:red-pytest-backfill",
+      "result": "failed for the expected missing-schema reason: asyncpg.exceptions.UndefinedTableError: relation \"memory_relationships\" does not exist"
+    },
+    {
+      "name": "GREEN TestBackfillScriptIntegration against bootstrapped pgvector DB",
+      "command_ref": "cmd:green-pytest-backfill",
+      "result": "1 passed"
+    },
+    {
+      "name": "Bootstrap idempotency rerun",
+      "command_ref": "cmd:idempotent-pytest-backfill",
+      "result": "1 passed against an already-bootstrapped DB"
+    },
+    {
+      "name": "Direct schema/function smoke",
+      "command_ref": "cmd:psql-column-and-function-smoke",
+      "result": "0 missing expected columns; memory, relationship, usage inserts succeeded; update_priority and decay_unused_priorities executed"
+    },
+    {
+      "name": "Postgres get_pool migration smoke",
+      "command_ref": "cmd:get-pool-smoke",
+      "result": "get_pool connected to the bootstrapped DB and confirmed memories, memory_relationships, decay_unused_priorities, and update_priority exist"
+    },
+    {
+      "name": "Non-integration suite",
+      "command_ref": "cmd:non-integration-suite",
+      "result": "1457 passed, 26 deselected"
+    }
+  ],
+  "external_resources": [
+    {
+      "type": "docker_image",
+      "name": "pgvector/pgvector:pg18-bookworm",
+      "digest": "sha256:12a379b47ad65289572ea0756efc11b7c241a6662833e8af7038cd3b73d647e0",
+      "purpose": "Disposable real Postgres+pgvector verification database"
+    },
+    {
+      "type": "docker_image",
+      "name": "ghcr.io/astral-sh/uv:python3.13-bookworm",
+      "digest": "sha256:47965cdc9d53a515f68f78241161c901e70051ce428f12e791bd7fe19f6a631a",
+      "purpose": "Disposable pytest runner sharing the pgvector container network namespace"
+    }
+  ],
+  "scope_changes": [],
+  "downstream_impacts": [
+    "Real-DB integration tests can opt into the bootstrapped schema by using the integration_database_url fixture.",
+    "The documented psql command can bootstrap a fresh pgvector database outside pytest.",
+    "CI marker behavior is unchanged; integration tests remain excluded by the existing non-integration command.",
+    "python/tests/test_postgres.py::TestPostgresPoolMigrations is absent in this worktree; the bootstrap was verified with the documented fallback smoke path."
+  ],
+  "evidence_refs": [
+    "cmd:docker-run-pgvector",
+    "cmd:red-pytest-backfill",
+    "cmd:green-pytest-backfill",
+    "cmd:idempotent-pytest-backfill",
+    "cmd:psql-column-and-function-smoke",
+    "cmd:hybrid-search-smoke",
+    "cmd:get-pool-smoke",
+    "cmd:non-integration-suite",
+    "cmd:test-postgres-pool-migrations-absent",
+    "cmd:metrics-uv-default-cache",
+    "cmd:metrics-uv-tmp-cache",
+    "cmd:fix-docker-run-pgvector",
+    "cmd:fix-fresh-bootstrap",
+    "cmd:fix-orphan-scenario",
+    "cmd:fix-return-type-trap",
+    "cmd:fix-column-smoke",
+    "cmd:fix-insert-function-smoke",
+    "cmd:fix-hybrid-search-smoke",
+    "cmd:fix-integration-backfill",
+    "cmd:fix-non-integration-suite"
+  ]
+}
