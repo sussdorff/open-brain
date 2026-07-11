@@ -1,6 +1,8 @@
 """Shared test fixtures and configuration."""
 
+import asyncio
 import os
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -14,6 +16,7 @@ _TEST_ENV = {
     "DATABASE_URL": "postgresql://test:test@localhost:5432/test",
     "ANTHROPIC_API_KEY": "test-anthropic-key",
 }
+_DATABASE_URL_WAS_PROVIDED = bool(os.environ.get("DATABASE_URL"))
 
 # Inject test env vars without polluting the real environment between test runs.
 # Uses setdefault so that values already set in the shell (e.g. a real key in CI)
@@ -83,6 +86,46 @@ def oauth_provider():
     """Return a fresh OAuthProvider instance."""
     from open_brain.auth.provider import OAuthProvider
     return OAuthProvider()
+
+
+def _real_integration_database_url() -> str:
+    """Return the caller-provided DATABASE_URL, or skip when only the test default exists."""
+    db_url = os.environ.get("DATABASE_URL", "").strip()
+    if not _DATABASE_URL_WAS_PROVIDED or db_url == _TEST_ENV["DATABASE_URL"]:
+        pytest.skip("Requires real DATABASE_URL (not test placeholder)")
+    return db_url
+
+
+@pytest.fixture(scope="session")
+def bootstrapped_database_url() -> str:
+    """Bootstrap the repository-owned test schema for real-DB integration tests."""
+    db_url = _real_integration_database_url()
+    script_path = Path(__file__).resolve().parents[2] / "scripts" / "bootstrap_test_schema.sql"
+    if not script_path.exists():
+        pytest.fail(f"Test schema bootstrap script not found: {script_path}")
+    sql = script_path.read_text(encoding="utf-8")
+
+    async def _bootstrap() -> None:
+        import asyncpg
+
+        conn = await asyncpg.connect(db_url)
+        try:
+            await conn.execute(sql)
+        finally:
+            await conn.close()
+
+    try:
+        asyncio.run(_bootstrap())
+    except Exception as exc:
+        pytest.fail(f"Failed to bootstrap test schema with {script_path}: {exc}")
+
+    return db_url
+
+
+@pytest.fixture
+def integration_database_url(bootstrapped_database_url: str) -> str:
+    """Return a bootstrapped caller-provided DATABASE_URL for real-DB integration tests."""
+    return bootstrapped_database_url
 
 
 @pytest.fixture

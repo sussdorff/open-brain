@@ -25,8 +25,19 @@
 ```bash
 cd python
 uv run python -m open_brain        # Run server locally
-uv run pytest                      # Run tests (1 integration test needs VOYAGE_API_KEY)
+uv run pytest                      # Run tests (some integration tests need VOYAGE_API_KEY)
 uv run pytest -m "not integration" # Run without external deps
+
+# Real-DB integration tests (require a Postgres+pgvector instance):
+# 1. Start a test database:
+#    docker run --rm -d --name open-brain-test-pg \
+#      -e POSTGRES_USER=open_brain -e POSTGRES_PASSWORD=test \
+#      -e POSTGRES_DB=open_brain_test -p 55432:5432 \
+#      pgvector/pgvector:pg18-bookworm
+# 2. Export DATABASE_URL="postgresql://open_brain:test@localhost:55432/open_brain_test"
+# 3. The integration_database_url fixture bootstraps the schema automatically via
+#    scripts/bootstrap_test_schema.sql — no manual schema authoring needed.
+uv run pytest -m integration tests/test_typed_relationships.py::TestBackfillScriptIntegration -v
 ```
 
 ## Deployment
