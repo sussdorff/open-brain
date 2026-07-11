@@ -542,14 +542,11 @@ class TestBackfillScriptIntegration:
     Requires DATABASE_URL env var pointing to a test database.
     """
 
-    def test_backfill_script_sets_link_type(self):
+    def test_backfill_script_sets_link_type(self, integration_database_url: str):
         import os
         import subprocess
+        import sys
         from pathlib import Path
-
-        db_url = os.environ.get("DATABASE_URL")
-        if not db_url:
-            pytest.skip("DATABASE_URL not set")
 
         # Locate the backfill script relative to this test file
         # Path(__file__) = python/tests/test_typed_relationships.py
@@ -558,11 +555,11 @@ class TestBackfillScriptIntegration:
         script_path = scripts_dir / "migrate_relationships_backfill.py"
         assert script_path.exists(), f"Backfill script not found at {script_path}"
 
-        env = {**os.environ, "DATABASE_URL": db_url}
+        env = {**os.environ, "DATABASE_URL": integration_database_url}
 
         # First run: should apply migration and report rows updated
         result = subprocess.run(
-            ["python", str(script_path)],
+            [sys.executable, str(script_path)],
             env=env,
             capture_output=True,
             text=True,
@@ -577,7 +574,7 @@ class TestBackfillScriptIntegration:
 
         # Second run: idempotency check — should report 0 rows updated
         result2 = subprocess.run(
-            ["python", str(script_path)],
+            [sys.executable, str(script_path)],
             env=env,
             capture_output=True,
             text=True,
