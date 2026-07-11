@@ -8,12 +8,16 @@
       "status": "done",
       "changed_files": [
         "python/src/open_brain/capture_router.py",
+        "python/src/open_brain/server.py",
         "python/tests/test_capture_router.py"
       ],
       "evidence_refs": [
         "cmd:red-ac1",
         "cmd:green-ac1",
-        "cmd:affected-final"
+        "cmd:affected-final",
+        "cmd:red-typecol",
+        "cmd:green-typecol",
+        "cmd:affected-typecol-final"
       ]
     },
     {
@@ -88,6 +92,14 @@
     {
       "sha": "df30c27",
       "message": "fix(open-brain-hws): address codex adversarial findings"
+    },
+    {
+      "sha": "756176d",
+      "message": "test(open-brain-hws): red \u2014 raw-capture type-column persistence"
+    },
+    {
+      "sha": "9a8b4e8",
+      "message": "fix(open-brain-hws): green \u2014 persist classified type to type column (except person_context)"
     }
   ],
   "tests": [
@@ -132,6 +144,18 @@
       "cwd": "python",
       "status": "passed",
       "evidence_ref": "cmd:affected-codex-final"
+    },
+    {
+      "command": "uv run pytest tests/test_capture_router.py::TestRawCaptureTypeColumnPersistence -v",
+      "cwd": "python",
+      "status": "passed",
+      "evidence_ref": "cmd:green-typecol"
+    },
+    {
+      "command": "uv run pytest tests/test_capture_router.py tests/test_domain_schemas.py tests/test_domain_metadata.py -m \"not integration\"",
+      "cwd": "python",
+      "status": "passed",
+      "evidence_ref": "cmd:affected-typecol-final"
     }
   ],
   "external_resources": [],
@@ -143,7 +167,8 @@
     "validate_domain_metadata gained warning-only branches for new canonical types while unknown and historical types remain permissive pass-through.",
     "Codex fix: classifier prompt and module docstring now advertise project.due_date and prompt.last_used_at so raw captures reliably extract those canonical fields.",
     "Codex fix: capture_router.canonical_type_for_capture_template maps person_context -> canonical person for domain-metadata validation while preserving the stored capture_template value.",
-    "Codex fix: save_memory now runs domain-metadata validation against classifier-generated canonical type + extracted fields for raw captures (no caller capture_template), merging non-duplicate warnings; pre-structured (AC3) and duplicate paths keep caller-only validation."
+    "Codex fix: save_memory now runs domain-metadata validation against classifier-generated canonical type + extracted fields for raw captures (no caller capture_template), merging non-duplicate warnings; pre-structured (AC3) and duplicate paths keep caller-only validation.",
+    "Phase 10 fix (VETO resolution): save_memory now persists the classifier capture_template into the memory `type` column for raw captures (no caller capture_template) via the existing post-save update_memory call, so type-based retrieval/stats/people machinery see the canonical classification. Scoped exception: person_context classifications keep type=observation (no auto-promotion to type=person, people pipeline untouched); explicit caller types and pre-structured captures are unaffected."
   ],
   "evidence_refs": [
     "cmd:red-ac1",
@@ -156,6 +181,9 @@
     "cmd:affected-final",
     "cmd:red-codex",
     "cmd:green-codex",
-    "cmd:affected-codex-final"
+    "cmd:affected-codex-final",
+    "cmd:red-typecol",
+    "cmd:green-typecol",
+    "cmd:affected-typecol-final"
   ]
 }

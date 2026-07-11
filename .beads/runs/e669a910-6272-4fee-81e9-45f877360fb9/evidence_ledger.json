@@ -217,6 +217,46 @@
       "purpose": "Commit Phase 8 green fix for the three findings.",
       "exit_code": 0,
       "observed_result": "Pre-commit hook ran the non-integration suite (1350 passed, 22 deselected) then created commit df30c27."
+    },
+    {
+      "id": "cmd:red-typecol",
+      "command": "uv run pytest tests/test_capture_router.py::TestRawCaptureTypeColumnPersistence -v",
+      "cwd": "python",
+      "purpose": "Phase 10 RED gate for raw-capture type-column persistence (VETO resolution).",
+      "exit_code": 1,
+      "observed_result": "6 failed, 3 passed. The 6 parametrized non-person canonical templates (journal, project, concept, correspondence, decision, event) failed because save_memory's post-save update_memory did not set the type column (assertion update_params.type == template). The 3 regression guards (person_context stays observation, explicit type=person unaffected, pre-structured capture_template=person bypass) already passed, confirming the exception behavior pre-existed."
+    },
+    {
+      "id": "cmd:red-typecol-commit",
+      "command": "git add python/tests/test_capture_router.py && git commit --no-verify -m \"test(open-brain-hws): red — raw-capture type-column persistence\"",
+      "cwd": ".",
+      "purpose": "Commit Phase 10 red tests (--no-verify because the pre-commit hook runs the suite and blocks intentionally failing red tests).",
+      "exit_code": 0,
+      "observed_result": "Created commit 756176d."
+    },
+    {
+      "id": "cmd:green-typecol",
+      "command": "uv run pytest tests/test_capture_router.py::TestRawCaptureTypeColumnPersistence -v",
+      "cwd": "python",
+      "purpose": "Phase 10 GREEN gate for raw-capture type-column persistence.",
+      "exit_code": 0,
+      "observed_result": "9 passed. All 6 non-person canonical templates persist type=<template>; person_context keeps type=None (observation default); explicit and pre-structured person captures are unaffected."
+    },
+    {
+      "id": "cmd:affected-typecol-final",
+      "command": "uv run pytest tests/test_capture_router.py tests/test_domain_schemas.py tests/test_domain_metadata.py -m \"not integration\"",
+      "cwd": "python",
+      "purpose": "Phase 10 final affected-file regression gate (no external dependencies).",
+      "exit_code": 0,
+      "observed_result": "151 passed, 1 deselected (was 142 passed / 1 deselected before this fix; +9 Phase 10 tests, no regressions)."
+    },
+    {
+      "id": "cmd:green-typecol-commit",
+      "command": "git add python/src/open_brain/server.py && git commit -m \"fix(open-brain-hws): green — persist classified type to type column (except person_context)\"",
+      "cwd": ".",
+      "purpose": "Commit Phase 10 green fix.",
+      "exit_code": 0,
+      "observed_result": "Pre-commit hook ran the non-integration suite (1359 passed, 22 deselected) then created commit 9a8b4e8."
     }
   ],
   "skipped_checks": [
