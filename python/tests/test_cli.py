@@ -1,7 +1,6 @@
 """Tests for the ob CLI — argument parsing, output formatting, and integration."""
 
 import json
-import os
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch

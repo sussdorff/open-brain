@@ -14,7 +14,6 @@ import asyncpg
 from open_brain.config import get_config
 from open_brain.data_layer.embedding import (
     embed,
-    embed_query,
     embed_with_usage,
     embed_query_with_usage,
     to_pg_vector,
@@ -1260,7 +1259,7 @@ class PostgresDataLayer:
                 set_parts.append(f"metadata = metadata || ${param_idx}::jsonb")
                 values.append(params.metadata)
                 param_idx += 1
-            set_parts.append(f"updated_at = NOW()")
+            set_parts.append("updated_at = NOW()")
 
             values.append(params.id)
             query = f"UPDATE memories SET {', '.join(set_parts)} WHERE id = ${param_idx}"
@@ -2960,7 +2959,6 @@ async def _execute_refine_actions(actions: list[RefineAction]) -> int:
 
     # Build waves of non-overlapping actions for parallel execution
     waves: list[list[RefineAction]] = []
-    assigned: set[int] = set()
 
     for action in valid_actions:
         action_ids = set(action.memory_ids)
