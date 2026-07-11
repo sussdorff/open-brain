@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- *(open-brain-jhg)* **Portable knowledge backup and restore** — New `ob export <bundle>`, `ob restore <bundle>`, and `ob verify <bundle>` commands create a vendor-neutral bundle for Open Brain memories, metadata, relationships, and Paperless references. Bundles include a versioned manifest, deterministic JSONL files, per-file SHA-256 hashes, explicit no-binary/no-credential assertions, id-preserving restore into empty stores, safe same-bundle reruns, and round-trip integrity reports covering content hashes, full-record hashes, relationship edge sets, and canonical entity ids.
 - *(open-brain-brt)* **Second Brain vault importer** — Deterministic bulk importer for historical Obsidian/Markdown vault notes via `python -m open_brain.second_brain_import <vault_path> [--apply] [--paperless-map <json>] [--output <report.json>]`.
   - Dry-run mode (default, no `--apply`) reports importable, duplicate, skipped, and unresolved items without any database writes.
   - Notes import idempotently: source path, filesystem timestamps, YAML frontmatter type metadata, and full content are preserved; re-running on an already-imported vault skips duplicates cleanly.
@@ -1573,5 +1574,4 @@ All notable changes to this project will be documented in this file.
 ### Init
 
 - Scaffold open-brain repo with TypeScript + MCP server structure
-
 
