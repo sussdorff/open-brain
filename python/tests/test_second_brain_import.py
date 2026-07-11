@@ -540,3 +540,72 @@ class TestSecondBrainAttachments:
                 "error": "Paperless transport failed for 123",
             }
         ]
+
+
+class TestSecondBrainRegressions:
+    @pytest.mark.asyncio
+    async def test_import_vault_raises_when_vault_path_missing(self, tmp_path):
+        """REGRESSION: a nonexistent vault path is a usage error, not a silent empty run."""
+        from open_brain.second_brain_import import import_vault
+
+        missing = tmp_path / "does-not-exist"
+
+        with pytest.raises(ValueError, match="Vault path does not exist"):
+            await import_vault(
+                vault_path=missing,
+                data_layer=FakeDataLayer(),
+                paperless_client=FakePaperlessClient(),
+                apply=False,
+            )
+
+    @pytest.mark.asyncio
+    async def test_unterminated_frontmatter_fence_is_reported_as_skipped(self, tmp_path):
+        """REGRESSION: a leading '---' with no closing fence is skipped as malformed_yaml."""
+        from open_brain.second_brain_import import import_vault
+
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        (vault / "Unterminated.md").write_text(
+            "---\ntype: project\ntitle: No closing fence\n\nBody without a closing fence.\n",
+            encoding="utf-8",
+        )
+
+        report = await import_vault(
+            vault_path=vault,
+            data_layer=FakeDataLayer(),
+            paperless_client=FakePaperlessClient(),
+            apply=False,
+        )
+
+        assert report["summary"]["skipped"] == 1
+        assert report["items"] == [
+            {
+                "source_ref": "Unterminated.md",
+                "type": None,
+                "action": "skip",
+                "memory_id": None,
+                "reason": "malformed_yaml",
+            }
+        ]
+
+    def test_unquoted_yaml_date_frontmatter_is_json_serializable(self, tmp_path):
+        """REGRESSION: unquoted YAML dates normalize to strings so metadata stays JSON-safe."""
+        from open_brain.second_brain_import import ParsedNote, _parse_note
+
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        note = vault / "2026-07-10.md"
+        note.write_text(
+            "---\ntype: journal\ndate: 2026-07-10\n---\nDaily note body.\n",
+            encoding="utf-8",
+        )
+
+        parsed = _parse_note(note, vault)
+
+        assert isinstance(parsed, ParsedNote)
+        # (a) the unquoted date leaf is preserved as an ISO string, not a date object.
+        assert parsed.metadata["frontmatter"]["date"] == "2026-07-10"
+        # (b) the metadata round-trips through plain json.dumps, mirroring the jsonb codec
+        #     (_init_conn in postgres.py uses json.dumps with no default= fallback).
+        round_tripped = json.loads(json.dumps(parsed.metadata))
+        assert round_tripped["frontmatter"]["date"] == "2026-07-10"

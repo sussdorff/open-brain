@@ -147,6 +147,50 @@
       ]
     }
   ],
+  "codex_adversarial_fixes": [
+    {
+      "finding": "REGRESSION 2",
+      "status": "done",
+      "summary": "Unquoted YAML date-like frontmatter values (e.g. date: 2026-07-10) are now recursively normalized to ISO strings via a new _json_safe helper applied in _split_frontmatter, so metadata['frontmatter'] no longer carries datetime.date/datetime.datetime objects that would crash the Postgres jsonb codec's plain json.dumps in save_memory.",
+      "changed_files": [
+        "python/src/open_brain/second_brain_import.py",
+        "python/tests/test_second_brain_import.py"
+      ],
+      "evidence_refs": [
+        "evidence_ledger.commands.codex_fix_focused_importer",
+        "evidence_ledger.commands.codex_fix_full_non_integration",
+        "python/tests/test_second_brain_import.py::TestSecondBrainRegressions::test_unquoted_yaml_date_frontmatter_is_json_serializable"
+      ]
+    },
+    {
+      "finding": "REGRESSION 5",
+      "status": "done",
+      "summary": "import_vault now validates that the resolved vault path exists and is a directory, raising ValueError('Vault path does not exist or is not a directory: ...') before any data-layer construction, instead of silently producing an empty 'successful' reconciliation report for a typo'd or missing path.",
+      "changed_files": [
+        "python/src/open_brain/second_brain_import.py",
+        "python/tests/test_second_brain_import.py"
+      ],
+      "evidence_refs": [
+        "evidence_ledger.commands.codex_fix_focused_importer",
+        "evidence_ledger.commands.codex_fix_full_non_integration",
+        "python/tests/test_second_brain_import.py::TestSecondBrainRegressions::test_import_vault_raises_when_vault_path_missing"
+      ]
+    },
+    {
+      "finding": "REGRESSION 6",
+      "status": "done",
+      "summary": "A document that begins with a '---' fence but has no closing fence now raises ValueError('unterminated frontmatter fence') in _split_frontmatter, flowing through the existing malformed_yaml handler in _parse_note so the note is reported as skipped (reason malformed_yaml) instead of being silently imported verbatim with the leading '---' as body text. Covered by an isolated tmp_path test rather than a shared-vault fixture to avoid perturbing the shared dry-run/apply manifests.",
+      "changed_files": [
+        "python/src/open_brain/second_brain_import.py",
+        "python/tests/test_second_brain_import.py"
+      ],
+      "evidence_refs": [
+        "evidence_ledger.commands.codex_fix_focused_importer",
+        "evidence_ledger.commands.codex_fix_full_non_integration",
+        "python/tests/test_second_brain_import.py::TestSecondBrainRegressions::test_unterminated_frontmatter_fence_is_reported_as_skipped"
+      ]
+    }
+  ],
   "changed_files": [
     "python/pyproject.toml",
     "python/uv.lock",
@@ -207,6 +251,16 @@
       "command": "UV_CACHE_DIR=/private/tmp/uv-cache-open-brain-brt uv run python -m py_compile src/open_brain/second_brain_import.py src/open_brain/data_layer/postgres.py src/open_brain/data_layer/interface.py",
       "status": "passed",
       "observed_result": "exit 0"
+    },
+    {
+      "command": "uv run pytest tests/test_second_brain_import.py -q",
+      "status": "passed",
+      "observed_result": "14 passed (includes 3 new TestSecondBrainRegressions tests for codex adversarial findings)"
+    },
+    {
+      "command": "uv run pytest -m \"not integration\"",
+      "status": "passed",
+      "observed_result": "1427 passed, 23 deselected, 52 warnings (baseline 1424 + 3 new regression tests)"
     }
   ],
   "external_resources": [

@@ -225,6 +225,20 @@
       "purpose": "Required full non-integration regression suite after cold-review fixes.",
       "exit_code": 0,
       "observed_result": "1424 passed, 23 deselected, 55 warnings."
+    },
+    {
+      "id": "codex_fix_focused_importer",
+      "command": "uv run pytest tests/test_second_brain_import.py -q",
+      "purpose": "Focused regression suite for codex adversarial fixes (REGRESSION 2 YAML date serialization, REGRESSION 5 vault path validation, REGRESSION 6 unterminated frontmatter fence), including the three new TestSecondBrainRegressions tests.",
+      "exit_code": 0,
+      "observed_result": "14 passed."
+    },
+    {
+      "id": "codex_fix_full_non_integration",
+      "command": "uv run pytest -m \"not integration\"",
+      "purpose": "Required full non-integration regression suite after codex adversarial fixes.",
+      "exit_code": 0,
+      "observed_result": "1427 passed, 23 deselected, 52 warnings (baseline 1424 + 3 new regression tests)."
     }
   ],
   "skipped_checks": [

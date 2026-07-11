@@ -16,7 +16,7 @@ import json
 import re
 import sys
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -106,6 +106,24 @@ def _iso_from_timestamp(timestamp: float) -> str:
     return datetime.fromtimestamp(timestamp, tz=UTC).isoformat()
 
 
+def _json_safe(value: Any) -> Any:
+    """Recursively normalize date/datetime leaves to ISO strings for JSON storage.
+
+    YAML 1.1 implicit typing parses unquoted date-like scalars (e.g. ``date: 2026-07-10``,
+    common in daily notes) into ``datetime.date``/``datetime.datetime`` objects. The
+    Postgres jsonb codec encodes metadata with plain ``json.dumps`` and no ``default=``
+    fallback, so such objects would raise ``TypeError`` in ``save_memory``. Convert them
+    to ISO strings while leaving every other value unchanged.
+    """
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    return value
+
+
 def _split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     """Split leading YAML frontmatter from a Markdown document."""
     lines = text.splitlines(keepends=True)
@@ -119,7 +137,7 @@ def _split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
             break
 
     if closing_index is None:
-        return {}, text
+        raise ValueError("unterminated frontmatter fence")
 
     frontmatter_text = "".join(lines[1:closing_index])
     body = "".join(lines[closing_index + 1 :])
@@ -128,7 +146,7 @@ def _split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
         return {}, body
     if not isinstance(loaded, dict):
         raise ValueError("frontmatter must be a mapping")
-    return dict(loaded), body
+    return _json_safe(dict(loaded)), body
 
 
 def _clean_wikilink_target(value: str) -> str:
@@ -596,6 +614,10 @@ async def import_vault(
 ) -> dict[str, Any]:
     """Import or dry-run a Second Brain vault and return a reconciliation report."""
     resolved_vault_path = Path(vault_path).expanduser().resolve()
+    if not resolved_vault_path.is_dir():
+        raise ValueError(
+            f"Vault path does not exist or is not a directory: {resolved_vault_path}"
+        )
     if data_layer is None:
         from open_brain.data_layer.postgres import PostgresDataLayer
 
