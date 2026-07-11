@@ -596,10 +596,38 @@ async def save_memory(
         if entities_result:
             post_save_metadata["entities"] = entities_result
 
+        # Persist the classified canonical type into the memory's `type` column for
+        # raw captures (no caller-supplied capture_template) so type-based retrieval,
+        # stats, and the people machinery see the classification instead of it living
+        # only in metadata.capture_template. Scoped decision (2026-07-11, see the
+        # bead's Design Decision Log):
+        #   - Use the raw classifier capture_template string directly for ALL canonical
+        #     templates (project, resource, concept, journal, correspondence, prompt,
+        #     decision, meeting, event, insight, learning, observation).
+        #   - EXCEPT "person_context": an incidental / LLM-inferred person mention must
+        #     keep type=observation and must NOT auto-activate the people pipeline, so
+        #     it is deliberately NOT routed through canonical_type_for_capture_template()
+        #     here (that mapping is only for the domain-metadata *validation* call below).
+        #   - Skipped for pre-structured captures (has_caller_template=True) and explicit
+        #     caller types, which already flow through normalize_memory_type() unchanged.
+        type_to_persist: str | None = None
+        if not has_caller_template:
+            classified_capture_template = (
+                classification.get("capture_template")
+                if isinstance(classification, dict)
+                else None
+            )
+            if classified_capture_template not in (None, "person_context"):
+                type_to_persist = classified_capture_template
+
         if post_save_metadata:
             try:
                 await dl.update_memory(
-                    UpdateMemoryParams(id=result.id, metadata=post_save_metadata)
+                    UpdateMemoryParams(
+                        id=result.id,
+                        type=type_to_persist,
+                        metadata=post_save_metadata,
+                    )
                 )
             except Exception:
                 logger.exception("save_memory: post-save metadata update failed (classification/entities)")
