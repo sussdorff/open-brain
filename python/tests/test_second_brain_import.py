@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+from dataclasses import replace
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ import pytest
 from open_brain.data_layer.interface import VALID_LINK_TYPES
 from open_brain.data_layer.interface import SaveMemoryParams, SaveMemoryResult
 from open_brain.data_layer.postgres import PostgresDataLayer
+from open_brain.ingest.runs import get_current_run_id
 from open_brain.paperless import PaperlessResolveResult
 
 
@@ -150,6 +152,29 @@ class FakePaperlessClient:
         raise AssertionError(f"unexpected document id {document_id}")
 
 
+class RecordingDataLayer(FakeDataLayer):
+    """DataLayer test double that records importer writes."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.next_id = 1000
+        self.saved_run_ids: list[str | None] = []
+
+    async def save_memory(self, params: SaveMemoryParams) -> SaveMemoryResult:
+        run_id = get_current_run_id()
+        self.saved_run_ids.append(run_id)
+        stored_metadata = dict(params.metadata or {})
+        if run_id is not None:
+            stored_metadata["run_id"] = run_id
+        stored = replace(params, metadata=stored_metadata)
+        self.saved.append(stored)
+        memory_id = self.next_id
+        self.next_id += 1
+        source_ref = stored_metadata["source_ref"]
+        self.existing_refs[source_ref] = memory_id
+        return SaveMemoryResult(id=memory_id, message="Memory saved")
+
+
 def _normalize_report(report: dict[str, Any]) -> dict[str, Any]:
     """Normalize environment-specific fields before fixture comparison."""
     normalized = json.loads(json.dumps(report, default=str))
@@ -178,3 +203,62 @@ class TestSecondBrainDryRun:
         assert data_layer.relationships == []
         assert paperless_client.resolved_ids == [101, 404]
         assert _normalize_report(report) == json.loads(EXPECTED_DRY_RUN.read_text())
+
+
+class TestSecondBrainApply:
+    @pytest.mark.asyncio
+    async def test_apply_twice_imports_supported_notes_once_with_provenance(self):
+        """AC2: apply writes supported notes idempotently with preserved content."""
+        from open_brain.second_brain_import import import_vault
+
+        data_layer = RecordingDataLayer()
+        paperless_client = FakePaperlessClient()
+
+        first = await import_vault(
+            vault_path=FIXTURE_VAULT,
+            paperless_mapping_path=PAPERLESS_MAPPING,
+            data_layer=data_layer,
+            paperless_client=paperless_client,
+            apply=True,
+        )
+
+        assert first["mode"] == "apply"
+        assert first["run_id"] is not None
+        assert first["summary"]["imported"] == 6
+        assert first["summary"]["duplicate"] == 0
+        assert first["summary"]["skipped"] == 1
+        assert len(data_layer.saved) == 6
+        assert set(data_layer.saved_run_ids) == {first["run_id"]}
+
+        project = next(
+            params for params in data_layer.saved
+            if params.metadata and params.metadata["source_ref"] == "Projects/OpenBrain.md"
+        )
+        assert project.type == "project"
+        assert project.title == "Open Brain Migration"
+        assert "Project body references" in project.text
+        assert project.metadata is not None
+        assert project.metadata["source"] == "second_brain"
+        assert project.metadata["source_ref"] == "Projects/OpenBrain.md"
+        assert project.metadata["source_path"].endswith("Projects/OpenBrain.md")
+        assert project.metadata["frontmatter"]["status"] == "active"
+        assert project.metadata["owner"] == "Malte"
+
+        second = await import_vault(
+            vault_path=FIXTURE_VAULT,
+            paperless_mapping_path=PAPERLESS_MAPPING,
+            data_layer=data_layer,
+            paperless_client=paperless_client,
+            apply=True,
+        )
+
+        assert len(data_layer.saved) == 6
+        assert second["mode"] == "apply"
+        assert second["run_id"] is not None
+        assert second["summary"]["imported"] == 0
+        assert second["summary"]["duplicate"] == 6
+        assert second["summary"]["skipped"] == 1
+        assert all(
+            item["action"] in {"duplicate", "skip"}
+            for item in second["items"]
+        )
