@@ -38,6 +38,11 @@ GATE_IDS = (
     "backup_round_trip",
 )
 
+# The only meta keys ``_build_report`` is allowed to populate. ``CutoverReport.to_payload``
+# rejects any other key so a hand-built report can never leak arbitrary data (PII, tokens,
+# secrets) into the durable report through the ``meta`` field.
+ALLOWED_META_KEYS = frozenset({"generated_at", "open_brain_git_sha", "verifier_version"})
+
 # Capability mapping for the seven closed prerequisite beads. The checks stay
 # cheap and read-only: stats prove persisted aggregate reachability, digest
 # smoke calls prove review/capture search paths, callable checks prove the
@@ -90,6 +95,9 @@ class CutoverReport:
                 gates.append(gate.to_payload())
             else:
                 raise TypeError(f"unsupported gate result type: {gate.__class__.__name__}")
+        unexpected_meta = set(self.meta) - ALLOWED_META_KEYS
+        if unexpected_meta:
+            raise ValueError(f"unsupported meta keys: {sorted(unexpected_meta)}")
         return {
             "schema_version": self.schema_version,
             "overall_status": self.overall_status,

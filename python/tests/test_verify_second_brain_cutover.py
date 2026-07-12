@@ -495,6 +495,51 @@ async def test_report_schema_rejects_sensitive_fixture_content(tmp_path: Path) -
             assert forbidden not in report_json
 
 
+def test_to_payload_rejects_arbitrary_meta_keys() -> None:
+    """A hand-built report must never serialize arbitrary meta keys (PII/tokens/secrets).
+
+    ``_build_report`` only ever populates the fixed ALLOWED_META_KEYS set, but a
+    direct-DI caller could construct ``CutoverReport(meta={"token": "raw-secret", ...})``.
+    ``to_payload`` must fail closed on any unexpected key, mirroring the gates-branch
+    defense that only accepts validated ``GateResult`` instances.
+    """
+    verifier = load_verifier()
+    gate = verifier.GateResult(
+        id="open_brain_capabilities",
+        status="green",
+        counts={},
+        detail="capabilities verified",
+    )
+    leaky_report = verifier.CutoverReport(
+        schema_version="cutover-report.v1",
+        overall_status="green",
+        gates=[gate],
+        meta={
+            "generated_at": "2026-07-12T09:00:00+00:00",
+            "open_brain_git_sha": "abc123",
+            "verifier_version": "20260712.1",
+            "token": "raw-secret",
+        },
+    )
+    with pytest.raises(ValueError):
+        leaky_report.to_payload()
+
+    # The known-safe meta key set still serializes cleanly with no leaked value.
+    safe_report = verifier.CutoverReport(
+        schema_version="cutover-report.v1",
+        overall_status="green",
+        gates=[gate],
+        meta={
+            "generated_at": "2026-07-12T09:00:00+00:00",
+            "open_brain_git_sha": "abc123",
+            "verifier_version": "20260712.1",
+        },
+    )
+    payload = safe_report.to_payload()
+    assert set(payload["meta"]) == {"generated_at", "open_brain_git_sha", "verifier_version"}
+    assert "raw-secret" not in json.dumps(payload)
+
+
 @pytest.mark.asyncio
 async def test_cli_exit_codes_follow_cutover_status(tmp_path: Path) -> None:
     """CLI returns 0 for green reports, 1 for red reports, and 2 for bad args."""

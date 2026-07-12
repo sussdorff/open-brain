@@ -16,9 +16,11 @@
         "cmd:green-full-non-integration-suite",
         "cmd:red-cold-review-regression-tests",
         "cmd:green-cold-review-targeted-tests",
-        "cmd:green-cold-review-full-non-integration-suite"
+        "cmd:green-cold-review-full-non-integration-suite",
+        "cmd:green-codex-recheck-meta-targeted-tests",
+        "cmd:green-codex-recheck-meta-full-non-integration-suite"
       ],
-      "notes": "All four named gates are always evaluated; missing capability, Paperless, migration, and backup fixtures each fail only their named gate. Cold-review regressions now cover unknown capability satisfied counts and argparse --help exit code preservation."
+      "notes": "All four named gates are always evaluated; missing capability, Paperless, migration, and backup fixtures each fail only their named gate. Cold-review regressions now cover unknown capability satisfied counts and argparse --help exit code preservation. Redaction is locked defense-in-depth: to_payload accepts only validated GateResult instances (gates) and only the ALLOWED_META_KEYS set (meta), raising on any unexpected input so a direct-DI caller cannot leak raw data into the durable report."
     },
     {
       "id": "AC2",
@@ -130,6 +132,20 @@
         "cmd:green-codex-regression-full-non-integration-suite"
       ],
       "notes": "Added counts[\"skipped\"] == 0 to the migration_reconciliation green condition so a vault with skipped notes (e.g. malformed frontmatter per import_vault's dry-run report) can no longer silently pass the gate as green, satisfying AC1's incompleteness requirement for skipped/unprocessed items. Added test_migration_reconciliation_skipped_notes_fail_named_gate_only using an unterminated-frontmatter vault fixture that asserts the gate is RED with skipped==1, importable/unresolved_links/unresolved_attachments==0, and detail 'migration reconciliation incomplete'."
+    },
+    {
+      "id": "codex-recheck-redaction-meta-gap",
+      "finding": "REGRESSION 1 (Codex re-check completion)",
+      "status": "done",
+      "changed_files": [
+        "scripts/verify_second_brain_cutover.py",
+        "python/tests/test_verify_second_brain_cutover.py"
+      ],
+      "evidence_refs": [
+        "cmd:green-codex-recheck-meta-targeted-tests",
+        "cmd:green-codex-recheck-meta-full-non-integration-suite"
+      ],
+      "notes": "Codex neutral re-check confirmed the meta field had the same redaction-bypass class as the already-fixed gates list: CutoverReport.to_payload emitted `dict(self.meta)` with no key validation, so a direct-DI caller constructing CutoverReport(meta={\"token\": \"raw-secret\", ...arbitrary...}) (bypassing _build_report, which only ever populates generated_at, open_brain_git_sha, verifier_version) would serialize arbitrary data verbatim into the durable report. Added module constant ALLOWED_META_KEYS = frozenset({generated_at, open_brain_git_sha, verifier_version}) and made to_payload raise ValueError on any unexpected meta key, matching the gates-branch defense-in-depth style (raise on unexpected input) already applied for REGRESSION 1. Added test_to_payload_rejects_arbitrary_meta_keys constructing a CutoverReport directly with a stray {\"token\": \"raw-secret\"} meta key that asserts to_payload raises ValueError, plus a safe-subset control that serializes cleanly and never leaks the token value."
     }
   ],
   "tests": [
@@ -167,6 +183,14 @@
     },
     {
       "command_ref": "cmd:green-codex-regression-full-non-integration-suite",
+      "status": "PASSED"
+    },
+    {
+      "command_ref": "cmd:green-codex-recheck-meta-targeted-tests",
+      "status": "PASSED"
+    },
+    {
+      "command_ref": "cmd:green-codex-recheck-meta-full-non-integration-suite",
       "status": "PASSED"
     }
   ],
@@ -207,6 +231,8 @@
     "cmd:fixture-report-generation",
     "artifact:second-brain-cutover-report",
     "cmd:green-codex-regression-targeted-tests",
-    "cmd:green-codex-regression-full-non-integration-suite"
+    "cmd:green-codex-regression-full-non-integration-suite",
+    "cmd:green-codex-recheck-meta-targeted-tests",
+    "cmd:green-codex-recheck-meta-full-non-integration-suite"
   ]
 }

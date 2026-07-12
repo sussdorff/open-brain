@@ -106,6 +106,20 @@
       "purpose": "Full non-integration regression suite after applying the Codex adversarial regression fixes.",
       "exit_code": 0,
       "observed_result": "1506 passed, 33 deselected, 64 warnings."
+    },
+    {
+      "id": "cmd:green-codex-recheck-meta-targeted-tests",
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache uv run pytest tests/test_verify_second_brain_cutover.py -q",
+      "purpose": "GREEN gate for the Codex re-check meta-redaction completion (CutoverReport.meta locked to ALLOWED_META_KEYS; to_payload raises ValueError on unexpected keys).",
+      "exit_code": 0,
+      "observed_result": "10 passed (added test_to_payload_rejects_arbitrary_meta_keys)."
+    },
+    {
+      "id": "cmd:green-codex-recheck-meta-full-non-integration-suite",
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache uv run pytest -m \"not integration\"",
+      "purpose": "Full non-integration regression suite after locking CutoverReport.meta to the known-safe key set.",
+      "exit_code": 0,
+      "observed_result": "1507 passed, 33 deselected, 64 warnings."
     }
   ],
   "skipped_checks": [
