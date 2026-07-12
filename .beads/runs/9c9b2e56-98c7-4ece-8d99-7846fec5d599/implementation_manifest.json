@@ -1,0 +1,143 @@
+{
+  "contract_version": "1",
+  "bead_id": "open-brain-5qo",
+  "acceptance_criteria": [
+    {
+      "criterion": 1,
+      "status": "done",
+      "summary": "Documented and tested agent capture for idea, journal, URL resource, and structured knowledge item through save_memory and inbox search.",
+      "changed_files": [
+        "docs/features/agent-knowledge-workflows.md",
+        "python/tests/test_agent_knowledge_workflows.py"
+      ],
+      "evidence_refs": [
+        "python/tests/test_agent_knowledge_workflows.py::test_agent_can_capture_supported_knowledge_items",
+        "python/tests/test_agent_knowledge_workflows.py::test_documentation_covers_agent_capture_and_inbox_review_operations"
+      ]
+    },
+    {
+      "criterion": 2,
+      "status": "done",
+      "summary": "Documented and tested inbox review with search(capture_status=\"inbox\") and set_capture_status transitions that preserve lifecycle status unless explicitly changed.",
+      "changed_files": [
+        "docs/features/agent-knowledge-workflows.md",
+        "python/tests/test_agent_knowledge_workflows.py"
+      ],
+      "evidence_refs": [
+        "python/tests/test_agent_knowledge_workflows.py::test_agent_can_review_and_process_outstanding_inbox_captures",
+        "python/tests/test_agent_knowledge_workflows.py::test_documentation_covers_agent_capture_and_inbox_review_operations"
+      ]
+    },
+    {
+      "criterion": 3,
+      "status": "done",
+      "summary": "Added DailyReview/generate_daily_review, source extraction, daily_review MCP tool, ob daily CLI command, documentation, and fixture-backed integration evidence.",
+      "changed_files": [
+        "docs/features/agent-knowledge-workflows.md",
+        "python/src/open_brain/cli/main.py",
+        "python/src/open_brain/digest.py",
+        "python/src/open_brain/server.py",
+        "python/tests/test_daily_review.py"
+      ],
+      "evidence_refs": [
+        "python/tests/test_daily_review.py::test_generate_daily_review_date_bounds_entries_unresolved_and_sources",
+        "python/tests/test_daily_review.py::test_daily_review_tool_is_base_memory_scope_and_serializes_result",
+        "python/tests/test_daily_review.py::test_daily_review_round_trip_uses_real_database"
+      ]
+    },
+    {
+      "criterion": 4,
+      "status": "done",
+      "summary": "Extended existing weekly briefing with canonical_entities and inbox_state fields, plus canonical entity select predicate reuse and fixture-backed integration evidence.",
+      "changed_files": [
+        "docs/features/agent-knowledge-workflows.md",
+        "python/src/open_brain/data_layer/postgres.py",
+        "python/src/open_brain/digest.py",
+        "python/tests/test_briefing.py",
+        "python/tests/test_weekly_briefing.py"
+      ],
+      "evidence_refs": [
+        "python/tests/test_weekly_briefing.py::test_canonical_entity_select_predicate_uses_positive_marker",
+        "python/tests/test_weekly_briefing.py::test_weekly_briefing_adds_relevant_canonical_entities_and_inbox_state",
+        "python/tests/test_weekly_briefing.py::test_weekly_briefing_round_trip_uses_real_database",
+        "python/tests/test_briefing.py"
+      ]
+    }
+  ],
+  "changed_files": [
+    "docs/features/agent-knowledge-workflows.md",
+    "python/src/open_brain/cli/main.py",
+    "python/src/open_brain/data_layer/postgres.py",
+    "python/src/open_brain/digest.py",
+    "python/src/open_brain/server.py",
+    "python/tests/test_agent_knowledge_workflows.py",
+    "python/tests/test_briefing.py",
+    "python/tests/test_daily_review.py",
+    "python/tests/test_weekly_briefing.py"
+  ],
+  "commits": [
+    {
+      "sha": "a8c2809",
+      "message": "test(open-brain-5qo): red - daily review workflow"
+    },
+    {
+      "sha": "9f61f02",
+      "message": "feat(open-brain-5qo): green - daily review workflow"
+    },
+    {
+      "sha": "4b07efa",
+      "message": "test(open-brain-5qo): red - weekly review extensions"
+    },
+    {
+      "sha": "ec09e0c",
+      "message": "feat(open-brain-5qo): green - weekly review extensions"
+    },
+    {
+      "sha": "4a25fcd",
+      "message": "test(open-brain-5qo): red - agent knowledge workflows"
+    },
+    {
+      "sha": "e67914e",
+      "message": "docs(open-brain-5qo): green - agent knowledge workflows"
+    }
+  ],
+  "tests": [
+    {
+      "command": "uv run pytest tests/test_agent_knowledge_workflows.py tests/test_daily_review.py tests/test_weekly_briefing.py -q",
+      "result": "8 passed, 4 skipped"
+    },
+    {
+      "command": "uv run pytest tests/test_agent_knowledge_workflows.py tests/test_daily_review.py tests/test_weekly_briefing.py --collect-only -q",
+      "result": "12 tests collected"
+    },
+    {
+      "command": "uv run pytest -m \"not integration\"",
+      "result": "1491 passed, 31 deselected"
+    },
+    {
+      "command": "UV_CACHE_DIR=/private/tmp/open-brain-5qo-uv-cache uv run ruff check src/open_brain/digest.py src/open_brain/data_layer/postgres.py src/open_brain/server.py src/open_brain/cli/main.py tests/test_daily_review.py tests/test_weekly_briefing.py tests/test_agent_knowledge_workflows.py tests/test_briefing.py",
+      "result": "All checks passed"
+    }
+  ],
+  "external_resources": [
+    {
+      "resource": "https://fhir-community.example/ig/stationaer-2026",
+      "source": "Existing repository fixture reference in python/tests/fixtures/email/newsletter.eml",
+      "usage": "Test-only resource URL metadata; not fetched"
+    }
+  ],
+  "scope_changes": [],
+  "downstream_impacts": [
+    "Adds daily_review as a new base memory-scope MCP tool.",
+    "Adds ob daily [DATE] [--project P] as a thin CLI wrapper.",
+    "Appends canonical_entities and inbox_state to WeeklyBriefing without reordering existing fields.",
+    "SearchParams(metadata_filter={\"canonical_entity\": true}) browse mode now uses the shared canonical_entity_select_predicate SQL helper."
+  ],
+  "evidence_refs": [
+    "python/tests/test_agent_knowledge_workflows.py",
+    "python/tests/test_daily_review.py",
+    "python/tests/test_weekly_briefing.py",
+    "python/tests/test_briefing.py",
+    "docs/features/agent-knowledge-workflows.md"
+  ]
+}
