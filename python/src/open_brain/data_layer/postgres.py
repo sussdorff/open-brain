@@ -419,6 +419,10 @@ async def _run_migrations(conn: asyncpg.Connection) -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
     """)
+    # Drop both known hybrid_search signatures before recreating the canonical one.
+    # Postgres treats different argument-type lists as separate overloads, so
+    # CREATE OR REPLACE leaves stale legacy signatures untouched; it also cannot
+    # change return types, so dropping current+legacy makes rebuild idempotent.
     await conn.execute("""
         DROP FUNCTION IF EXISTS public.hybrid_search(TEXT, vector, INTEGER, INTEGER, INTEGER);
         DROP FUNCTION IF EXISTS public.hybrid_search(TEXT, vector, INTEGER, INTEGER, INTEGER, TEXT, JSONB, TEXT);
@@ -485,6 +489,10 @@ async def _run_migrations(conn: asyncpg.Connection) -> None:
     # Typed-relationship schema migration (idempotent)
     await _ensure_link_type_column(conn)
     await _ensure_metadata_column(conn)
+    # Drop both known decay_unused_priorities signatures before recreating it.
+    # Postgres treats REAL and DOUBLE PRECISION as separate argument overloads,
+    # so CREATE OR REPLACE leaves stale legacy signatures untouched; it also cannot
+    # change return types, so dropping current+legacy makes rebuild idempotent.
     await conn.execute("""
         DROP FUNCTION IF EXISTS public.decay_unused_priorities(INTEGER, REAL);
         DROP FUNCTION IF EXISTS public.decay_unused_priorities(INTEGER, DOUBLE PRECISION);
