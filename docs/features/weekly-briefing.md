@@ -4,7 +4,7 @@ Generates structured summaries of memory activity over time windows, surfacing e
 
 ## Was
 
-Weekly Briefing is an MCP tool that aggregates memories across a configurable time window (default: 1 week) and generates a structured digest with six sections:
+Weekly Briefing is an MCP tool that aggregates memories across a configurable time window (default: 1 week) and generates a structured digest with six core sections plus two supplementary fields:
 
 1. **Memory Counts** — Total memories in current/previous period, broken down by type, with deltas
 2. **Top Entities** — Most-frequently-mentioned people, organizations, technologies, locations, dates (aggregated from all memories in the window)
@@ -12,6 +12,8 @@ Weekly Briefing is an MCP tool that aggregates memories across a configurable ti
 4. **Open Loops** — Unresolved action items from meetings, decisions, and other memory types (sorted by age)
 5. **Cross-Project Connections** — Shared entities and memory counts across different projects (if project metadata present)
 6. **Decay Warnings** — Memories not accessed in 30+ days with access_count ≤ 2 (candidates for archival or review)
+7. **Canonical Entities** *(supplementary)* — Relevant canonical entities (persons, projects, organizations, concepts marked `metadata.canonical_entity=true`) that appear in the briefing window
+8. **Inbox State** *(supplementary)* — Summary of outstanding inbox captures: total count and a representative sample of unresolved items
 
 The tool works with empty databases and gracefully handles mixed memory types.
 
@@ -354,7 +356,11 @@ class WeeklyBriefing:
     open_loops: list[dict[str, Any]]
     cross_project_connections: list[dict[str, Any]]
     decay_warnings: list[dict[str, Any]]
+    canonical_entities: list[dict[str, Any]] = field(default_factory=list)
+    inbox_state: dict[str, Any] = field(default_factory=dict)
 ```
+
+`canonical_entities` contains an entry for each memory in the briefing window that has `metadata.canonical_entity=true`. Each entry includes the memory `id`, `title`, memory `type`, and canonical `kind` (person/project/organization/concept). `inbox_state` reports the total number of unresolved inbox captures under the `pending` key (from `SearchResult.total`, not capped by the per-search fetch limit) and a `sample` list (`id`, `title`, `type`) of representative unresolved items, so operators can see outstanding work without running a separate `search` call.
 
 ### Helper Functions
 
@@ -370,6 +376,8 @@ All aggregation logic is in `digest.py`:
 | `_find_decay_warnings(memories, now, stale_days=30, max_access_count=2)` | Find stale low-access memories |
 | `_count_by_type(memories)` | Group memories by type |
 | `_find_cross_project_connections(memories)` | Group by project metadata |
+| `_relevant_canonical_entities(canonical_memories, current_memories)` | Filter canonical entities relevant to the briefing window |
+| `_inbox_state(memories, total, sample_size=5)` | Summarise outstanding inbox captures (total + sample) |
 
 ### MCP Tool Definition
 
@@ -437,7 +445,21 @@ JSON string containing:
     title: string,
     days_unaccessed: number,
     access_count: number
-  }>
+  }>,
+  canonical_entities: Array<{
+    id: number,
+    title: string,
+    type: string,
+    kind: string
+  }>,
+  inbox_state: {
+    pending: number,
+    sample: Array<{
+      id: number,
+      title: string,
+      type: string
+    }>
+  }
 }
 ```
 

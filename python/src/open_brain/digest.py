@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 from collections import Counter
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, time, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
-from open_brain.data_layer.interface import DataLayer, Memory, SearchParams
+from open_brain.data_layer.interface import DataLayer, Memory, SearchParams, canonical_entity_kind
 
 
 # ─── Domain dataclasses ────────────────────────────────────────────────────────
@@ -25,6 +26,18 @@ class WeeklyBriefing:
     open_loops: list[dict[str, Any]]
     cross_project_connections: list[dict[str, Any]]
     decay_warnings: list[dict[str, Any]]
+    canonical_entities: list[dict[str, Any]] = field(default_factory=list)
+    inbox_state: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class DailyReview:
+    """Structured review of memory activity for one selected calendar date."""
+
+    date: str
+    entries: list[dict[str, Any]]
+    unresolved_captures: list[dict[str, Any]]
+    counts: dict[str, Any]
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -162,6 +175,61 @@ def _count_by_type(memories: list[Memory]) -> dict[str, int]:
     return counts
 
 
+def _extract_source(mem: Memory) -> dict[str, Any] | None:
+    """Extract the best available source reference from memory metadata."""
+    metadata = mem.metadata or {}
+
+    url = metadata.get("url")
+    if isinstance(url, str) and url.strip():
+        return {"kind": "url", "url": url}
+
+    source_ref = metadata.get("source_ref")
+    if isinstance(source_ref, str) and source_ref.strip():
+        return {"kind": "source_ref", "source_ref": source_ref}
+
+    paperless_reference = metadata.get("paperless_reference")
+    if isinstance(paperless_reference, dict):
+        document_id = paperless_reference.get("document_id")
+        if isinstance(document_id, int) and not isinstance(document_id, bool):
+            source: dict[str, Any] = {"kind": "paperless", "document_id": document_id}
+            for key in ("instance", "title"):
+                value = paperless_reference.get(key)
+                if isinstance(value, str) and value.strip():
+                    source[key] = value
+            return source
+
+    document_id = metadata.get("document_id")
+    if isinstance(document_id, int) and not isinstance(document_id, bool):
+        return {"kind": "paperless", "document_id": document_id}
+
+    session_ref = metadata.get("session_ref")
+    if isinstance(session_ref, str) and session_ref.strip():
+        return {"kind": "session_ref", "session_ref": session_ref}
+
+    return None
+
+
+def _daily_entry(mem: Memory) -> dict[str, Any]:
+    """Return the DailyReview entry payload for a memory."""
+    return {
+        "id": mem.id,
+        "title": mem.title,
+        "type": mem.type,
+        "created_at": mem.created_at,
+        "source": _extract_source(mem),
+    }
+
+
+def _unresolved_capture(mem: Memory) -> dict[str, Any]:
+    """Return the DailyReview unresolved capture payload for a memory."""
+    return {
+        "id": mem.id,
+        "title": mem.title,
+        "type": mem.type,
+        "capture_status": mem.metadata.get("capture_status"),
+    }
+
+
 def _find_cross_project_connections(memories: list[Memory]) -> list[dict[str, Any]]:
     """Group memories by index_id (project identifier).
 
@@ -192,7 +260,152 @@ def _find_cross_project_connections(memories: list[Memory]) -> list[dict[str, An
     return result
 
 
+def _normalize_entity_name(value: Any) -> str | None:
+    """Normalize a metadata entity value for relevance matching."""
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    return normalized or None
+
+
+def _active_entity_references(memories: list[Memory]) -> tuple[set[int], set[str]]:
+    """Collect canonical ids and names referenced by current-window memories."""
+    ids = {mem.id for mem in memories}
+    names: set[str] = set()
+    for mem in memories:
+        entities = mem.metadata.get("entities", {})
+        if isinstance(entities, dict):
+            for values in entities.values():
+                if not isinstance(values, list):
+                    continue
+                for value in values:
+                    if isinstance(value, int) and not isinstance(value, bool):
+                        ids.add(value)
+                    if name := _normalize_entity_name(value):
+                        names.add(name)
+        if name := _normalize_entity_name(mem.title):
+            names.add(name)
+    return ids, names
+
+
+def _canonical_entity_names(memory: Memory) -> set[str]:
+    """Return normalized names that can identify a canonical entity memory."""
+    names: set[str] = set()
+    for value in (
+        memory.title,
+        memory.metadata.get("name"),
+        memory.metadata.get("canonical_name"),
+    ):
+        if name := _normalize_entity_name(value):
+            names.add(name)
+    return names
+
+
+def _canonical_entity_payload(memory: Memory) -> dict[str, Any] | None:
+    """Return the weekly canonical entity payload when metadata is valid."""
+    kind = canonical_entity_kind(memory)
+    if kind is None:
+        return None
+    return {
+        "id": memory.id,
+        "title": memory.title,
+        "type": memory.type,
+        "kind": kind,
+    }
+
+
+def _relevant_canonical_entities(
+    canonical_memories: list[Memory],
+    current_memories: list[Memory],
+) -> list[dict[str, Any]]:
+    """Select canonical entities that are active in the current weekly window."""
+    active_ids, active_names = _active_entity_references(current_memories)
+    entities: list[dict[str, Any]] = []
+    for memory in canonical_memories:
+        if memory.id not in active_ids and not (_canonical_entity_names(memory) & active_names):
+            continue
+        payload = _canonical_entity_payload(memory)
+        if payload is not None:
+            entities.append(payload)
+    return entities
+
+
+def _inbox_state(memories: list[Memory], total: int, sample_size: int = 5) -> dict[str, Any]:
+    """Return pending inbox count and a small sample for weekly review.
+
+    ``total`` is the true backlog size from ``SearchResult.total``; ``memories``
+    is the capped result list used only for the preview sample. Reporting
+    ``len(memories)`` would silently under-count once the backlog exceeds the
+    per-search cap.
+    """
+    return {
+        "pending": total,
+        "sample": [
+            {"id": mem.id, "title": mem.title, "type": mem.type}
+            for mem in memories[:sample_size]
+        ],
+    }
+
+
 # ─── Main function ─────────────────────────────────────────────────────────────
+
+
+async def generate_daily_review(
+    dl: DataLayer,
+    date: str,
+    project: str | None = None,
+    tz: str = "UTC",
+    max_items: int = 200,
+) -> DailyReview:
+    """Generate a date-bounded daily review from existing search primitives.
+
+    Args:
+        dl: DataLayer protocol instance.
+        date: Selected calendar date as YYYY-MM-DD.
+        project: Optional project filter.
+        tz: IANA timezone name used to compute day boundaries.
+        max_items: Maximum entries to fetch for each search call.
+
+    Returns:
+        DailyReview with entries, unresolved captures, and counts.
+    """
+    selected_date = datetime.strptime(date, "%Y-%m-%d").date()
+    timezone = ZoneInfo(tz)
+    day_start = datetime.combine(selected_date, time.min, tzinfo=timezone)
+    day_end = datetime.combine(selected_date, time.max, tzinfo=timezone)
+
+    entries_result, unresolved_result = await asyncio.gather(
+        dl.search(
+            SearchParams(
+                date_start=day_start.isoformat(),
+                date_end=day_end.isoformat(),
+                project=project,
+                limit=max_items,
+            )
+        ),
+        dl.search(
+            SearchParams(
+                capture_status="inbox",
+                date_start=day_start.isoformat(),
+                date_end=day_end.isoformat(),
+                project=project,
+                limit=max_items,
+            )
+        ),
+    )
+    entries = entries_result.results
+    unresolved = unresolved_result.results
+
+    return DailyReview(
+        date=selected_date.isoformat(),
+        entries=[_daily_entry(mem) for mem in entries],
+        unresolved_captures=[_unresolved_capture(mem) for mem in unresolved],
+        counts={
+            "entries": len(entries),
+            "unresolved": len(unresolved),
+            "by_type": _count_by_type(entries),
+        },
+    )
 
 
 async def generate_weekly_briefing(
@@ -222,8 +435,8 @@ async def generate_weekly_briefing(
     period_start = now - timedelta(weeks=weeks_back)
     prev_period_start = now - timedelta(weeks=weeks_back * 2)
 
-    # ── Fetch current period, previous period, and full DB in parallel ─────────
-    current_result, previous_result, decay_result = await asyncio.gather(
+    # ── Fetch current period, previous period, full DB, canonical entities, and inbox state in parallel
+    current_result, previous_result, decay_result, canonical_result, inbox_result = await asyncio.gather(
         dl.search(SearchParams(
             date_start=period_start.isoformat(),
             date_end=now.isoformat(),
@@ -237,10 +450,22 @@ async def generate_weekly_briefing(
             limit=max_memories,
         )),
         dl.search(SearchParams(project=project, limit=max_memories)),
+        dl.search(SearchParams(
+            project=project,
+            metadata_filter={"canonical_entity": True},
+            limit=max_memories,
+        )),
+        dl.search(SearchParams(
+            project=project,
+            capture_status="inbox",
+            limit=max_memories,
+        )),
     )
     current_memories = current_result.results
     previous_memories = previous_result.results
     all_memories = decay_result.results
+    canonical_memories = canonical_result.results
+    inbox_memories = inbox_result.results
 
     # ── Memory counts ─────────────────────────────────────────────────────────
     current_by_type = _count_by_type(current_memories)
@@ -283,4 +508,6 @@ async def generate_weekly_briefing(
         open_loops=open_loops,
         cross_project_connections=cross_project_connections,
         decay_warnings=decay_warnings,
+        canonical_entities=_relevant_canonical_entities(canonical_memories, current_memories),
+        inbox_state=_inbox_state(inbox_memories, inbox_result.total),
     )

@@ -70,6 +70,12 @@ def canonical_entity_protection_predicate(alias: str | None = None) -> str:
     return f"({metadata_ref}->>'{CANONICAL_ENTITY_METADATA_KEY}') IS DISTINCT FROM 'true'"
 
 
+def canonical_entity_select_predicate(alias: str | None = None) -> str:
+    """Return the shared SQL predicate that selects protected canonical entities."""
+    metadata_ref = f"{alias}.metadata" if alias else "metadata"
+    return f"{metadata_ref}->>'{CANONICAL_ENTITY_METADATA_KEY}' = 'true'"
+
+
 def _canonical_entity_protection_filter(alias: str | None = None) -> str:
     """Return an AND-prefixed canonical entity protection SQL clause."""
     return f"AND {canonical_entity_protection_predicate(alias)}"
@@ -419,107 +425,133 @@ async def _run_migrations(conn: asyncpg.Connection) -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
     """)
-    await conn.execute("""
-        CREATE OR REPLACE FUNCTION public.hybrid_search(
-            query_text text,
-            query_embedding vector,
-            match_limit integer DEFAULT 20,
-            rrf_k integer DEFAULT 60,
-            p_index_id integer DEFAULT NULL,
-            p_user_id text DEFAULT NULL,
-            p_metadata_filter jsonb DEFAULT NULL,
-            p_capture_status text DEFAULT NULL
-        )
-        RETURNS TABLE(id integer, title text, subtitle text, type text, score real, created_at timestamp with time zone)
-        LANGUAGE sql
-        STABLE
-        AS $fn$
-          WITH fts AS (
-            SELECT m.id,
-                   ROW_NUMBER() OVER (
-                     ORDER BY ts_rank_cd(m.search_vector, websearch_to_tsquery('english', query_text)) DESC
-                   ) AS rank
-            FROM memories m
-            WHERE m.search_vector @@ websearch_to_tsquery('english', query_text)
-              AND (p_index_id IS NULL OR m.index_id = p_index_id)
-              AND (p_user_id IS NULL OR m.user_id = p_user_id)
-              AND (p_metadata_filter IS NULL OR m.metadata @> p_metadata_filter)
-              AND (p_capture_status IS NULL OR m.metadata->>'capture_status' = p_capture_status)
-            ORDER BY ts_rank_cd(m.search_vector, websearch_to_tsquery('english', query_text)) DESC
-            LIMIT match_limit * 2
-          ),
-          vec AS (
-            SELECT m.id,
-                   ROW_NUMBER() OVER (ORDER BY m.embedding <=> query_embedding) AS rank
-            FROM memories m
-            WHERE m.embedding IS NOT NULL
-              AND (p_index_id IS NULL OR m.index_id = p_index_id)
-              AND (p_user_id IS NULL OR m.user_id = p_user_id)
-              AND (p_metadata_filter IS NULL OR m.metadata @> p_metadata_filter)
-              AND (p_capture_status IS NULL OR m.metadata->>'capture_status' = p_capture_status)
-            ORDER BY m.embedding <=> query_embedding
-            LIMIT match_limit * 2
-          ),
-          combined AS (
-            SELECT
-              COALESCE(f.id, v.id) AS id,
-              (COALESCE(1.0 / (rrf_k + f.rank), 0.0) +
-               COALESCE(1.0 / (rrf_k + v.rank), 0.0))::REAL AS score
-            FROM fts f
-            FULL OUTER JOIN vec v ON f.id = v.id
-          )
-          SELECT m.id, m.title, m.subtitle, m.type, c.score, m.created_at
-          FROM combined c
-          JOIN memories m ON m.id = c.id
-          ORDER BY c.score DESC
-          LIMIT match_limit;
-        $fn$;
-    """)
+    # Drop both known hybrid_search signatures before recreating the canonical one.
+    # Postgres treats different argument-type lists as separate overloads, so
+    # CREATE OR REPLACE leaves stale legacy signatures untouched; it also cannot
+    # change return types, so dropping current+legacy makes rebuild idempotent.
+    # Wrap the drop+recreate in a single transaction so concurrent READ COMMITTED
+    # connections keep resolving the OLD definition until commit (MVCC snapshot),
+    # eliminating the undefined-function window that separate autocommit statements
+    # would otherwise open between DROP and CREATE OR REPLACE.
+    async with conn.transaction():
+        await conn.execute("""
+            DROP FUNCTION IF EXISTS public.hybrid_search(TEXT, vector, INTEGER, INTEGER, INTEGER);
+            DROP FUNCTION IF EXISTS public.hybrid_search(TEXT, vector, INTEGER, INTEGER, INTEGER, TEXT, JSONB, TEXT);
+        """)
+        await conn.execute("""
+            CREATE OR REPLACE FUNCTION public.hybrid_search(
+                query_text text,
+                query_embedding vector,
+                match_limit integer DEFAULT 20,
+                rrf_k integer DEFAULT 60,
+                p_index_id integer DEFAULT NULL,
+                p_user_id text DEFAULT NULL,
+                p_metadata_filter jsonb DEFAULT NULL,
+                p_capture_status text DEFAULT NULL
+            )
+            RETURNS TABLE(id integer, title text, subtitle text, type text, score real, created_at timestamp with time zone)
+            LANGUAGE sql
+            STABLE
+            AS $fn$
+              WITH fts AS (
+                SELECT m.id,
+                       ROW_NUMBER() OVER (
+                         ORDER BY ts_rank_cd(m.search_vector, websearch_to_tsquery('english', query_text)) DESC
+                       ) AS rank
+                FROM memories m
+                WHERE m.search_vector @@ websearch_to_tsquery('english', query_text)
+                  AND (p_index_id IS NULL OR m.index_id = p_index_id)
+                  AND (p_user_id IS NULL OR m.user_id = p_user_id)
+                  AND (p_metadata_filter IS NULL OR m.metadata @> p_metadata_filter)
+                  AND (p_capture_status IS NULL OR m.metadata->>'capture_status' = p_capture_status)
+                ORDER BY ts_rank_cd(m.search_vector, websearch_to_tsquery('english', query_text)) DESC
+                LIMIT match_limit * 2
+              ),
+              vec AS (
+                SELECT m.id,
+                       ROW_NUMBER() OVER (ORDER BY m.embedding <=> query_embedding) AS rank
+                FROM memories m
+                WHERE m.embedding IS NOT NULL
+                  AND (p_index_id IS NULL OR m.index_id = p_index_id)
+                  AND (p_user_id IS NULL OR m.user_id = p_user_id)
+                  AND (p_metadata_filter IS NULL OR m.metadata @> p_metadata_filter)
+                  AND (p_capture_status IS NULL OR m.metadata->>'capture_status' = p_capture_status)
+                ORDER BY m.embedding <=> query_embedding
+                LIMIT match_limit * 2
+              ),
+              combined AS (
+                SELECT
+                  COALESCE(f.id, v.id) AS id,
+                  (COALESCE(1.0 / (rrf_k + f.rank), 0.0) +
+                   COALESCE(1.0 / (rrf_k + v.rank), 0.0))::REAL AS score
+                FROM fts f
+                FULL OUTER JOIN vec v ON f.id = v.id
+              )
+              SELECT m.id, m.title, m.subtitle, m.type, c.score, m.created_at
+              FROM combined c
+              JOIN memories m ON m.id = c.id
+              ORDER BY c.score DESC
+              LIMIT match_limit;
+            $fn$;
+        """)
     # Importance-aware decay function: skips critical (mult=0.0), applies importance
     # multipliers (high=0.5x, medium=1.0x, low=2.0x), includes 24h race guard via
     # last_decay_at so concurrent calls are safe without advisory locks.
     # Typed-relationship schema migration (idempotent)
     await _ensure_link_type_column(conn)
     await _ensure_metadata_column(conn)
-    await conn.execute(f"""
-        CREATE OR REPLACE FUNCTION decay_unused_priorities(
-            p_stale_days integer,
-            p_decay_factor float
-        ) RETURNS integer
-        LANGUAGE plpgsql
-        AS $$
-        DECLARE
-            v_updated integer;
-        BEGIN
-            WITH mult_map(importance, mult) AS (
-                VALUES ('critical'::text, 0.0::float),
-                       ('high'::text,     0.5::float),
-                       ('medium'::text,   1.0::float),
-                       ('low'::text,      2.0::float)
-            ),
-            updated AS (
-                UPDATE memories m
-                SET priority = GREATEST(
-                        0.0,
-                        priority - priority * (1.0 - p_decay_factor)
-                                   * mult_map.mult
-                                   / (1.0 + CAST(m.access_count AS float) * 0.1)
-                    ),
-                    last_decay_at = NOW()
-                FROM mult_map
-                WHERE m.importance = mult_map.importance
-                  AND mult_map.mult > 0.0
-                  AND (m.last_accessed_at IS NULL OR m.last_accessed_at < NOW() - (p_stale_days || ' days')::interval)
-                  AND m.created_at < NOW() - (p_stale_days || ' days')::interval
-                  AND (m.last_decay_at IS NULL OR m.last_decay_at < NOW() - interval '24 hours')
-                  AND {canonical_entity_protection_predicate("m")}
-                RETURNING m.id
-            )
-            SELECT COUNT(*) INTO v_updated FROM updated;
-            RETURN v_updated;
-        END;
-        $$;
-    """)
+    # Drop both known decay_unused_priorities signatures before recreating it.
+    # Postgres treats REAL and DOUBLE PRECISION as separate argument overloads,
+    # so CREATE OR REPLACE leaves stale legacy signatures untouched; it also cannot
+    # change return types, so dropping current+legacy makes rebuild idempotent.
+    # Wrap the drop+recreate in a single transaction so concurrent READ COMMITTED
+    # connections keep resolving the OLD definition until commit (MVCC snapshot),
+    # eliminating the undefined-function window that separate autocommit statements
+    # would otherwise open between DROP and CREATE OR REPLACE.
+    async with conn.transaction():
+        await conn.execute("""
+            DROP FUNCTION IF EXISTS public.decay_unused_priorities(INTEGER, REAL);
+            DROP FUNCTION IF EXISTS public.decay_unused_priorities(INTEGER, DOUBLE PRECISION);
+        """)
+        await conn.execute(f"""
+            CREATE OR REPLACE FUNCTION decay_unused_priorities(
+                p_stale_days integer,
+                p_decay_factor float
+            ) RETURNS integer
+            LANGUAGE plpgsql
+            AS $$
+            DECLARE
+                v_updated integer;
+            BEGIN
+                WITH mult_map(importance, mult) AS (
+                    VALUES ('critical'::text, 0.0::float),
+                           ('high'::text,     0.5::float),
+                           ('medium'::text,   1.0::float),
+                           ('low'::text,      2.0::float)
+                ),
+                updated AS (
+                    UPDATE memories m
+                    SET priority = GREATEST(
+                            0.0,
+                            priority - priority * (1.0 - p_decay_factor)
+                                       * mult_map.mult
+                                       / (1.0 + CAST(m.access_count AS float) * 0.1)
+                        ),
+                        last_decay_at = NOW()
+                    FROM mult_map
+                    WHERE m.importance = mult_map.importance
+                      AND mult_map.mult > 0.0
+                      AND (m.last_accessed_at IS NULL OR m.last_accessed_at < NOW() - (p_stale_days || ' days')::interval)
+                      AND m.created_at < NOW() - (p_stale_days || ' days')::interval
+                      AND (m.last_decay_at IS NULL OR m.last_decay_at < NOW() - interval '24 hours')
+                      AND {canonical_entity_protection_predicate("m")}
+                    RETURNING m.id
+                )
+                SELECT COUNT(*) INTO v_updated FROM updated;
+                RETURN v_updated;
+            END;
+            $$;
+        """)
 
 
 async def get_pool(run_migrations: bool | None = None) -> asyncpg.Pool:
@@ -780,9 +812,12 @@ class PostgresDataLayer:
                 values.append(params.file_path)
                 param_idx += 1
             if params.metadata_filter:
-                conditions.append(f"m.metadata @> ${param_idx}::jsonb")
-                values.append(params.metadata_filter)
-                param_idx += 1
+                if params.metadata_filter == {CANONICAL_ENTITY_METADATA_KEY: True}:
+                    conditions.append(canonical_entity_select_predicate("m"))
+                else:
+                    conditions.append(f"m.metadata @> ${param_idx}::jsonb")
+                    values.append(params.metadata_filter)
+                    param_idx += 1
             if params.capture_status is not None:
                 conditions.append(f"m.metadata->>'capture_status' = ${param_idx}")
                 values.append(params.capture_status)
@@ -1526,12 +1561,12 @@ class PostgresDataLayer:
                     str(params.boost_days),
                 )
                 protected_canonical_entities = await conn.fetchval(
-                    """SELECT COUNT(*) FROM memories
+                    f"""SELECT COUNT(*) FROM memories
                        WHERE (last_accessed_at IS NULL OR last_accessed_at < NOW() - ($1 || ' days')::interval)
                          AND created_at < NOW() - ($1 || ' days')::interval
                          AND importance != 'critical'
                          AND (last_decay_at IS NULL OR last_decay_at < NOW() - interval '24 hours')
-                         AND metadata->>'canonical_entity' = 'true'""",
+                         AND {canonical_entity_select_predicate()}""",
                     str(params.stale_days),
                 )
             else:
@@ -1565,12 +1600,12 @@ class PostgresDataLayer:
                     str(params.boost_days),
                 )
                 protected_canonical_entities = await conn.fetchval(
-                    """SELECT COUNT(*) FROM memories
+                    f"""SELECT COUNT(*) FROM memories
                        WHERE (last_accessed_at IS NULL OR last_accessed_at < NOW() - ($1 || ' days')::interval)
                          AND created_at < NOW() - ($1 || ' days')::interval
                          AND importance != 'critical'
                          AND (last_decay_at IS NULL OR last_decay_at < NOW() - interval '24 hours')
-                         AND metadata->>'canonical_entity' = 'true'""",
+                         AND {canonical_entity_select_predicate()}""",
                     str(params.stale_days),
                 )
 
@@ -2338,7 +2373,7 @@ class PostgresDataLayer:
                     await conn.fetchval(
                         f"""SELECT COUNT(*) FROM memories
                             WHERE 1=1 {_active_lifecycle_filter}
-                              AND metadata->>'canonical_entity' = 'true'"""
+                              AND {canonical_entity_select_predicate()}"""
                     )
                 )
                 mem_rows = await conn.fetch(
@@ -2368,7 +2403,7 @@ class PostgresDataLayer:
                     await conn.fetchval(
                         f"""SELECT COUNT(*) FROM memories
                             WHERE index_id = $1 {_active_lifecycle_filter}
-                              AND metadata->>'canonical_entity' = 'true'""",
+                              AND {canonical_entity_select_predicate()}""",
                         index_id,
                     )
                 )
@@ -2382,7 +2417,7 @@ class PostgresDataLayer:
                     await conn.fetchval(
                         f"""SELECT COUNT(*) FROM memories
                             WHERE type = $1 {_active_lifecycle_filter}
-                              AND metadata->>'canonical_entity' = 'true'""",
+                              AND {canonical_entity_select_predicate()}""",
                         mem_type,
                     )
                 )
@@ -3109,7 +3144,7 @@ async def _fetch_protected_canonical_ids(
     if not memory_ids:
         return set()
     rows = await conn.fetch(
-        "SELECT id FROM memories WHERE id = ANY($1::int[]) AND metadata->>'canonical_entity' = 'true'",
+        f"SELECT id FROM memories WHERE id = ANY($1::int[]) AND {canonical_entity_select_predicate()}",
         memory_ids,
     )
     return {int(row["id"]) for row in rows}

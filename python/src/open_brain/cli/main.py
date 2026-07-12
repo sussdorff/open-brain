@@ -7,6 +7,7 @@ import os
 import sys
 from contextlib import contextmanager
 from dataclasses import asdict
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -302,6 +303,16 @@ async def _cmd_timeline(args: argparse.Namespace) -> Any:
     if args.depth_after is not None:
         kwargs["depth_after"] = args.depth_after
     return await call_tool("timeline", kwargs)
+
+
+async def _cmd_daily(args: argparse.Namespace) -> Any:
+    """Generate a daily review via MCP."""
+    kwargs: dict[str, Any] = {
+        "date": args.date or datetime.now().astimezone().date().isoformat()
+    }
+    if args.project:
+        kwargs["project"] = args.project
+    return await call_tool("daily_review", kwargs)
 
 
 async def _cmd_context(args: argparse.Namespace) -> Any:
@@ -930,6 +941,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Number of entries after anchor",
     )
 
+    # daily
+    p_daily = subparsers.add_parser(
+        "daily",
+        help="Generate a daily memory review",
+    )
+    p_daily.add_argument("date", nargs="?", help="Date to review (YYYY-MM-DD; default: today)")
+    p_daily.add_argument("--project", help="Filter by project")
+
     # context
     p_context = subparsers.add_parser(
         "context",
@@ -1301,6 +1320,7 @@ _COMMAND_MAP = {
     "save": _cmd_save,
     "get": _cmd_get,
     "timeline": _cmd_timeline,
+    "daily": _cmd_daily,
     "context": _cmd_context,
     "stats": _cmd_stats,
     "doctor": _cmd_doctor,
