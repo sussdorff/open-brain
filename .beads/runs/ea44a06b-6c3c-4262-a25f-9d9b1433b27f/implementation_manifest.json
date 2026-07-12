@@ -5,7 +5,7 @@
     {
       "id": "AC1",
       "title": "verifier fail-closed behavior",
-      "status": "DONE",
+      "status": "done",
       "changed_files": [
         "scripts/verify_second_brain_cutover.py",
         "python/tests/test_verify_second_brain_cutover.py"
@@ -20,7 +20,7 @@
     {
       "id": "AC2",
       "title": "durable machine-readable report",
-      "status": "DONE",
+      "status": "done",
       "changed_files": [
         "scripts/verify_second_brain_cutover.py",
         "python/tests/test_verify_second_brain_cutover.py",
@@ -36,18 +36,18 @@
     {
       "id": "AC3",
       "title": "second-brain archival",
-      "status": "NOT_DONE_THIS_DISPATCH",
+      "status": "not_done",
       "changed_files": [],
       "evidence_refs": [],
-      "notes": "Per dispatch scope, second-brain archival is handled by a separate orchestrator-managed second-brain worktree after this verifier is committed and passing."
+      "notes": "Per dispatch scope, second-brain archival is handled by a separate orchestrator-managed second-brain worktree after this verifier is committed and passing. (status normalized from NOT_DONE_THIS_DISPATCH to not_done for schema conformance; deferred to a later dispatch within this same orchestration run, not abandoned.)"
     },
     {
       "id": "AC4",
       "title": "both repositories clean and pushed",
-      "status": "NOT_DONE_THIS_DISPATCH",
+      "status": "not_done",
       "changed_files": [],
       "evidence_refs": [],
-      "notes": "Per dispatch scope, cross-repository push/clean closeout happens at session-close after both repositories' work lands."
+      "notes": "Per dispatch scope, cross-repository push/clean closeout happens at session-close after both repositories' work lands. (status normalized from NOT_DONE_THIS_DISPATCH to not_done for schema conformance; deferred to a later dispatch within this same orchestration run, not abandoned.)"
     }
   ],
   "changed_files": [
