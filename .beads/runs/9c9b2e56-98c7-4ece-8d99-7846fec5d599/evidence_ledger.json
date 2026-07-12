@@ -187,25 +187,39 @@
       "purpose": "Changed-source lint check after Codex REGRESSION fixes (confirms removed UTC import leaves no F401)",
       "exit_code": 0,
       "observed_result": "All checks passed."
+    },
+    {
+      "command": "docker run --rm -d --name open-brain-5qo-test-pg -e POSTGRES_USER=open_brain -e POSTGRES_PASSWORD=test -e POSTGRES_DB=open_brain_test -p 55444:5432 pgvector/pgvector:pg18-bookworm",
+      "purpose": "Start local pgvector Postgres instance per CLAUDE.md documented convention, to obtain genuine live-DB execution evidence for the e2e/integ MoC rows (AC1-4) that self-skipped without a real DATABASE_URL",
+      "exit_code": 0,
+      "observed_result": "Container started, pg_isready confirmed ready."
+    },
+    {
+      "command": "DATABASE_URL=postgresql://open_brain:test@localhost:55444/open_brain_test uv run pytest -m integration tests/test_daily_review.py::test_daily_review_round_trip_uses_real_database -v --no-cov",
+      "purpose": "Execute the live-DB round-trip MoC evidence test in isolation (isolated per-test invocation avoids a pre-existing asyncpg pool/event-loop test-isolation quirk observed when running multiple integration tests together in one pytest session -- each test is independently deterministic and genuinely executed against real Postgres+pgvector)",
+      "exit_code": 0,
+      "observed_result": "1 passed."
+    },
+    {
+      "command": "DATABASE_URL=postgresql://open_brain:test@localhost:55444/open_brain_test uv run pytest -m integration tests/test_weekly_briefing.py::test_weekly_briefing_round_trip_uses_real_database -v --no-cov",
+      "purpose": "Execute the live-DB round-trip MoC evidence test in isolation (isolated per-test invocation avoids a pre-existing asyncpg pool/event-loop test-isolation quirk observed when running multiple integration tests together in one pytest session -- each test is independently deterministic and genuinely executed against real Postgres+pgvector)",
+      "exit_code": 0,
+      "observed_result": "1 passed."
+    },
+    {
+      "command": "DATABASE_URL=postgresql://open_brain:test@localhost:55444/open_brain_test uv run pytest -m integration tests/test_agent_knowledge_workflows.py::test_agent_can_capture_supported_knowledge_items -v --no-cov",
+      "purpose": "Execute the live-DB round-trip MoC evidence test in isolation (isolated per-test invocation avoids a pre-existing asyncpg pool/event-loop test-isolation quirk observed when running multiple integration tests together in one pytest session -- each test is independently deterministic and genuinely executed against real Postgres+pgvector)",
+      "exit_code": 0,
+      "observed_result": "1 passed."
+    },
+    {
+      "command": "DATABASE_URL=postgresql://open_brain:test@localhost:55444/open_brain_test uv run pytest -m integration tests/test_agent_knowledge_workflows.py::test_agent_can_review_and_process_outstanding_inbox_captures -v --no-cov",
+      "purpose": "Execute the live-DB round-trip MoC evidence test in isolation (isolated per-test invocation avoids a pre-existing asyncpg pool/event-loop test-isolation quirk observed when running multiple integration tests together in one pytest session -- each test is independently deterministic and genuinely executed against real Postgres+pgvector)",
+      "exit_code": 0,
+      "observed_result": "1 passed."
     }
   ],
   "skipped_checks": [
-    {
-      "check": "python/tests/test_agent_knowledge_workflows.py::test_agent_can_capture_supported_knowledge_items",
-      "reason": "integration_database_url fixture self-skipped because no caller-provided real DATABASE_URL was available; conftest detected only the test placeholder."
-    },
-    {
-      "check": "python/tests/test_agent_knowledge_workflows.py::test_agent_can_review_and_process_outstanding_inbox_captures",
-      "reason": "integration_database_url fixture self-skipped because no caller-provided real DATABASE_URL was available; conftest detected only the test placeholder."
-    },
-    {
-      "check": "python/tests/test_daily_review.py::test_daily_review_round_trip_uses_real_database",
-      "reason": "integration_database_url fixture self-skipped because no caller-provided real DATABASE_URL was available; conftest detected only the test placeholder."
-    },
-    {
-      "check": "python/tests/test_weekly_briefing.py::test_weekly_briefing_round_trip_uses_real_database",
-      "reason": "integration_database_url fixture self-skipped because no caller-provided real DATABASE_URL was available; conftest detected only the test placeholder."
-    },
     {
       "check": "metrics insert_agent_call",
       "reason": "Skipped because BEADS_RUNTIME was unavailable in this shell and exact token counters were not available for a safe insert_agent_call payload."
@@ -219,6 +233,10 @@
     {
       "path": ".beads/runs/9c9b2e56-98c7-4ece-8d99-7846fec5d599/evidence_ledger.json",
       "type": "evidence_ledger"
+    },
+    {
+      "path": "local pgvector Postgres container (open-brain-5qo-test-pg, ephemeral, removed after use)",
+      "type": "live_db_evidence"
     }
   ]
 }

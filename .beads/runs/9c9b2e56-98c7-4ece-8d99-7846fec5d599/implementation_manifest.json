@@ -12,7 +12,8 @@
       ],
       "evidence_refs": [
         "python/tests/test_agent_knowledge_workflows.py::test_agent_can_capture_supported_knowledge_items",
-        "python/tests/test_agent_knowledge_workflows.py::test_documentation_covers_agent_capture_and_inbox_review_operations"
+        "python/tests/test_agent_knowledge_workflows.py::test_documentation_covers_agent_capture_and_inbox_review_operations",
+        "LIVE-DB VERIFIED: test_agent_knowledge_workflows.py::test_agent_can_capture_supported_knowledge_items passed against real Postgres+pgvector (local docker pgvector/pgvector:pg18-bookworm)"
       ]
     },
     {
@@ -25,7 +26,8 @@
       ],
       "evidence_refs": [
         "python/tests/test_agent_knowledge_workflows.py::test_agent_can_review_and_process_outstanding_inbox_captures",
-        "python/tests/test_agent_knowledge_workflows.py::test_documentation_covers_agent_capture_and_inbox_review_operations"
+        "python/tests/test_agent_knowledge_workflows.py::test_documentation_covers_agent_capture_and_inbox_review_operations",
+        "LIVE-DB VERIFIED: test_agent_knowledge_workflows.py::test_agent_can_review_and_process_outstanding_inbox_captures passed against real Postgres+pgvector"
       ]
     },
     {
@@ -42,7 +44,8 @@
       "evidence_refs": [
         "python/tests/test_daily_review.py::test_generate_daily_review_date_bounds_entries_unresolved_and_sources",
         "python/tests/test_daily_review.py::test_daily_review_tool_is_base_memory_scope_and_serializes_result",
-        "python/tests/test_daily_review.py::test_daily_review_round_trip_uses_real_database"
+        "python/tests/test_daily_review.py::test_daily_review_round_trip_uses_real_database",
+        "LIVE-DB VERIFIED: test_daily_review.py::test_daily_review_round_trip_uses_real_database passed against real Postgres+pgvector"
       ]
     },
     {
@@ -60,7 +63,8 @@
         "python/tests/test_weekly_briefing.py::test_canonical_entity_select_predicate_uses_positive_marker",
         "python/tests/test_weekly_briefing.py::test_weekly_briefing_adds_relevant_canonical_entities_and_inbox_state",
         "python/tests/test_weekly_briefing.py::test_weekly_briefing_round_trip_uses_real_database",
-        "python/tests/test_briefing.py"
+        "python/tests/test_briefing.py",
+        "LIVE-DB VERIFIED: test_weekly_briefing.py::test_weekly_briefing_round_trip_uses_real_database passed against real Postgres+pgvector"
       ]
     }
   ],
