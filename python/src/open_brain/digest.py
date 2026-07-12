@@ -330,10 +330,16 @@ def _relevant_canonical_entities(
     return entities
 
 
-def _inbox_state(memories: list[Memory], sample_size: int = 5) -> dict[str, Any]:
-    """Return pending inbox count and a small sample for weekly review."""
+def _inbox_state(memories: list[Memory], total: int, sample_size: int = 5) -> dict[str, Any]:
+    """Return pending inbox count and a small sample for weekly review.
+
+    ``total`` is the true backlog size from ``SearchResult.total``; ``memories``
+    is the capped result list used only for the preview sample. Reporting
+    ``len(memories)`` would silently under-count once the backlog exceeds the
+    per-search cap.
+    """
     return {
-        "pending": len(memories),
+        "pending": total,
         "sample": [
             {"id": mem.id, "title": mem.title, "type": mem.type}
             for mem in memories[:sample_size]
@@ -503,5 +509,5 @@ async def generate_weekly_briefing(
         cross_project_connections=cross_project_connections,
         decay_warnings=decay_warnings,
         canonical_entities=_relevant_canonical_entities(canonical_memories, current_memories),
-        inbox_state=_inbox_state(inbox_memories),
+        inbox_state=_inbox_state(inbox_memories, inbox_result.total),
     )

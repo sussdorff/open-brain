@@ -182,6 +182,33 @@ async def test_daily_cli_calls_daily_review_tool() -> None:
     )
 
 
+@pytest.mark.asyncio
+async def test_daily_cli_default_date_uses_local_time_not_utc() -> None:
+    """An omitted date defaults to the local calendar date, not the UTC date."""
+    from open_brain.cli.main import _cmd_daily
+
+    args = _build_parser().parse_args(["daily"])
+    assert args.date is None
+
+    # Naive local wall-clock instant late in the day. The corresponding UTC
+    # instant may roll over to the next calendar date, so a UTC-based default
+    # (datetime.now(tz=UTC)) would review the wrong day around local midnight.
+    local_now = datetime(2026, 7, 12, 21, 30)
+    with (
+        patch("open_brain.cli.main.call_tool", new_callable=AsyncMock) as mock_call,
+        patch("open_brain.cli.main.datetime") as mock_datetime,
+    ):
+        mock_datetime.now.return_value = local_now
+        mock_call.return_value = {"date": "2026-07-12"}
+        await _cmd_daily(args)
+
+    # The default date must be resolved from local time, i.e. datetime.now()
+    # called without a tz=UTC argument.
+    mock_datetime.now.assert_called_once_with()
+    sent_date = mock_call.await_args.args[1]["date"]
+    assert sent_date == "2026-07-12"
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_daily_review_round_trip_uses_real_database(

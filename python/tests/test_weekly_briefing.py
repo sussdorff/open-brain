@@ -106,6 +106,35 @@ async def test_weekly_briefing_adds_relevant_canonical_entities_and_inbox_state(
     assert inbox_params.project == "open-brain"
 
 
+@pytest.mark.asyncio
+async def test_weekly_briefing_inbox_pending_reflects_search_total_not_capped_results() -> None:
+    """inbox_state.pending reports SearchResult.total, not the capped result length."""
+    from open_brain.digest import generate_weekly_briefing
+
+    active_memory = _memory(10, title="Open Brain planning")
+    # Inbox search is capped at max_memories (200) but the true backlog is larger.
+    inbox_sample = [_memory(100 + i, title=f"Pending {i}") for i in range(200)]
+    dl = AsyncMock()
+    dl.search.side_effect = [
+        SearchResult(results=[active_memory], total=1),
+        SearchResult(results=[], total=0),
+        SearchResult(results=[active_memory], total=1),
+        SearchResult(results=[], total=0),
+        SearchResult(results=inbox_sample, total=350),
+    ]
+
+    result = await generate_weekly_briefing(dl, weeks_back=1, project="open-brain")
+
+    assert result.inbox_state["pending"] == 350
+    # The sample stays bounded to the small preview slice.
+    assert len(result.inbox_state["sample"]) == 5
+    assert result.inbox_state["sample"][0] == {
+        "id": 100,
+        "title": "Pending 0",
+        "type": "observation",
+    }
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_weekly_briefing_round_trip_uses_real_database(

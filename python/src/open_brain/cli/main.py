@@ -7,7 +7,7 @@ import os
 import sys
 from contextlib import contextmanager
 from dataclasses import asdict
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -308,7 +308,7 @@ async def _cmd_timeline(args: argparse.Namespace) -> Any:
 async def _cmd_daily(args: argparse.Namespace) -> Any:
     """Generate a daily review via MCP."""
     kwargs: dict[str, Any] = {
-        "date": args.date or datetime.now(tz=UTC).date().isoformat()
+        "date": args.date or datetime.now().astimezone().date().isoformat()
     }
     if args.project:
         kwargs["project"] = args.project
