@@ -87,6 +87,8 @@ async def test_briefing_entities():
         SearchResult(results=memories, total=3),  # current
         SearchResult(results=[], total=0),         # previous
         SearchResult(results=memories, total=3),   # decay
+        SearchResult(results=[], total=0),          # canonical entities
+        SearchResult(results=[], total=0),          # inbox state
     ]
 
     result = await generate_weekly_briefing(dl, weeks_back=1)
@@ -121,6 +123,8 @@ async def test_briefing_trends():
         SearchResult(results=current_memories, total=2),   # current
         SearchResult(results=previous_memories, total=1),  # previous
         SearchResult(results=current_memories, total=2),   # decay
+        SearchResult(results=[], total=0),                  # canonical entities
+        SearchResult(results=[], total=0),                  # inbox state
     ]
 
     result = await generate_weekly_briefing(dl, weeks_back=1)
@@ -154,6 +158,8 @@ async def test_briefing_open_loops():
         SearchResult(results=[meeting, obs], total=2),  # current
         SearchResult(results=[], total=0),               # previous
         SearchResult(results=[meeting, obs], total=2),   # decay
+        SearchResult(results=[], total=0),               # canonical entities
+        SearchResult(results=[], total=0),               # inbox state
     ]
 
     result = await generate_weekly_briefing(dl, weeks_back=1)
@@ -193,6 +199,8 @@ async def test_briefing_decay():
         SearchResult(results=[stale_memory, recent_memory], total=2),  # current
         SearchResult(results=[], total=0),                               # previous
         SearchResult(results=[stale_memory, recent_memory], total=2),   # decay
+        SearchResult(results=[], total=0),                               # canonical entities
+        SearchResult(results=[], total=0),                               # inbox state
     ]
 
     result = await generate_weekly_briefing(dl, weeks_back=1)
@@ -250,6 +258,8 @@ async def test_cross_project_connections_use_index_id():
         SearchResult(results=memories, total=3),
         SearchResult(results=[], total=0),
         SearchResult(results=memories, total=3),
+        SearchResult(results=[], total=0),
+        SearchResult(results=[], total=0),
     ]
 
     result = await generate_weekly_briefing(dl, weeks_back=1)
@@ -278,6 +288,8 @@ async def test_cross_project_excludes_none_index_id():
         SearchResult(results=memories, total=2),
         SearchResult(results=[], total=0),
         SearchResult(results=memories, total=2),
+        SearchResult(results=[], total=0),
+        SearchResult(results=[], total=0),
     ]
 
     result = await generate_weekly_briefing(dl, weeks_back=1)
@@ -373,6 +385,8 @@ async def test_briefing_full_scenario():
         SearchResult(results=all_mems, total=len(all_mems)),   # current
         SearchResult(results=[], total=0),                      # previous
         SearchResult(results=all_mems, total=len(all_mems)),   # decay
+        SearchResult(results=[], total=0),                      # canonical entities
+        SearchResult(results=[], total=0),                      # inbox state
     ]
 
     result = await generate_weekly_briefing(dl, weeks_back=2)
@@ -410,6 +424,8 @@ async def test_briefing_single_type():
         SearchResult(results=memories, total=5),   # current
         SearchResult(results=[], total=0),          # previous
         SearchResult(results=memories, total=5),   # decay
+        SearchResult(results=[], total=0),          # canonical entities
+        SearchResult(results=[], total=0),          # inbox state
     ]
 
     result = await generate_weekly_briefing(dl, weeks_back=1)
@@ -464,6 +480,8 @@ async def test_briefing_cross_project():
         SearchResult(results=all_mems, total=len(all_mems)),   # current
         SearchResult(results=[], total=0),                      # previous
         SearchResult(results=all_mems, total=len(all_mems)),   # decay
+        SearchResult(results=[], total=0),                      # canonical entities
+        SearchResult(results=[], total=0),                      # inbox state
     ]
 
     result = await generate_weekly_briefing(dl, weeks_back=1)

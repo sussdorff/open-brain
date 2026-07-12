@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import asyncio
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from open_brain.data_layer.interface import DataLayer, Memory, SearchParams
+from open_brain.data_layer.interface import DataLayer, Memory, SearchParams, canonical_entity_kind
 
 
 # ─── Domain dataclasses ────────────────────────────────────────────────────────
@@ -26,6 +26,8 @@ class WeeklyBriefing:
     open_loops: list[dict[str, Any]]
     cross_project_connections: list[dict[str, Any]]
     decay_warnings: list[dict[str, Any]]
+    canonical_entities: list[dict[str, Any]] = field(default_factory=list)
+    inbox_state: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -258,6 +260,87 @@ def _find_cross_project_connections(memories: list[Memory]) -> list[dict[str, An
     return result
 
 
+def _normalize_entity_name(value: Any) -> str | None:
+    """Normalize a metadata entity value for relevance matching."""
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    return normalized or None
+
+
+def _active_entity_references(memories: list[Memory]) -> tuple[set[int], set[str]]:
+    """Collect canonical ids and names referenced by current-window memories."""
+    ids = {mem.id for mem in memories}
+    names: set[str] = set()
+    for mem in memories:
+        entities = mem.metadata.get("entities", {})
+        if isinstance(entities, dict):
+            for values in entities.values():
+                if not isinstance(values, list):
+                    continue
+                for value in values:
+                    if isinstance(value, int) and not isinstance(value, bool):
+                        ids.add(value)
+                    if name := _normalize_entity_name(value):
+                        names.add(name)
+        if name := _normalize_entity_name(mem.title):
+            names.add(name)
+    return ids, names
+
+
+def _canonical_entity_names(memory: Memory) -> set[str]:
+    """Return normalized names that can identify a canonical entity memory."""
+    names: set[str] = set()
+    for value in (
+        memory.title,
+        memory.metadata.get("name"),
+        memory.metadata.get("canonical_name"),
+    ):
+        if name := _normalize_entity_name(value):
+            names.add(name)
+    return names
+
+
+def _canonical_entity_payload(memory: Memory) -> dict[str, Any] | None:
+    """Return the weekly canonical entity payload when metadata is valid."""
+    kind = canonical_entity_kind(memory)
+    if kind is None:
+        return None
+    return {
+        "id": memory.id,
+        "title": memory.title,
+        "type": memory.type,
+        "kind": kind,
+    }
+
+
+def _relevant_canonical_entities(
+    canonical_memories: list[Memory],
+    current_memories: list[Memory],
+) -> list[dict[str, Any]]:
+    """Select canonical entities that are active in the current weekly window."""
+    active_ids, active_names = _active_entity_references(current_memories)
+    entities: list[dict[str, Any]] = []
+    for memory in canonical_memories:
+        if memory.id not in active_ids and not (_canonical_entity_names(memory) & active_names):
+            continue
+        payload = _canonical_entity_payload(memory)
+        if payload is not None:
+            entities.append(payload)
+    return entities
+
+
+def _inbox_state(memories: list[Memory], sample_size: int = 5) -> dict[str, Any]:
+    """Return pending inbox count and a small sample for weekly review."""
+    return {
+        "pending": len(memories),
+        "sample": [
+            {"id": mem.id, "title": mem.title, "type": mem.type}
+            for mem in memories[:sample_size]
+        ],
+    }
+
+
 # ─── Main function ─────────────────────────────────────────────────────────────
 
 
@@ -346,8 +429,8 @@ async def generate_weekly_briefing(
     period_start = now - timedelta(weeks=weeks_back)
     prev_period_start = now - timedelta(weeks=weeks_back * 2)
 
-    # ── Fetch current period, previous period, and full DB in parallel ─────────
-    current_result, previous_result, decay_result = await asyncio.gather(
+    # ── Fetch current period, previous period, full DB, canonical entities, and inbox state in parallel
+    current_result, previous_result, decay_result, canonical_result, inbox_result = await asyncio.gather(
         dl.search(SearchParams(
             date_start=period_start.isoformat(),
             date_end=now.isoformat(),
@@ -361,10 +444,22 @@ async def generate_weekly_briefing(
             limit=max_memories,
         )),
         dl.search(SearchParams(project=project, limit=max_memories)),
+        dl.search(SearchParams(
+            project=project,
+            metadata_filter={"canonical_entity": True},
+            limit=max_memories,
+        )),
+        dl.search(SearchParams(
+            project=project,
+            capture_status="inbox",
+            limit=max_memories,
+        )),
     )
     current_memories = current_result.results
     previous_memories = previous_result.results
     all_memories = decay_result.results
+    canonical_memories = canonical_result.results
+    inbox_memories = inbox_result.results
 
     # ── Memory counts ─────────────────────────────────────────────────────────
     current_by_type = _count_by_type(current_memories)
@@ -407,4 +502,6 @@ async def generate_weekly_briefing(
         open_loops=open_loops,
         cross_project_connections=cross_project_connections,
         decay_warnings=decay_warnings,
+        canonical_entities=_relevant_canonical_entities(canonical_memories, current_memories),
+        inbox_state=_inbox_state(inbox_memories),
     )
