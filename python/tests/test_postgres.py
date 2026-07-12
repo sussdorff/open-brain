@@ -7,6 +7,7 @@ import inspect
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import asyncpg
 import pytest
 
 from open_brain.data_layer.interface import (
@@ -170,6 +171,107 @@ class TestPostgresPoolMigrations:
             assert first is second
             assert pg_module._migrations_ensured is True
             run_migrations.assert_awaited_once()
+        finally:
+            await pg_module.close_pool()
+
+    @pytest.mark.integration
+    @pytest.mark.asyncio
+    async def test_get_pool_drops_legacy_function_overloads(
+        self, bootstrapped_database_url: str
+    ):
+        """Runtime migrations remove legacy function overloads before recreating."""
+        from open_brain.config import get_config
+        from open_brain.data_layer import postgres as pg_module
+
+        async def count_public_overloads(
+            conn: asyncpg.Connection, function_name: str
+        ) -> int:
+            return await conn.fetchval(
+                """
+                SELECT COUNT(*)
+                  FROM pg_catalog.pg_proc p
+                  JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+                 WHERE n.nspname = 'public'
+                   AND p.proname = $1;
+                """,
+                function_name,
+            )
+
+        conn = await asyncpg.connect(bootstrapped_database_url)
+        try:
+            await conn.execute("""
+                DROP FUNCTION IF EXISTS public.hybrid_search(
+                    TEXT, vector, INTEGER, INTEGER, INTEGER
+                );
+                CREATE OR REPLACE FUNCTION public.hybrid_search(
+                    query_text TEXT,
+                    query_embedding vector,
+                    match_limit INTEGER,
+                    rrf_k INTEGER,
+                    p_index_id INTEGER
+                )
+                RETURNS TABLE(
+                    id INTEGER,
+                    title TEXT,
+                    subtitle TEXT,
+                    type TEXT,
+                    score REAL,
+                    created_at TIMESTAMP WITH TIME ZONE
+                )
+                LANGUAGE sql
+                STABLE
+                AS $fn$
+                    SELECT
+                        NULL::INTEGER,
+                        NULL::TEXT,
+                        NULL::TEXT,
+                        NULL::TEXT,
+                        NULL::REAL,
+                        NULL::TIMESTAMP WITH TIME ZONE
+                    WHERE FALSE;
+                $fn$;
+            """)
+            await conn.execute("""
+                DROP FUNCTION IF EXISTS public.decay_unused_priorities(INTEGER, REAL);
+                CREATE OR REPLACE FUNCTION public.decay_unused_priorities(
+                    p_stale_days INTEGER,
+                    p_decay_factor REAL
+                ) RETURNS INTEGER
+                LANGUAGE plpgsql
+                AS $fn$
+                BEGIN
+                    RETURN 0;
+                END;
+                $fn$;
+            """)
+        finally:
+            await conn.close()
+
+        get_config().DATABASE_URL = bootstrapped_database_url
+        await pg_module.close_pool()
+
+        try:
+            await pg_module.get_pool()
+
+            conn = await asyncpg.connect(bootstrapped_database_url)
+            try:
+                zero_vector = f"[{','.join(['0'] * 1024)}]"
+                await conn.fetchval(
+                    """
+                    SELECT COUNT(*)
+                      FROM public.hybrid_search($1, $2::vector, $3, $4, $5::integer);
+                    """,
+                    "test",
+                    zero_vector,
+                    20,
+                    60,
+                    None,
+                )
+
+                assert await count_public_overloads(conn, "hybrid_search") == 1
+                assert await count_public_overloads(conn, "decay_unused_priorities") == 1
+            finally:
+                await conn.close()
         finally:
             await pg_module.close_pool()
 
