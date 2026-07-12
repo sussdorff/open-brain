@@ -73,7 +73,7 @@ from open_brain.people.merge import (
 )
 from open_brain.utils import parse_llm_json
 from open_brain.data_layer.postgres import PostgresDataLayer, close_pool, get_pool
-from open_brain.digest import generate_weekly_briefing
+from open_brain.digest import generate_daily_review, generate_weekly_briefing
 from open_brain.evolution import (
     analyze_engagement,
     generate_suggestion,
@@ -2297,6 +2297,27 @@ If nothing worth remembering happened, return: {{"observations": [], "session_su
         )
     except Exception:
         logger.exception("Failed to process session capture")
+
+
+@mcp.tool(
+    description="Generate a routine daily memory review for one date. "
+    "Base memory-scope tool like search/timeline, not an evolution-gated briefing. "
+    "Returns date-bounded entries, source references, unresolved inbox captures, and counts. "
+    "Params: date (YYYY-MM-DD, required), project (optional filter)"
+)
+@logged_tool
+async def daily_review(
+    date: str,
+    project: str | None = None,
+) -> str:
+    """Generate a routine daily review using base memory-scope reads."""
+    try:
+        dl = get_dl()
+        result = await generate_daily_review(dl, date=date, project=project)
+        return json.dumps(asdict(result), default=str)
+    except Exception:
+        logger.exception("daily_review failed")
+        raise
 
 
 @mcp.tool(
