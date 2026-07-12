@@ -31,6 +31,27 @@
       "observed_result": "1504 passed, 33 deselected, 64 warnings."
     },
     {
+      "id": "cmd:red-cold-review-regression-tests",
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache uv run pytest tests/test_verify_second_brain_cutover.py -q",
+      "purpose": "RED gate for the cold-review regression tests before applying the inline fixes.",
+      "exit_code": 1,
+      "observed_result": "2 failed, 6 passed; failures confirmed unknown capability satisfied count was 0 instead of 1 and --help returned 2 instead of 0."
+    },
+    {
+      "id": "cmd:green-cold-review-targeted-tests",
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache uv run pytest tests/test_verify_second_brain_cutover.py -q",
+      "purpose": "GREEN gate for targeted verifier regressions after fixing the cold-review findings.",
+      "exit_code": 0,
+      "observed_result": "8 passed."
+    },
+    {
+      "id": "cmd:green-cold-review-full-non-integration-suite",
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache uv run pytest -m \"not integration\"",
+      "purpose": "Full non-integration regression suite after fixing the cold-review findings.",
+      "exit_code": 0,
+      "observed_result": "1505 passed, 33 deselected, 64 warnings."
+    },
+    {
       "id": "cmd:green-commit-hook-suite",
       "command": "git add scripts/verify_second_brain_cutover.py python/tests/test_verify_second_brain_cutover.py && git commit -m \"feat(open-brain-m9e): green - add cutover verifier\"",
       "purpose": "Commit the green verifier implementation with the repository hook active.",

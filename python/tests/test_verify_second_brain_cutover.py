@@ -383,6 +383,29 @@ async def test_missing_open_brain_capability_fails_named_gate_only(tmp_path: Pat
 
 
 @pytest.mark.asyncio
+async def test_regression_unknown_open_brain_capability_does_not_reduce_satisfied_count(
+    tmp_path: Path,
+) -> None:
+    """Unknown capability ids must not be counted as both unknown and missing."""
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    verifier = load_verifier()
+
+    gate = await verifier._evaluate_open_brain_capabilities(
+        data_layer=FixtureDataLayer(),
+        paperless_client=FixturePaperlessClient(),
+        vault_path=vault,
+        required_capabilities=["open-brain-ccd", "open-brain-unknown"],
+    )
+
+    assert gate.status == "red"
+    assert gate.counts["required"] == 2
+    assert gate.counts["satisfied"] == 1
+    assert gate.counts["missing"] == 0
+    assert gate.counts["unknown"] == 1
+
+
+@pytest.mark.asyncio
 async def test_missing_paperless_reference_fails_named_gate_only(tmp_path: Path) -> None:
     """Paperless probes fail closed on every non-found resolver status."""
     async with complete_cutover_fixture(
@@ -480,4 +503,5 @@ async def test_cli_exit_codes_follow_cutover_status(tmp_path: Path) -> None:
         assert await verifier.main(argv) == 0
     with patch.object(verifier, "run_cutover", new=AsyncMock(return_value=red_report)):
         assert await verifier.main(argv) == 1
+    assert await verifier.main(["--help"]) == 0
     assert await verifier.main([]) == 2

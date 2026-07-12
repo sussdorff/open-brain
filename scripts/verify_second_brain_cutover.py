@@ -305,7 +305,10 @@ async def _evaluate_open_brain_capabilities(
         missing = [
             capability_id
             for capability_id in required_capabilities
-            if not capability_results.get(capability_id, False)
+            if (
+                capability_id in REQUIRED_CAPABILITY_IDS
+                and not capability_results.get(capability_id, False)
+            )
         ]
         counts = {
             "required": len(required_capabilities),
@@ -548,8 +551,8 @@ async def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     try:
         args = parser.parse_args(argv)
-    except SystemExit:
-        return 2
+    except SystemExit as exc:
+        return 0 if exc.code == 0 else 2
 
     try:
         report = await run_cutover(

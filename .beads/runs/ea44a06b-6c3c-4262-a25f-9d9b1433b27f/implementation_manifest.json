@@ -13,9 +13,12 @@
       "evidence_refs": [
         "cmd:red-targeted-verifier-tests",
         "cmd:green-targeted-verifier-tests",
-        "cmd:green-full-non-integration-suite"
+        "cmd:green-full-non-integration-suite",
+        "cmd:red-cold-review-regression-tests",
+        "cmd:green-cold-review-targeted-tests",
+        "cmd:green-cold-review-full-non-integration-suite"
       ],
-      "notes": "All four named gates are always evaluated; missing capability, Paperless, migration, and backup fixtures each fail only their named gate."
+      "notes": "All four named gates are always evaluated; missing capability, Paperless, migration, and backup fixtures each fail only their named gate. Cold-review regressions now cover unknown capability satisfied counts and argparse --help exit code preservation."
     },
     {
       "id": "AC2",
@@ -69,6 +72,38 @@
       "notes": "Hook-ran non-integration suite passed before commit."
     }
   ],
+  "regression_fixes": [
+    {
+      "id": "cold-review-satisfied-count",
+      "finding": "Finding 1",
+      "status": "done",
+      "changed_files": [
+        "scripts/verify_second_brain_cutover.py",
+        "python/tests/test_verify_second_brain_cutover.py"
+      ],
+      "evidence_refs": [
+        "cmd:red-cold-review-regression-tests",
+        "cmd:green-cold-review-targeted-tests",
+        "cmd:green-cold-review-full-non-integration-suite"
+      ],
+      "notes": "Unknown capability ids are counted as unknown only; missing now excludes unknown ids so satisfied reflects known truthy required capabilities."
+    },
+    {
+      "id": "cold-review-help-exit-code",
+      "finding": "Finding 2",
+      "status": "done",
+      "changed_files": [
+        "scripts/verify_second_brain_cutover.py",
+        "python/tests/test_verify_second_brain_cutover.py"
+      ],
+      "evidence_refs": [
+        "cmd:red-cold-review-regression-tests",
+        "cmd:green-cold-review-targeted-tests",
+        "cmd:green-cold-review-full-non-integration-suite"
+      ],
+      "notes": "main() now preserves argparse SystemExit(0) for --help while genuine parse failures still return 2."
+    }
+  ],
   "tests": [
     {
       "command_ref": "cmd:red-targeted-verifier-tests",
@@ -80,6 +115,18 @@
     },
     {
       "command_ref": "cmd:green-full-non-integration-suite",
+      "status": "PASSED"
+    },
+    {
+      "command_ref": "cmd:red-cold-review-regression-tests",
+      "status": "EXPECTED_RED"
+    },
+    {
+      "command_ref": "cmd:green-cold-review-targeted-tests",
+      "status": "PASSED"
+    },
+    {
+      "command_ref": "cmd:green-cold-review-full-non-integration-suite",
       "status": "PASSED"
     },
     {
@@ -118,6 +165,9 @@
     "cmd:red-targeted-verifier-tests",
     "cmd:green-targeted-verifier-tests",
     "cmd:green-full-non-integration-suite",
+    "cmd:red-cold-review-regression-tests",
+    "cmd:green-cold-review-targeted-tests",
+    "cmd:green-cold-review-full-non-integration-suite",
     "cmd:fixture-report-generation",
     "artifact:second-brain-cutover-report"
   ]
