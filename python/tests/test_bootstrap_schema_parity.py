@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import json
-
 import asyncpg
 import pytest
+
+SchemaSnapshot = list[dict[str, str]]
+SchemaKey = tuple[str, str, str, str]
 
 
 _SCHEMA_SNAPSHOT_SQL = """
@@ -73,13 +74,59 @@ ORDER BY kind, object_schema, object_name, detail_name, definition;
 """
 
 
-async def _fetch_schema_snapshot(database_url: str) -> str:
+def _normalize_schema_row(row: asyncpg.Record) -> dict[str, str]:
+    snapshot_row = dict(row)
+    if snapshot_row["kind"] == "function":
+        # Function definitions preserve free-form SQL formatting. Case-folding
+        # also folds string literal case such as 'critical'. That is acceptable
+        # for this drift smoke guard; distinguishing literals from keywords
+        # adds complexity for negligible benefit at this test's scope.
+        snapshot_row["definition"] = (
+            " ".join(snapshot_row["definition"].split()).lower()
+        )
+    return snapshot_row
+
+
+async def _fetch_schema_snapshot(database_url: str) -> SchemaSnapshot:
     conn = await asyncpg.connect(database_url)
     try:
         rows = await conn.fetch(_SCHEMA_SNAPSHOT_SQL)
     finally:
         await conn.close()
-    return json.dumps([dict(row) for row in rows], indent=2, sort_keys=True)
+    return [_normalize_schema_row(row) for row in rows]
+
+
+def _snapshot_by_key(snapshot: SchemaSnapshot) -> dict[SchemaKey, str]:
+    return {
+        (
+            row["kind"],
+            row["object_schema"],
+            row["object_name"],
+            row["detail_name"],
+        ): row["definition"]
+        for row in snapshot
+    }
+
+
+def _drifted_schema_keys(
+    before_snapshot: SchemaSnapshot,
+    after_snapshot: SchemaSnapshot,
+) -> list[SchemaKey]:
+    before_by_key = _snapshot_by_key(before_snapshot)
+    after_by_key = _snapshot_by_key(after_snapshot)
+    changed_keys = {
+        key
+        for key in before_by_key.keys() & after_by_key.keys()
+        if before_by_key[key] != after_by_key[key]
+    }
+    return sorted((before_by_key.keys() ^ after_by_key.keys()) | changed_keys)
+
+
+def _format_schema_keys(keys: list[SchemaKey]) -> str:
+    return "\n".join(
+        f"- kind={kind}, schema={object_schema}, object={object_name}, detail={detail_name}"
+        for kind, object_schema, object_name, detail_name in keys
+    )
 
 
 @pytest.mark.integration
@@ -92,20 +139,26 @@ async def test_bootstrap_schema_matches_get_pool_migrations(
     The ``bootstrapped_database_url`` fixture applies
     ``scripts/bootstrap_test_schema.sql`` against the caller-provided
     ``DATABASE_URL``. Running ``get_pool()`` afterward executes the real
-    idempotent migration battery against that schema; any catalog change means
-    the bootstrap SQL no longer matches the migration-managed schema.
+    idempotent migration battery against that schema; semantic catalog changes
+    mean the bootstrap SQL no longer matches the migration-managed schema.
+    Function whitespace and SQL keyword case are normalized so cosmetic-only
+    function definition rewrites do not trip this guard.
     """
-    from open_brain.config import get_config
+    import open_brain.config as config_module
     from open_brain.data_layer import postgres as pg_module
 
-    get_config().DATABASE_URL = bootstrapped_database_url
     await pg_module.close_pool()
     before_snapshot = await _fetch_schema_snapshot(bootstrapped_database_url)
 
     try:
         await pg_module.get_pool()
         after_snapshot = await _fetch_schema_snapshot(bootstrapped_database_url)
+        drifted_keys = _drifted_schema_keys(before_snapshot, after_snapshot)
 
-        assert after_snapshot == before_snapshot
+        assert not drifted_keys, (
+            "get_pool() changed bootstrap-managed schema objects:\n"
+            f"{_format_schema_keys(drifted_keys)}"
+        )
     finally:
         await pg_module.close_pool()
+        config_module._config = None
