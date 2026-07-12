@@ -202,7 +202,7 @@ def _extract_source(mem: Memory) -> dict[str, Any] | None:
     if isinstance(document_id, int) and not isinstance(document_id, bool):
         return {"kind": "paperless", "document_id": document_id}
 
-    session_ref = metadata.get("session_ref") or getattr(mem, "session_ref", None)
+    session_ref = metadata.get("session_ref")
     if isinstance(session_ref, str) and session_ref.strip():
         return {"kind": "session_ref", "session_ref": session_ref}
 

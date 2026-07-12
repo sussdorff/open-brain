@@ -64,9 +64,35 @@
       ]
     }
   ],
+  "advisory_fixes": [
+    {
+      "finding": 1,
+      "status": "done",
+      "summary": "Removed the dead Memory.session_ref getattr fallback from _extract_source; session_ref source extraction now only reads metadata[\"session_ref\"].",
+      "changed_files": [
+        "python/src/open_brain/digest.py"
+      ],
+      "evidence_refs": [
+        "UV_CACHE_DIR=/private/tmp/open-brain-5qo-uv-cache-fix uv run pytest tests/test_daily_review.py tests/test_weekly_briefing.py tests/test_briefing.py tests/test_agent_knowledge_workflows.py -q"
+      ]
+    },
+    {
+      "finding": 2,
+      "status": "done",
+      "summary": "Widened SearchParams.metadata_filter to dict[str, str | bool] | None so the canonical_entity boolean marker is type-correct without changing postgres search matching.",
+      "changed_files": [
+        "python/src/open_brain/data_layer/interface.py"
+      ],
+      "evidence_refs": [
+        "rg -n \"metadata_filter=\" python/src",
+        "UV_CACHE_DIR=/private/tmp/open-brain-5qo-uv-cache-fix uv run ruff check src/open_brain/digest.py src/open_brain/data_layer/interface.py"
+      ]
+    }
+  ],
   "changed_files": [
     "docs/features/agent-knowledge-workflows.md",
     "python/src/open_brain/cli/main.py",
+    "python/src/open_brain/data_layer/interface.py",
     "python/src/open_brain/data_layer/postgres.py",
     "python/src/open_brain/digest.py",
     "python/src/open_brain/server.py",
@@ -117,6 +143,18 @@
     {
       "command": "UV_CACHE_DIR=/private/tmp/open-brain-5qo-uv-cache uv run ruff check src/open_brain/digest.py src/open_brain/data_layer/postgres.py src/open_brain/server.py src/open_brain/cli/main.py tests/test_daily_review.py tests/test_weekly_briefing.py tests/test_agent_knowledge_workflows.py tests/test_briefing.py",
       "result": "All checks passed"
+    },
+    {
+      "command": "UV_CACHE_DIR=/private/tmp/open-brain-5qo-uv-cache-fix uv run ruff check src/open_brain/digest.py src/open_brain/data_layer/interface.py",
+      "result": "All checks passed"
+    },
+    {
+      "command": "UV_CACHE_DIR=/private/tmp/open-brain-5qo-uv-cache-fix uv run pytest tests/test_daily_review.py tests/test_weekly_briefing.py tests/test_briefing.py tests/test_agent_knowledge_workflows.py -q",
+      "result": "20 passed, 4 skipped"
+    },
+    {
+      "command": "UV_CACHE_DIR=/private/tmp/open-brain-5qo-uv-cache-fix uv run pytest -m \"not integration\" -q",
+      "result": "1491 passed, 31 deselected, 62 warnings"
     }
   ],
   "external_resources": [
@@ -126,7 +164,12 @@
       "usage": "Test-only resource URL metadata; not fetched"
     }
   ],
-  "scope_changes": [],
+  "scope_changes": [
+    {
+      "source": "Phase 5 FINAL_REVIEW cold-review advisory",
+      "summary": "Addressed only the dead _extract_source session_ref fallback and SearchParams.metadata_filter type annotation mismatch; no postgres search runtime matching logic was changed."
+    }
+  ],
   "downstream_impacts": [
     "Adds daily_review as a new base memory-scope MCP tool.",
     "Adds ob daily [DATE] [--project P] as a thin CLI wrapper.",
@@ -138,6 +181,7 @@
     "python/tests/test_daily_review.py",
     "python/tests/test_weekly_briefing.py",
     "python/tests/test_briefing.py",
+    "python/src/open_brain/data_layer/interface.py",
     "docs/features/agent-knowledge-workflows.md"
   ]
 }
