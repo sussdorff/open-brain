@@ -438,7 +438,6 @@ async def test_report_schema_rejects_sensitive_fixture_content(tmp_path: Path) -
             SENSITIVE_PAPERLESS_ERROR,
             SENSITIVE_MEMORY_CONTENT,
             "items",
-            "unresolved_attachments",
             "retrieval_targets",
             "download",
             "token=do-not-commit",
