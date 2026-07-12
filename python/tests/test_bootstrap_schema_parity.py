@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import patch
 
 import asyncpg
 import pytest
@@ -73,8 +72,6 @@ FROM (
 ORDER BY kind, object_schema, object_name, detail_name, definition;
 """
 
-_DRIFT_MARKER_COLUMN = "bootstrap_schema_parity_drift_marker"
-
 
 async def _fetch_schema_snapshot(database_url: str) -> str:
     conn = await asyncpg.connect(database_url)
@@ -83,16 +80,6 @@ async def _fetch_schema_snapshot(database_url: str) -> str:
     finally:
         await conn.close()
     return json.dumps([dict(row) for row in rows], indent=2, sort_keys=True)
-
-
-async def _drop_drift_marker(database_url: str) -> None:
-    conn = await asyncpg.connect(database_url)
-    try:
-        await conn.execute(
-            f"ALTER TABLE memories DROP COLUMN IF EXISTS {_DRIFT_MARKER_COLUMN};"
-        )
-    finally:
-        await conn.close()
 
 
 @pytest.mark.integration
@@ -115,23 +102,10 @@ async def test_bootstrap_schema_matches_get_pool_migrations(
     await pg_module.close_pool()
     before_snapshot = await _fetch_schema_snapshot(bootstrapped_database_url)
 
-    original_run_migrations = pg_module._run_migrations
-
-    async def run_migrations_with_fake_drift(conn):
-        await original_run_migrations(conn)
-        await conn.execute(
-            f"ALTER TABLE memories ADD COLUMN IF NOT EXISTS {_DRIFT_MARKER_COLUMN} TEXT;"
-        )
-
     try:
-        with patch(
-            "open_brain.data_layer.postgres._run_migrations",
-            new=run_migrations_with_fake_drift,
-        ):
-            await pg_module.get_pool()
+        await pg_module.get_pool()
         after_snapshot = await _fetch_schema_snapshot(bootstrapped_database_url)
 
         assert after_snapshot == before_snapshot
     finally:
-        await _drop_drift_marker(bootstrapped_database_url)
         await pg_module.close_pool()
