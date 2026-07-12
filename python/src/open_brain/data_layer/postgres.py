@@ -420,6 +420,10 @@ async def _run_migrations(conn: asyncpg.Connection) -> None:
         );
     """)
     await conn.execute("""
+        DROP FUNCTION IF EXISTS public.hybrid_search(TEXT, vector, INTEGER, INTEGER, INTEGER);
+        DROP FUNCTION IF EXISTS public.hybrid_search(TEXT, vector, INTEGER, INTEGER, INTEGER, TEXT, JSONB, TEXT);
+    """)
+    await conn.execute("""
         CREATE OR REPLACE FUNCTION public.hybrid_search(
             query_text text,
             query_embedding vector,
@@ -481,6 +485,10 @@ async def _run_migrations(conn: asyncpg.Connection) -> None:
     # Typed-relationship schema migration (idempotent)
     await _ensure_link_type_column(conn)
     await _ensure_metadata_column(conn)
+    await conn.execute("""
+        DROP FUNCTION IF EXISTS public.decay_unused_priorities(INTEGER, REAL);
+        DROP FUNCTION IF EXISTS public.decay_unused_priorities(INTEGER, DOUBLE PRECISION);
+    """)
     await conn.execute(f"""
         CREATE OR REPLACE FUNCTION decay_unused_priorities(
             p_stale_days integer,
