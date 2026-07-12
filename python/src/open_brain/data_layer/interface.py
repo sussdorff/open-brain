@@ -27,7 +27,7 @@ rank_importance mapping
 Any other value raises :class:`ValueError`.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal, Protocol, TypedDict
 
@@ -455,7 +455,7 @@ class SearchParams:
     date_end: str | None = None
     order_by: str | None = None
     file_path: str | None = None
-    metadata_filter: dict[str, str] | None = None
+    metadata_filter: dict[str, str | bool] | None = None
     capture_status: str | None = None
     author: str | None = None  # filter by user_id (contributor)
 

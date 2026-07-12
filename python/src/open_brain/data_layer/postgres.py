@@ -70,6 +70,12 @@ def canonical_entity_protection_predicate(alias: str | None = None) -> str:
     return f"({metadata_ref}->>'{CANONICAL_ENTITY_METADATA_KEY}') IS DISTINCT FROM 'true'"
 
 
+def canonical_entity_select_predicate(alias: str | None = None) -> str:
+    """Return the shared SQL predicate that selects protected canonical entities."""
+    metadata_ref = f"{alias}.metadata" if alias else "metadata"
+    return f"{metadata_ref}->>'{CANONICAL_ENTITY_METADATA_KEY}' = 'true'"
+
+
 def _canonical_entity_protection_filter(alias: str | None = None) -> str:
     """Return an AND-prefixed canonical entity protection SQL clause."""
     return f"AND {canonical_entity_protection_predicate(alias)}"
@@ -806,9 +812,12 @@ class PostgresDataLayer:
                 values.append(params.file_path)
                 param_idx += 1
             if params.metadata_filter:
-                conditions.append(f"m.metadata @> ${param_idx}::jsonb")
-                values.append(params.metadata_filter)
-                param_idx += 1
+                if params.metadata_filter == {CANONICAL_ENTITY_METADATA_KEY: True}:
+                    conditions.append(canonical_entity_select_predicate("m"))
+                else:
+                    conditions.append(f"m.metadata @> ${param_idx}::jsonb")
+                    values.append(params.metadata_filter)
+                    param_idx += 1
             if params.capture_status is not None:
                 conditions.append(f"m.metadata->>'capture_status' = ${param_idx}")
                 values.append(params.capture_status)
@@ -1552,12 +1561,12 @@ class PostgresDataLayer:
                     str(params.boost_days),
                 )
                 protected_canonical_entities = await conn.fetchval(
-                    """SELECT COUNT(*) FROM memories
+                    f"""SELECT COUNT(*) FROM memories
                        WHERE (last_accessed_at IS NULL OR last_accessed_at < NOW() - ($1 || ' days')::interval)
                          AND created_at < NOW() - ($1 || ' days')::interval
                          AND importance != 'critical'
                          AND (last_decay_at IS NULL OR last_decay_at < NOW() - interval '24 hours')
-                         AND metadata->>'canonical_entity' = 'true'""",
+                         AND {canonical_entity_select_predicate()}""",
                     str(params.stale_days),
                 )
             else:
@@ -1591,12 +1600,12 @@ class PostgresDataLayer:
                     str(params.boost_days),
                 )
                 protected_canonical_entities = await conn.fetchval(
-                    """SELECT COUNT(*) FROM memories
+                    f"""SELECT COUNT(*) FROM memories
                        WHERE (last_accessed_at IS NULL OR last_accessed_at < NOW() - ($1 || ' days')::interval)
                          AND created_at < NOW() - ($1 || ' days')::interval
                          AND importance != 'critical'
                          AND (last_decay_at IS NULL OR last_decay_at < NOW() - interval '24 hours')
-                         AND metadata->>'canonical_entity' = 'true'""",
+                         AND {canonical_entity_select_predicate()}""",
                     str(params.stale_days),
                 )
 
@@ -2364,7 +2373,7 @@ class PostgresDataLayer:
                     await conn.fetchval(
                         f"""SELECT COUNT(*) FROM memories
                             WHERE 1=1 {_active_lifecycle_filter}
-                              AND metadata->>'canonical_entity' = 'true'"""
+                              AND {canonical_entity_select_predicate()}"""
                     )
                 )
                 mem_rows = await conn.fetch(
@@ -2394,7 +2403,7 @@ class PostgresDataLayer:
                     await conn.fetchval(
                         f"""SELECT COUNT(*) FROM memories
                             WHERE index_id = $1 {_active_lifecycle_filter}
-                              AND metadata->>'canonical_entity' = 'true'""",
+                              AND {canonical_entity_select_predicate()}""",
                         index_id,
                     )
                 )
@@ -2408,7 +2417,7 @@ class PostgresDataLayer:
                     await conn.fetchval(
                         f"""SELECT COUNT(*) FROM memories
                             WHERE type = $1 {_active_lifecycle_filter}
-                              AND metadata->>'canonical_entity' = 'true'""",
+                              AND {canonical_entity_select_predicate()}""",
                         mem_type,
                     )
                 )
@@ -3135,7 +3144,7 @@ async def _fetch_protected_canonical_ids(
     if not memory_ids:
         return set()
     rows = await conn.fetch(
-        "SELECT id FROM memories WHERE id = ANY($1::int[]) AND metadata->>'canonical_entity' = 'true'",
+        f"SELECT id FROM memories WHERE id = ANY($1::int[]) AND {canonical_entity_select_predicate()}",
         memory_ids,
     )
     return {int(row["id"]) for row in rows}

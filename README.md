@@ -266,6 +266,7 @@ search(query)          →  compact index with IDs (~50-100 tokens/result)
 | `get_observations` | Fetch full details for a list of IDs. |
 | `search_by_concept` | Pure vector search — good for "what did I learn about X?" |
 | `get_context` | Recent session summaries — useful at conversation start. |
+| `daily_review` | Date-bounded review for one calendar day: entries, source references, unresolved inbox captures, and counts by type. Base memory scope — no evolution gate. |
 | `stats` | Database statistics: memory count, type taxonomy, DB size, embedding token usage, estimated API cost. |
 
 ### Memory Writing
@@ -488,6 +489,7 @@ Current `ob` commands:
 | `ob verify <bundle>` | Verify round-trip integrity of a bundle (content hashes, relationships, entity ids) |
 | `ob inbox` | List captures with `capture_status=inbox` |
 | `ob capture set-status` | Transition a capture's inbox status (`inbox` / `processed` / `dismissed`) |
+| `ob daily [DATE]` | Daily memory review: date-bounded entries, source links, unresolved inbox captures, and counts. Defaults to today. |
 
 ### `ob people`
 
@@ -578,6 +580,7 @@ more local entries than it displays by default (`max(limit*5, 50)`); use
 ## Documentation
 
 - [Architecture & Diagrams](docs/architecture.md) — system design, hybrid search, memory lifecycle, auth flow
+- [Agent Knowledge Workflows](docs/features/agent-knowledge-workflows.md) — capture, inbox review, daily review, and weekly review workflows for agents replacing Obsidian
 - [Operator Script Promotion Policy](docs/operator-scripts.md) — which scripts become stable `ob` commands and which stay as scripts
 - [Contributing](CONTRIBUTING.md) — development setup, PR process, coding guidelines
 - [Security](SECURITY.md) — vulnerability reporting, security considerations
