@@ -51,3 +51,12 @@ Use the existing `weekly_briefing(weeks_back=..., project=...)` tool for weekly
 review. Weekly briefing remains an evolution-gated MCP tool and includes memory
 counts, top entities, trends, open loops, cross-project connections, decay
 warnings, canonical entity state, and inbox state.
+
+See [weekly-briefing.md](weekly-briefing.md) for the full field reference and
+return-type schema.
+
+## Related Documentation
+
+- [capture-router.md](capture-router.md) — domain templates and structured field extraction used during `save_memory`
+- [canonical-entity-protection.md](canonical-entity-protection.md) — how canonical entities are protected and surfaced in briefings
+- [weekly-briefing.md](weekly-briefing.md) — full weekly briefing field reference including `canonical_entities` and `inbox_state`
