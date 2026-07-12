@@ -30,7 +30,6 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
-from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from open_brain.auth.provider import get_provider

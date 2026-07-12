@@ -14,7 +14,7 @@ Supported agent capture patterns:
 - Idea capture: `save_memory(text=..., type="observation", project=..., metadata={"capture_template": "observation"})`
 - Journal capture: `save_memory(text=..., type="journal", project=..., metadata={"capture_template": "journal", "entry_date": "2026-07-12T09:00:00"})`
 - URL resource capture: `save_memory(text=..., type="resource", project=..., metadata={"capture_template": "resource", "url": "<resource-url>", "source_type": "web"})`
-- Structured knowledge capture: use the canonical personal-knowledge types documented by `save_memory`, such as `concept`, `decision`, `meeting`, `project`, or `person`.
+- structured knowledge item capture: use the canonical personal-knowledge types documented by `save_memory`, such as `concept`, `decision`, `meeting`, `project`, or `person`.
 
 For deterministic agent-authored captures, include `metadata.capture_template`.
 When entity extraction should not call the LLM, include `metadata.entities`.
@@ -23,7 +23,7 @@ When entity extraction should not call the LLM, include `metadata.entities`.
 
 New captures default to `metadata.capture_status="inbox"`.
 
-Supported review operations:
+Supported operations to review outstanding inbox captures:
 
 - List outstanding captures with `search(capture_status="inbox", project=...)` or `ob inbox --project <project>`.
 - Mark an item processed with `set_capture_status(memory_id=..., capture_status="processed")` or `ob capture set-status <id> processed`.
