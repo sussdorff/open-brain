@@ -478,6 +478,16 @@ class TestEnsureMetadataColumn:
             conn.execute = AsyncMock(return_value=None)
             conn.fetch = AsyncMock(return_value=[])
 
+            # _run_migrations wraps each function DROP+CREATE pair in
+            # `async with conn.transaction():` — return a fresh no-op async
+            # context manager per call (asynccontextmanager instances are
+            # single-use, and migrations open more than one transaction).
+            @asynccontextmanager
+            async def _noop_transaction():
+                yield
+
+            conn.transaction = MagicMock(side_effect=lambda *a, **k: _noop_transaction())
+
             pool = _make_pool(conn)
 
             # asyncpg.create_pool is a coroutine — use AsyncMock so it can be awaited
