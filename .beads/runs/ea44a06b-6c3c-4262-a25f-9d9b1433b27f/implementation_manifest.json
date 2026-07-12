@@ -102,6 +102,34 @@
         "cmd:green-cold-review-full-non-integration-suite"
       ],
       "notes": "main() now preserves argparse SystemExit(0) for --help while genuine parse failures still return 2."
+    },
+    {
+      "id": "codex-redaction-bypass-dict-branch",
+      "finding": "REGRESSION 1",
+      "status": "done",
+      "changed_files": [
+        "scripts/verify_second_brain_cutover.py",
+        "python/tests/test_verify_second_brain_cutover.py"
+      ],
+      "evidence_refs": [
+        "cmd:green-codex-regression-targeted-tests",
+        "cmd:green-codex-regression-full-non-integration-suite"
+      ],
+      "notes": "Removed the elif isinstance(gate, dict): gates.append(dict(gate)) pass-through branch from CutoverReport.to_payload so gates only ever accept validated GateResult instances; the else: raise TypeError fallback is preserved. Closes the structural bypass of the human-approved aggregate-only redaction guarantee for any DI caller constructing a CutoverReport with a raw dict gate carrying raw titles, retrieval targets, tokens, or exception strings. Updated test_cli_exit_codes_follow_cutover_status to construct a real GateResult instead of asdict(gate) | {...}, and dropped the now-unused dataclasses.asdict import."
+    },
+    {
+      "id": "codex-migration-skipped-count-gate",
+      "finding": "REGRESSION 2",
+      "status": "done",
+      "changed_files": [
+        "scripts/verify_second_brain_cutover.py",
+        "python/tests/test_verify_second_brain_cutover.py"
+      ],
+      "evidence_refs": [
+        "cmd:green-codex-regression-targeted-tests",
+        "cmd:green-codex-regression-full-non-integration-suite"
+      ],
+      "notes": "Added counts[\"skipped\"] == 0 to the migration_reconciliation green condition so a vault with skipped notes (e.g. malformed frontmatter per import_vault's dry-run report) can no longer silently pass the gate as green, satisfying AC1's incompleteness requirement for skipped/unprocessed items. Added test_migration_reconciliation_skipped_notes_fail_named_gate_only using an unterminated-frontmatter vault fixture that asserts the gate is RED with skipped==1, importable/unresolved_links/unresolved_attachments==0, and detail 'migration reconciliation incomplete'."
     }
   ],
   "tests": [
@@ -131,6 +159,14 @@
     },
     {
       "command_ref": "cmd:green-commit-hook-suite",
+      "status": "PASSED"
+    },
+    {
+      "command_ref": "cmd:green-codex-regression-targeted-tests",
+      "status": "PASSED"
+    },
+    {
+      "command_ref": "cmd:green-codex-regression-full-non-integration-suite",
       "status": "PASSED"
     }
   ],
@@ -169,6 +205,8 @@
     "cmd:green-cold-review-targeted-tests",
     "cmd:green-cold-review-full-non-integration-suite",
     "cmd:fixture-report-generation",
-    "artifact:second-brain-cutover-report"
+    "artifact:second-brain-cutover-report",
+    "cmd:green-codex-regression-targeted-tests",
+    "cmd:green-codex-regression-full-non-integration-suite"
   ]
 }

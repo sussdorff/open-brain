@@ -2,7 +2,6 @@
 
 from collections.abc import Callable
 from contextlib import asynccontextmanager
-from dataclasses import asdict
 from datetime import UTC, datetime
 import hashlib
 import importlib.util
@@ -311,6 +310,7 @@ async def complete_cutover_fixture(
     paperless_client: FixturePaperlessClient | None = None,
     backup_store_factory: Callable[[], FixturePortableStore] | None = None,
     vault_has_importable_note: bool = False,
+    vault_has_skipped_note: bool = False,
 ):
     """Yield a complete verifier fixture with targeted override points."""
     vault = tmp_path / "vault"
@@ -318,6 +318,13 @@ async def complete_cutover_fixture(
     if vault_has_importable_note:
         (vault / f"{SENSITIVE_NOTE_TITLE}.md").write_text(
             f"# {SENSITIVE_NOTE_TITLE}\n\n[[{SENSITIVE_WIKILINK}]]\n",
+            encoding="utf-8",
+        )
+    if vault_has_skipped_note:
+        # Unterminated frontmatter fence -> import_vault records a skip-action
+        # note without ever making it importable.
+        (vault / "Unparseable Frontmatter.md").write_text(
+            "---\ntitle: broken frontmatter\n",
             encoding="utf-8",
         )
     report_path = tmp_path / "cutover-report.json"
@@ -431,6 +438,26 @@ async def test_migration_reconciliation_failure_fails_named_gate_only(tmp_path: 
 
 
 @pytest.mark.asyncio
+async def test_migration_reconciliation_skipped_notes_fail_named_gate_only(
+    tmp_path: Path,
+) -> None:
+    """A nonzero skipped count keeps migration red even when nothing is importable."""
+    async with complete_cutover_fixture(
+        tmp_path,
+        vault_has_skipped_note=True,
+    ) as (_verifier, _report, payload, _report_path):
+        _assert_single_red_gate(payload, "migration_reconciliation")
+        migration_gate = next(
+            gate for gate in payload["gates"] if gate["id"] == "migration_reconciliation"
+        )
+        assert migration_gate["counts"]["skipped"] == 1
+        assert migration_gate["counts"]["importable"] == 0
+        assert migration_gate["counts"]["unresolved_links"] == 0
+        assert migration_gate["counts"]["unresolved_attachments"] == 0
+        assert migration_gate["detail"] == "migration reconciliation incomplete"
+
+
+@pytest.mark.asyncio
 async def test_backup_round_trip_failure_fails_named_gate_only(tmp_path: Path) -> None:
     """An empty portable closure cannot make the backup round-trip gate green."""
     async with complete_cutover_fixture(
@@ -487,7 +514,14 @@ async def test_cli_exit_codes_follow_cutover_status(tmp_path: Path) -> None:
     red_report = verifier.CutoverReport(
         schema_version="cutover-report.v1",
         overall_status="red",
-        gates=[asdict(gate) | {"status": "red"}],
+        gates=[
+            verifier.GateResult(
+                id="open_brain_capabilities",
+                status="red",
+                counts={},
+                detail="capabilities verified",
+            )
+        ],
         meta={"generated_at": "2026-07-12T09:00:00+00:00"},
     )
     argv = [

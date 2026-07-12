@@ -92,6 +92,20 @@
       "purpose": "Validate committed cutover report JSON syntax.",
       "exit_code": 0,
       "observed_result": "json.tool parsed and printed second-brain-cutover-report.json successfully."
+    },
+    {
+      "id": "cmd:green-codex-regression-targeted-tests",
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache uv run pytest tests/test_verify_second_brain_cutover.py -q",
+      "purpose": "GREEN gate for the two Codex adversarial regression fixes (redaction-bypass dict branch removed; skipped-count gate added).",
+      "exit_code": 0,
+      "observed_result": "9 passed (added test_migration_reconciliation_skipped_notes_fail_named_gate_only; updated test_cli_exit_codes_follow_cutover_status)."
+    },
+    {
+      "id": "cmd:green-codex-regression-full-non-integration-suite",
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache uv run pytest -m \"not integration\"",
+      "purpose": "Full non-integration regression suite after applying the Codex adversarial regression fixes.",
+      "exit_code": 0,
+      "observed_result": "1506 passed, 33 deselected, 64 warnings."
     }
   ],
   "skipped_checks": [

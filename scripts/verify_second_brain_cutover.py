@@ -88,8 +88,6 @@ class CutoverReport:
         for gate in self.gates:
             if isinstance(gate, GateResult):
                 gates.append(gate.to_payload())
-            elif isinstance(gate, dict):
-                gates.append(dict(gate))
             else:
                 raise TypeError(f"unsupported gate result type: {gate.__class__.__name__}")
         return {
@@ -412,6 +410,7 @@ async def _evaluate_migration_reconciliation(
             counts["importable"] == 0
             and counts["unresolved_links"] == 0
             and counts["unresolved_attachments"] == 0
+            and counts["skipped"] == 0
         ):
             return _green("migration_reconciliation", counts, "migration reconciliation complete")
         return _red("migration_reconciliation", counts, "migration reconciliation incomplete")
