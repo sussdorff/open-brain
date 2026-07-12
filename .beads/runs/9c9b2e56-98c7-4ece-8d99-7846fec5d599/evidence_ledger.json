@@ -163,6 +163,30 @@
       "purpose": "Run full non-integration regression suite after advisory fixes",
       "exit_code": 0,
       "observed_result": "1491 passed, 31 deselected, 62 warnings."
+    },
+    {
+      "command": "UV_CACHE_DIR=/private/tmp/open-brain-5qo-uv-cache-p8 uv run pytest tests/test_daily_review.py::test_daily_cli_default_date_uses_local_time_not_utc tests/test_weekly_briefing.py::test_weekly_briefing_inbox_pending_reflects_search_total_not_capped_results -q --no-cov",
+      "purpose": "RED gate for Codex REGRESSION findings 1 and 2 before implementing the fixes",
+      "exit_code": 1,
+      "observed_result": "2 failed for the right reason: finding 1 asserted now() but actual was now(tz=datetime.timezone.utc); finding 2 asserted pending==350 but actual was 200 (capped result length)."
+    },
+    {
+      "command": "UV_CACHE_DIR=/private/tmp/open-brain-5qo-uv-cache-p8 uv run pytest tests/test_daily_review.py tests/test_weekly_briefing.py tests/test_briefing.py tests/test_agent_knowledge_workflows.py -q --no-cov",
+      "purpose": "GREEN gate for Codex REGRESSION fixes plus affected sibling suites",
+      "exit_code": 0,
+      "observed_result": "22 passed, 4 skipped (integration self-skips without DATABASE_URL)."
+    },
+    {
+      "command": "UV_CACHE_DIR=/private/tmp/open-brain-5qo-uv-cache-p8 uv run pytest -m \"not integration\" -q --no-cov",
+      "purpose": "Full non-integration regression suite after Codex REGRESSION fixes",
+      "exit_code": 0,
+      "observed_result": "1493 passed, 31 deselected, 63 warnings."
+    },
+    {
+      "command": "UV_CACHE_DIR=/private/tmp/open-brain-5qo-uv-cache-p8 uv run ruff check src/open_brain/digest.py src/open_brain/cli/main.py",
+      "purpose": "Changed-source lint check after Codex REGRESSION fixes (confirms removed UTC import leaves no F401)",
+      "exit_code": 0,
+      "observed_result": "All checks passed."
     }
   ],
   "skipped_checks": [

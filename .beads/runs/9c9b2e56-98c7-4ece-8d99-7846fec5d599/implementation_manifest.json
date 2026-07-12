@@ -89,6 +89,34 @@
       ]
     }
   ],
+  "regression_fixes": [
+    {
+      "finding": 1,
+      "source": "Phase 8 Codex adversarial review (REGRESSION)",
+      "status": "done",
+      "summary": "ob daily default date now resolves from local time (datetime.now().astimezone().date()) instead of datetime.now(tz=UTC).date(); around local midnight the no-argument CLI reviewed the wrong day. Removed the now-unused UTC import from cli/main.py. generate_daily_review already handles the tz day-boundary math; no new --tz flag or MCP parameter added.",
+      "changed_files": [
+        "python/src/open_brain/cli/main.py",
+        "python/tests/test_daily_review.py"
+      ],
+      "evidence_refs": [
+        "python/tests/test_daily_review.py::test_daily_cli_default_date_uses_local_time_not_utc"
+      ]
+    },
+    {
+      "finding": 2,
+      "source": "Phase 8 Codex adversarial review (REGRESSION)",
+      "status": "done",
+      "summary": "_inbox_state now reports the true backlog size from SearchResult.total for the 'pending' field (threaded via inbox_result.total) instead of len(memories) from the capped result list; the sample preview still uses the capped list. Backlogs above max_memories (default 200) previously under-reported pending capped at 200.",
+      "changed_files": [
+        "python/src/open_brain/digest.py",
+        "python/tests/test_weekly_briefing.py"
+      ],
+      "evidence_refs": [
+        "python/tests/test_weekly_briefing.py::test_weekly_briefing_inbox_pending_reflects_search_total_not_capped_results"
+      ]
+    }
+  ],
   "changed_files": [
     "docs/features/agent-knowledge-workflows.md",
     "python/src/open_brain/cli/main.py",
