@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from open_brain.cli.client import MCPError, call_tool
-from open_brain.data_layer.postgres import PostgresDataLayer
+from open_brain.data_layer.postgres import PostgresDataLayer, suppress_migrations
 from open_brain.portable_backup import export_bundle, restore_bundle, verify_round_trip
 from open_brain.runtime import run_server
 
@@ -340,6 +340,7 @@ async def _cmd_doctor(_args: argparse.Namespace) -> Any:
 
 async def _cmd_export(args: argparse.Namespace) -> Any:
     """Export a portable knowledge bundle."""
+    suppress_migrations()
     return await export_bundle(
         Path(args.bundle_path),
         PostgresDataLayer(),
@@ -358,6 +359,7 @@ async def _cmd_restore(args: argparse.Namespace) -> Any:
 
 async def _cmd_verify(args: argparse.Namespace) -> Any:
     """Verify a portable knowledge bundle against the current store."""
+    suppress_migrations()
     return await verify_round_trip(
         Path(args.bundle_path),
         PostgresDataLayer(),
