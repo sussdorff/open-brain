@@ -35,6 +35,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- *(open-brain-2w8)* **`ob export` and `ob verify` skip redundant migration battery** — Both read-only CLI commands now call `suppress_migrations()` before constructing `PostgresDataLayer()`, so they no longer run the full migration battery on each invocation. Write-capable paths (`ob restore`, `ob people enrich --apply`) retain the default migrating behavior unchanged.
+
 - *(open-brain-y4b)* **Second Brain importer dry-run no longer writes to the database** — `get_pool()` previously fused connection-pool acquisition with the idempotent-but-data-mutating migration battery, causing every one-shot CLI invocation (including dry-run mode) to execute an `UPDATE memories ...` statement. The migration battery is now decoupled via `suppress_migrations()` (process-level opt-out) and an optional `run_migrations` parameter on `get_pool()`. The importer's dry-run path calls `suppress_migrations()` before any database access; `--apply` mode retains the default migrating behavior so writes never run against a stale schema. The MCP server startup path is unchanged.
 
 - *(open-brain-ccd)* **Canonical entity protection** — Memories can now be marked as canonical entities via `metadata.canonical_entity=true` + `metadata.canonical_kind` (one of `person`, `project`, `organization`, `concept`). Protected canonical entities are immune to automated demotion, deletion, and merging by decay, compaction, refine, triage, and materialize/archive operations.

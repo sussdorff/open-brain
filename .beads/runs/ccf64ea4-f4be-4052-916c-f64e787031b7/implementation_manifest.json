@@ -1,0 +1,89 @@
+{
+  "contract_version": "1",
+  "bead_id": "open-brain-2w8",
+  "acceptance_criteria": [
+    {
+      "id": "AC1",
+      "criterion": "ob export and ob verify perform zero migration-battery writes when invoked as fresh read-only one-shot CLI handlers.",
+      "status": "done",
+      "changed_files": [
+        "python/src/open_brain/cli/main.py",
+        "python/tests/test_cli.py"
+      ],
+      "evidence_refs": [
+        "cmd:red-cli-suppression-guards",
+        "cmd:green-cli-suppression-guards",
+        "cmd:cli-non-integration"
+      ]
+    },
+    {
+      "id": "AC2",
+      "criterion": "ob restore and ob people enrich --auto-apply keep the default migration behavior unchanged for write-capable direct-DB paths.",
+      "status": "done",
+      "changed_files": [
+        "python/tests/test_cli.py"
+      ],
+      "evidence_refs": [
+        "cmd:red-cli-suppression-guards",
+        "cmd:green-cli-suppression-guards",
+        "cmd:cli-non-integration",
+        "cmd:green-commit"
+      ]
+    }
+  ],
+  "changed_files": [
+    "python/src/open_brain/cli/main.py",
+    "python/tests/test_cli.py",
+    ".beads/runs/ccf64ea4-f4be-4052-916c-f64e787031b7/implementation_manifest.json",
+    ".beads/runs/ccf64ea4-f4be-4052-916c-f64e787031b7/evidence_ledger.json"
+  ],
+  "commits": [
+    {
+      "hash": "ae3f832",
+      "message": "test(open-brain-2w8): red \u2014 cli migration suppression guards"
+    },
+    {
+      "hash": "36d5f9a",
+      "message": "feat(open-brain-2w8): green \u2014 suppress migrations for read-only cli bundle commands"
+    }
+  ],
+  "tests": [
+    {
+      "id": "red-cli-suppression-guards",
+      "command": "PYTHONPATH=src UV_PROJECT_ENVIRONMENT=/Users/malte/code/open-brain/python/.venv UV_CACHE_DIR=.uv-cache uv run --no-sync pytest tests/test_cli.py::TestCommandHandlers::test_cmd_export_suppresses_migrations tests/test_cli.py::TestCommandHandlers::test_cmd_verify_suppresses_migrations tests/test_cli.py::TestCommandHandlers::test_cmd_restore_keeps_migrations tests/test_cli.py::TestCommandHandlers::test_cmd_people_enrichment_keeps_migrations -q",
+      "status": "failed_as_expected",
+      "observed_result": "4 failed; export/verify did not call suppress_migrations and restore/people enrichment could not yet patch open_brain.cli.main.suppress_migrations."
+    },
+    {
+      "id": "green-cli-suppression-guards",
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest tests/test_cli.py::TestCommandHandlers::test_cmd_export_suppresses_migrations tests/test_cli.py::TestCommandHandlers::test_cmd_verify_suppresses_migrations tests/test_cli.py::TestCommandHandlers::test_cmd_restore_keeps_migrations tests/test_cli.py::TestCommandHandlers::test_cmd_people_enrichment_keeps_migrations -q",
+      "status": "passed",
+      "observed_result": "4 passed."
+    },
+    {
+      "id": "cli-non-integration",
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest tests/test_cli.py -m \"not integration\" -q",
+      "status": "passed",
+      "observed_result": "93 passed, 1 deselected."
+    },
+    {
+      "id": "green-commit",
+      "command": "git add python/src/open_brain/cli/main.py && git commit -m \"feat(open-brain-2w8): green \u2014 suppress migrations for read-only cli bundle commands\"",
+      "status": "passed",
+      "observed_result": "Created commit 36d5f9a; hook reported 1487 passed, 27 deselected."
+    }
+  ],
+  "external_resources": [],
+  "scope_changes": [],
+  "downstream_impacts": [
+    "ob export now suppresses the process-global migration battery before constructing PostgresDataLayer.",
+    "ob verify now suppresses the process-global migration battery before constructing PostgresDataLayer.",
+    "ob restore and ob people enrich remain write-capable paths with no suppress_migrations call."
+  ],
+  "evidence_refs": [
+    "cmd:red-cli-suppression-guards -> .beads/runs/ccf64ea4-f4be-4052-916c-f64e787031b7/evidence_ledger.json#commands",
+    "cmd:green-cli-suppression-guards -> .beads/runs/ccf64ea4-f4be-4052-916c-f64e787031b7/evidence_ledger.json#commands",
+    "cmd:cli-non-integration -> .beads/runs/ccf64ea4-f4be-4052-916c-f64e787031b7/evidence_ledger.json#commands",
+    "artifact:evidence-ledger -> .beads/runs/ccf64ea4-f4be-4052-916c-f64e787031b7/evidence_ledger.json"
+  ]
+}

@@ -855,6 +855,142 @@ class TestCommandHandlers:
         )
         assert result == {"ok": True}
 
+    @pytest.mark.asyncio
+    async def test_cmd_export_suppresses_migrations(self, tmp_path: Path):
+        args = parse(["export", str(tmp_path / "bundle"), "--source-label", "fixture"])
+        call_order: list[str] = []
+        fake_data_layer = object()
+
+        def suppress_side_effect() -> None:
+            call_order.append("suppress")
+
+        def data_layer_side_effect() -> object:
+            call_order.append("data_layer")
+            return fake_data_layer
+
+        with (
+            patch(
+                "open_brain.cli.main.suppress_migrations",
+                create=True,
+                side_effect=suppress_side_effect,
+            ) as suppress,
+            patch(
+                "open_brain.cli.main.PostgresDataLayer",
+                side_effect=data_layer_side_effect,
+            ) as mock_data_layer,
+            patch("open_brain.cli.main.export_bundle", new_callable=AsyncMock) as mock_export,
+        ):
+            mock_export.return_value = {"bundle_format_version": "1.0.0"}
+            from open_brain.cli.main import _cmd_export
+            result = await _cmd_export(args)
+
+        suppress.assert_called_once_with()
+        mock_data_layer.assert_called_once_with()
+        mock_export.assert_called_once_with(
+            Path(args.bundle_path),
+            fake_data_layer,
+            source_label="fixture",
+        )
+        assert call_order == ["suppress", "data_layer"]
+        assert result == {"bundle_format_version": "1.0.0"}
+
+    @pytest.mark.asyncio
+    async def test_cmd_verify_suppresses_migrations(self, tmp_path: Path):
+        args = parse(["verify", str(tmp_path / "bundle")])
+        call_order: list[str] = []
+        fake_data_layer = object()
+
+        def suppress_side_effect() -> None:
+            call_order.append("suppress")
+
+        def data_layer_side_effect() -> object:
+            call_order.append("data_layer")
+            return fake_data_layer
+
+        with (
+            patch(
+                "open_brain.cli.main.suppress_migrations",
+                create=True,
+                side_effect=suppress_side_effect,
+            ) as suppress,
+            patch(
+                "open_brain.cli.main.PostgresDataLayer",
+                side_effect=data_layer_side_effect,
+            ) as mock_data_layer,
+            patch("open_brain.cli.main.verify_round_trip", new_callable=AsyncMock) as mock_verify,
+        ):
+            mock_verify.return_value = {"ok": True}
+            from open_brain.cli.main import _cmd_verify
+            result = await _cmd_verify(args)
+
+        suppress.assert_called_once_with()
+        mock_data_layer.assert_called_once_with()
+        mock_verify.assert_called_once_with(
+            Path(args.bundle_path),
+            fake_data_layer,
+        )
+        assert call_order == ["suppress", "data_layer"]
+        assert result == {"ok": True}
+
+    @pytest.mark.asyncio
+    async def test_cmd_restore_keeps_migrations(self, tmp_path: Path):
+        args = parse(["restore", str(tmp_path / "bundle"), "--skip-embeddings"])
+        with (
+            patch("open_brain.cli.main.suppress_migrations") as suppress,
+            patch("open_brain.cli.main.PostgresDataLayer") as mock_data_layer,
+            patch("open_brain.cli.main.restore_bundle", new_callable=AsyncMock) as mock_restore,
+        ):
+            mock_restore.return_value = {"restored": {"memories": 2}}
+            from open_brain.cli.main import _cmd_restore
+            result = await _cmd_restore(args)
+
+        suppress.assert_not_called()
+        mock_data_layer.assert_called_once_with()
+        mock_restore.assert_called_once_with(
+            Path(args.bundle_path),
+            mock_data_layer.return_value,
+            regenerate_embeddings=False,
+        )
+        assert result == {"restored": {"memories": 2}}
+
+    @pytest.mark.asyncio
+    async def test_cmd_people_enrichment_keeps_migrations(self, capsys):
+        args = parse(
+            [
+                "people",
+                "enrich",
+                "--auto-apply",
+                "--searxng-url",
+                "http://searxng.local",
+            ]
+        )
+
+        with (
+            patch("open_brain.cli.main.suppress_migrations") as cli_suppress,
+            patch("open_brain.data_layer.postgres.suppress_migrations") as postgres_suppress,
+            patch("open_brain.cli.direct.load_database_url", return_value="postgresql://db"),
+            patch("open_brain.cli.direct.prepare_direct_env") as prepare_direct_env,
+            patch("open_brain.data_layer.postgres.PostgresDataLayer") as mock_data_layer,
+            patch("open_brain.data_layer.postgres.close_pool", new_callable=AsyncMock) as close_pool,
+            patch(
+                "open_brain.people.enrichment.list_enrichment_candidates",
+                new_callable=AsyncMock,
+                return_value=[],
+            ) as list_candidates,
+        ):
+            from open_brain.cli.main import _cmd_people_enrichment
+            result = await _cmd_people_enrichment(args)
+
+        captured = capsys.readouterr()
+        cli_suppress.assert_not_called()
+        postgres_suppress.assert_not_called()
+        prepare_direct_env.assert_called_once_with("postgresql://db")
+        mock_data_layer.assert_called_once_with()
+        list_candidates.assert_awaited_once_with(mock_data_layer.return_value)
+        close_pool.assert_awaited_once_with()
+        assert "No enrichment candidates found." in captured.out
+        assert result is None
+
     def test_server_calls_runtime(self):
         args = parse(["server", "--host", "127.0.0.1", "--port", "9000"])
         with patch("open_brain.cli.main.run_server") as mock_run_server:
