@@ -214,9 +214,12 @@ Canonical entities are round-tripped through the memory metadata flag
 
 The command-line surface is:
 
-- `open-brain export <path> [--source-label ...]`
-- `open-brain restore <path> [--skip-embeddings]`
-- `open-brain verify <path>`
+- `ob export <path> [--source-label ...]`
+- `ob restore <path> [--skip-embeddings]`
+- `ob verify <path>`
+
+The console script entrypoint is `ob` (see `pyproject.toml` `[project.scripts]`: `ob =
+"open_brain.cli.main:main"`; the argparse `prog` is also set to `"ob"` in `cli/main.py`).
 
 Restore regenerates embeddings by default. `--skip-embeddings` sets `regenerate_embeddings` to
 `False`.
