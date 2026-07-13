@@ -358,16 +358,16 @@ class TestPostgresSaveMemory:
 
     @pytest.mark.asyncio
     async def test_session_summary_upsert_updates_existing(self, dl):
-        """When a memory with the same session_ref exists, it is updated instead of inserted."""
+        """Same-project session_summary rows are updated instead of duplicated."""
         existing_row = MagicMock()
         existing_row.__getitem__ = lambda self, key: {
             "id": 55, "content": "Original content"
         }[key]
 
         conn = AsyncMock()
-        # fetchrow calls: _resolve_index_id (no project), then SELECT by session_ref
         conn.fetchrow.side_effect = [
-            existing_row,  # SELECT ... WHERE session_ref = $1
+            {"id": 7},     # _resolve_index_id: existing index found
+            existing_row,  # scoped session_summary upsert check
         ]
         pool = _make_pool(conn)
 
@@ -380,6 +380,7 @@ class TestPostgresSaveMemory:
                 SaveMemoryParams(
                     text="New summary text",
                     type="session_summary",
+                    project="myproj",
                     title="Updated Title",
                     session_ref="open-brain-193",
                 )
@@ -387,6 +388,12 @@ class TestPostgresSaveMemory:
 
         assert result.id == 55
         assert result.message == "Memory updated (upsert)"
+        upsert_sql, session_ref, search_index_id = conn.fetchrow.call_args_list[1][0]
+        assert "session_ref = $1" in upsert_sql
+        assert "type = 'session_summary'" in upsert_sql
+        assert "index_id IS NOT DISTINCT FROM $2" in upsert_sql
+        assert session_ref == "open-brain-193"
+        assert search_index_id == 7
         # Verify an UPDATE was executed (not an INSERT)
         conn.execute.assert_called_once()
         update_sql = conn.execute.call_args[0][0]
@@ -396,6 +403,144 @@ class TestPostgresSaveMemory:
         merged = update_args[1]  # first positional value after the SQL
         assert "Original content" in merged
         assert "New summary text" in merged
+
+    @pytest.mark.asyncio
+    async def test_session_summary_upsert_preserves_non_summary_records_with_colliding_session_ref(
+        self, dl
+    ):
+        """A session_summary save must not mutate non-summary rows sharing session_ref."""
+        non_summary_records = [
+            {
+                "id": 201,
+                "type": "learning",
+                "title": "Learning title",
+                "content": "Learning content",
+                "narrative": "Learning narrative",
+                "index_id": 7,
+            },
+            {
+                "id": 202,
+                "type": "debrief",
+                "title": "Debrief title",
+                "content": "Debrief content",
+                "narrative": "Debrief narrative",
+                "index_id": 7,
+            },
+        ]
+        before = [record.copy() for record in non_summary_records]
+        inserted_row = MagicMock()
+        inserted_row.__getitem__ = lambda self, key: 900 if key == "id" else None
+
+        def row_from_record(record: dict[str, object]) -> MagicMock:
+            row = MagicMock()
+            row.__getitem__ = lambda self, key: record[key]
+            return row
+
+        async def fetchrow_side_effect(sql: str, *args: object):
+            if "SELECT id FROM memory_indexes" in sql:
+                return {"id": 7}
+            if "SELECT id, content FROM memories WHERE session_ref" in sql:
+                if "type = 'session_summary'" in sql and "index_id IS NOT DISTINCT FROM $2" in sql:
+                    return None
+                return row_from_record(non_summary_records[0])
+            if "metadata->>'content_hash'" in sql:
+                return None
+            if "INSERT INTO memories" in sql:
+                return inserted_row
+            raise AssertionError(f"Unexpected fetchrow SQL: {sql}")
+
+        async def execute_side_effect(sql: str, *args: object):
+            if not sql.startswith("UPDATE memories SET"):
+                return None
+            updated_id = args[-1]
+            for record in non_summary_records:
+                if record["id"] == updated_id:
+                    record["content"] = args[0]
+                    if "title =" in sql:
+                        record["title"] = args[1]
+                    if "narrative =" in sql:
+                        record["narrative"] = args[-2]
+
+        conn = AsyncMock()
+        conn.fetchrow.side_effect = fetchrow_side_effect
+        conn.execute.side_effect = execute_side_effect
+        pool = _make_pool(conn)
+
+        with (
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
+        ):
+            mock_asyncio.create_task = MagicMock()
+            result = await dl.save_memory(
+                SaveMemoryParams(
+                    text="New summary text",
+                    type="session_summary",
+                    project="myproj",
+                    title="Summary title",
+                    narrative="Summary narrative",
+                    session_ref="shared-session",
+                )
+            )
+
+        assert non_summary_records == before
+        assert result.id == 900
+        assert result.message == "Memory saved"
+        conn.execute.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_session_summary_replace_scopes_lookup_and_delete_by_project(self, dl):
+        """Replace-mode session_summary lookup and delete stay inside the project scope."""
+        inserted_row = MagicMock()
+        inserted_row.__getitem__ = lambda self, key: 901 if key == "id" else None
+
+        @asynccontextmanager
+        async def fake_transaction():
+            yield
+
+        conn = AsyncMock()
+        conn.transaction = fake_transaction
+        conn.fetchrow.side_effect = [
+            {"id": 7},     # _resolve_index_id: existing index found
+            inserted_row,  # INSERT INTO memories
+        ]
+        conn.fetch.return_value = [{"id": 55}]
+        pool = _make_pool(conn)
+
+        with (
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
+        ):
+            mock_asyncio.create_task = MagicMock()
+            result = await dl.save_memory(
+                SaveMemoryParams(
+                    text="Replacement summary",
+                    type="session_summary",
+                    project="myproj",
+                    title="Replacement title",
+                    session_ref="open-brain-193",
+                    upsert_mode="replace",
+                )
+            )
+
+        assert result.id == 901
+        existing_sql, session_ref, search_index_id = conn.fetch.call_args[0]
+        assert "session_ref = $1" in existing_sql
+        assert "type = 'session_summary'" in existing_sql
+        assert "index_id IS NOT DISTINCT FROM $2" in existing_sql
+        assert session_ref == "open-brain-193"
+        assert search_index_id == 7
+
+        delete_memories_call = [
+            call
+            for call in conn.execute.call_args_list
+            if "DELETE FROM memories WHERE" in call[0][0]
+        ][0]
+        delete_sql, delete_session_ref, delete_index_id = delete_memories_call[0]
+        assert "session_ref = $1" in delete_sql
+        assert "type = 'session_summary'" in delete_sql
+        assert "index_id IS NOT DISTINCT FROM $2" in delete_sql
+        assert delete_session_ref == "open-brain-193"
+        assert delete_index_id == 7
 
     @pytest.mark.asyncio
     async def test_non_session_summary_skips_upsert(self, dl):
