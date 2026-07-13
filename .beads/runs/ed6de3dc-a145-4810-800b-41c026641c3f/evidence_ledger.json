@@ -1,0 +1,95 @@
+{
+  "contract_version": "1",
+  "bead_id": "open-brain-bv5f",
+  "commands": [
+    {
+      "id": "cmd:focused-red",
+      "command": "cd python && uv run pytest <five focused bv5f tests> -q",
+      "purpose": "TDD RED proof for content-hash reconciliation, external references, and Postgres lookup scope.",
+      "exit_code": 1,
+      "observed": "5 failed: importable remained 1 for content duplicates, external URLs remained unresolved attachments, and PostgresDataLayer lacked the hash lookup."
+    },
+    {
+      "id": "cmd:focused-green",
+      "command": "cd python && uv run pytest <five focused bv5f tests> -q",
+      "purpose": "TDD GREEN proof for all new focused behaviors.",
+      "exit_code": 0,
+      "observed": "5 passed."
+    },
+    {
+      "id": "cmd:importer-regression",
+      "command": "cd python && uv run pytest tests/test_second_brain_import.py tests/test_postgres.py::TestPostgresIngestStatus -q",
+      "purpose": "Focused importer and hash-query regression gate.",
+      "exit_code": 0,
+      "observed": "23 passed."
+    },
+    {
+      "id": "cmd:ruff",
+      "command": "cd python && uv run ruff check <touched source/importer test files>; uv run ruff check --ignore F841 tests/test_postgres.py",
+      "purpose": "Lint all touched code while isolating an unrelated pre-existing F841 in test_postgres.py.",
+      "exit_code": 0,
+      "observed": "All touched checks passed; the unignored file-wide run reported only pre-existing F841 at tests/test_postgres.py:1012."
+    },
+    {
+      "id": "cmd:mypy",
+      "command": "cd python && uv run mypy --disable-error-code=import-untyped src/open_brain/data_layer/interface.py src/open_brain/data_layer/postgres.py src/open_brain/second_brain_import.py",
+      "purpose": "Type-check touched production code while excluding baseline missing third-party stub diagnostics.",
+      "exit_code": 0,
+      "observed": "Success: no issues found in 3 source files."
+    },
+    {
+      "id": "cmd:compile-diff-check",
+      "command": "cd python && uv run python -m py_compile <touched python files> && git diff --check",
+      "purpose": "Syntax and whitespace verification.",
+      "exit_code": 0,
+      "observed": "No output; all files compiled and diff check passed."
+    },
+    {
+      "id": "cmd:full-regression",
+      "command": "cd python && uv run pytest -m \"not integration\" -q",
+      "purpose": "Full non-external Python regression gate.",
+      "exit_code": 0,
+      "observed": "1502 passed, 33 deselected, 67 pre-existing warnings."
+    },
+    {
+      "id": "cmd:combined-verifier-gate",
+      "command": "temporary m9e+bv5f worktree: cd python && uv run pytest tests/test_verify_second_brain_cutover.py tests/test_bv5f_gate_integration_temp.py tests/test_second_brain_import.py -q",
+      "purpose": "Execute the pending m9e verifier unchanged against bv5f importer semantics, including explicit green and red AC4 cases, without touching the locked m9e worktree.",
+      "exit_code": 0,
+      "observed": "31 passed. Green: same-body/different-source note with correct and single-slash HTTP(S) images produced importable=0 and unresolved_attachments=0. Red: genuinely new content with an unresolved local PDF produced importable=1 and unresolved_attachments=1."
+    },
+    {
+      "id": "cmd:codex-adversarial",
+      "command": "RUN_ID=ed6de3dc-a145-4810-800b-41c026641c3f BEAD_ID=open-brain-bv5f PHASE_LABEL=codex-adversarial CODEX_EXEC_SANDBOX_MODE=read-only uv run ~/.agents/skills/beads/scripts/codex-exec.py --diff-range 25a4071...HEAD <prompt>",
+      "purpose": "Independent Codex adversarial review of the full implementation diff and executed evidence.",
+      "exit_code": 0,
+      "observed": "LGTM. Installed runtime parser returned status=ok, total_findings=0."
+    },
+    {
+      "id": "cmd:post-main-merge-regression",
+      "command": "git merge origin/main --no-edit; cd python && uv run pytest -m \"not integration\" -q",
+      "purpose": "Verify bv5f after incorporating the concurrently landed open-brain-9fo main branch without rebasing.",
+      "exit_code": 0,
+      "observed": "Merge completed without conflict; 1512 passed, 33 deselected, 62 pre-existing warnings."
+    }
+  ],
+  "skipped_checks": [],
+  "artifacts": [
+    {
+      "path": ".beads/runs/ed6de3dc-a145-4810-800b-41c026641c3f/implementation_manifest.json",
+      "kind": "implementation_manifest"
+    },
+    {
+      "path": ".beads/runs/ed6de3dc-a145-4810-800b-41c026641c3f/evidence_ledger.json",
+      "kind": "evidence_ledger"
+    },
+    {
+      "path": "python/tests/test_second_brain_import.py",
+      "kind": "test"
+    },
+    {
+      "path": "python/tests/test_postgres.py",
+      "kind": "test"
+    }
+  ]
+}
