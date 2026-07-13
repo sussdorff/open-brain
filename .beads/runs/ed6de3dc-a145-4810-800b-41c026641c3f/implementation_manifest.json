@@ -1,0 +1,123 @@
+{
+  "contract_version": "1",
+  "bead_id": "open-brain-bv5f",
+  "acceptance_criteria": [
+    {
+      "id": 1,
+      "text": "Dry-run classifies an existing body under any source_ref as duplicate, not importable.",
+      "status": "done",
+      "changed_files": [
+        "python/src/open_brain/data_layer/interface.py",
+        "python/src/open_brain/data_layer/postgres.py",
+        "python/src/open_brain/second_brain_import.py",
+        "python/tests/test_postgres.py",
+        "python/tests/test_second_brain_import.py"
+      ],
+      "evidence_refs": [
+        "cmd:focused-red",
+        "cmd:focused-green",
+        "cmd:full-regression"
+      ]
+    },
+    {
+      "id": 2,
+      "text": "An immediate dry-run after apply reports importable=0 for unmatched content duplicates.",
+      "status": "done",
+      "changed_files": [
+        "python/src/open_brain/second_brain_import.py",
+        "python/tests/test_second_brain_import.py"
+      ],
+      "evidence_refs": [
+        "cmd:focused-red",
+        "cmd:focused-green",
+        "cmd:importer-regression"
+      ]
+    },
+    {
+      "id": 3,
+      "text": "External HTTP(S) references are non-blocking while local attachments retain reconciliation behavior.",
+      "status": "done",
+      "changed_files": [
+        "python/src/open_brain/second_brain_import.py",
+        "python/tests/test_second_brain_import.py"
+      ],
+      "evidence_refs": [
+        "cmd:focused-red",
+        "cmd:focused-green",
+        "cmd:importer-regression"
+      ]
+    },
+    {
+      "id": 4,
+      "text": "The migration_reconciliation gate is green only for reconciled duplicates/external references and red for genuinely outstanding content or local attachments.",
+      "status": "done",
+      "changed_files": [
+        "python/src/open_brain/second_brain_import.py",
+        "python/tests/test_second_brain_import.py"
+      ],
+      "evidence_refs": [
+        "cmd:full-regression",
+        "cmd:combined-verifier-gate"
+      ]
+    }
+  ],
+  "changed_files": [
+    "CHANGELOG.md",
+    "python/src/open_brain/data_layer/interface.py",
+    "python/src/open_brain/data_layer/postgres.py",
+    "python/src/open_brain/second_brain_import.py",
+    "python/tests/test_postgres.py",
+    "python/tests/test_second_brain_import.py"
+  ],
+  "commits": [
+    {
+      "sha": "6d4e11fd29d9de5f9cbdf95d902c11802240573b",
+      "message": "fix(open-brain-bv5f): reconcile content duplicates and web references"
+    }
+  ],
+  "tests": [
+    {
+      "command": "cd python && uv run pytest <five focused bv5f tests> -q",
+      "status": "passed",
+      "evidence_ref": "cmd:focused-green"
+    },
+    {
+      "command": "cd python && uv run pytest tests/test_second_brain_import.py tests/test_postgres.py::TestPostgresIngestStatus -q",
+      "status": "passed",
+      "evidence_ref": "cmd:importer-regression"
+    },
+    {
+      "command": "cd python && uv run pytest -m \"not integration\" -q",
+      "status": "passed",
+      "evidence_ref": "cmd:full-regression"
+    },
+    {
+      "command": "temporary m9e+bv5f worktree: cd python && uv run pytest tests/test_verify_second_brain_cutover.py tests/test_bv5f_gate_integration_temp.py tests/test_second_brain_import.py -q",
+      "status": "passed",
+      "evidence_ref": "cmd:combined-verifier-gate"
+    }
+  ],
+  "external_resources": [
+    {
+      "type": "git_branch",
+      "value": "worktree-bead-open-brain-m9e",
+      "purpose": "Pending cutover verifier consumer used only for isolated combined-state verification."
+    }
+  ],
+  "scope_changes": [],
+  "downstream_impacts": [
+    "The pending open-brain-m9e cutover verifier consumes the corrected reconciliation summary without any gate relaxation."
+  ],
+  "evidence_refs": [
+    "cmd:focused-red",
+    "cmd:focused-green",
+    "cmd:importer-regression",
+    "cmd:ruff",
+    "cmd:mypy",
+    "cmd:compile-diff-check",
+    "cmd:full-regression",
+    "cmd:combined-verifier-gate",
+    "cmd:codex-adversarial",
+    "cmd:post-main-merge-regression"
+  ]
+}

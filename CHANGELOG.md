@@ -42,6 +42,10 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- *(open-brain-bv5f)* **Second Brain cutover reconciliation now reaches a truthful green state** — Dry-run reconciliation mirrors apply-time content-hash deduplication across different source references, including duplicate bodies within one vault batch. External HTTP(S) web-clip images, including single-slash `https:/` references, no longer count as Paperless attachments, while local attachment failures and genuinely new content still keep the migration gate red.
+
+- *(open-brain-9fo)* **Portable backup restore preserves Unicode line-separator content** — JSONL readers now split records strictly on LF, so U+2028, U+2029, and U+0085 inside valid JSON strings no longer fragment backup, migration, or transcript records. Portable export, restore, and round-trip verification regression coverage confirms the characters survive unchanged.
+
 - *(open-brain-2w8)* **`ob export` and `ob verify` skip redundant migration battery** — Both read-only CLI commands now call `suppress_migrations()` before constructing `PostgresDataLayer()`, so they no longer run the full migration battery on each invocation. Write-capable paths (`ob restore`, `ob people enrich --apply`) retain the default migrating behavior unchanged.
 
 - *(open-brain-y4b)* **Second Brain importer dry-run no longer writes to the database** — `get_pool()` previously fused connection-pool acquisition with the idempotent-but-data-mutating migration battery, causing every one-shot CLI invocation (including dry-run mode) to execute an `UPDATE memories ...` statement. The migration battery is now decoupled via `suppress_migrations()` (process-level opt-out) and an optional `run_migrations` parameter on `get_pool()`. The importer's dry-run path calls `suppress_migrations()` before any database access; `--apply` mode retains the default migrating behavior so writes never run against a stale schema. The MCP server startup path is unchanged.
@@ -1607,4 +1611,3 @@ All notable changes to this project will be documented in this file.
 ### Init
 
 - Scaffold open-brain repo with TypeScript + MCP server structure
-
