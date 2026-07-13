@@ -16,6 +16,13 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- *(open-brain-m9e)* **Second Brain cutover verifier** — `scripts/verify_second_brain_cutover.py` is a pre-archival gate that operators and agents run before archiving the legacy Second Brain vault. It checks four independent gates, each of which fails closed:
+  - `open_brain_capabilities` — verifies all seven prerequisite Open Brain capabilities are live (canonical entities, vocabulary, capture inbox, daily/weekly review, Paperless resolution, vault import, portable backup).
+  - `paperless_references` — resolves a caller-supplied list of Paperless document IDs against the live Paperless-ngx instance.
+  - `migration_reconciliation` — dry-runs the vault importer and asserts no importable notes, unresolved wikilinks, unresolved attachments, or skipped notes remain.
+  - `backup_round_trip` — exports data to a temporary bundle, restores it, and verifies round-trip integrity via an injected restore-safe store; the shipped CLI does not yet wire this factory, so it always reports red by design (fail-closed default — the live production database is never a restore target) until a safe store is wired in a follow-up.
+  - On any successful run the verifier writes a durable `cutover-report.v1` JSON report (redacted aggregate counts only — no PII, tokens, or raw content) to a caller-specified path. The committed evidence artifact lives at `artifacts/second-brain-cutover-report.json`.
+
 - *(open-brain-5qo)* **Agent knowledge workflows and daily review** — Agents can now use Open Brain as a full replacement for Obsidian capture and periodic reviews without adding a graphical note-taking surface.
   - New `daily_review` MCP tool returns date-bounded entries for a selected calendar day, source references from `metadata.url`, `metadata.source_ref`, `metadata.paperless_reference.document_id`, or `session_ref`, unresolved inbox captures for the same day, and counts by type. This is a base memory-scope operation (no evolution gate), analogous to `search` and `timeline`.
   - New `ob daily [DATE] [--project P]` CLI command exposes the same daily review to humans and operator scripts.
@@ -34,6 +41,8 @@ All notable changes to this project will be documented in this file.
   - `ingest_status` data-layer query now accepts an optional `memory_type` filter for efficient duplicate detection by type.
 
 ### Fixed
+
+- *(open-brain-cd79)* **Second Brain cutover accepts an empty canonical-entity set when filtering works** — The `open_brain_capabilities` gate now verifies the canonical-entity filter query itself and reports its full result total. A successful zero-count query is green, while an unavailable, broken, or malformed query remains red.
 
 - *(open-brain-bv5f)* **Second Brain cutover reconciliation now reaches a truthful green state** — Dry-run reconciliation mirrors apply-time content-hash deduplication across different source references, including duplicate bodies within one vault batch. External HTTP(S) web-clip images, including single-slash `https:/` references, no longer count as Paperless attachments, while local attachment failures and genuinely new content still keep the migration gate red.
 

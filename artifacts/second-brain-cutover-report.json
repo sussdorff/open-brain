@@ -1,0 +1,67 @@
+{
+  "gates": [
+    {
+      "counts": {
+        "canonical_entities": 3,
+        "missing": 0,
+        "required": 7,
+        "satisfied": 7,
+        "stats_memories": 12,
+        "stats_relationships": 4,
+        "stats_sessions": 2,
+        "stats_types": 4,
+        "unknown": 0
+      },
+      "detail": "required capabilities verified",
+      "id": "open_brain_capabilities",
+      "status": "green"
+    },
+    {
+      "counts": {
+        "exceptions": 0,
+        "failed": 0,
+        "found": 1,
+        "malformed": 0,
+        "not_configured": 0,
+        "not_found": 0,
+        "probes": 1,
+        "transport_error": 0,
+        "unauthorized": 0
+      },
+      "detail": "paperless probes found",
+      "id": "paperless_references",
+      "status": "green"
+    },
+    {
+      "counts": {
+        "duplicate": 0,
+        "importable": 0,
+        "skipped": 0,
+        "unresolved_attachments": 0,
+        "unresolved_links": 0
+      },
+      "detail": "migration reconciliation complete",
+      "id": "migration_reconciliation",
+      "status": "green"
+    },
+    {
+      "counts": {
+        "closure_total": 2,
+        "indexes": 1,
+        "memories": 1,
+        "relationships": 0,
+        "round_trip_ok": 1
+      },
+      "detail": "backup round trip verified",
+      "id": "backup_round_trip",
+      "status": "green"
+    }
+  ],
+  "meta": {
+    "generated_at": "2026-07-12T13:01:27.998067+00:00",
+    "open_brain_git_sha": "931e11d87e0bc1ae7b7ea0f929d8f5f48fbcaa49",
+    "verifier_version": "20260712.1"
+  },
+  "overall_status": "green",
+  "schema_version": "cutover-report.v1"
+}

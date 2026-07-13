@@ -1,0 +1,164 @@
+{
+  "contract_version": "1",
+  "bead_id": "open-brain-m9e",
+  "commands": [
+    {
+      "id": "cmd:red-targeted-verifier-tests",
+      "command": "uv run pytest tests/test_verify_second_brain_cutover.py -q",
+      "purpose": "RED gate for the new verifier test contract before production code existed.",
+      "exit_code": 1,
+      "observed_result": "7 tests failed for the intended reason: FileNotFoundError for scripts/verify_second_brain_cutover.py."
+    },
+    {
+      "id": "cmd:red-commit-hook-suite",
+      "command": "git add python/tests/test_verify_second_brain_cutover.py && git commit -m \"test(open-brain-m9e): red - verify cutover gates\"",
+      "purpose": "Attempt the required red commit with the repository hook active.",
+      "exit_code": 1,
+      "observed_result": "Hook-ran non-integration suite had 1497 passed, 33 deselected, 7 failed; failures were the expected missing verifier script."
+    },
+    {
+      "id": "cmd:green-targeted-verifier-tests",
+      "command": "uv run pytest tests/test_verify_second_brain_cutover.py -q",
+      "purpose": "GREEN gate for all verifier fixtures and schema/PII regression tests.",
+      "exit_code": 0,
+      "observed_result": "7 passed."
+    },
+    {
+      "id": "cmd:green-full-non-integration-suite",
+      "command": "uv run pytest -m \"not integration\"",
+      "purpose": "Full non-integration regression suite after implementing the verifier.",
+      "exit_code": 0,
+      "observed_result": "1504 passed, 33 deselected, 64 warnings."
+    },
+    {
+      "id": "cmd:red-cold-review-regression-tests",
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache uv run pytest tests/test_verify_second_brain_cutover.py -q",
+      "purpose": "RED gate for the cold-review regression tests before applying the inline fixes.",
+      "exit_code": 1,
+      "observed_result": "2 failed, 6 passed; failures confirmed unknown capability satisfied count was 0 instead of 1 and --help returned 2 instead of 0."
+    },
+    {
+      "id": "cmd:green-cold-review-targeted-tests",
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache uv run pytest tests/test_verify_second_brain_cutover.py -q",
+      "purpose": "GREEN gate for targeted verifier regressions after fixing the cold-review findings.",
+      "exit_code": 0,
+      "observed_result": "8 passed."
+    },
+    {
+      "id": "cmd:green-cold-review-full-non-integration-suite",
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache uv run pytest -m \"not integration\"",
+      "purpose": "Full non-integration regression suite after fixing the cold-review findings.",
+      "exit_code": 0,
+      "observed_result": "1505 passed, 33 deselected, 64 warnings."
+    },
+    {
+      "id": "cmd:green-commit-hook-suite",
+      "command": "git add scripts/verify_second_brain_cutover.py python/tests/test_verify_second_brain_cutover.py && git commit -m \"feat(open-brain-m9e): green - add cutover verifier\"",
+      "purpose": "Commit the green verifier implementation with the repository hook active.",
+      "exit_code": 0,
+      "observed_result": "Hook-ran non-integration suite passed with 1504 passed, 33 deselected, 64 warnings; commit 931e11d87e0bc1ae7b7ea0f929d8f5f48fbcaa49 created."
+    },
+    {
+      "id": "cmd:fixture-report-generation-cache-failure",
+      "command": "uv run python .beads/runs/ea44a06b-6c3c-4262-a25f-9d9b1433b27f/generate_cutover_report_tmp.py",
+      "purpose": "Generate the durable report artifact from the complete fixture.",
+      "exit_code": 2,
+      "observed_result": "uv could not initialize /Users/malte/.cache/uv under the sandbox; rerun used a writable UV_CACHE_DIR."
+    },
+    {
+      "id": "cmd:fixture-report-generation",
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache uv run python ../.beads/runs/ea44a06b-6c3c-4262-a25f-9d9b1433b27f/generate_cutover_report_tmp.py",
+      "purpose": "Generate the committed redacted cutover report from the hermetic complete fixture.",
+      "exit_code": 0,
+      "observed_result": "artifacts/second-brain-cutover-report.json written with overall_status=green and all four gates green."
+    },
+    {
+      "id": "cmd:json-validate-manifest",
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache uv run python -m json.tool ../.beads/runs/ea44a06b-6c3c-4262-a25f-9d9b1433b27f/implementation_manifest.json",
+      "purpose": "Validate implementation manifest JSON syntax.",
+      "exit_code": 0,
+      "observed_result": "json.tool parsed and printed implementation_manifest.json successfully."
+    },
+    {
+      "id": "cmd:json-validate-evidence",
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache uv run python -m json.tool ../.beads/runs/ea44a06b-6c3c-4262-a25f-9d9b1433b27f/evidence_ledger.json",
+      "purpose": "Validate evidence ledger JSON syntax.",
+      "exit_code": 0,
+      "observed_result": "json.tool parsed and printed evidence_ledger.json successfully."
+    },
+    {
+      "id": "cmd:json-validate-report",
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache uv run python -m json.tool ../artifacts/second-brain-cutover-report.json",
+      "purpose": "Validate committed cutover report JSON syntax.",
+      "exit_code": 0,
+      "observed_result": "json.tool parsed and printed second-brain-cutover-report.json successfully."
+    },
+    {
+      "id": "cmd:green-codex-regression-targeted-tests",
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache uv run pytest tests/test_verify_second_brain_cutover.py -q",
+      "purpose": "GREEN gate for the two Codex adversarial regression fixes (redaction-bypass dict branch removed; skipped-count gate added).",
+      "exit_code": 0,
+      "observed_result": "9 passed (added test_migration_reconciliation_skipped_notes_fail_named_gate_only; updated test_cli_exit_codes_follow_cutover_status)."
+    },
+    {
+      "id": "cmd:green-codex-regression-full-non-integration-suite",
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache uv run pytest -m \"not integration\"",
+      "purpose": "Full non-integration regression suite after applying the Codex adversarial regression fixes.",
+      "exit_code": 0,
+      "observed_result": "1506 passed, 33 deselected, 64 warnings."
+    },
+    {
+      "id": "cmd:green-codex-recheck-meta-targeted-tests",
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache uv run pytest tests/test_verify_second_brain_cutover.py -q",
+      "purpose": "GREEN gate for the Codex re-check meta-redaction completion (CutoverReport.meta locked to ALLOWED_META_KEYS; to_payload raises ValueError on unexpected keys).",
+      "exit_code": 0,
+      "observed_result": "10 passed (added test_to_payload_rejects_arbitrary_meta_keys)."
+    },
+    {
+      "id": "cmd:green-codex-recheck-meta-full-non-integration-suite",
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache uv run pytest -m \"not integration\"",
+      "purpose": "Full non-integration regression suite after locking CutoverReport.meta to the known-safe key set.",
+      "exit_code": 0,
+      "observed_result": "1507 passed, 33 deselected, 64 warnings."
+    }
+  ],
+  "skipped_checks": [
+    {
+      "check": "Live Open Brain database cutover verification",
+      "reason": "Out of scope for this dispatch and not available without live DB configuration; fixture-backed store was the required MoC for backup isolation."
+    },
+    {
+      "check": "Live Paperless probe",
+      "reason": "Out of scope for this dispatch and would require network and credentials; Paperless behavior is verified with injected resolver statuses."
+    },
+    {
+      "check": "second-brain archival verification",
+      "reason": "Explicitly reserved for the later dedicated second-brain repository dispatch."
+    },
+    {
+      "check": "git push",
+      "reason": "Explicitly deferred by the dispatch output contract until session-close after both repositories' work lands."
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "artifact:second-brain-cutover-report",
+      "path": "artifacts/second-brain-cutover-report.json",
+      "producer": "scripts/verify_second_brain_cutover.py run_cutover via hermetic complete fixture",
+      "status": "generated",
+      "notes": "Redacted aggregate schema only; no raw import items, Paperless retrieval targets, tokens, note titles, wikilink targets, or memory content."
+    },
+    {
+      "id": "artifact:implementation-manifest",
+      "path": ".beads/runs/ea44a06b-6c3c-4262-a25f-9d9b1433b27f/implementation_manifest.json",
+      "producer": "implementation dispatch",
+      "status": "generated"
+    },
+    {
+      "id": "artifact:evidence-ledger",
+      "path": ".beads/runs/ea44a06b-6c3c-4262-a25f-9d9b1433b27f/evidence_ledger.json",
+      "producer": "implementation dispatch",
+      "status": "generated"
+    }
+  ]
+}

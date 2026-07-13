@@ -735,6 +735,70 @@ class TestSecondBrainAttachments:
         ]
 
 
+class TestSecondBrainTemplateExclusion:
+    def test_scan_vault_excludes_template_directory_files_entirely(self, tmp_path):
+        """Template-directory notes are in neither notes nor skipped."""
+        from open_brain.second_brain_import import _scan_vault
+
+        vault = tmp_path / "vault"
+        vault.mkdir()
+
+        numbered_templates = vault / "80-Templates"
+        numbered_templates.mkdir()
+        (numbered_templates / "Asset.md").write_text(
+            "---\ntype: {{type}}\n---\nBody with {{placeholder}}.\n",
+            encoding="utf-8",
+        )
+        (numbered_templates / "daily-note-template.md").write_text(
+            "# {{date}}\n\n{{cursor}}\n",
+            encoding="utf-8",
+        )
+
+        plain_templates = vault / "Templates"
+        plain_templates.mkdir()
+        (plain_templates / "Meeting.md").write_text(
+            "---\ntitle: {{title}}\n---\n{{body}}\n",
+            encoding="utf-8",
+        )
+
+        real = vault / "Projects"
+        real.mkdir()
+        (real / "OpenBrain.md").write_text(
+            "---\ntype: project\ntitle: Open Brain\n---\nReal knowledge content.\n",
+            encoding="utf-8",
+        )
+
+        notes, skipped = _scan_vault(vault)
+
+        source_refs = {note.source_ref for note in notes}
+        skipped_refs = {item.source_ref for item in skipped}
+
+        assert source_refs == {"Projects/OpenBrain.md"}
+        assert skipped_refs == set()
+        # No template file appears anywhere in the scan output.
+        assert not any("Templates" in ref for ref in source_refs | skipped_refs)
+
+    def test_scan_vault_keeps_notes_whose_filename_contains_template(self, tmp_path):
+        """A note named like a template but outside a template dir is still scanned."""
+        from open_brain.second_brain_import import _scan_vault
+
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        resources = vault / "Resources"
+        resources.mkdir()
+        (resources / "template-design-patterns.md").write_text(
+            "---\ntype: resource\ntitle: Template Design Patterns\n---\nAbout templates.\n",
+            encoding="utf-8",
+        )
+
+        notes, skipped = _scan_vault(vault)
+
+        assert {note.source_ref for note in notes} == {
+            "Resources/template-design-patterns.md"
+        }
+        assert skipped == []
+
+
 class TestSecondBrainRegressions:
     @pytest.mark.asyncio
     async def test_import_vault_raises_when_vault_path_missing(self, tmp_path):
