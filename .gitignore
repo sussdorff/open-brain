@@ -36,7 +36,7 @@ src-ts-DEPRECATED/
 
 # session-close runtime artifacts (never source of truth, must not be committed)
 .session-close.lock
-.session-close-state.json
+.session-close-state.json*
 .worktree-handoff.json
 .worktree-turns.jsonl
 session-close-summary.txt
