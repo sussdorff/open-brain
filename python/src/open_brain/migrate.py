@@ -36,7 +36,7 @@ def parse_jsonl_batch(content: str) -> tuple[list[dict], int]:
     """
     items = []
     errors = 0
-    for line in content.splitlines():
+    for line in content.split("\n"):
         if not line.strip():
             continue  # blank lines are silently skipped
         result = parse_jsonl_line(line)
