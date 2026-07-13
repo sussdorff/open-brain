@@ -9,10 +9,21 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Protocol
 
-BUNDLE_FORMAT_VERSION = "1.0.0"
+BUNDLE_FORMAT_VERSION = "1.1.0"
 OPEN_BRAIN_SCHEMA_VERSION = "postgres-portable-v1"
 
 INDEX_FIELDS = ("id", "name")
+SESSION_FIELDS = (
+    "id",
+    "session_id",
+    "index_id",
+    "project",
+    "started_at",
+    "ended_at",
+    "metadata",
+    "status",
+    "prompt_counter",
+)
 MEMORY_FIELDS = (
     "id",
     "index_id",
@@ -45,8 +56,26 @@ RELATIONSHIP_FIELDS = (
 )
 JSONL_FILES = {
     "indexes": "indexes.jsonl",
+    "sessions": "sessions.jsonl",
     "memories": "memories.jsonl",
     "relationships": "relationships.jsonl",
+}
+LEGACY_JSONL_FILES = {
+    "indexes": "indexes.jsonl",
+    "memories": "memories.jsonl",
+    "relationships": "relationships.jsonl",
+}
+PORTABLE_DATABASE_TABLES = {
+    "indexes": "memory_indexes",
+    "sessions": "sessions",
+    "memories": "memories",
+    "relationships": "memory_relationships",
+}
+PORTABLE_FOREIGN_KEY_PARENTS = {
+    "memory_indexes": frozenset(),
+    "sessions": frozenset({"memory_indexes"}),
+    "memories": frozenset({"memory_indexes", "sessions"}),
+    "memory_relationships": frozenset({"memories"}),
 }
 
 # Credential-shaped key markers that must never appear anywhere in an exported
@@ -108,6 +137,7 @@ class PortableBackupStore(Protocol):
     async def restore_portable_records(
         self,
         indexes: list[dict[str, Any]],
+        sessions: list[dict[str, Any]],
         memories: list[dict[str, Any]],
         relationships: list[dict[str, Any]],
         *,
@@ -167,7 +197,9 @@ def _canonical_json(value: Any, *, pretty: bool = False) -> str:
 
 def _project_fields(record: dict[str, Any], fields: tuple[str, ...]) -> dict[str, Any]:
     """Return a record restricted to the portable field contract."""
-    return {field: _json_ready(record.get(field)) for field in fields if field in record}
+    return {
+        field: _json_ready(record.get(field)) for field in fields if field in record
+    }
 
 
 def _canonical_records(
@@ -177,6 +209,10 @@ def _canonical_records(
     indexes = [
         _project_fields(record, INDEX_FIELDS)
         for record in sorted(records.get("indexes", []), key=lambda item: item["id"])
+    ]
+    sessions = [
+        _project_fields(record, SESSION_FIELDS)
+        for record in sorted(records.get("sessions", []), key=lambda item: item["id"])
     ]
     memories = [
         _project_fields(record, MEMORY_FIELDS)
@@ -195,6 +231,7 @@ def _canonical_records(
     ]
     return {
         "indexes": indexes,
+        "sessions": sessions,
         "memories": memories,
         "relationships": relationships,
     }
@@ -225,6 +262,12 @@ def _memory_record_hash(memory: dict[str, Any]) -> str:
     and session-related fields — is caught, not just content/title/metadata.
     """
     payload = {field: memory.get(field) for field in MEMORY_FIELDS if field != "id"}
+    return _sha256_text(_canonical_json(payload))
+
+
+def _session_record_hash(session: dict[str, Any]) -> str:
+    """Return a full-record hash covering every round-tripped session field."""
+    payload = {field: session.get(field) for field in SESSION_FIELDS if field != "id"}
     return _sha256_text(_canonical_json(payload))
 
 
@@ -307,7 +350,7 @@ def _assert_no_forbidden_content(
     fail-closed, reject-malformed-input security default.
     """
     offenders: list[str] = []
-    for record_type in ("indexes", "memories", "relationships"):
+    for record_type in ("indexes", "sessions", "memories", "relationships"):
         for record in records.get(record_type, []):
             record_id = record.get("id")
             for hit in _scan_forbidden_keys(record):
@@ -369,16 +412,16 @@ def _verify_bundle_manifest(path: Path, manifest: dict[str, Any]) -> None:
             "Bundle manifest is missing the 'record_counts' section"
         )
 
-    for key, filename in JSONL_FILES.items():
+    version = manifest.get("bundle_format_version")
+    bundle_files = LEGACY_JSONL_FILES if version == "1.0.0" else JSONL_FILES
+    for key, filename in bundle_files.items():
         file_path = path / filename
         if not file_path.exists():
             raise BundleIntegrityError(f"Bundle file missing: {filename}")
 
         declared = declared_files.get(filename)
         if not isinstance(declared, dict) or "sha256" not in declared:
-            raise BundleIntegrityError(
-                f"Bundle manifest missing sha256 for {filename}"
-            )
+            raise BundleIntegrityError(f"Bundle manifest missing sha256 for {filename}")
         actual_sha = _sha256_file(file_path)
         if actual_sha != declared["sha256"]:
             raise BundleIntegrityError(
@@ -413,7 +456,9 @@ def _validate_source_label(source_label: str | None) -> None:
         "jwt",
     )
     if any(marker in lowered for marker in forbidden_markers):
-        raise ValueError("source_label must be non-identifying and must not contain credentials")
+        raise ValueError(
+            "source_label must be non-identifying and must not contain credentials"
+        )
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -429,12 +474,20 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return records
 
 
-def _bundle_records(path: Path) -> dict[str, list[dict[str, Any]]]:
+def _bundle_records(
+    path: Path,
+    manifest: dict[str, Any] | None = None,
+) -> dict[str, list[dict[str, Any]]]:
     """Read and canonicalize all authoritative JSONL records from a bundle."""
-    return _canonical_records({
-        key: _read_jsonl(path / filename)
-        for key, filename in JSONL_FILES.items()
-    })
+    resolved_manifest = manifest or _load_manifest(path)
+    bundle_files = (
+        LEGACY_JSONL_FILES
+        if resolved_manifest.get("bundle_format_version") == "1.0.0"
+        else JSONL_FILES
+    )
+    return _canonical_records(
+        {key: _read_jsonl(path / filename) for key, filename in bundle_files.items()}
+    )
 
 
 async def verify_round_trip(
@@ -443,8 +496,8 @@ async def verify_round_trip(
 ) -> dict[str, Any]:
     """Verify that a restored store matches a portable bundle."""
     path = Path(bundle_path)
-    manifest = json.loads((path / "manifest.json").read_text(encoding="utf-8"))
-    expected = _bundle_records(path)
+    manifest = _load_manifest(path)
+    expected = _bundle_records(path, manifest)
     restored = _canonical_records(await store.export_portable_records())
 
     expected_memories = {record["id"]: record for record in expected["memories"]}
@@ -471,6 +524,17 @@ async def verify_round_trip(
 
         if _memory_record_hash(restored_memory) != _memory_record_hash(expected_memory):
             record_hash_mismatches.append(memory_id)
+
+    expected_sessions = {record["id"]: record for record in expected["sessions"]}
+    restored_sessions = {record["id"]: record for record in restored["sessions"]}
+    missing_sessions = sorted(set(expected_sessions) - set(restored_sessions))
+    extra_sessions = sorted(set(restored_sessions) - set(expected_sessions))
+    session_record_mismatches = sorted(
+        session_id
+        for session_id in set(expected_sessions) & set(restored_sessions)
+        if _session_record_hash(expected_sessions[session_id])
+        != _session_record_hash(restored_sessions[session_id])
+    )
 
     expected_edges = _relationship_edges(expected["relationships"])
     restored_edges = _relationship_edges(restored["relationships"])
@@ -507,6 +571,13 @@ async def verify_round_trip(
             "content_hash_mismatches": sorted(content_hash_mismatches),
             "record_hash_mismatches": sorted(record_hash_mismatches),
         },
+        "sessions": {
+            "expected": len(expected["sessions"]),
+            "restored": len(restored["sessions"]),
+            "missing": missing_sessions,
+            "extra": extra_sessions,
+            "record_mismatches": session_record_mismatches,
+        },
         "relationships": {
             "expected": len(expected["relationships"]),
             "restored": len(restored["relationships"]),
@@ -531,6 +602,10 @@ async def verify_round_trip(
         and report["memories"]["content_hash_matches"] == report["memories"]["expected"]
         and not report["memories"]["content_hash_mismatches"]
         and not report["memories"]["record_hash_mismatches"]
+        and report["sessions"]["expected"] == report["sessions"]["restored"]
+        and not report["sessions"]["missing"]
+        and not report["sessions"]["extra"]
+        and not report["sessions"]["record_mismatches"]
         and report["relationships"]["expected"] == report["relationships"]["restored"]
         and not report["relationships"]["missing"]
         and not report["relationships"]["extra"]
@@ -581,6 +656,7 @@ async def export_bundle(
         "created_at": _iso_utc(created_at or datetime.now(UTC)),
         "record_counts": {
             "indexes": len(records["indexes"]),
+            "sessions": len(records["sessions"]),
             "memories": len(records["memories"]),
             "relationships": len(records["relationships"]),
         },
@@ -617,7 +693,15 @@ async def restore_bundle(
     manifest = _load_manifest(path)
     _verify_bundle_manifest(path, manifest)
 
-    records = _bundle_records(path)
+    records = _bundle_records(path, manifest)
+    if manifest.get("bundle_format_version") == "1.0.0" and any(
+        memory.get("session_id") is not None for memory in records["memories"]
+    ):
+        raise IncompatibleBundleVersionError(
+            "Legacy bundle format 1.0.0 omits sessions.jsonl but contains "
+            "memories with session_id references; restore cannot preserve those "
+            "foreign keys. Re-export the source with bundle format 1.1 or newer."
+        )
 
     # The emptiness/same-bundle check and the write are performed atomically by
     # the store (inside one locked transaction) to avoid a TOCTOU race — see
@@ -625,16 +709,20 @@ async def restore_bundle(
     # RestoreTargetNotEmptyError when the target holds non-matching rows.
     result = await store.restore_portable_records(
         records["indexes"],
+        records["sessions"],
         records["memories"],
         records["relationships"],
         regenerate_embeddings=regenerate_embeddings,
     )
-    already_restored = bool(result.get("already_restored")) if isinstance(result, dict) else False
+    already_restored = (
+        bool(result.get("already_restored")) if isinstance(result, dict) else False
+    )
 
     report = {
         "bundle_path": str(path),
         "restored": {
             "indexes": len(records["indexes"]),
+            "sessions": len(records["sessions"]),
             "memories": len(records["memories"]),
             "relationships": len(records["relationships"]),
         },
