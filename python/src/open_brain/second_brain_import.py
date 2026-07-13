@@ -39,6 +39,7 @@ _EMBED_RE = re.compile(r"!\[\[([^\]]+)\]\]")
 _MARKDOWN_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 _EXTERNAL_HTTP_REFERENCE_RE = re.compile(r"^https?:/{1,2}", re.IGNORECASE)
 _DATE_STEM_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_TEMPLATE_DIR_RE = re.compile(r"^(?:\d+-)?templates$", re.IGNORECASE)
 _ATTACHMENT_SUFFIXES = frozenset({
     ".pdf",
     ".png",
@@ -423,11 +424,32 @@ def _parse_note(path: Path, vault_path: Path) -> ParsedNote | SkippedNote:
     )
 
 
+def _is_template_path(relative_path: Path) -> bool:
+    """True if any parent directory component is an Obsidian template folder.
+
+    Matches directory components named ``Templates``, ``templates``, or
+    ``NN-Templates`` (e.g. ``80-Templates``), case-insensitively, anywhere in
+    the path. Only DIRECTORY components are inspected (the filename is excluded
+    via ``[:-1]``) so a real note whose filename merely contains "template" is
+    not excluded.
+    """
+    return any(_TEMPLATE_DIR_RE.fullmatch(part) for part in relative_path.parts[:-1])
+
+
 def _scan_vault(vault_path: Path) -> tuple[list[ParsedNote], list[SkippedNote]]:
-    """Read and parse all Markdown notes in a vault."""
+    """Read and parse all Markdown notes in a vault.
+
+    Files living under an Obsidian template directory are excluded entirely:
+    template notes contain ``{{placeholder}}`` syntax that is not knowledge
+    content, so they are neither parsed into ``notes`` nor recorded as
+    ``skipped`` (which would otherwise block the cutover reconciliation gate).
+    """
     notes: list[ParsedNote] = []
     skipped: list[SkippedNote] = []
     for path in sorted(vault_path.rglob("*.md")):
+        relative = path.relative_to(vault_path)
+        if _is_template_path(relative):
+            continue
         parsed = _parse_note(path, vault_path)
         if isinstance(parsed, SkippedNote):
             skipped.append(parsed)
