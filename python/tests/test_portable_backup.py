@@ -916,6 +916,80 @@ async def test_verify_round_trip_catches_previously_uncovered_field_corruption(
     assert session_report["sessions"]["record_mismatches"] == [100]
 
 
+@pytest.mark.asyncio
+async def test_verify_round_trip_ok_when_stored_content_hash_diverges_from_content(
+    tmp_path: Path,
+) -> None:
+    """A byte-perfect restore is ``ok`` even when the stored content_hash does
+    not equal sha256(content).
+
+    This mirrors the real production property: ~11.3k of 21.4k memories carry a
+    ``metadata.content_hash`` computed over differently-normalized text, so it
+    legitimately diverges from a fresh hash of the stored content. Round-trip
+    fidelity is judged by full-record hashes, so such records must not fail the
+    verdict. The ``content_hash_mismatches`` diagnostic still fires (proving it
+    survives in the report), but no longer gates ``ok``.
+    """
+    source = FixturePortableStore()
+    diverging = source.records["memories"][0]
+    memory_id = diverging["id"]
+    # Stored hash that does NOT equal sha256(content) — the content itself is
+    # left untouched so the record round-trips byte-perfectly.
+    diverging["metadata"]["content_hash"] = "0" * 64
+    assert diverging["metadata"]["content_hash"] != _content_hash(diverging["content"])
+
+    bundle = tmp_path / "bundle"
+    await portable_backup.export_bundle(
+        bundle,
+        source,
+        source_label="fixture",
+        created_at=FIXED_EXPORT_TIME,
+    )
+    target = EmptyRestoreStore()
+    await portable_backup.restore_bundle(bundle, target, regenerate_embeddings=False)
+
+    report = await portable_backup.verify_round_trip(bundle, target)
+
+    # Verdict is True: every field round-tripped faithfully.
+    assert report["ok"] is True
+    assert report["memories"]["record_hash_mismatches"] == []
+    # The stored-hash-vs-content diagnostic still fires for the diverging memory,
+    # proving it survives in the report but no longer fails the verdict.
+    assert memory_id in report["memories"]["content_hash_mismatches"]
+    assert (
+        report["memories"]["content_hash_matches"] < report["memories"]["expected"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_verify_round_trip_fails_when_restored_content_is_corrupted(
+    tmp_path: Path,
+) -> None:
+    """Genuine content corruption still fails the verdict via record fidelity.
+
+    Dropping the content_hash conditions from ``ok`` creates no blind spot:
+    ``content`` is part of MEMORY_FIELDS, so a tampered body is caught by
+    ``record_hash_mismatches`` even though the stored content_hash is unchanged.
+    """
+    bundle = tmp_path / "bundle"
+    await portable_backup.export_bundle(
+        bundle,
+        FixturePortableStore(),
+        source_label="fixture",
+        created_at=FIXED_EXPORT_TIME,
+    )
+    target = EmptyRestoreStore()
+    await portable_backup.restore_bundle(bundle, target, regenerate_embeddings=False)
+
+    assert (await portable_backup.verify_round_trip(bundle, target))["ok"] is True
+
+    target.memories[10]["content"] = "Tampered content that was never exported."
+    report = await portable_backup.verify_round_trip(bundle, target)
+
+    assert report["ok"] is False
+    assert report["memories"]["record_hash_mismatches"] == [10]
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_real_postgres_round_trip_preserves_session_foreign_keys(

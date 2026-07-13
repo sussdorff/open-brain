@@ -597,10 +597,18 @@ async def verify_round_trip(
             "preserved_ids": preserved_ids,
         },
     }
+    # Round-trip fidelity is judged solely by full-record hashes
+    # (``record_hash_mismatches``), which cover every round-tripped field in the
+    # MEMORY_FIELDS allowlist except ``id`` — content included. The
+    # stored-``content_hash``-vs-``sha256(content)`` metric
+    # (``content_hash_matches`` / ``content_hash_mismatches``) is retained as an
+    # informational diagnostic only: it reflects a source-data-integrity property
+    # (whether the stored hash still equals a fresh hash of the content) that is
+    # independent of backup fidelity, so it must not gate ``ok`` — on real data a
+    # faithful byte-perfect restore can still carry a stored hash computed over
+    # differently-normalized text.
     report["ok"] = (
         report["memories"]["expected"] == report["memories"]["restored"]
-        and report["memories"]["content_hash_matches"] == report["memories"]["expected"]
-        and not report["memories"]["content_hash_mismatches"]
         and not report["memories"]["record_hash_mismatches"]
         and report["sessions"]["expected"] == report["sessions"]["restored"]
         and not report["sessions"]["missing"]
