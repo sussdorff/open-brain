@@ -42,6 +42,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- *(open-brain-cd79)* **Second Brain cutover accepts an empty canonical-entity set when filtering works** — The `open_brain_capabilities` gate now verifies the canonical-entity filter query itself and reports its full result total. A successful zero-count query is green, while an unavailable, broken, or malformed query remains red.
+
 - *(open-brain-bv5f)* **Second Brain cutover reconciliation now reaches a truthful green state** — Dry-run reconciliation mirrors apply-time content-hash deduplication across different source references, including duplicate bodies within one vault batch. External HTTP(S) web-clip images, including single-slash `https:/` references, no longer count as Paperless attachments, while local attachment failures and genuinely new content still keep the migration gate red.
 
 - *(open-brain-9fo)* **Portable backup restore preserves Unicode line-separator content** — JSONL readers now split records strictly on LF, so U+2028, U+2029, and U+0085 inside valid JSON strings no longer fragment backup, migration, or transcript records. Portable export, restore, and round-trip verification regression coverage confirms the characters survive unchanged.

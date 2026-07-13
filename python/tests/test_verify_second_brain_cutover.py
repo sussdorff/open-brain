@@ -90,6 +90,8 @@ class FixtureDataLayer:
         *,
         stats: dict[str, Any] | None = None,
         existing_refs: dict[str, int] | None = None,
+        canonical_total: int = 3,
+        canonical_query_error: Exception | None = None,
     ) -> None:
         self._stats = stats if stats is not None else {
             "memories": 12,
@@ -101,9 +103,10 @@ class FixtureDataLayer:
                 "resource": 2,
                 "journal": 1,
             },
-            "canonical_entities": 3,
         }
         self.existing_refs = existing_refs or {}
+        self.canonical_total = canonical_total
+        self.canonical_query_error = canonical_query_error
         self.search_calls: list[Any] = []
         self.saved: list[SaveMemoryParams] = []
 
@@ -115,8 +118,10 @@ class FixtureDataLayer:
         """Return deterministic memories for daily and weekly digest smoke tests."""
         self.search_calls.append(params)
         if getattr(params, "metadata_filter", None) == {"canonical_entity": True}:
+            if self.canonical_query_error is not None:
+                raise self.canonical_query_error
             return SearchResult(
-                results=[
+                results=[] if self.canonical_total == 0 else [
                     _memory(
                         memory_id=10,
                         title="Ada Sensitive",
@@ -128,7 +133,7 @@ class FixtureDataLayer:
                         },
                     )
                 ],
-                total=1,
+                total=self.canonical_total,
             )
         if getattr(params, "capture_status", None) == "inbox":
             return SearchResult(
@@ -387,6 +392,114 @@ async def test_missing_open_brain_capability_fails_named_gate_only(tmp_path: Pat
         data_layer=FixtureDataLayer(stats=incomplete_stats),
     ) as (_verifier, _report, payload, _report_path):
         _assert_single_red_gate(payload, "open_brain_capabilities")
+
+
+@pytest.mark.asyncio
+async def test_canonical_capability_accepts_wired_empty_query_and_reports_zero(
+    tmp_path: Path,
+) -> None:
+    """A successful canonical filter query proves capability even when its total is zero."""
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    verifier = load_verifier()
+
+    gate = await verifier._evaluate_open_brain_capabilities(
+        data_layer=FixtureDataLayer(canonical_total=0),
+        paperless_client=FixturePaperlessClient(),
+        vault_path=vault,
+        required_capabilities=list(ALL_CAPABILITIES),
+    )
+
+    assert gate.status == "green"
+    assert gate.counts["canonical_entities"] == 0
+    assert gate.counts["satisfied"] == len(ALL_CAPABILITIES)
+
+
+@pytest.mark.asyncio
+async def test_canonical_capability_does_not_require_stored_memories(
+    tmp_path: Path,
+) -> None:
+    """Canonical query capability is independent of whether the store has data."""
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    verifier = load_verifier()
+
+    gate = await verifier._evaluate_open_brain_capabilities(
+        data_layer=FixtureDataLayer(
+            stats={"memories": 0, "sessions": 0, "relationships": 0, "types": {}},
+            canonical_total=0,
+        ),
+        paperless_client=FixturePaperlessClient(),
+        vault_path=vault,
+        required_capabilities=["open-brain-ccd"],
+    )
+
+    assert gate.status == "green"
+    assert gate.counts["canonical_entities"] == 0
+
+
+@pytest.mark.asyncio
+async def test_canonical_capability_reports_full_query_total(tmp_path: Path) -> None:
+    """The reported canonical count uses the query total, not the limited result list."""
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    verifier = load_verifier()
+
+    gate = await verifier._evaluate_open_brain_capabilities(
+        data_layer=FixtureDataLayer(canonical_total=7),
+        paperless_client=FixturePaperlessClient(),
+        vault_path=vault,
+        required_capabilities=["open-brain-ccd"],
+    )
+
+    assert gate.status == "green"
+    assert gate.counts["canonical_entities"] == 7
+
+
+@pytest.mark.asyncio
+async def test_canonical_capability_fails_when_query_path_is_broken(
+    tmp_path: Path,
+) -> None:
+    """A broken canonical filter query must not be mistaken for a valid zero count."""
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    verifier = load_verifier()
+
+    gate = await verifier._evaluate_open_brain_capabilities(
+        data_layer=FixtureDataLayer(
+            canonical_total=0,
+            canonical_query_error=RuntimeError("canonical filter unavailable"),
+        ),
+        paperless_client=FixturePaperlessClient(),
+        vault_path=vault,
+        required_capabilities=["open-brain-ccd"],
+    )
+
+    assert gate.status == "red"
+    assert gate.detail == "required capabilities incomplete"
+    assert gate.counts["missing"] == 1
+
+
+@pytest.mark.asyncio
+async def test_broken_canonical_query_does_not_fail_unrelated_capability(
+    tmp_path: Path,
+) -> None:
+    """Canonical query failures are isolated when CCD is not required."""
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    verifier = load_verifier()
+
+    gate = await verifier._evaluate_open_brain_capabilities(
+        data_layer=FixtureDataLayer(
+            canonical_query_error=RuntimeError("canonical filter unavailable")
+        ),
+        paperless_client=FixturePaperlessClient(),
+        vault_path=vault,
+        required_capabilities=["open-brain-amq"],
+    )
+
+    assert gate.status == "green"
+    assert gate.counts["satisfied"] == 1
 
 
 @pytest.mark.asyncio

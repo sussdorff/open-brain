@@ -14,7 +14,7 @@ from typing import Any, Literal
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "python" / "src"))
 
-from open_brain.data_layer.interface import DataLayer  # noqa: E402
+from open_brain.data_layer.interface import DataLayer, SearchParams  # noqa: E402
 from open_brain.digest import generate_daily_review, generate_weekly_briefing  # noqa: E402
 from open_brain.paperless import PaperlessClient  # noqa: E402
 from open_brain.portable_backup import (  # noqa: E402
@@ -49,7 +49,7 @@ ALLOWED_META_KEYS = frozenset({"generated_at", "open_brain_git_sha", "verifier_v
 # Paperless/import/backup primitives are wired, and the live Paperless probes
 # are left to the dedicated paperless_references gate.
 REQUIRED_CAPABILITY_IDS = (
-    "open-brain-ccd",  # canonical entities survive: non-empty stats plus canonical digest evidence
+    "open-brain-ccd",  # canonical entity filtering is wired and returns a valid count
     "open-brain-hws",  # canonical vocabulary: non-empty stats type taxonomy
     "open-brain-slu",  # capture inbox: daily review exposes unresolved capture counts
     "open-brain-5qo",  # agent capture plus daily/weekly review: both digest calls succeed
@@ -267,28 +267,53 @@ async def _evaluate_open_brain_capabilities(
                 "stats unavailable",
             )
 
+        required = set(required_capabilities)
+        canonical_count = 0
+        canonical_query_succeeded = False
+        if "open-brain-ccd" in required:
+            try:
+                canonical_result = await data_layer.search(
+                    SearchParams(metadata_filter={"canonical_entity": True}, limit=1)
+                )
+            except Exception:
+                pass
+            else:
+                canonical_total = getattr(canonical_result, "total", None)
+                canonical_query_succeeded = (
+                    isinstance(canonical_total, int)
+                    and not isinstance(canonical_total, bool)
+                    and canonical_total >= 0
+                )
+                if canonical_query_succeeded:
+                    canonical_count = canonical_total
+
         today = datetime.now(tz=UTC).date().isoformat()
-        daily_review = await generate_daily_review(data_layer, date=today, max_items=5)
-        weekly_briefing = await generate_weekly_briefing(data_layer, weeks_back=1, max_memories=5)
+        daily_review = None
+        if required & {"open-brain-slu", "open-brain-5qo"}:
+            daily_review = await generate_daily_review(data_layer, date=today, max_items=5)
+        weekly_briefing = None
+        if "open-brain-5qo" in required:
+            weekly_briefing = await generate_weekly_briefing(
+                data_layer, weeks_back=1, max_memories=5
+            )
 
         stats_memories = _safe_int(stats.get("memories"))
         stats_relationships = _safe_int(stats.get("relationships"))
         stats_sessions = _safe_int(stats.get("sessions"))
         type_counts = _stats_types(stats)
-        canonical_count = _safe_int(stats.get("canonical_entities"))
-        if canonical_count <= 0:
-            canonical_count = len(weekly_briefing.canonical_entities)
-
         capability_results = {
-            "open-brain-ccd": stats_memories > 0 and canonical_count > 0,
+            "open-brain-ccd": canonical_query_succeeded,
             "open-brain-hws": stats_memories > 0 and bool(type_counts),
             "open-brain-slu": (
-                stats_memories > 0
+                daily_review is not None
+                and stats_memories > 0
                 and isinstance(daily_review.counts, dict)
                 and "unresolved" in daily_review.counts
             ),
             "open-brain-5qo": (
-                isinstance(daily_review.counts, dict)
+                daily_review is not None
+                and weekly_briefing is not None
+                and isinstance(daily_review.counts, dict)
                 and bool(daily_review.counts)
                 and isinstance(weekly_briefing.memory_counts, dict)
                 and bool(weekly_briefing.memory_counts)
