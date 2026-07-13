@@ -15,6 +15,8 @@
         "EV-GREEN-PRESERVE",
         "EV-FULL-POSTGRES",
         "EV-FULL-POSTGRES-RERUN",
+        "EV-CODEX-FINAL-TARGETED",
+        "EV-CODEX-FINAL-FULL",
         "EV-PRECOMMIT"
       ]
     },
@@ -31,6 +33,8 @@
         "EV-GREEN-UPDATES",
         "EV-FULL-POSTGRES",
         "EV-FULL-POSTGRES-RERUN",
+        "EV-CODEX-FINAL-TARGETED",
+        "EV-CODEX-FINAL-FULL",
         "EV-PRECOMMIT"
       ]
     },
@@ -48,6 +52,8 @@
         "EV-GREEN-REPLACE",
         "EV-FULL-POSTGRES",
         "EV-FULL-POSTGRES-RERUN",
+        "EV-CODEX-FINAL-TARGETED",
+        "EV-CODEX-FINAL-FULL",
         "EV-PRECOMMIT"
       ]
     },
@@ -63,6 +69,8 @@
         "EV-GREEN-PRESERVE",
         "EV-FULL-POSTGRES",
         "EV-FULL-POSTGRES-RERUN",
+        "EV-CODEX-FINAL-TARGETED",
+        "EV-CODEX-FINAL-FULL",
         "EV-PRECOMMIT"
       ]
     }
@@ -83,6 +91,11 @@
       "hash": "a4dedf4",
       "message": "feat(open-brain-ceb3): green - scope session summary upserts",
       "type": "implementation"
+    },
+    {
+      "hash": "d17cd1c",
+      "message": "chore(open-brain-ceb3): add implementation artifacts",
+      "type": "implementation_artifacts"
     }
   ],
   "tests": [
@@ -123,6 +136,24 @@
       "result": "53 passed, 2 skipped from python/ workdir during final verification."
     },
     {
+      "evidence_ref": "EV-CODEX-FINAL-ROOT-WRONG-ENV",
+      "command": "uv run pytest python/tests/test_postgres.py -v -k 'test_session_summary_upsert_updates_existing or test_session_summary_upsert_preserves_non_summary_records_with_colliding_session_ref or test_session_summary_replace_scopes_lookup_and_delete_by_project'",
+      "status": "not_collected",
+      "result": "Root-level uv environment failed before collection on missing pytest-cov from injected addopts."
+    },
+    {
+      "evidence_ref": "EV-CODEX-FINAL-TARGETED",
+      "command": "uv run pytest tests/test_postgres.py -v -k 'test_session_summary_upsert_updates_existing or test_session_summary_upsert_preserves_non_summary_records_with_colliding_session_ref or test_session_summary_replace_scopes_lookup_and_delete_by_project'",
+      "status": "passed",
+      "result": "3 selected tests passed, 52 deselected from python/ workdir."
+    },
+    {
+      "evidence_ref": "EV-CODEX-FINAL-FULL",
+      "command": "uv run pytest tests/test_postgres.py -v",
+      "status": "passed",
+      "result": "53 passed, 2 skipped from python/ workdir during final verification."
+    },
+    {
       "evidence_ref": "EV-PRECOMMIT",
       "command": "git add python/src/open_brain/data_layer/postgres.py python/tests/test_postgres.py && git commit -m \"feat(open-brain-ceb3): green - scope session summary upserts\"",
       "status": "passed",
@@ -147,6 +178,9 @@
     "EV-GREEN-REPLACE",
     "EV-FULL-POSTGRES",
     "EV-FULL-POSTGRES-RERUN",
+    "EV-CODEX-FINAL-ROOT-WRONG-ENV",
+    "EV-CODEX-FINAL-TARGETED",
+    "EV-CODEX-FINAL-FULL",
     "EV-PRECOMMIT"
   ]
 }

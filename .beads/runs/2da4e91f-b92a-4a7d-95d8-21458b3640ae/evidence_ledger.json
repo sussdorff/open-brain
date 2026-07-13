@@ -99,6 +99,27 @@
       "purpose": "Final scoped verification after confirming the implementation commits were present.",
       "exit_code": 0,
       "observed_result": "53 passed, 2 skipped from python/ workdir; warnings were existing unawaited coroutine warnings in mocked background tasks."
+    },
+    {
+      "id": "EV-CODEX-FINAL-ROOT-WRONG-ENV",
+      "command": "uv run pytest python/tests/test_postgres.py -v -k 'test_session_summary_upsert_updates_existing or test_session_summary_upsert_preserves_non_summary_records_with_colliding_session_ref or test_session_summary_replace_scopes_lookup_and_delete_by_project'",
+      "purpose": "Final verification attempt using the bead prompt's root-relative test path.",
+      "exit_code": 4,
+      "observed_result": "Did not reach collection; root-level uv environment lacked pytest-cov while python/pyproject.toml injected coverage addopts."
+    },
+    {
+      "id": "EV-CODEX-FINAL-TARGETED",
+      "command": "uv run pytest tests/test_postgres.py -v -k 'test_session_summary_upsert_updates_existing or test_session_summary_upsert_preserves_non_summary_records_with_colliding_session_ref or test_session_summary_replace_scopes_lookup_and_delete_by_project'",
+      "purpose": "Final targeted verification for the session_summary upsert regression tests from the nested Python project.",
+      "exit_code": 0,
+      "observed_result": "3 selected tests passed, 52 deselected from python/ workdir; one existing unawaited coroutine warning in mocked background tasks."
+    },
+    {
+      "id": "EV-CODEX-FINAL-FULL",
+      "command": "uv run pytest tests/test_postgres.py -v",
+      "purpose": "Final full test_postgres.py regression gate from the nested Python project.",
+      "exit_code": 0,
+      "observed_result": "53 passed, 2 skipped from python/ workdir; 18 existing unawaited coroutine warnings in mocked background tasks."
     }
   ],
   "skipped_checks": [
