@@ -5,7 +5,7 @@
     {
       "id": "AC1",
       "description": "Saving a session_summary does not update, merge into, retitle, or retype a learning or debrief with the same session_ref.",
-      "status": "passed",
+      "status": "done",
       "changed_files": [
         "python/src/open_brain/data_layer/postgres.py",
         "python/tests/test_postgres.py"
@@ -23,7 +23,7 @@
     {
       "id": "AC2",
       "description": "Repeating a session_summary save for the same project and session_ref updates the existing session_summary idempotently without creating a duplicate.",
-      "status": "passed",
+      "status": "done",
       "changed_files": [
         "python/src/open_brain/data_layer/postgres.py",
         "python/tests/test_postgres.py"
@@ -41,7 +41,7 @@
     {
       "id": "AC3",
       "description": "The session-summary upsert lookup includes the memory type and project boundaries in addition to session_ref.",
-      "status": "passed",
+      "status": "done",
       "changed_files": [
         "python/src/open_brain/data_layer/postgres.py",
         "python/tests/test_postgres.py"
@@ -60,7 +60,7 @@
     {
       "id": "AC4",
       "description": "Regression tests cover the observed cross-type collision and verify all original non-summary records remain byte-for-byte unchanged in their primary content fields.",
-      "status": "passed",
+      "status": "done",
       "changed_files": [
         "python/tests/test_postgres.py"
       ],
