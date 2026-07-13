@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import asyncpg
 import pytest
 
 import open_brain.portable_backup as portable_backup
@@ -68,11 +69,24 @@ class FixturePortableStore:
                 {"id": 2, "name": "zeta"},
                 {"id": 1, "name": "alpha"},
             ],
+            "sessions": [
+                {
+                    "id": 100,
+                    "session_id": "session-1",
+                    "index_id": 1,
+                    "project": "open-brain",
+                    "started_at": "2026-07-11T08:55:00+00:00",
+                    "ended_at": "2026-07-11T09:15:00+00:00",
+                    "metadata": {"source": "fixture"},
+                    "status": "completed",
+                    "prompt_counter": 3,
+                }
+            ],
             "memories": [
                 {
                     "id": 20,
                     "index_id": 2,
-                    "session_id": None,
+                    "session_id": 100,
                     "type": "resource",
                     "title": "Paperless reference",
                     "subtitle": None,
@@ -172,6 +186,7 @@ class EmptyRestoreStore:
 
     def __init__(self) -> None:
         self.indexes: dict[int, dict[str, Any]] = {}
+        self.sessions: dict[int, dict[str, Any]] = {}
         self.memories: dict[int, dict[str, Any]] = {}
         self.relationships: dict[tuple[int, int, str], dict[str, Any]] = {}
         self.restore_calls = 0
@@ -182,6 +197,7 @@ class EmptyRestoreStore:
         """Return current in-memory portable records."""
         return {
             "indexes": list(self.indexes.values()),
+            "sessions": list(self.sessions.values()),
             "memories": list(self.memories.values()),
             "relationships": list(self.relationships.values()),
         }
@@ -190,6 +206,7 @@ class EmptyRestoreStore:
         """Return closure row counts."""
         return {
             "indexes": len(self.indexes),
+            "sessions": len(self.sessions),
             "memories": len(self.memories),
             "relationships": len(self.relationships),
         }
@@ -197,6 +214,7 @@ class EmptyRestoreStore:
     async def restore_portable_records(
         self,
         indexes: list[dict[str, Any]],
+        sessions: list[dict[str, Any]],
         memories: list[dict[str, Any]],
         relationships: list[dict[str, Any]],
         *,
@@ -204,16 +222,24 @@ class EmptyRestoreStore:
     ) -> dict[str, Any]:
         """Atomically check emptiness/same-bundle, then insert (idempotent)."""
         expected = portable_backup._canonical_records(
-            {"indexes": indexes, "memories": memories, "relationships": relationships}
+            {
+                "indexes": indexes,
+                "sessions": sessions,
+                "memories": memories,
+                "relationships": relationships,
+            }
         )
         existing = portable_backup._canonical_records(
             {
                 "indexes": list(self.indexes.values()),
+                "sessions": list(self.sessions.values()),
                 "memories": list(self.memories.values()),
                 "relationships": list(self.relationships.values()),
             }
         )
-        populated = bool(self.indexes or self.memories or self.relationships)
+        populated = bool(
+            self.indexes or self.sessions or self.memories or self.relationships
+        )
         already_restored = False
         if populated:
             if existing == expected:
@@ -227,6 +253,8 @@ class EmptyRestoreStore:
             self.restore_calls += 1
             for index in indexes:
                 self.indexes.setdefault(index["id"], dict(index))
+            for session in sessions:
+                self.sessions.setdefault(session["id"], dict(session))
             for memory in memories:
                 self.memories.setdefault(memory["id"], dict(memory))
             for relationship in relationships:
@@ -251,6 +279,23 @@ class EmptyRestoreStore:
                 self.embed_calls += 1
 
         return {"already_restored": already_restored}
+
+
+def test_portable_table_allowlist_is_foreign_key_closed() -> None:
+    """Every parent referenced by an exported table is itself portable."""
+    portable_tables = set(portable_backup.PORTABLE_DATABASE_TABLES.values())
+
+    assert set(portable_backup.PORTABLE_FOREIGN_KEY_PARENTS) == portable_tables
+    assert all(
+        parents <= portable_tables
+        for parents in portable_backup.PORTABLE_FOREIGN_KEY_PARENTS.values()
+    )
+    assert portable_backup.PORTABLE_FOREIGN_KEY_PARENTS == {
+        "memory_indexes": frozenset(),
+        "sessions": frozenset({"memory_indexes"}),
+        "memories": frozenset({"memory_indexes", "sessions"}),
+        "memory_relationships": frozenset({"memories"}),
+    }
 
 
 @pytest.mark.parametrize("separator", ["\u2028", "\u2029", "\u0085"])
@@ -349,6 +394,7 @@ async def test_export_writes_versioned_deterministic_bundle_with_metadata_and_pa
     for relative_path in (
         "manifest.json",
         "indexes.jsonl",
+        "sessions.jsonl",
         "memories.jsonl",
         "relationships.jsonl",
     ):
@@ -357,21 +403,30 @@ async def test_export_writes_versioned_deterministic_bundle_with_metadata_and_pa
         ).read_bytes()
 
     manifest = json.loads((first_bundle / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["bundle_format_version"] == "1.0.0"
+    assert manifest["bundle_format_version"] == "1.1.0"
     assert manifest["record_counts"] == {
         "indexes": 2,
+        "sessions": 1,
         "memories": 2,
         "relationships": 2,
     }
     assert manifest["contains_binaries"] is False
     assert manifest["contains_credentials"] is False
     assert manifest["embedding_model"] == {"name": "voyage-4", "dim": 1024}
-    for filename in ("indexes.jsonl", "memories.jsonl", "relationships.jsonl"):
+    for filename in (
+        "indexes.jsonl",
+        "sessions.jsonl",
+        "memories.jsonl",
+        "relationships.jsonl",
+    ):
         expected_hash = hashlib.sha256((first_bundle / filename).read_bytes()).hexdigest()
         assert manifest["files"][filename]["sha256"] == expected_hash
 
     indexes = _read_jsonl(first_bundle / "indexes.jsonl")
     assert [record["id"] for record in indexes] == [1, 2]
+
+    sessions = _read_jsonl(first_bundle / "sessions.jsonl")
+    assert sessions == [FixturePortableStore().records["sessions"][0]]
 
     memories = _read_jsonl(first_bundle / "memories.jsonl")
     assert [record["id"] for record in memories] == [10, 20]
@@ -531,6 +586,7 @@ async def test_restore_rejects_bundle_with_tampered_file_hash(tmp_path: Path) ->
     assert target.restore_calls == 0
     assert await target.portable_closure_counts() == {
         "indexes": 0,
+        "sessions": 0,
         "memories": 0,
         "relationships": 0,
     }
@@ -585,6 +641,67 @@ async def test_restore_rejects_incompatible_bundle_version(tmp_path: Path) -> No
     with pytest.raises(IncompatibleBundleVersionError):
         await portable_backup.restore_bundle(bundle, target, regenerate_embeddings=False)
     assert target.restore_calls == 0
+
+
+def _downgrade_bundle_to_legacy_v1(bundle: Path) -> None:
+    """Convert a current test bundle into the historical sessions-less v1 shape."""
+    sessions_path = bundle / "sessions.jsonl"
+    sessions_path.unlink()
+    manifest_path = bundle / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["bundle_format_version"] = "1.0.0"
+    manifest["record_counts"].pop("sessions")
+    manifest["files"].pop("sessions.jsonl")
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_legacy_bundle_with_session_references_fails_with_migration_guidance(
+    tmp_path: Path,
+) -> None:
+    """Legacy bundles fail clearly when their omitted sessions are required by FKs."""
+    bundle = tmp_path / "bundle"
+    await portable_backup.export_bundle(
+        bundle,
+        FixturePortableStore(),
+        source_label="fixture",
+        created_at=FIXED_EXPORT_TIME,
+    )
+    _downgrade_bundle_to_legacy_v1(bundle)
+
+    target = EmptyRestoreStore()
+    with pytest.raises(IncompatibleBundleVersionError, match="omits sessions.jsonl"):
+        await portable_backup.restore_bundle(bundle, target, regenerate_embeddings=False)
+
+    assert target.restore_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_legacy_bundle_without_session_references_remains_restorable(
+    tmp_path: Path,
+) -> None:
+    """Sessions-less v1 bundles remain supported when no memory needs a session FK."""
+    source = FixturePortableStore()
+    for memory in source.records["memories"]:
+        memory["session_id"] = None
+    bundle = tmp_path / "bundle"
+    await portable_backup.export_bundle(
+        bundle,
+        source,
+        source_label="fixture",
+        created_at=FIXED_EXPORT_TIME,
+    )
+    _downgrade_bundle_to_legacy_v1(bundle)
+
+    target = EmptyRestoreStore()
+    report = await portable_backup.restore_bundle(
+        bundle,
+        target,
+        regenerate_embeddings=False,
+    )
+
+    assert report["restored"]["sessions"] == 0
+    assert (await portable_backup.verify_round_trip(bundle, target))["ok"] is True
 
 
 @pytest.mark.asyncio
@@ -646,11 +763,13 @@ async def test_restore_recreates_graph_and_same_bundle_rerun_creates_no_duplicat
     )
     assert first_result["restored"] == {
         "indexes": 2,
+        "sessions": 1,
         "memories": 2,
         "relationships": 2,
     }
     assert await target.portable_closure_counts() == {
         "indexes": 2,
+        "sessions": 1,
         "memories": 2,
         "relationships": 2,
     }
@@ -665,11 +784,13 @@ async def test_restore_recreates_graph_and_same_bundle_rerun_creates_no_duplicat
 
     assert second_result["restored"] == {
         "indexes": 2,
+        "sessions": 1,
         "memories": 2,
         "relationships": 2,
     }
     assert await target.portable_closure_counts() == {
         "indexes": 2,
+        "sessions": 1,
         "memories": 2,
         "relationships": 2,
     }
@@ -697,7 +818,7 @@ async def test_verify_round_trip_reports_hashes_edges_and_canonical_ids(
     report = await portable_backup.verify_round_trip(bundle, target)
 
     assert report == {
-        "bundle_format_version": "1.0.0",
+        "bundle_format_version": "1.1.0",
         "ok": True,
         "memories": {
             "expected": 2,
@@ -705,6 +826,13 @@ async def test_verify_round_trip_reports_hashes_edges_and_canonical_ids(
             "content_hash_matches": 2,
             "content_hash_mismatches": [],
             "record_hash_mismatches": [],
+        },
+        "sessions": {
+            "expected": 1,
+            "restored": 1,
+            "missing": [],
+            "extra": [],
+            "record_mismatches": [],
         },
         "relationships": {
             "expected": 2,
@@ -780,6 +908,155 @@ async def test_verify_round_trip_catches_previously_uncovered_field_corruption(
     assert index_report["indexes"]["missing"] == [(1, "alpha")]
     assert index_report["indexes"]["extra"] == [(1, "renamed")]
 
+    # 4. session status (the parent row must round-trip exactly, not just exist).
+    target.indexes[1]["name"] = "alpha"
+    target.sessions[100]["status"] = "failed"
+    session_report = await portable_backup.verify_round_trip(bundle, target)
+    assert session_report["ok"] is False
+    assert session_report["sessions"]["record_mismatches"] == [100]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_real_postgres_round_trip_preserves_session_foreign_keys(
+    tmp_path: Path,
+    integration_database_url: str,
+) -> None:
+    """A fresh FK-enforcing target restores sessions before referenced memories."""
+    from open_brain.config import get_config
+    from open_brain.data_layer import postgres as postgres_module
+
+    async def truncate_portable_tables(*, seed_default_index: bool = False) -> None:
+        conn = await asyncpg.connect(integration_database_url)
+        try:
+            await conn.execute(
+                """TRUNCATE TABLE
+                       memory_relationships, memories, session_summaries,
+                       sessions, memory_indexes
+                   RESTART IDENTITY CASCADE"""
+            )
+            if seed_default_index:
+                await conn.execute(
+                    """INSERT INTO memory_indexes (name, description)
+                       VALUES ('default', 'Default memory index')"""
+                )
+        finally:
+            await conn.close()
+
+    await postgres_module.close_pool()
+    get_config().DATABASE_URL = integration_database_url
+    await truncate_portable_tables()
+
+    conn = await asyncpg.connect(integration_database_url)
+    try:
+        await conn.executemany(
+            "INSERT INTO memory_indexes (id, name) VALUES ($1, $2)",
+            [(11, "alpha"), (12, "beta")],
+        )
+        await conn.executemany(
+            """INSERT INTO sessions (
+                   id, session_id, index_id, project, metadata, status, prompt_counter
+               ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)""",
+            [
+                (101, "portable-session-a", 11, "alpha", "{}", "completed", 2),
+                (102, "portable-session-b", 12, "beta", "{}", "completed", 1),
+            ],
+        )
+        await conn.executemany(
+            """INSERT INTO memories (
+                   id, index_id, session_id, type, title, content, metadata
+               ) VALUES ($1, $2, $3, 'observation', $4, $5, '{}'::jsonb)""",
+            [
+                (1001, 11, 101, "A1", "Session A memory one"),
+                (1002, 11, 101, "A2", "Session A memory two"),
+                (1003, 12, 102, "B1", "Session B memory"),
+                (1004, 12, None, "No session", "Independent memory"),
+            ],
+        )
+        await conn.execute(
+            """INSERT INTO memory_relationships (
+                   id, source_id, target_id, relation_type, link_type, confidence, metadata
+               ) VALUES (501, 1001, 1003, 'references', 'references', 1.0, '{}'::jsonb)"""
+        )
+
+        fk_rows = await conn.fetch(
+            """SELECT child.relname AS child_table, parent.relname AS parent_table
+                 FROM pg_constraint constraint_record
+                 JOIN pg_class child ON child.oid = constraint_record.conrelid
+                 JOIN pg_class parent ON parent.oid = constraint_record.confrelid
+                 JOIN pg_namespace child_namespace
+                   ON child_namespace.oid = child.relnamespace
+                WHERE constraint_record.contype = 'f'
+                  AND child_namespace.nspname = 'public'
+                  AND child.relname = ANY($1::text[])""",
+            list(portable_backup.PORTABLE_DATABASE_TABLES.values()),
+        )
+        actual_fk_graph = {
+            table: frozenset(
+                row["parent_table"]
+                for row in fk_rows
+                if row["child_table"] == table
+            )
+            for table in portable_backup.PORTABLE_DATABASE_TABLES.values()
+        }
+        assert actual_fk_graph == portable_backup.PORTABLE_FOREIGN_KEY_PARENTS
+    finally:
+        await conn.close()
+
+    bundle = tmp_path / "bundle"
+    source = PostgresDataLayer()
+    try:
+        manifest = await portable_backup.export_bundle(
+            bundle,
+            source,
+            source_label="real-postgres-fixture",
+            created_at=FIXED_EXPORT_TIME,
+        )
+        assert manifest["record_counts"] == {
+            "indexes": 2,
+            "sessions": 2,
+            "memories": 4,
+            "relationships": 1,
+        }
+
+        await postgres_module.close_pool()
+        await truncate_portable_tables()
+
+        restore_report = await portable_backup.restore_bundle(
+            bundle,
+            PostgresDataLayer(),
+            regenerate_embeddings=False,
+        )
+        verification = await portable_backup.verify_round_trip(
+            bundle,
+            PostgresDataLayer(),
+        )
+
+        assert restore_report["restored"]["sessions"] == 2
+        assert verification["ok"] is True
+
+        conn = await asyncpg.connect(integration_database_url)
+        try:
+            restored_sessions = await conn.fetchval("SELECT COUNT(*) FROM sessions")
+            referenced_memories = await conn.fetchval(
+                "SELECT COUNT(*) FROM memories WHERE session_id IS NOT NULL"
+            )
+            missing_session_parents = await conn.fetchval(
+                """SELECT COUNT(*)
+                     FROM memories memory
+                     LEFT JOIN sessions session ON session.id = memory.session_id
+                    WHERE memory.session_id IS NOT NULL AND session.id IS NULL"""
+            )
+        finally:
+            await conn.close()
+
+        assert restored_sessions == 2
+        assert referenced_memories == 3
+        assert missing_session_parents == 0
+    finally:
+        await postgres_module.close_pool()
+        await truncate_portable_tables(seed_default_index=True)
+
 
 @pytest.mark.asyncio
 async def test_postgres_export_reads_only_portable_closure_tables() -> None:
@@ -788,6 +1065,7 @@ async def test_postgres_export_reads_only_portable_closure_tables() -> None:
     conn.transaction = MagicMock(return_value=_transaction_context())
     conn.fetch.side_effect = [
         [{"id": 1, "name": "alpha"}],
+        [FixturePortableStore().records["sessions"][0]],
         [
             {
                 "id": 10,
@@ -829,11 +1107,12 @@ async def test_postgres_export_reads_only_portable_closure_tables() -> None:
         records = await PostgresDataLayer().export_portable_records()
 
     assert records["indexes"] == [{"id": 1, "name": "alpha"}]
+    assert records["sessions"][0]["session_id"] == "session-1"
     assert records["memories"][0]["id"] == 10
     assert "embedding" not in records["memories"][0]
     assert records["relationships"][0]["relation_type"] == "references"
 
-    # Finding 7: the three reads share one REPEATABLE READ snapshot.
+    # Finding 7: all closure reads share one REPEATABLE READ snapshot.
     conn.transaction.assert_called_once_with(isolation="repeatable_read")
 
     export_sql = "\n".join(call.args[0] for call in conn.fetch.call_args_list).lower()
@@ -841,7 +1120,6 @@ async def test_postgres_export_reads_only_portable_closure_tables() -> None:
         "url_tokens",
         "memory_usage_log",
         "embedding_token_log",
-        "sessions",
         "session_summaries",
     ):
         assert forbidden_table not in export_sql
@@ -854,13 +1132,14 @@ async def test_postgres_restore_uses_explicit_ids_conflicts_and_sequence_repair(
     conn = AsyncMock()
     conn.transaction = MagicMock(return_value=_transaction_context())
     # Empty closure so the in-transaction emptiness check proceeds to insert.
-    conn.fetch.side_effect = [[], [], []]
+    conn.fetch.side_effect = [[], [], [], []]
     pool = _make_pool(conn)
     fixture = FixturePortableStore().records
 
     with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
         result = await PostgresDataLayer().restore_portable_records(
             fixture["indexes"],
+            fixture["sessions"],
             fixture["memories"],
             fixture["relationships"],
             regenerate_embeddings=False,
@@ -871,15 +1150,18 @@ async def test_postgres_restore_uses_explicit_ids_conflicts_and_sequence_repair(
     restore_sql = "\n".join(call.args[0] for call in conn.execute.call_args_list)
     # Findings 4 & 8: the closure tables are locked before the check-then-write.
     assert (
-        "LOCK TABLE memory_indexes, memories, memory_relationships IN EXCLUSIVE MODE"
+        "LOCK TABLE memory_indexes, sessions, memories, memory_relationships "
+        "IN EXCLUSIVE MODE"
         in restore_sql
     )
     assert "INSERT INTO memory_indexes (id, name)" in restore_sql
+    assert "INSERT INTO sessions (" in restore_sql
     assert "INSERT INTO memories (" in restore_sql
     assert "ON CONFLICT (id) DO NOTHING" in restore_sql
     assert "INSERT INTO memory_relationships" in restore_sql
     assert "ON CONFLICT (source_id, target_id, relation_type) DO NOTHING" in restore_sql
     assert "pg_get_serial_sequence('memories', 'id')" in restore_sql
+    assert "pg_get_serial_sequence('sessions', 'id')" in restore_sql
     assert "pg_get_serial_sequence('memory_relationships', 'id')" in restore_sql
     # The lock and inserts all happen inside a single transaction.
     conn.transaction.assert_called_once_with()
