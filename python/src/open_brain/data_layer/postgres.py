@@ -623,6 +623,12 @@ def _row_to_memory(row: asyncpg.Record) -> Memory:
 class PostgresDataLayer:
     """DataLayer implementation backed by Postgres + pgvector."""
 
+    def _scope_index_id(self, index_id: int | None) -> int:
+        """Normalize missing project scope to the default memory index."""
+        if index_id is None:
+            return 1
+        return index_id
+
     async def _resolve_index_id(self, conn: asyncpg.Connection, project: str | None) -> int | None:
         """Resolve a project name to its memory_indexes.id, creating if needed."""
         if not project:
@@ -1155,7 +1161,7 @@ class PostgresDataLayer:
 
             # ── Upsert path for session_summary ──
             if params.type == "session_summary" and params.session_ref:
-                session_summary_index_id = index_id if index_id is not None else 1
+                session_summary_index_id = self._scope_index_id(index_id)
                 if params.upsert_mode == "replace":
                     # Delete existing rows in FK-safe order, then insert fresh.
                     # Wrapped in a transaction for atomicity.
@@ -1200,7 +1206,7 @@ class PostgresDataLayer:
                             """INSERT INTO memories (index_id, type, title, subtitle, narrative, content, session_ref, metadata, user_id, importance)
                                VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10)
                                RETURNING id""",
-                            index_id or 1,
+                            self._scope_index_id(index_id),
                             params.type or "observation",
                             params.title,
                             params.subtitle,
@@ -1271,8 +1277,8 @@ class PostgresDataLayer:
                 query_embedding, query_tokens = await embed_query_with_usage(params.text)
                 asyncio.create_task(self._log_embedding_tokens("query", query_tokens))
                 vec_str = to_pg_vector(query_embedding)
-                # Normalize index_id for dedup: inserts use `index_id or 1`; match the same scope
-                search_index_id = index_id if index_id is not None else 1
+                # Normalize index_id for dedup: match the same scope used by inserts.
+                search_index_id = self._scope_index_id(index_id)
                 match_row = await conn.fetchrow(
                     """SELECT id, importance, content,
                               1 - (embedding <=> $1::vector) AS similarity
@@ -1310,8 +1316,8 @@ class PostgresDataLayer:
 
             # ── Content hash dedup ──
             content_hash = hashlib.sha256(params.text.encode()).hexdigest()
-            # Normalize index_id for dedup: inserts use `index_id or 1`; match the same scope
-            content_hash_index_id = index_id if index_id is not None else 1
+            # Normalize index_id for dedup: match the same scope used by inserts.
+            content_hash_index_id = self._scope_index_id(index_id)
             dup_row = await conn.fetchrow(
                 """SELECT id FROM memories
                    WHERE metadata->>'content_hash' = $1
@@ -1340,7 +1346,7 @@ class PostgresDataLayer:
                 """INSERT INTO memories (index_id, type, title, subtitle, narrative, content, session_ref, metadata, user_id, importance)
                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10)
                    RETURNING id""",
-                index_id or 1,
+                self._scope_index_id(index_id),
                 params.type or "observation",
                 params.title,
                 params.subtitle,
@@ -1389,7 +1395,7 @@ class PostgresDataLayer:
                 updates["narrative"] = params.narrative
             if params.project is not None:
                 index_id = await self._resolve_index_id(conn, params.project)
-                updates["index_id"] = index_id or 1
+                updates["index_id"] = self._scope_index_id(index_id)
 
             has_metadata_merge = params.metadata is not None
 
@@ -1535,7 +1541,7 @@ class PostgresDataLayer:
                 updates["narrative"] = params.narrative
             if params.project is not None:
                 index_id = await self._resolve_index_id(conn, params.project)
-                updates["index_id"] = index_id or 1
+                updates["index_id"] = self._scope_index_id(index_id)
 
             set_parts: list[str] = []
             values: list[Any] = []
@@ -2229,7 +2235,7 @@ class PostgresDataLayer:
                 index_id = await self._resolve_index_id(conn, project)
                 rows = await conn.fetch(
                     "SELECT * FROM memories WHERE index_id = $1 ORDER BY created_at DESC LIMIT $2",
-                    index_id or 1,
+                    self._scope_index_id(index_id),
                     limit,
                 )
                 candidates = [_row_to_memory(r) for r in rows]
@@ -2342,7 +2348,7 @@ class PostgresDataLayer:
                 index_id = await self._resolve_index_id(conn, project)
                 rows = await conn.fetch(
                     f"SELECT * FROM memories WHERE index_id = $1 {_lifecycle_filter} ORDER BY created_at DESC LIMIT $2",
-                    index_id or 1,
+                    self._scope_index_id(index_id),
                     limit,
                 )
             elif scope.startswith("type:"):
