@@ -1881,12 +1881,14 @@ class PostgresDataLayer:
         pool = await get_pool()
         async with pool.acquire() as conn:
             indexes = await conn.fetchrow("SELECT COUNT(*)::int AS count FROM memory_indexes")
+            sessions = await conn.fetchrow("SELECT COUNT(*)::int AS count FROM sessions")
             memories = await conn.fetchrow("SELECT COUNT(*)::int AS count FROM memories")
             relationships = await conn.fetchrow(
                 "SELECT COUNT(*)::int AS count FROM memory_relationships"
             )
         return {
             "indexes": int(indexes["count"]),
+            "sessions": int(sessions["count"]),
             "memories": int(memories["count"]),
             "relationships": int(relationships["count"]),
         }
@@ -1896,11 +1898,17 @@ class PostgresDataLayer:
     ) -> dict[str, list[dict[str, Any]]]:
         """Read the portable knowledge closure (no credentials, no embeddings).
 
-        Uses the caller-provided connection so the three reads can be scoped to a
+        Uses the caller-provided connection so all reads can be scoped to a
         single transaction/snapshot by the caller (export snapshot / restore
         emptiness check).
         """
         indexes = await conn.fetch("SELECT id, name FROM memory_indexes ORDER BY id")
+        sessions = await conn.fetch(
+            """SELECT id, session_id, index_id, project, started_at, ended_at,
+                      metadata, status, prompt_counter
+               FROM sessions
+               ORDER BY id"""
+        )
         memories = await conn.fetch(
             """SELECT id, index_id, session_id, type, title, subtitle, narrative,
                       content, metadata, priority, stability, access_count,
@@ -1916,6 +1924,7 @@ class PostgresDataLayer:
         )
         return {
             "indexes": [dict(row) for row in indexes],
+            "sessions": [dict(row) for row in sessions],
             "memories": [dict(row) for row in memories],
             "relationships": [dict(row) for row in relationships],
         }
@@ -1923,7 +1932,7 @@ class PostgresDataLayer:
     async def export_portable_records(self) -> dict[str, list[dict[str, Any]]]:
         """Read the portable knowledge closure without credentials or embeddings.
 
-        All three reads run in one REPEATABLE READ transaction so they observe a
+        All closure reads run in one REPEATABLE READ transaction so they observe a
         single consistent snapshot; a concurrent mutation cannot produce an
         internally inconsistent bundle (e.g. a relationship referencing a memory
         that was not included in the same snapshot).
@@ -1948,6 +1957,7 @@ class PostgresDataLayer:
     async def restore_portable_records(
         self,
         indexes: list[dict[str, Any]],
+        sessions: list[dict[str, Any]],
         memories: list[dict[str, Any]],
         relationships: list[dict[str, Any]],
         *,
@@ -1957,7 +1967,7 @@ class PostgresDataLayer:
 
         Findings 4 & 8 (race elimination): the emptiness/same-bundle check, the
         id-preserving inserts, and the sequence repair all run inside ONE
-        transaction that first takes an EXCLUSIVE lock on the three closure
+        transaction that first takes an EXCLUSIVE lock on the closure
         tables. That lock blocks concurrent INSERT/UPDATE/DELETE (and therefore
         ``nextval`` via ``save_memory``) for the duration of the restore, so
         check-then-write is atomic and the sequence repair cannot be moved behind
@@ -1975,6 +1985,7 @@ class PostgresDataLayer:
         expected = _canonical_records(
             {
                 "indexes": indexes,
+                "sessions": sessions,
                 "memories": memories,
                 "relationships": relationships,
             }
@@ -1987,13 +1998,14 @@ class PostgresDataLayer:
                 # Serialize the whole restore against concurrent writers so the
                 # emptiness check below and the writes are atomic (findings 4 & 8).
                 await conn.execute(
-                    "LOCK TABLE memory_indexes, memories, memory_relationships "
+                    "LOCK TABLE memory_indexes, sessions, memories, memory_relationships "
                     "IN EXCLUSIVE MODE"
                 )
 
                 existing = await self._read_portable_closure(conn)
                 populated = any(
-                    existing[key] for key in ("indexes", "memories", "relationships")
+                    existing[key]
+                    for key in ("indexes", "sessions", "memories", "relationships")
                 )
                 if populated:
                     if _canonical_records(existing) == expected:
@@ -2007,7 +2019,7 @@ class PostgresDataLayer:
 
                 if not already_restored:
                     await self._insert_portable_records(
-                        conn, indexes, memories, relationships
+                        conn, indexes, sessions, memories, relationships
                     )
 
         if regenerate_embeddings:
@@ -2043,6 +2055,7 @@ class PostgresDataLayer:
         self,
         conn: asyncpg.Connection,
         indexes: list[dict[str, Any]],
+        sessions: list[dict[str, Any]],
         memories: list[dict[str, Any]],
         relationships: list[dict[str, Any]],
     ) -> None:
@@ -2061,6 +2074,25 @@ class PostgresDataLayer:
                    ON CONFLICT (id) DO NOTHING""",
                 index["id"],
                 index["name"],
+            )
+
+        for session in sessions:
+            await conn.execute(
+                """INSERT INTO sessions (
+                       id, session_id, index_id, project, started_at, ended_at,
+                       metadata, status, prompt_counter
+                   )
+                   VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)
+                   ON CONFLICT (id) DO NOTHING""",
+                session["id"],
+                session["session_id"],
+                session.get("index_id"),
+                session.get("project"),
+                _parse_portable_timestamp(session.get("started_at")),
+                _parse_portable_timestamp(session.get("ended_at")),
+                session.get("metadata") or {},
+                session.get("status"),
+                session.get("prompt_counter"),
             )
 
         for memory in memories:
@@ -2117,6 +2149,13 @@ class PostgresDataLayer:
             """SELECT setval(
                    pg_get_serial_sequence('memory_indexes', 'id'),
                    GREATEST(COALESCE((SELECT MAX(id) FROM memory_indexes), 0) + 1, 1),
+                   false
+               )"""
+        )
+        await conn.execute(
+            """SELECT setval(
+                   pg_get_serial_sequence('sessions', 'id'),
+                   GREATEST(COALESCE((SELECT MAX(id) FROM sessions), 0) + 1, 1),
                    false
                )"""
         )

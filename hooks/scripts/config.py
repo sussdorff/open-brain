@@ -1,5 +1,7 @@
 """Configuration loader for open-brain hooks."""
 
+from __future__ import annotations
+
 import json
 import logging
 import os

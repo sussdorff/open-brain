@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "hooks" / "scripts"))
+import session_end_summary
 from session_end_summary import _filter_turns
 
 import pytest
@@ -21,6 +22,14 @@ from httpx import ASGITransport, AsyncClient
 from open_brain.data_layer.interface import SaveMemoryResult
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+
+def test_session_end_hook_fails_open_on_unexpected_error(capsys):
+    """Unexpected non-security failures must not block session shutdown."""
+    with patch.object(session_end_summary, "main", side_effect=RuntimeError("boom")):
+        session_end_summary.run()
+
+    assert json.loads(capsys.readouterr().out) == {"continue": True}
 
 # ─── Shared helpers ────────────────────────────────────────────────────────────
 
