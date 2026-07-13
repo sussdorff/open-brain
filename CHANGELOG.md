@@ -42,6 +42,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- *(open-brain-ceb3)* **`save_memory` session-summary upsert no longer corrupts unrelated memory types** — The upsert lookup for `type='session_summary'` saves (both append and replace mode) now scopes its existing-row match by memory type and project, in addition to `session_ref`. Previously, appending a session summary could match *any* memory sharing the same `session_ref` — including a `learning` or `debrief` — and silently retitle it and concatenate content into it. Session summaries with the same `session_ref` and project still update idempotently in place; memories of other types or projects are never touched.
+
 - *(open-brain-cd79)* **Second Brain cutover accepts an empty canonical-entity set when filtering works** — The `open_brain_capabilities` gate now verifies the canonical-entity filter query itself and reports its full result total. A successful zero-count query is green, while an unavailable, broken, or malformed query remains red.
 
 - *(open-brain-bv5f)* **Second Brain cutover reconciliation now reaches a truthful green state** — Dry-run reconciliation mirrors apply-time content-hash deduplication across different source references, including duplicate bodies within one vault batch. External HTTP(S) web-clip images, including single-slash `https:/` references, no longer count as Paperless attachments, while local attachment failures and genuinely new content still keep the migration gate red.

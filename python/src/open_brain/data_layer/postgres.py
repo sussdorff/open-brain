@@ -1126,8 +1126,9 @@ class PostgresDataLayer:
         """Insert a new memory and trigger async embedding.
 
         Upsert behaviour: when type='session_summary' and session_ref is provided,
-        an existing memory with the same session_ref is updated (content appended,
-        title/subtitle/narrative replaced if provided) instead of inserting a new row.
+        an existing session_summary in the same project scope is updated (content
+        appended, title/subtitle/narrative replaced if provided) instead of
+        inserting a new row.
         """
         # Validate importance BEFORE any DB access (V6)
         if params.importance not in IMPORTANCE_VALUES:
@@ -1154,13 +1155,18 @@ class PostgresDataLayer:
 
             # ── Upsert path for session_summary ──
             if params.type == "session_summary" and params.session_ref:
+                session_summary_index_id = index_id if index_id is not None else 1
                 if params.upsert_mode == "replace":
                     # Delete existing rows in FK-safe order, then insert fresh.
                     # Wrapped in a transaction for atomicity.
                     async with conn.transaction():
                         existing_ids_rows = await conn.fetch(
-                            "SELECT id FROM memories WHERE session_ref = $1 AND type = 'session_summary'",
+                            """SELECT id FROM memories
+                               WHERE session_ref = $1
+                                 AND type = 'session_summary'
+                                 AND (index_id IS NOT DISTINCT FROM $2)""",
                             params.session_ref,
+                            session_summary_index_id,
                         )
                         existing_ids: list[int] = [r["id"] for r in existing_ids_rows]
                         if existing_ids:
@@ -1173,8 +1179,12 @@ class PostgresDataLayer:
                                 existing_ids,
                             )
                             await conn.execute(
-                                "DELETE FROM memories WHERE session_ref = $1 AND type = 'session_summary'",
+                                """DELETE FROM memories
+                                   WHERE session_ref = $1
+                                     AND type = 'session_summary'
+                                     AND (index_id IS NOT DISTINCT FROM $2)""",
                                 params.session_ref,
+                                session_summary_index_id,
                             )
 
                         # Content-hash dedup is skipped for replace mode (we're intentionally
@@ -1214,8 +1224,13 @@ class PostgresDataLayer:
                 else:
                     # append mode: merge content into existing row
                     existing = await conn.fetchrow(
-                        "SELECT id, content FROM memories WHERE session_ref = $1 LIMIT 1",
+                        """SELECT id, content FROM memories
+                           WHERE session_ref = $1
+                             AND type = 'session_summary'
+                             AND (index_id IS NOT DISTINCT FROM $2)
+                           LIMIT 1""",
                         params.session_ref,
+                        session_summary_index_id,
                     )
                     if existing:
                         existing_id: int = existing["id"]

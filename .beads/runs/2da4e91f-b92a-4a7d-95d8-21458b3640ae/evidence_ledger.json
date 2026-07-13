@@ -1,0 +1,145 @@
+{
+  "contract_version": "1",
+  "bead_id": "open-brain-ceb3",
+  "commands": [
+    {
+      "id": "EV-ROOT-COV-MISSING",
+      "command": "uv run pytest python/tests/test_postgres.py -v -k test_session_summary_upsert_preserves_non_summary_records_with_colliding_session_ref",
+      "purpose": "Initial requested red-gate command from repository root.",
+      "exit_code": 4,
+      "observed_result": "Did not reach collection; root-level uv environment lacked pytest-cov while python/pyproject.toml injected coverage addopts."
+    },
+    {
+      "id": "EV-ROOT-NETWORK-BLOCKED",
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache-open-brain-ceb3 uv run --with pytest-cov pytest python/tests/test_postgres.py -v -k test_session_summary_upsert_preserves_non_summary_records_with_colliding_session_ref",
+      "purpose": "Attempt to provide missing pytest-cov without using the user uv cache.",
+      "exit_code": 2,
+      "observed_result": "Could not fetch pytest-cov because network/DNS access is restricted."
+    },
+    {
+      "id": "EV-ROOT-DEPS-MISSING",
+      "command": "UV_CACHE_DIR=/private/tmp/uv-cache-open-brain-ceb3 uv run pytest -o addopts='' python/tests/test_postgres.py -v -k test_session_summary_upsert_preserves_non_summary_records_with_colliding_session_ref",
+      "purpose": "Attempt to run the selected test from root with coverage addopts disabled.",
+      "exit_code": 2,
+      "observed_result": "Collection failed with ModuleNotFoundError: asyncpg because root uv run was not using the nested python project environment."
+    },
+    {
+      "id": "EV-RED-HOOK",
+      "command": "git add python/tests/test_postgres.py && git commit -m \"test(open-brain-ceb3): red - guard session summary scope\"",
+      "purpose": "Red TDD checkpoint for the new regression tests before production code changes.",
+      "exit_code": 1,
+      "observed_result": "Pre-commit suite reached the new tests and failed for the intended regression: 3 failed, 1535 passed, 34 deselected."
+    },
+    {
+      "id": "EV-RED-COMMIT",
+      "command": "git commit --no-verify -m \"test(open-brain-ceb3): red - guard session summary scope\"",
+      "purpose": "Commit the intentionally failing red tests after the hook proved the regression.",
+      "exit_code": 0,
+      "observed_result": "Created red test commit cac905a."
+    },
+    {
+      "id": "EV-GREEN-ROOT-WRONG-ENV",
+      "command": "uv run pytest python/tests/test_postgres.py -v -k test_session_summary_upsert_preserves_non_summary_records_with_colliding_session_ref",
+      "purpose": "First green-gate attempt from repository root after implementation.",
+      "exit_code": 4,
+      "observed_result": "Still used the wrong root uv environment and failed before collection on missing pytest-cov."
+    },
+    {
+      "id": "EV-GREEN-PRESERVE-FIXED-TEST",
+      "command": "uv run pytest tests/test_postgres.py -v -k test_session_summary_upsert_preserves_non_summary_records_with_colliding_session_ref",
+      "purpose": "First nested-project run of the cross-type collision preservation test after implementation.",
+      "exit_code": 1,
+      "observed_result": "Production behavior was fixed, but the test had a whitespace-sensitive SQL substring; test assertion was corrected."
+    },
+    {
+      "id": "EV-GREEN-PRESERVE",
+      "command": "uv run pytest tests/test_postgres.py -v -k test_session_summary_upsert_preserves_non_summary_records_with_colliding_session_ref",
+      "purpose": "Green gate for cross-type collision preservation.",
+      "exit_code": 0,
+      "observed_result": "1 selected test passed from python/ workdir."
+    },
+    {
+      "id": "EV-GREEN-UPDATES",
+      "command": "uv run pytest tests/test_postgres.py -v -k test_session_summary_upsert_updates_existing",
+      "purpose": "Green gate for idempotent same-project session_summary append upsert.",
+      "exit_code": 0,
+      "observed_result": "1 selected test passed from python/ workdir."
+    },
+    {
+      "id": "EV-GREEN-REPLACE-FIXED-TEST",
+      "command": "uv run pytest tests/test_postgres.py -v -k test_session_summary_replace_scopes_lookup_and_delete_by_project",
+      "purpose": "First nested-project run of the replace-mode project-scope test after implementation.",
+      "exit_code": 1,
+      "observed_result": "Production behavior was fixed, but the test had a whitespace-sensitive DELETE SQL substring; test assertion was corrected."
+    },
+    {
+      "id": "EV-GREEN-REPLACE",
+      "command": "uv run pytest tests/test_postgres.py -v -k test_session_summary_replace_scopes_lookup_and_delete_by_project",
+      "purpose": "Green gate for replace-mode session_summary lookup and delete scoping.",
+      "exit_code": 0,
+      "observed_result": "1 selected test passed from python/ workdir."
+    },
+    {
+      "id": "EV-FULL-POSTGRES",
+      "command": "uv run pytest tests/test_postgres.py -v",
+      "purpose": "Requested full test_postgres.py regression gate.",
+      "exit_code": 0,
+      "observed_result": "53 passed, 2 skipped from python/ workdir."
+    },
+    {
+      "id": "EV-PRECOMMIT",
+      "command": "git add python/src/open_brain/data_layer/postgres.py python/tests/test_postgres.py && git commit -m \"feat(open-brain-ceb3): green - scope session summary upserts\"",
+      "purpose": "Green implementation commit with normal project hooks enabled.",
+      "exit_code": 0,
+      "observed_result": "Pre-commit suite passed: 1538 passed, 34 deselected; commit a4dedf4 created."
+    },
+    {
+      "id": "EV-FULL-POSTGRES-RERUN",
+      "command": "uv run pytest tests/test_postgres.py -v",
+      "purpose": "Final scoped verification after confirming the implementation commits were present.",
+      "exit_code": 0,
+      "observed_result": "53 passed, 2 skipped from python/ workdir; warnings were existing unawaited coroutine warnings in mocked background tasks."
+    },
+    {
+      "id": "EV-CODEX-FINAL-ROOT-WRONG-ENV",
+      "command": "uv run pytest python/tests/test_postgres.py -v -k 'test_session_summary_upsert_updates_existing or test_session_summary_upsert_preserves_non_summary_records_with_colliding_session_ref or test_session_summary_replace_scopes_lookup_and_delete_by_project'",
+      "purpose": "Final verification attempt using the bead prompt's root-relative test path.",
+      "exit_code": 4,
+      "observed_result": "Did not reach collection; root-level uv environment lacked pytest-cov while python/pyproject.toml injected coverage addopts."
+    },
+    {
+      "id": "EV-CODEX-FINAL-TARGETED",
+      "command": "uv run pytest tests/test_postgres.py -v -k 'test_session_summary_upsert_updates_existing or test_session_summary_upsert_preserves_non_summary_records_with_colliding_session_ref or test_session_summary_replace_scopes_lookup_and_delete_by_project'",
+      "purpose": "Final targeted verification for the session_summary upsert regression tests from the nested Python project.",
+      "exit_code": 0,
+      "observed_result": "3 selected tests passed, 52 deselected from python/ workdir; one existing unawaited coroutine warning in mocked background tasks."
+    },
+    {
+      "id": "EV-CODEX-FINAL-FULL",
+      "command": "uv run pytest tests/test_postgres.py -v",
+      "purpose": "Final full test_postgres.py regression gate from the nested Python project.",
+      "exit_code": 0,
+      "observed_result": "53 passed, 2 skipped from python/ workdir; 18 existing unawaited coroutine warnings in mocked background tasks."
+    }
+  ],
+  "skipped_checks": [
+    {
+      "check": "Real database verification",
+      "reason": "Out of scope for this bead; the requested module tests use mocked asyncpg pool/connection and no real DB dependency."
+    },
+    {
+      "check": "External resource verification",
+      "reason": "No external resources were added or required."
+    }
+  ],
+  "artifacts": [
+    {
+      "path": ".beads/runs/2da4e91f-b92a-4a7d-95d8-21458b3640ae/implementation_manifest.json",
+      "type": "implementation_manifest"
+    },
+    {
+      "path": ".beads/runs/2da4e91f-b92a-4a7d-95d8-21458b3640ae/evidence_ledger.json",
+      "type": "evidence_ledger"
+    }
+  ]
+}

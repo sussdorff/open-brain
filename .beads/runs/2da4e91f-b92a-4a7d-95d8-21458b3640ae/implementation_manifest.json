@@ -1,0 +1,186 @@
+{
+  "contract_version": "1",
+  "bead_id": "open-brain-ceb3",
+  "acceptance_criteria": [
+    {
+      "id": "AC1",
+      "description": "Saving a session_summary does not update, merge into, retitle, or retype a learning or debrief with the same session_ref.",
+      "status": "done",
+      "changed_files": [
+        "python/src/open_brain/data_layer/postgres.py",
+        "python/tests/test_postgres.py"
+      ],
+      "evidence_refs": [
+        "EV-RED-HOOK",
+        "EV-GREEN-PRESERVE",
+        "EV-FULL-POSTGRES",
+        "EV-FULL-POSTGRES-RERUN",
+        "EV-CODEX-FINAL-TARGETED",
+        "EV-CODEX-FINAL-FULL",
+        "EV-PRECOMMIT"
+      ]
+    },
+    {
+      "id": "AC2",
+      "description": "Repeating a session_summary save for the same project and session_ref updates the existing session_summary idempotently without creating a duplicate.",
+      "status": "done",
+      "changed_files": [
+        "python/src/open_brain/data_layer/postgres.py",
+        "python/tests/test_postgres.py"
+      ],
+      "evidence_refs": [
+        "EV-RED-HOOK",
+        "EV-GREEN-UPDATES",
+        "EV-FULL-POSTGRES",
+        "EV-FULL-POSTGRES-RERUN",
+        "EV-CODEX-FINAL-TARGETED",
+        "EV-CODEX-FINAL-FULL",
+        "EV-PRECOMMIT"
+      ]
+    },
+    {
+      "id": "AC3",
+      "description": "The session-summary upsert lookup includes the memory type and project boundaries in addition to session_ref.",
+      "status": "done",
+      "changed_files": [
+        "python/src/open_brain/data_layer/postgres.py",
+        "python/tests/test_postgres.py"
+      ],
+      "evidence_refs": [
+        "EV-RED-HOOK",
+        "EV-GREEN-UPDATES",
+        "EV-GREEN-REPLACE",
+        "EV-FULL-POSTGRES",
+        "EV-FULL-POSTGRES-RERUN",
+        "EV-CODEX-FINAL-TARGETED",
+        "EV-CODEX-FINAL-FULL",
+        "EV-PRECOMMIT"
+      ]
+    },
+    {
+      "id": "AC4",
+      "description": "Regression tests cover the observed cross-type collision and verify all original non-summary records remain byte-for-byte unchanged in their primary content fields.",
+      "status": "done",
+      "changed_files": [
+        "python/tests/test_postgres.py"
+      ],
+      "evidence_refs": [
+        "EV-RED-HOOK",
+        "EV-GREEN-PRESERVE",
+        "EV-FULL-POSTGRES",
+        "EV-FULL-POSTGRES-RERUN",
+        "EV-CODEX-FINAL-TARGETED",
+        "EV-CODEX-FINAL-FULL",
+        "EV-PRECOMMIT"
+      ]
+    }
+  ],
+  "changed_files": [
+    "python/src/open_brain/data_layer/postgres.py",
+    "python/tests/test_postgres.py",
+    ".beads/runs/2da4e91f-b92a-4a7d-95d8-21458b3640ae/implementation_manifest.json",
+    ".beads/runs/2da4e91f-b92a-4a7d-95d8-21458b3640ae/evidence_ledger.json"
+  ],
+  "commits": [
+    {
+      "hash": "cac905a",
+      "message": "test(open-brain-ceb3): red - guard session summary scope",
+      "type": "red_tests"
+    },
+    {
+      "hash": "a4dedf4",
+      "message": "feat(open-brain-ceb3): green - scope session summary upserts",
+      "type": "implementation"
+    },
+    {
+      "hash": "d17cd1c",
+      "message": "chore(open-brain-ceb3): add implementation artifacts",
+      "type": "implementation_artifacts"
+    }
+  ],
+  "tests": [
+    {
+      "evidence_ref": "EV-RED-HOOK",
+      "command": "git add python/tests/test_postgres.py && git commit -m \"test(open-brain-ceb3): red - guard session summary scope\"",
+      "status": "failed_as_expected",
+      "result": "Pre-commit test suite reached the new regression tests and failed with 3 failures before production code changed."
+    },
+    {
+      "evidence_ref": "EV-GREEN-PRESERVE",
+      "command": "uv run pytest tests/test_postgres.py -v -k test_session_summary_upsert_preserves_non_summary_records_with_colliding_session_ref",
+      "status": "passed",
+      "result": "1 selected test passed from python/ workdir."
+    },
+    {
+      "evidence_ref": "EV-GREEN-UPDATES",
+      "command": "uv run pytest tests/test_postgres.py -v -k test_session_summary_upsert_updates_existing",
+      "status": "passed",
+      "result": "1 selected test passed from python/ workdir."
+    },
+    {
+      "evidence_ref": "EV-GREEN-REPLACE",
+      "command": "uv run pytest tests/test_postgres.py -v -k test_session_summary_replace_scopes_lookup_and_delete_by_project",
+      "status": "passed",
+      "result": "1 selected test passed from python/ workdir."
+    },
+    {
+      "evidence_ref": "EV-FULL-POSTGRES",
+      "command": "uv run pytest tests/test_postgres.py -v",
+      "status": "passed",
+      "result": "53 passed, 2 skipped from python/ workdir."
+    },
+    {
+      "evidence_ref": "EV-FULL-POSTGRES-RERUN",
+      "command": "uv run pytest tests/test_postgres.py -v",
+      "status": "passed",
+      "result": "53 passed, 2 skipped from python/ workdir during final verification."
+    },
+    {
+      "evidence_ref": "EV-CODEX-FINAL-ROOT-WRONG-ENV",
+      "command": "uv run pytest python/tests/test_postgres.py -v -k 'test_session_summary_upsert_updates_existing or test_session_summary_upsert_preserves_non_summary_records_with_colliding_session_ref or test_session_summary_replace_scopes_lookup_and_delete_by_project'",
+      "status": "not_collected",
+      "result": "Root-level uv environment failed before collection on missing pytest-cov from injected addopts."
+    },
+    {
+      "evidence_ref": "EV-CODEX-FINAL-TARGETED",
+      "command": "uv run pytest tests/test_postgres.py -v -k 'test_session_summary_upsert_updates_existing or test_session_summary_upsert_preserves_non_summary_records_with_colliding_session_ref or test_session_summary_replace_scopes_lookup_and_delete_by_project'",
+      "status": "passed",
+      "result": "3 selected tests passed, 52 deselected from python/ workdir."
+    },
+    {
+      "evidence_ref": "EV-CODEX-FINAL-FULL",
+      "command": "uv run pytest tests/test_postgres.py -v",
+      "status": "passed",
+      "result": "53 passed, 2 skipped from python/ workdir during final verification."
+    },
+    {
+      "evidence_ref": "EV-PRECOMMIT",
+      "command": "git add python/src/open_brain/data_layer/postgres.py python/tests/test_postgres.py && git commit -m \"feat(open-brain-ceb3): green - scope session summary upserts\"",
+      "status": "passed",
+      "result": "Pre-commit suite passed: 1538 passed, 34 deselected."
+    }
+  ],
+  "external_resources": [],
+  "scope_changes": [],
+  "downstream_impacts": [
+    "Session summary append upserts now only merge into existing session_summary rows in the same normalized project scope.",
+    "Session summary replace mode now deletes only matching session_summary rows in the same normalized project scope."
+  ],
+  "evidence_refs": [
+    "EV-ROOT-COV-MISSING",
+    "EV-ROOT-NETWORK-BLOCKED",
+    "EV-ROOT-DEPS-MISSING",
+    "EV-RED-HOOK",
+    "EV-RED-COMMIT",
+    "EV-GREEN-ROOT-WRONG-ENV",
+    "EV-GREEN-PRESERVE",
+    "EV-GREEN-UPDATES",
+    "EV-GREEN-REPLACE",
+    "EV-FULL-POSTGRES",
+    "EV-FULL-POSTGRES-RERUN",
+    "EV-CODEX-FINAL-ROOT-WRONG-ENV",
+    "EV-CODEX-FINAL-TARGETED",
+    "EV-CODEX-FINAL-FULL",
+    "EV-PRECOMMIT"
+  ]
+}
