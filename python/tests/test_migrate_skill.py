@@ -7,6 +7,7 @@ These are unit tests that verify:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -234,6 +235,20 @@ class TestBatchModeInteg:
         items, errors = parse_jsonl_batch(content)
         assert errors == 0
         assert len(items) == 2
+
+    @pytest.mark.parametrize("separator", ["\u2028", "\u2029", "\u0085"])
+    def test_unicode_separators_inside_text_are_not_record_delimiters(
+        self,
+        separator: str,
+    ) -> None:
+        """Unicode separators in JSON strings remain part of the imported text."""
+        text = f"before{separator}after"
+        content = json.dumps({"text": text}, ensure_ascii=False) + "\n"
+
+        items, errors = parse_jsonl_batch(content)
+
+        assert errors == 0
+        assert items == [{"text": text}]
 
 
 # ---------------------------------------------------------------------------

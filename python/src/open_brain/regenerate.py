@@ -92,7 +92,7 @@ def _parse_raw_jsonl_turns(path: Path) -> list[dict[str, Any]]:
     from open_brain.session_summary import _is_valid_turn
 
     turns = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8").split("\n"):
         line = line.strip()
         if not line:
             continue
