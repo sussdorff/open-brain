@@ -223,6 +223,7 @@ class FixturePortableStore:
     def __init__(self, *, populated: bool = False) -> None:
         self.records = _portable_records() if populated else {
             "indexes": [],
+            "sessions": [],
             "memories": [],
             "relationships": [],
         }
@@ -235,6 +236,7 @@ class FixturePortableStore:
         """Return row counts for the portable closure."""
         return {
             "indexes": len(self.records["indexes"]),
+            "sessions": len(self.records["sessions"]),
             "memories": len(self.records["memories"]),
             "relationships": len(self.records["relationships"]),
         }
@@ -242,6 +244,7 @@ class FixturePortableStore:
     async def restore_portable_records(
         self,
         indexes: list[dict[str, Any]],
+        sessions: list[dict[str, Any]],
         memories: list[dict[str, Any]],
         relationships: list[dict[str, Any]],
         *,
@@ -250,6 +253,7 @@ class FixturePortableStore:
         """Restore records into this in-memory store."""
         self.records = {
             "indexes": [dict(record) for record in indexes],
+            "sessions": [dict(record) for record in sessions],
             "memories": [dict(record) for record in memories],
             "relationships": [dict(record) for record in relationships],
         }
@@ -261,11 +265,24 @@ def _portable_records() -> dict[str, list[dict[str, Any]]]:
     content = "Portable backup fixture content"
     return {
         "indexes": [{"id": 1, "name": "default"}],
+        "sessions": [
+            {
+                "id": 1,
+                "session_id": "fixture-session-0001",
+                "index_id": 1,
+                "project": "second-brain-cutover",
+                "started_at": "2026-07-12T09:00:00+00:00",
+                "ended_at": "2026-07-12T09:30:00+00:00",
+                "metadata": {},
+                "status": "closed",
+                "prompt_counter": 3,
+            }
+        ],
         "memories": [
             {
                 "id": 10,
                 "index_id": 1,
-                "session_id": None,
+                "session_id": 1,
                 "type": "person",
                 "title": "Ada Sensitive",
                 "subtitle": None,
