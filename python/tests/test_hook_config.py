@@ -16,6 +16,32 @@ import config as hook_config
 from config import detect_project, load_config, resolve_project
 
 
+def test_hook_config_imports_with_host_python_3_9():
+    """The Claude hook interpreter must be able to import the shared config."""
+    host_python = Path("/usr/bin/python3")
+    if not host_python.exists():
+        pytest.skip("Host Python is not available at /usr/bin/python3")
+
+    version = subprocess.run(
+        [str(host_python), "-c", "import sys; print(sys.version_info[:2])"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    if version != "(3, 9)":
+        pytest.skip(f"Host Python is not 3.9: {version}")
+
+    scripts_dir = Path(__file__).parent.parent.parent / "hooks" / "scripts"
+    result = subprocess.run(
+        [str(host_python), "-c", "import config"],
+        cwd=scripts_dir,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.fixture(autouse=True)
 def reset_project_cache():
     """Clear the detect_project cache between tests to prevent cross-test pollution."""
