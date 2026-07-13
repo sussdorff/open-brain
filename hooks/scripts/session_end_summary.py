@@ -123,5 +123,14 @@ def main() -> None:
     print(json.dumps({"continue": True}))
 
 
+def run() -> None:
+    """Run the non-security hook with a fail-open process boundary."""
+    try:
+        main()
+    except Exception as exc:
+        logger.warning("session-end-summary: unexpected hook failure: %s", exc)
+        print(json.dumps({"continue": True}))
+
+
 if __name__ == "__main__":
-    main()
+    run()
