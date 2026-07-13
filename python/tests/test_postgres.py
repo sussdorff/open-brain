@@ -582,6 +582,43 @@ class TestPostgresIngestStatus:
 
         assert result == {}
 
+    @pytest.mark.asyncio
+    async def test_memory_ids_by_content_hashes_matches_save_dedup_scope(self, dl):
+        row = MagicMock()
+        row.__getitem__ = lambda self, key: {
+            "content_hash": "a" * 64,
+            "memory_id": 42,
+        }[key]
+        conn = AsyncMock()
+        conn.fetch.return_value = [row]
+        pool = _make_pool(conn)
+
+        with patch(
+            "open_brain.data_layer.postgres.get_pool",
+            new_callable=AsyncMock,
+            return_value=pool,
+        ):
+            result = await dl.memory_ids_by_content_hashes([
+                "a" * 64,
+                "b" * 64,
+                "a" * 64,
+                "",
+            ])
+
+        assert result == {"a" * 64: 42}
+        query, hashes, index_id, window_days = conn.fetch.call_args[0]
+        assert "metadata->>'content_hash' = ANY($1::text[])" in query
+        assert "created_at > NOW() - ($3 * INTERVAL '1 day')" in query
+        assert hashes == ["a" * 64, "b" * 64]
+        assert index_id == 1
+        assert window_days == 30
+
+    @pytest.mark.asyncio
+    async def test_memory_ids_by_content_hashes_empty_skips_db(self, dl):
+        result = await dl.memory_ids_by_content_hashes(["", "   "])
+
+        assert result == {}
+
 
 class TestPostgresGetContext:
     @pytest.fixture

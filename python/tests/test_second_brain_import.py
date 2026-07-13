@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from contextlib import asynccontextmanager
 from dataclasses import replace
 import importlib.util
@@ -148,8 +149,13 @@ class TestSecondBrainSharedContracts:
 class FakeDataLayer:
     """DataLayer test double that rejects writes in dry-run tests."""
 
-    def __init__(self, existing_refs: dict[str, int] | None = None) -> None:
+    def __init__(
+        self,
+        existing_refs: dict[str, int] | None = None,
+        existing_content_hashes: dict[str, int] | None = None,
+    ) -> None:
         self.existing_refs = existing_refs or {}
+        self.existing_content_hashes = existing_content_hashes or {}
         self.saved: list[SaveMemoryParams] = []
         self.relationships: list[dict[str, Any]] = []
 
@@ -171,6 +177,18 @@ class FakeDataLayer:
                 "title": "Existing note" if source_ref in self.existing_refs else None,
             }
             for source_ref in source_refs
+        }
+
+    async def memory_ids_by_content_hashes(
+        self,
+        content_hashes: list[str],
+        index_id: int = 1,
+    ) -> dict[str, int]:
+        assert index_id == 1
+        return {
+            content_hash: self.existing_content_hashes[content_hash]
+            for content_hash in content_hashes
+            if content_hash in self.existing_content_hashes
         }
 
     async def save_memory(self, params: SaveMemoryParams) -> SaveMemoryResult:
@@ -234,6 +252,14 @@ class RecordingDataLayer(FakeDataLayer):
     async def save_memory(self, params: SaveMemoryParams) -> SaveMemoryResult:
         run_id = get_current_run_id()
         self.saved_run_ids.append(run_id)
+        content_hash = hashlib.sha256(params.text.encode()).hexdigest()
+        if content_hash in self.existing_content_hashes:
+            existing_id = self.existing_content_hashes[content_hash]
+            return SaveMemoryResult(
+                id=existing_id,
+                message="Duplicate content detected",
+                duplicate_of=existing_id,
+            )
         stored_metadata = dict(params.metadata or {})
         if run_id is not None:
             stored_metadata["run_id"] = run_id
@@ -243,6 +269,7 @@ class RecordingDataLayer(FakeDataLayer):
         self.next_id += 1
         source_ref = stored_metadata["source_ref"]
         self.existing_refs[source_ref] = memory_id
+        self.existing_content_hashes[content_hash] = memory_id
         return SaveMemoryResult(id=memory_id, message="Memory saved")
 
     async def create_relationship(
@@ -365,6 +392,34 @@ class TestSecondBrainDryRun:
             }
         ]
 
+    @pytest.mark.asyncio
+    async def test_existing_body_under_another_source_ref_is_duplicate(self, tmp_path):
+        """AC1: dry-run uses the same body hash as apply-time deduplication."""
+        from open_brain.second_brain_import import import_vault
+
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        body = "Body already stored under another source reference.\n"
+        (vault / "Duplicate Title.md").write_text(body, encoding="utf-8")
+        content_hash = hashlib.sha256(body.encode()).hexdigest()
+
+        report = await import_vault(
+            vault_path=vault,
+            data_layer=FakeDataLayer(existing_content_hashes={content_hash: 731}),
+            paperless_client=FakePaperlessClient(),
+            apply=False,
+        )
+
+        assert report["summary"]["importable"] == 0
+        assert report["summary"]["duplicate"] == 1
+        assert report["items"] == [{
+            "source_ref": "Duplicate Title.md",
+            "type": "observation",
+            "action": "duplicate",
+            "memory_id": 731,
+            "reason": "content_hash_collision",
+        }]
+
 
 class TestSecondBrainApply:
     @pytest.mark.asyncio
@@ -470,6 +525,39 @@ class TestSecondBrainApply:
                 },
             }
         ]
+
+    @pytest.mark.asyncio
+    async def test_apply_then_dry_run_reconciles_different_refs_with_same_body(
+        self,
+        tmp_path,
+    ):
+        """AC2: post-apply dry-run reports no importable content duplicates."""
+        from open_brain.second_brain_import import import_vault
+
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        body = "Shared body under two filenames.\n"
+        (vault / "First.md").write_text(body, encoding="utf-8")
+        (vault / "Second.md").write_text(body, encoding="utf-8")
+        data_layer = RecordingDataLayer()
+
+        applied = await import_vault(
+            vault_path=vault,
+            data_layer=data_layer,
+            paperless_client=FakePaperlessClient(),
+            apply=True,
+        )
+        reconciled = await import_vault(
+            vault_path=vault,
+            data_layer=data_layer,
+            paperless_client=FakePaperlessClient(),
+            apply=False,
+        )
+
+        assert applied["summary"]["imported"] == 1
+        assert applied["summary"]["duplicate"] == 1
+        assert reconciled["summary"]["importable"] == 0
+        assert reconciled["summary"]["duplicate"] == 2
 
     @pytest.mark.asyncio
     async def test_cli_drains_pending_background_tasks_before_return(
@@ -604,6 +692,46 @@ class TestSecondBrainAttachments:
                 "reason": "transport_error",
                 "error": "Paperless transport failed for 123",
             }
+        ]
+
+    @pytest.mark.asyncio
+    async def test_external_urls_are_not_paperless_attachments(self, tmp_path):
+        """AC3: web references are non-blocking while local attachments remain."""
+        from open_brain.second_brain_import import import_vault
+
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        (vault / "Web Clip.md").write_text(
+            "---\n"
+            "attachments:\n"
+            "  - https://cdn.example/frontmatter.png\n"
+            "  - local-frontmatter.pdf\n"
+            "---\n"
+            "![remote](https:/cdn.example/collapsed.jpeg)\n"
+            "![local](local-body.png)\n",
+            encoding="utf-8",
+        )
+
+        report = await import_vault(
+            vault_path=vault,
+            data_layer=FakeDataLayer(),
+            paperless_client=FakePaperlessClient(),
+            apply=False,
+        )
+
+        assert report["unresolved_attachments"] == [
+            {
+                "source_ref": "Web Clip.md",
+                "attachment": "local-body.png",
+                "document_id": None,
+                "reason": "no_mapping",
+            },
+            {
+                "source_ref": "Web Clip.md",
+                "attachment": "local-frontmatter.pdf",
+                "document_id": None,
+                "reason": "no_mapping",
+            },
         ]
 
 

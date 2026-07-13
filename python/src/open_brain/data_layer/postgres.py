@@ -944,6 +944,48 @@ class PostgresDataLayer:
 
         return statuses
 
+    async def memory_ids_by_content_hashes(
+        self,
+        content_hashes: list[str],
+        index_id: int = 1,
+    ) -> dict[str, int]:
+        """Return recent exact-content duplicate IDs in save-memory dedup scope."""
+        unique_hashes: list[str] = []
+        seen: set[str] = set()
+        for content_hash in content_hashes:
+            normalized_hash = str(content_hash).strip()
+            if not normalized_hash or normalized_hash in seen:
+                continue
+            seen.add(normalized_hash)
+            unique_hashes.append(normalized_hash)
+        if not unique_hashes:
+            return {}
+
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    metadata->>'content_hash' AS content_hash,
+                    id AS memory_id
+                FROM memories
+                WHERE metadata->>'content_hash' = ANY($1::text[])
+                  AND index_id = $2
+                  AND created_at > NOW() - ($3 * INTERVAL '1 day')
+                ORDER BY created_at DESC
+                """,
+                unique_hashes,
+                index_id,
+                DEDUP_WINDOW_DAYS,
+            )
+
+        memory_ids: dict[str, int] = {}
+        for row in rows:
+            content_hash = row["content_hash"]
+            if content_hash not in memory_ids:
+                memory_ids[content_hash] = row["memory_id"]
+        return memory_ids
+
     async def _apply_recall_decay_background(
         self, candidates: list[tuple[int, str, int]]
     ) -> None:

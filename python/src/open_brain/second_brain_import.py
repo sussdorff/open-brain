@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import re
 import sys
@@ -36,6 +37,7 @@ ItemAction = Literal["import", "duplicate", "skip"]
 _WIKILINK_RE = re.compile(r"(?<!!)\[\[([^\]]+)\]\]")
 _EMBED_RE = re.compile(r"!\[\[([^\]]+)\]\]")
 _MARKDOWN_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
+_EXTERNAL_HTTP_REFERENCE_RE = re.compile(r"^https?:/{1,2}", re.IGNORECASE)
 _DATE_STEM_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _ATTACHMENT_SUFFIXES = frozenset({
     ".pdf",
@@ -166,8 +168,15 @@ def _extract_wikilinks(body: str) -> list[ParsedWikilink]:
     return links
 
 
+def _is_external_http_reference(value: str) -> bool:
+    """Return true for standard or single-slash HTTP(S) web references."""
+    return _EXTERNAL_HTTP_REFERENCE_RE.match(value.strip()) is not None
+
+
 def _is_attachment_target(value: str) -> bool:
     """Return true when a link target looks like an attachment reference."""
+    if _is_external_http_reference(value):
+        return False
     suffix = Path(value.split("#", 1)[0].split("|", 1)[0].strip()).suffix.lower()
     return suffix in _ATTACHMENT_SUFFIXES
 
@@ -179,7 +188,11 @@ def _extract_attachments(body: str, frontmatter: dict[str, Any]) -> list[str]:
     raw_frontmatter_attachments = frontmatter.get("attachments")
     if isinstance(raw_frontmatter_attachments, list):
         for value in raw_frontmatter_attachments:
-            if isinstance(value, str) and value.strip():
+            if (
+                isinstance(value, str)
+                and value.strip()
+                and not _is_external_http_reference(value)
+            ):
                 attachments.append(value.strip())
 
     for match in _EMBED_RE.finditer(body):
@@ -667,10 +680,25 @@ async def _import_vault_reconcile(
         [note.source_ref for note in notes],
         memory_type=None,
     )
+    content_hashes_by_source_ref: dict[str, str] = {}
+    memory_ids_by_content_hash: dict[str, int] = {}
+    if mode == "dry_run":
+        content_hashes_by_source_ref = {
+            note.source_ref: hashlib.sha256(note.body.encode()).hexdigest()
+            for note in notes
+            if not statuses.get(note.source_ref, {}).get("ingested")
+        }
+        content_hash_lookup = getattr(data_layer, "memory_ids_by_content_hashes", None)
+        if callable(content_hash_lookup):
+            memory_ids_by_content_hash = await content_hash_lookup(
+                list(content_hashes_by_source_ref.values()),
+                index_id=1,
+            )
 
     by_path, by_basename = _build_note_index(notes)
     items_by_source_ref: dict[str, dict[str, Any]] = {}
     importable_notes: list[ParsedNote] = []
+    importable_content_hashes: set[str] = set()
     memory_ids_by_source_ref: dict[str, int] = {}
     for skipped in skipped_notes:
         items_by_source_ref[skipped.source_ref] = _item(
@@ -694,6 +722,21 @@ async def _import_vault_reconcile(
                 reason="already_ingested",
             )
             continue
+        if mode == "dry_run":
+            content_hash = content_hashes_by_source_ref[note.source_ref]
+            content_memory_id = memory_ids_by_content_hash.get(content_hash)
+            if content_memory_id is not None or content_hash in importable_content_hashes:
+                if content_memory_id is not None:
+                    memory_ids_by_source_ref[note.source_ref] = content_memory_id
+                items_by_source_ref[note.source_ref] = _item(
+                    source_ref=note.source_ref,
+                    memory_type=note.memory_type,
+                    action="duplicate",
+                    memory_id=content_memory_id,
+                    reason="content_hash_collision",
+                )
+                continue
+            importable_content_hashes.add(content_hash)
         importable_notes.append(note)
         items_by_source_ref[note.source_ref] = _item(
             source_ref=note.source_ref,
