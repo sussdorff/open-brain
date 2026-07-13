@@ -419,7 +419,7 @@ def _validate_source_label(source_label: str | None) -> None:
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     """Read a deterministic JSONL file into record dictionaries."""
     records: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8").split("\n"):
         if not line.strip():
             continue
         value = json.loads(line)

@@ -34,7 +34,7 @@ def _content_hash(content: str) -> str:
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     """Read fixture JSONL records."""
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").split("\n") if line]
 
 
 def _make_pool(conn: AsyncMock) -> MagicMock:
@@ -251,6 +251,52 @@ class EmptyRestoreStore:
                 self.embed_calls += 1
 
         return {"already_restored": already_restored}
+
+
+@pytest.mark.parametrize("separator", ["\u2028", "\u2029", "\u0085"])
+def test_read_jsonl_preserves_unicode_separators_inside_strings(
+    tmp_path: Path,
+    separator: str,
+) -> None:
+    """Unicode separators inside JSON strings are content, not record delimiters."""
+    path = tmp_path / "records.jsonl"
+    content = f"before{separator}after"
+    path.write_text(
+        json.dumps({"content": content}, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+    assert portable_backup._read_jsonl(path) == [{"content": content}]
+
+
+@pytest.mark.asyncio
+async def test_unicode_separators_survive_export_restore_and_verification(
+    tmp_path: Path,
+) -> None:
+    """Portable backup round trips every Unicode separator without splitting JSONL."""
+    bundle = tmp_path / "bundle"
+    separators = "\u2028\u2029\u0085"
+    content = f"before{separators}after"
+    source = FixturePortableStore()
+    source_memory = source.records["memories"][0]
+    source_memory["content"] = content
+    source_memory["narrative"] = content
+    source_memory["metadata"]["content_hash"] = _content_hash(content)
+
+    await portable_backup.export_bundle(
+        bundle,
+        source,
+        source_label="fixture",
+        created_at=FIXED_EXPORT_TIME,
+    )
+    target = EmptyRestoreStore()
+
+    await portable_backup.restore_bundle(bundle, target, regenerate_embeddings=False)
+    report = await portable_backup.verify_round_trip(bundle, target)
+
+    assert report["ok"] is True
+    assert target.memories[20]["content"] == content
+    assert target.memories[20]["narrative"] == content
 
 
 @pytest.mark.asyncio

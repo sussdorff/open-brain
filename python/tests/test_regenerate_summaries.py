@@ -295,6 +295,30 @@ class TestParseRawJsonlTurns:
         assert len(turns) == 1
         assert turns[0]["content"] == "valid"
 
+    @pytest.mark.parametrize("separator", ["\u2028", "\u2029", "\u0085"])
+    def test_unicode_separators_inside_content_are_not_record_delimiters(
+        self,
+        tmp_path,
+        separator,
+    ):
+        """Unicode separators inside transcript content remain in one JSONL record."""
+        from open_brain.regenerate import _parse_raw_jsonl_turns
+
+        path = tmp_path / "test.jsonl"
+        content = f"before{separator}after"
+        path.write_text(
+            json.dumps(
+                {"type": "user", "message": {"content": content}},
+                ensure_ascii=False,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        assert _parse_raw_jsonl_turns(path) == [
+            {"type": "user", "message": {"content": content}, "content": content}
+        ]
+
 
 # ─── AK16: dry_run ───────────────────────────────────────────────────────────
 
