@@ -439,7 +439,7 @@ class TestPostgresSaveMemory:
         async def fetchrow_side_effect(sql: str, *args: object):
             if "SELECT id FROM memory_indexes" in sql:
                 return {"id": 7}
-            if "SELECT id, content FROM memories WHERE session_ref" in sql:
+            if "SELECT id, content FROM memories" in sql and "WHERE session_ref = $1" in sql:
                 if "type = 'session_summary'" in sql and "index_id IS NOT DISTINCT FROM $2" in sql:
                     return None
                 return row_from_record(non_summary_records[0])
@@ -533,7 +533,7 @@ class TestPostgresSaveMemory:
         delete_memories_call = [
             call
             for call in conn.execute.call_args_list
-            if "DELETE FROM memories WHERE" in call[0][0]
+            if "DELETE FROM memories" in call[0][0] and "WHERE session_ref = $1" in call[0][0]
         ][0]
         delete_sql, delete_session_ref, delete_index_id = delete_memories_call[0]
         assert "session_ref = $1" in delete_sql
