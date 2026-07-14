@@ -1261,6 +1261,59 @@ async def test_reconciliation_merges_cleanup_gate_paraphrases_across_sessions() 
 
 
 @pytest.mark.asyncio
+async def test_tracker_git_divergence_reaches_review_when_llms_reject_pair() -> None:
+    candidates = [
+        analysis.LearningCandidate.from_dict(
+            _candidate(
+                "21617-1",
+                source_memory_id=21617,
+                statement=(
+                    "When a session-close push fails, the bead is closed but commits "
+                    "are not on main."
+                ),
+                observation="The bead was closed while commits were not on main.",
+                cause="The push failed after tracker closure.",
+                future_behavior="Recover the Git push without closing the bead again.",
+            )
+        ),
+        analysis.LearningCandidate.from_dict(
+            _candidate(
+                "26870-1",
+                source_memory_id=26870,
+                statement="Closed-bead worktrees can still contain unmerged commits.",
+                observation="Closed beads retained unmerged Git work.",
+                cause="Tracker closure does not establish Git landedness.",
+                future_behavior="Verify semantic diffs before branch cleanup.",
+            )
+        ),
+    ]
+
+    with (
+        patch.object(
+            analysis,
+            "llm_complete",
+            new_callable=AsyncMock,
+            side_effect=[
+                json.dumps({"clusters": []}),
+                json.dumps({"equivalent_pair_ids": []}),
+            ],
+        ) as complete,
+        patch.object(
+            analysis,
+            "embed_batch",
+            new_callable=AsyncMock,
+            return_value=[[1.0, 0.0], [0.0, 1.0]],
+        ),
+    ):
+        clusters = await analysis._cluster_candidates(candidates, model=None)
+
+    assert len(clusters) == 1
+    assert clusters[0].source_memory_ids == [21617, 26870]
+    assert clusters[0].review_eligible is True
+    assert complete.await_count == 2
+
+
+@pytest.mark.asyncio
 async def test_reconciliation_keeps_incompatible_cleanup_rules_separate() -> None:
     candidates = [
         analysis.LearningCandidate.from_dict(

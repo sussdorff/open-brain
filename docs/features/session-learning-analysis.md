@@ -133,6 +133,12 @@ at different workflow phases. Those pairs remain eligible only when they
 identify the same evidenced failure mode or causal mechanism and neither
 consequence weakens or contradicts the other. Shared workflow vocabulary and
 merely non-contradictory actions are insufficient.
+One narrow evidence-backed invariant is also recognized deterministically for
+review: tracker or bead closure coexisting with Git work that is explicitly
+unmerged, absent from main, or otherwise not landed. Both independent session
+claims must state both sides of that divergence. A successful verification,
+ordinary closed-bead status, or generic Git vocabulary cannot satisfy this rule.
+The result is still only a review cluster and is never persisted automatically.
 Confirmed pairs only combine
 larger groups when every
 cross-group cluster pair was also confirmed, preventing a broad middle claim

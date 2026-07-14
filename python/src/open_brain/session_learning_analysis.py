@@ -173,6 +173,19 @@ _CONDITIONAL_MECHANISM_RE = re.compile(
     r"(?P<cause>.+?)[,;]\s+(?P<observation>.+)$",
     re.IGNORECASE,
 )
+_TRACKER_CLOSED_RE = re.compile(
+    r"\b(?:beads?|trackers?|work items?)\b.{0,40}\bclosed\b|"
+    r"\bclosed[- ](?:beads?|trackers?|work items?)\b",
+    re.IGNORECASE,
+)
+_GIT_NOT_LANDED_RE = re.compile(
+    r"\bunmerged\b|"
+    r"\b(?:commits?|code|work)\b.{0,40}\b(?:not|never)\b.{0,20}"
+    r"\b(?:landed|merged|main)\b|"
+    r"\b(?:commits?|code|work)\b.{0,40}\babsent from main\b|"
+    r"\bdoes not (?:necessarily )?(?:mean|prove)\b.{0,40}\blanded\b",
+    re.IGNORECASE,
+)
 # Reject short fragments that commonly occur as generic status boilerplate.
 _MIN_EVIDENCE_QUOTE_CHARS = 20
 _EVIDENCE_REQUIRED_KINDS = {
@@ -1554,6 +1567,25 @@ Tentative pairs to audit:
 {base_prompt.split("Candidate pairs:\n", maxsplit=1)[1]}"""
 
 
+def _tracker_git_divergence_pairs(
+    candidates: list[LearningCandidate],
+) -> list[tuple[LearningCandidate, LearningCandidate]]:
+    """Match the evidenced invariant that tracker closure can precede Git landing."""
+    matches = [
+        candidate
+        for candidate in candidates
+        if _TRACKER_CLOSED_RE.search(_behavioral_signature(candidate))
+        and _GIT_NOT_LANDED_RE.search(_behavioral_signature(candidate))
+    ]
+    pairs: list[tuple[LearningCandidate, LearningCandidate]] = []
+    for left_index, left in enumerate(matches):
+        for right in matches[left_index + 1 :]:
+            if left.source_memory_id == right.source_memory_id:
+                continue
+            pairs.append(_canonical_pair(left, right))
+    return pairs
+
+
 async def _extract_candidates(
     summaries: list[SessionSummary],
     *,
@@ -1705,52 +1737,62 @@ async def _cluster_candidates(
 
     raw_pair_ids = reconciliation.get("equivalent_pair_ids", [])
     if not isinstance(raw_pair_ids, list):
-        return conservative_clusters
+        raw_pair_ids = []
     pair_by_id = {pair_id: (left, right) for pair_id, left, right, _ in pairs}
-    confirmed_pairs = [
+    tentative_pairs_for_verification = [
         pair_by_id[str(pair_id)]
         for pair_id in raw_pair_ids
         if str(pair_id) in pair_by_id
     ]
-    if not confirmed_pairs:
-        return conservative_clusters
     confirmed_pair_ids = {
-        _pair_id(left, right) for left, right in confirmed_pairs
+        _pair_id(left, right) for left, right in tentative_pairs_for_verification
     }
     tentative_pairs = [
         (pair_id, left, right, similarity)
         for pair_id, left, right, similarity in pairs
         if pair_id in confirmed_pair_ids
     ]
-    try:
-        verification_response = await llm_complete(
-            [
-                LlmMessage(
-                    role="user",
-                    content=_build_pair_verification_prompt(tentative_pairs),
-                )
-            ],
-            model=model,
-            max_tokens=2048,
-            response_format={"type": "json_object"},
-            disable_reasoning=True,
+    confirmed_pairs: list[tuple[LearningCandidate, LearningCandidate]] = []
+    if tentative_pairs:
+        try:
+            verification_response = await llm_complete(
+                [
+                    LlmMessage(
+                        role="user",
+                        content=_build_pair_verification_prompt(tentative_pairs),
+                    )
+                ],
+                model=model,
+                max_tokens=2048,
+                response_format={"type": "json_object"},
+                disable_reasoning=True,
+            )
+            verification = _parse_json_object(verification_response)
+        except Exception:
+            logger.warning(
+                "Learning pair verification failed; preserving singleton clusters",
+                exc_info=True,
+            )
+            return conservative_clusters
+        verified_pair_ids = verification.get("equivalent_pair_ids", [])
+        if not isinstance(verified_pair_ids, list):
+            return conservative_clusters
+        verified_id_set = {str(pair_id) for pair_id in verified_pair_ids}
+        confirmed_pairs.extend(
+            (left, right)
+            for left, right in tentative_pairs_for_verification
+            if _pair_id(left, right) in verified_id_set
         )
-        verification = _parse_json_object(verification_response)
-    except Exception:
-        logger.warning(
-            "Learning pair verification failed; preserving singleton clusters",
-            exc_info=True,
-        )
-        return conservative_clusters
-    verified_pair_ids = verification.get("equivalent_pair_ids", [])
-    if not isinstance(verified_pair_ids, list):
-        return conservative_clusters
-    verified_id_set = {str(pair_id) for pair_id in verified_pair_ids}
-    confirmed_pairs = [
-        (left, right)
-        for left, right in confirmed_pairs
-        if _pair_id(left, right) in verified_id_set
-    ]
+    confirmed_by_id = {
+        _pair_id(left, right): (left, right) for left, right in confirmed_pairs
+    }
+    confirmed_by_id.update(
+        {
+            _pair_id(left, right): (left, right)
+            for left, right in _tracker_git_divergence_pairs(learnings)
+        }
+    )
+    confirmed_pairs = list(confirmed_by_id.values())
     if not confirmed_pairs:
         return conservative_clusters
     try:
