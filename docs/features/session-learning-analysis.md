@@ -48,12 +48,15 @@ action field. Standard and skill candidates must also satisfy the causal
 evidence contract. A `duplicate_doctrine` candidate must name the existing
 artifact it duplicates.
 
-Explicit unresolved markers are checked across the statement, observation,
-future behavior, and evidence. High-confidence phrases such as "must still",
-"not yet", "follow-up needed", or "should be filed" recover mislabeled work as
-a TODO using the quoted pending field as its action and the source project as a
-fallback target. Conversely, completed status narration is excluded from the
-learning queue, and source text marked as a key decision is routed to decisions.
+Explicit unresolved markers are checked at two strengths. Statements and
+observations may use concrete work-object phrases such as "a bead should be
+filed" or a specific action that is "not yet deployed". Future behavior and
+evidence require stronger unresolved markers such as "must still be deployed"
+or "follow-up required", so a durable rule or historical "not yet" observation
+does not become a TODO. Recovered work uses the matching field as its action and
+the source project as a fallback target. Conversely, unambiguous completed
+status narration is excluded from the learning queue, and an observation marked
+as a key decision is routed to decisions.
 
 In multi-summary batches, learning, standard, and skill candidates require
 evidence. TODO and decision candidates may omit it. Whenever evidence is

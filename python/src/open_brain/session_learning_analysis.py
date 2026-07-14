@@ -54,16 +54,25 @@ _PENDING_ACTION_RE = re.compile(
     r"follow-up (?:needed|required))\b",
     re.IGNORECASE,
 )
-_EXPLICIT_PENDING_RE = re.compile(
-    r"\b(?:must still|still (?:needs?|requires?) to|not yet|still pending|"
-    r"remains? to be|follow-up (?:needed|required)|"
-    r"should (?:still )?be (?:filed|created|implemented|deployed|completed|done)|"
-    r"(?:was|is) (?:explicitly )?not filed)\b",
+_EXPLICIT_PENDING_PRIMARY_RE = re.compile(
+    r"\b(?:bead|issue|ticket|follow-up)\b.{0,60}\b"
+    r"(?:must|should|needs? to)\s+be\s+(?:filed|created|written)\b|"
+    r"\b(?:must still|still (?:needs?|requires?) to|remains? to be)\s+"
+    r"(?:deployed|implemented|completed|merged|landed|released)\b|"
+    r"\bnot yet\s+(?:filed|deployed|implemented|completed|merged|landed|released)\b|"
+    r"\b(?:still pending|follow-up (?:needed|required)|"
+    r"(?:was|is) explicitly not filed|TODO:)\b",
+    re.IGNORECASE,
+)
+_EXPLICIT_PENDING_SUPPORT_RE = re.compile(
+    r"\bmust still\s+(?:be\s+)?"
+    r"(?:filed|created|written|deployed|implemented|completed|merged|landed|released)\b|"
+    r"\b(?:still pending|follow-up (?:needed|required)|"
+    r"(?:was|is) explicitly not filed)\b",
     re.IGNORECASE,
 )
 _STATUS_NARRATION_RE = re.compile(
-    r"^(?:added|amended|classified|fixed|implemented|migrated|moved|re-exported|"
-    r"rewrote|shipped|split|updated)\b|^bead\b.*\b(?:implemented|shipped)\b",
+    r"^re-exported\s+|^bead\b.*\b(?:implemented and shipped|was shipped)\b",
     re.IGNORECASE,
 )
 _DECISION_MARKER_RE = re.compile(r"\bkey decisions?\s*:", re.IGNORECASE)
@@ -427,14 +436,24 @@ def route_candidate(candidate: LearningCandidate) -> LearningCandidate:
     pending_statement = imperative_statement or bool(
         _PENDING_ACTION_RE.search(candidate.statement)
     )
-    candidate_fields = [
-        candidate.statement,
-        candidate.observation or "",
+    primary_pending_fields = [candidate.statement, candidate.observation or ""]
+    support_pending_fields = [
         candidate.future_behavior or "",
         *(candidate.evidence or []),
     ]
     explicit_pending_field = next(
-        (field for field in candidate_fields if _EXPLICIT_PENDING_RE.search(field)),
+        (
+            field
+            for field in primary_pending_fields
+            if _EXPLICIT_PENDING_PRIMARY_RE.search(field)
+        ),
+        None,
+    ) or next(
+        (
+            field
+            for field in support_pending_fields
+            if _EXPLICIT_PENDING_SUPPORT_RE.search(field)
+        ),
         None,
     )
     actionable_kinds = {
@@ -480,12 +499,9 @@ def route_candidate(candidate: LearningCandidate) -> LearningCandidate:
         CandidateKind.STANDARD_CANDIDATE,
         CandidateKind.SKILL_CANDIDATE,
     }
-    decision_context = "\n".join(
-        [candidate.observation or "", *(candidate.evidence or [])]
-    )
     if (
         candidate.kind is CandidateKind.LEARNING
-        and _DECISION_MARKER_RE.search(decision_context)
+        and _DECISION_MARKER_RE.search(candidate.observation or "")
     ):
         return replace(
             candidate,
