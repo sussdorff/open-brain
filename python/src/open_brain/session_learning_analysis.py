@@ -569,8 +569,6 @@ def _shortlist_reconciliation_pairs(
     embeddings: list[list[float]],
 ) -> list[tuple[str, LearningCandidate, LearningCandidate, float]]:
     """Select semantically close cross-session candidates split across clusters."""
-    if len(embeddings) != len(candidates):
-        return []
     cluster_by_candidate = {
         candidate_id: cluster.cluster_id
         for cluster in clusters
@@ -665,7 +663,12 @@ def _select_reconciliation_pairs(
         semantic_by_id.values(), key=lambda item: (-item[3], item[0])
     )
     ordered_proposals = sorted(
-        proposal_only.values(), key=lambda item: (-item[3], item[0])
+        proposal_only.values(),
+        key=lambda item: (
+            item[3] >= RECONCILIATION_SIMILARITY_THRESHOLD,
+            -item[3],
+            item[0],
+        ),
     )
 
     reserved_proposals = min(
