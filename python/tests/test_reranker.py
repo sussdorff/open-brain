@@ -15,8 +15,8 @@ class TestRerank:
     """Unit tests for reranker.rerank() with mocked HTTP."""
 
     @pytest.mark.asyncio
-    async def test_rerank_returns_indices_in_relevance_order(self):
-        """Successful rerank returns original indices sorted by relevance descending."""
+    async def test_rerank_returns_scores_in_relevance_order(self):
+        """Successful rerank returns indices with relevance scores."""
         mock_response = MagicMock()
         mock_response.is_success = True
         mock_response.json.return_value = {
@@ -44,7 +44,11 @@ class TestRerank:
                 model="rerank-2.5",
             )
 
-        assert result == [2, 0, 1]
+        assert [(item.index, item.relevance_score) for item in result] == [
+            (2, 0.95),
+            (0, 0.80),
+            (1, 0.55),
+        ]
 
     @pytest.mark.asyncio
     async def test_rerank_with_top_k(self):
@@ -79,7 +83,10 @@ class TestRerank:
         # Verify top_k was included in the request payload
         call_kwargs = mock_client.post.call_args
         assert call_kwargs.kwargs["json"]["top_k"] == 2
-        assert result == [1, 0]
+        assert [(item.index, item.relevance_score) for item in result] == [
+            (1, 0.9),
+            (0, 0.7),
+        ]
 
     @pytest.mark.asyncio
     async def test_rerank_api_failure_raises_runtime_error(self):
@@ -258,7 +265,8 @@ async def test_reranked_results_differ_from_raw_order():
     ]
     query = "async Python database driver"
 
-    indices = await rerank(query=query, documents=documents, model="rerank-2.5")
+    results = await rerank(query=query, documents=documents, model="rerank-2.5")
+    indices = [result.index for result in results]
 
     # We expect index 2 (asyncpg) to rank highest for this query
     assert len(indices) == len(documents)

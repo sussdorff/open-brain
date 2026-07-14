@@ -11,6 +11,26 @@ from open_brain.data_layer.interface import Memory, SearchParams, TimelineParams
 from open_brain.data_layer.refine import find_obvious_duplicates
 
 
+def _memory(memory_id: int, priority: float, content: str = "content") -> Memory:
+    return Memory(
+        id=memory_id,
+        index_id=1,
+        session_id=None,
+        type="observation",
+        title=f"Memory {memory_id}",
+        subtitle=None,
+        narrative=None,
+        content=content,
+        metadata={},
+        priority=priority,
+        stability="stable",
+        access_count=0,
+        last_accessed_at=None,
+        created_at="2026-01-01",
+        updated_at="2026-01-01",
+    )
+
+
 # ─── pgvector format tests ─────────────────────────────────────────────────────
 
 class TestToPgVector:
@@ -203,6 +223,38 @@ class TestPostgresDataLayerSearch:
             # Should not raise; falls back to FTS
             result = await dl.search(SearchParams(query="test"))
             assert result.results == []
+
+    def test_priority_score_orders_equal_relevance_without_filtering_low_priority(self):
+        from open_brain.data_layer.postgres import _order_by_priority_score
+
+        low_priority = _memory(1, 0.1)
+        high_priority = _memory(2, 1.0)
+
+        ordered = _order_by_priority_score(
+            [(low_priority, 1.0), (high_priority, 1.0)],
+            limit=2,
+        )
+
+        assert [memory.id for memory in ordered] == [2, 1]
+
+    def test_priority_score_preserves_stronger_relevance_tradeoff(self):
+        from open_brain.data_layer.postgres import _order_by_priority_score
+
+        low_priority = _memory(1, 0.1)
+        high_priority = _memory(2, 1.0)
+
+        ordered = _order_by_priority_score(
+            [(low_priority, 1.0), (high_priority, 0.3)],
+            limit=2,
+        )
+
+        assert [memory.id for memory in ordered] == [1, 2]
+
+    def test_priority_score_clamps_priority_defensively(self):
+        from open_brain.data_layer.postgres import _priority_factor
+
+        assert _priority_factor(-5.0) == 0.35
+        assert _priority_factor(5.0) == 1.0
 
 
 class TestPostgresDataLayerStats:

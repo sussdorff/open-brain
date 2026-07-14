@@ -275,10 +275,16 @@ LANGUAGE sql STABLE AS $fn$
     FROM fts f
     FULL OUTER JOIN vec v ON f.id = v.id
   )
-  SELECT m.id, m.title, m.subtitle, m.type, c.score, m.created_at
+  SELECT
+    m.id,
+    m.title,
+    m.subtitle,
+    m.type,
+    (c.score * (0.35 + 0.65 * LEAST(GREATEST(m.priority, 0.0), 1.0)))::REAL AS score,
+    m.created_at
   FROM combined c
   JOIN memories m ON m.id = c.id
-  ORDER BY c.score DESC
+  ORDER BY score DESC
   LIMIT match_limit;
 $fn$;
 

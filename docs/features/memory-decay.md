@@ -164,16 +164,18 @@ These are **candidates** for user action:
 
 The `_find_decay_warnings()` function in `digest.py` handles this filtering (pre-existing before decay feature was added; decay simply uses the same criteria).
 
-## Zusammenspiel
+## Retrieval Effects
 
 ### With search_memory
 
-Decay does **not change search behavior directly**, but affects result ranking:
+Decay affects retrieval by changing the priority value used as a bounded ranking prior:
 
-- Decayed memories have lower priority → lower rank in hybrid search (priority is one of the ranking factors)
-- Boosted memories have higher priority → higher rank in search results
+- Hybrid search computes relevance from FTS/vector matching, then applies `priority_factor = 0.35 + 0.65 * clamp(priority, 0.0, 1.0)`.
+- Voyage-reranked search applies the same factor to Voyage relevance scores after reranking.
+- Concept search applies the same factor to vector similarity when reranking is disabled and to Voyage relevance when reranking is enabled.
+- Decayed memories remain eligible for retrieval; priority `0.1` still has a factor of `0.415`, so strong relevance can keep a low-priority memory visible.
 
-The underlying search algorithm in `search()` remains unchanged; decay is purely a data-layer operation.
+Priority is not a hard filter and does not replace relevance. It only nudges final ordering after candidate relevance has been established.
 
 ### With triage_memories
 
@@ -238,7 +240,7 @@ After 5 weekly decay runs, a memory's priority drops to ~31% of original. This i
 
 Accessing a decayed memory **restores its priority** via the boost mechanism:
 
-1. User searches and finds a decayed memory (priority still visible in search results, just lower)
+1. User searches and finds a decayed memory (still eligible for search results, just lower when relevance is comparable)
 2. User accesses it (increments `access_count`)
 3. On the next decay run, boost applies: `priority *= 1.1`
 4. Repeated boosts can restore priority to original value
