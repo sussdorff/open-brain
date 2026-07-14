@@ -515,11 +515,11 @@ async def test_reconciliation_merges_cleanup_gate_paraphrases_across_sessions() 
             new_callable=AsyncMock,
             side_effect=responses,
         ),
-        patch(
-            "open_brain.session_learning_analysis.embed_batch",
+        patch.object(
+            analysis,
+            "embed_batch",
             new_callable=AsyncMock,
             return_value=[[1.0, 0.0], [0.95, 0.05]],
-            create=True,
         ),
     ):
         clusters = await analysis._cluster_candidates(candidates, model=None)
@@ -576,11 +576,11 @@ async def test_reconciliation_keeps_incompatible_cleanup_rules_separate() -> Non
                 json.dumps({"equivalent_pair_ids": []}),
             ],
         ),
-        patch(
-            "open_brain.session_learning_analysis.embed_batch",
+        patch.object(
+            analysis,
+            "embed_batch",
             new_callable=AsyncMock,
             return_value=[[1.0, 0.0], [0.95, 0.05]],
-            create=True,
         ),
     ):
         clusters = await analysis._cluster_candidates(candidates, model=None)
