@@ -55,7 +55,11 @@ narrative of the specific source summary named by `source_memory_id`, and at
 least one excerpt must be unique within the input batch. Candidates with
 missing required evidence, shared boilerplate only, paraphrased evidence, or
 cross-summary evidence are rejected before routing, preventing adjacent session
-summaries from borrowing each other's learnings.
+summaries from borrowing each other's learnings. Invalid optional evidence on a
+TODO or decision is stripped instead of discarding an otherwise valid action or
+choice. Identical summaries or candidates supported only by shared boilerplate
+remain held out intentionally; this favors precision over recall during manual
+review.
 
 Only validated `learning` candidates enter semantic clustering. A cluster is
 review-eligible only when it has support from at least two distinct source

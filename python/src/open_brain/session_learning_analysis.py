@@ -54,6 +54,7 @@ _PENDING_ACTION_RE = re.compile(
     r"follow-up (?:needed|required))\b",
     re.IGNORECASE,
 )
+# Reject short fragments that commonly occur as generic status boilerplate.
 _MIN_EVIDENCE_QUOTE_CHARS = 20
 _EVIDENCE_REQUIRED_KINDS = {
     CandidateKind.LEARNING,
@@ -319,22 +320,30 @@ def _parse_batch_extraction_response(
         kind = _candidate_kind(raw.get("kind"))
         evidence = _string_list(raw.get("evidence"))
         evidence_required = kind in _EVIDENCE_REQUIRED_KINDS
-        evidence_invalid = evidence and not _evidence_is_grounded(
-            summary,
-            summaries,
-            evidence,
-        )
-        if len(summaries) > 1 and (
-            (evidence_required and not evidence) or evidence_invalid
-        ):
-            logger.warning(
-                "Rejected cross-summary candidate with missing, ungrounded, or "
-                "batch-ambiguous evidence: source_memory_id=%d kind=%s",
-                memory_id,
-                kind.value,
+        trusted_raw = raw
+        if len(summaries) > 1:
+            evidence_invalid = bool(evidence) and not _evidence_is_grounded(
+                summary,
+                summaries,
+                evidence,
             )
-            continue
-        grouped[memory_id].append(raw)
+            if evidence_required and (not evidence or evidence_invalid):
+                logger.warning(
+                    "Rejected cross-summary candidate with missing, ungrounded, "
+                    "or batch-ambiguous evidence: source_memory_id=%d kind=%s",
+                    memory_id,
+                    kind.value,
+                )
+                continue
+            if evidence_invalid:
+                logger.warning(
+                    "Stripped invalid optional evidence from cross-summary "
+                    "candidate: source_memory_id=%d kind=%s",
+                    memory_id,
+                    kind.value,
+                )
+                trusted_raw = {**raw, "evidence": []}
+        grouped[memory_id].append(trusted_raw)
 
     parsed: list[LearningCandidate] = []
     for summary in summaries:
@@ -349,16 +358,16 @@ def _normalize_evidence_text(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip().casefold()
 
 
-def _summary_evidence_text(summary: SessionSummary) -> str:
-    """Return the bounded source text eligible for evidence matching."""
-    return _normalize_evidence_text(
-        "\n".join(
-            (
-                summary.title or "",
-                summary.content[:MAX_SUMMARY_CHARS],
-                (summary.narrative or "")[:MAX_SUMMARY_CHARS],
-            )
+def _summary_evidence_fields(summary: SessionSummary) -> tuple[str, ...]:
+    """Return bounded fields separately to prevent boundary-spanning matches."""
+    return tuple(
+        _normalize_evidence_text(value)
+        for value in (
+            summary.title or "",
+            summary.content[:MAX_SUMMARY_CHARS],
+            (summary.narrative or "")[:MAX_SUMMARY_CHARS],
         )
+        if value
     )
 
 
@@ -369,20 +378,24 @@ def _evidence_is_grounded(
 ) -> bool:
     """Require grounded evidence with at least one batch-unique excerpt."""
     normalized_evidence = [_normalize_evidence_text(item) for item in evidence]
-    source = _summary_evidence_text(summary)
+    source_fields = _summary_evidence_fields(summary)
     if not all(
-        len(item) >= _MIN_EVIDENCE_QUOTE_CHARS and item in source
+        len(item) >= _MIN_EVIDENCE_QUOTE_CHARS
+        and any(item in field for field in source_fields)
         for item in normalized_evidence
     ):
         return False
 
     other_sources = [
-        _summary_evidence_text(other)
+        _summary_evidence_fields(other)
         for other in batch_summaries
         if other.id != summary.id
     ]
     return any(
-        all(item not in other_source for other_source in other_sources)
+        all(
+            all(item not in field for field in other_source)
+            for other_source in other_sources
+        )
         for item in normalized_evidence
     )
 
