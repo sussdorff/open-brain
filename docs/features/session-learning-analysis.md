@@ -46,9 +46,9 @@ also satisfy the causal evidence contract. A `duplicate_doctrine` candidate
 must name the existing artifact it duplicates.
 
 Only validated `learning` candidates enter semantic clustering. A cluster is
-review-eligible when it has support from at least two distinct source session
-summaries, or when a single high/critical-severity incident includes concrete
-evidence. Ordinary singletons remain held instead of being promoted.
+review-eligible only when it has support from at least two distinct source
+session summaries. Severity alone never promotes a singleton. Held singletons
+retain their severity and evidence so later runs can match genuine recurrence.
 
 ## Usage
 

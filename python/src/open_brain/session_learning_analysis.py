@@ -391,8 +391,7 @@ def _make_cluster(
             if item not in evidence:
                 evidence.append(item)
     severity = _cluster_severity(candidates)
-    severe_evidence = severity in {"high", "critical"} and bool(evidence)
-    review_eligible = len(source_ids) >= 2 or severe_evidence
+    review_eligible = len(source_ids) >= 2
     return LearningCluster(
         cluster_id=f"L{cluster_number:03d}",
         canonical_learning=canonical_learning,
@@ -403,7 +402,7 @@ def _make_cluster(
         confidence=max((candidate.confidence for candidate in candidates), default=0.0),
         severity=severity,
         review_eligible=review_eligible,
-        hold_reason=None if review_eligible else "needs_recurrence_or_severe_evidence",
+        hold_reason=None if review_eligible else "needs_cross_session_recurrence",
     )
 
 
