@@ -441,12 +441,60 @@ def test_explicit_must_be_filed_observation_is_recovered_as_todo() -> None:
     assert routed.concrete_action == candidate.observation
 
 
+def test_natural_still_needs_to_be_deployed_is_recovered_as_todo() -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "101-1",
+            kind="decision",
+            statement="The persistence fix still needs to be deployed.",
+            observation="Deployment remains open.",
+            cause=None,
+            future_behavior=None,
+            evidence=[],
+            generalizable=False,
+        )
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.TODO
+    assert routed.concrete_action == candidate.statement
+
+
 def test_prescriptive_future_behavior_remains_learning() -> None:
     candidate = analysis.LearningCandidate.from_dict(
         _candidate(
             "101-1",
             statement="Atomic rollbacks prevent partial state.",
             future_behavior="Rollbacks should be done atomically.",
+        )
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.LEARNING
+
+
+def test_generic_strong_future_marker_remains_learning() -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "101-1",
+            statement="Required reviews catch defects before merge.",
+            future_behavior="Reviews must still be completed before merge.",
+        )
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.LEARNING
+
+
+def test_historical_follow_up_required_evidence_remains_learning() -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "101-1",
+            statement="Escalation notes reveal ownership gaps.",
+            evidence=["The reviewer noted that follow-up required another owner."],
         )
     )
 
