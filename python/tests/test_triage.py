@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -841,6 +843,206 @@ class TestLifecyclePipelineStaging:
         assert len(conn.staged) == 50
 
     @pytest.mark.asyncio
+    async def test_regression_dry_run_rechecks_staged_memories(self):
+        """A dry-run previews the selected scope, not only the next unstaged batch."""
+        from open_brain.data_layer.postgres import PostgresDataLayer
+
+        class DryRunConnection:
+            async def fetch(self, query: str, *args):
+                if "NOT EXISTS" in query:
+                    return []
+                return [vars(_make_memory(1))]
+
+        conn = DryRunConnection()
+
+        @asynccontextmanager
+        async def acquire():
+            yield conn
+
+        pool = MagicMock()
+        pool.acquire = acquire
+
+        with (
+            patch(
+                "open_brain.data_layer.postgres.get_pool",
+                new_callable=AsyncMock,
+                return_value=pool,
+            ),
+            patch(
+                "open_brain.data_layer.triage.triage_with_llm",
+                new_callable=AsyncMock,
+                return_value=[
+                    TriageAction(
+                        action="keep",
+                        memory_id=1,
+                        reason="Still useful",
+                        memory_type="observation",
+                        memory_title="Test Memory",
+                    )
+                ],
+            ),
+        ):
+            result = await PostgresDataLayer().triage_memories(
+                TriageParams(limit=1, dry_run=True)
+            )
+
+        assert result.analyzed == 1
+        assert len(result.actions) == 1
+
+    @pytest.mark.asyncio
+    async def test_regression_partial_result_fails_unfinished_reservations(self):
+        """A partial classifier result must not leave owned rows classifying."""
+        from open_brain.data_layer.postgres import PostgresDataLayer
+
+        class PartialResultConnection:
+            def __init__(self) -> None:
+                self.rows = [vars(_make_memory(1)), vars(_make_memory(2))]
+                self.states: dict[int, str] = {}
+                self.tokens: dict[int, str] = {}
+
+            def transaction(self):
+                @asynccontextmanager
+                async def transaction_context():
+                    yield
+
+                return transaction_context()
+
+            async def fetchval(self, query: str, *args):
+                return None
+
+            async def fetch(self, query: str, *args):
+                return self.rows
+
+            async def fetchrow(self, query: str, *args):
+                memory_id = args[0]
+                if "INSERT INTO memory_lifecycle_actions" in query:
+                    self.states[memory_id] = "classifying"
+                    self.tokens[memory_id] = args[2]
+                    return {"id": memory_id}
+                self.states[memory_id] = "staged"
+                return {"id": memory_id}
+
+            async def execute(self, query: str, *args):
+                if "DELETE FROM memory_lifecycle_actions" in query:
+                    return "DELETE 0"
+                assert "SET state = 'failed'" in query
+                memory_ids, _policy_version, reservation_token = args
+                for memory_id in memory_ids:
+                    if self.tokens[memory_id] == reservation_token:
+                        self.states[memory_id] = "failed"
+                return f"UPDATE {len(memory_ids)}"
+
+        conn = PartialResultConnection()
+
+        @asynccontextmanager
+        async def acquire():
+            yield conn
+
+        pool = MagicMock()
+        pool.acquire = acquire
+
+        with (
+            patch(
+                "open_brain.data_layer.postgres.get_pool",
+                new_callable=AsyncMock,
+                return_value=pool,
+            ),
+            patch(
+                "open_brain.data_layer.triage.triage_with_llm",
+                new_callable=AsyncMock,
+                return_value=[
+                    TriageAction(
+                        action="keep",
+                        memory_id=1,
+                        reason="Still useful",
+                        memory_type="observation",
+                        memory_title="Test Memory",
+                    )
+                ],
+            ),
+        ):
+            result = await PostgresDataLayer().triage_memories(TriageParams(limit=2))
+
+        assert len(result.actions) == 1
+        assert conn.states == {1: "staged", 2: "failed"}
+
+    @pytest.mark.asyncio
+    async def test_regression_classifier_crash_fails_owned_reservations(self):
+        """An unexpected classifier exception must release every owned reservation."""
+        from open_brain.data_layer.postgres import PostgresDataLayer
+
+        class CrashingClassifierConnection:
+            def __init__(self) -> None:
+                self.row = vars(_make_memory(1))
+                self.state: str | None = None
+                self.token: str | None = None
+
+            def transaction(self):
+                @asynccontextmanager
+                async def transaction_context():
+                    yield
+
+                return transaction_context()
+
+            async def fetchval(self, query: str, *args):
+                return None
+
+            async def fetch(self, query: str, *args):
+                return [self.row]
+
+            async def fetchrow(self, query: str, *args):
+                self.state = "classifying"
+                self.token = args[2]
+                return {"id": 1}
+
+            async def execute(self, query: str, *args):
+                if "DELETE FROM memory_lifecycle_actions" in query:
+                    return "DELETE 0"
+                assert "SET state = 'failed'" in query
+                memory_ids, _policy_version, reservation_token = args
+                if memory_ids == [1] and reservation_token == self.token:
+                    self.state = "failed"
+                return "UPDATE 1"
+
+        conn = CrashingClassifierConnection()
+
+        @asynccontextmanager
+        async def acquire():
+            yield conn
+
+        pool = MagicMock()
+        pool.acquire = acquire
+
+        with (
+            patch(
+                "open_brain.data_layer.postgres.get_pool",
+                new_callable=AsyncMock,
+                return_value=pool,
+            ),
+            patch(
+                "open_brain.data_layer.triage.triage_with_llm",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("classifier crashed"),
+            ),
+            pytest.raises(RuntimeError, match="classifier crashed"),
+        ):
+            await PostgresDataLayer().triage_memories(TriageParams(limit=1))
+
+        assert conn.state == "failed"
+
+    def test_regression_review_state_records_resolution_not_application(self):
+        """The public state name must not imply an unverified materialization effect."""
+        with pytest.raises(ValueError, match="Unknown review state"):
+            LifecycleActionStateParams(action_id=1, state="applied")
+
+        params = LifecycleActionStateParams(
+            action_id=1,
+            state="resolved",
+            note="Keep decision reviewed",
+        )
+        assert params.state == "resolved"
+
+    @pytest.mark.asyncio
     async def test_replaced_reservation_rejects_stale_worker_result(self):
         """A reclaimed reservation cannot be finalized by its original worker."""
         from contextlib import asynccontextmanager
@@ -1001,7 +1203,16 @@ class TestLifecyclePipelineStaging:
         finally:
             await setup_conn.close()
 
+        first_classification_started = asyncio.Event()
+        release_first_classification = asyncio.Event()
+        classifier_calls = 0
+
         async def classify(memories):
+            nonlocal classifier_calls
+            classifier_calls += 1
+            if classifier_calls == 1:
+                first_classification_started.set()
+                await release_first_classification.wait()
             return [
                 TriageAction(
                     action="keep",
@@ -1025,8 +1236,16 @@ class TestLifecyclePipelineStaging:
                     limit=50,
                     policy_version=policy_version,
                 )
-                first = await dl.triage_memories(params)
-                second = await dl.triage_memories(params)
+                async def first_run():
+                    return await dl.triage_memories(params)
+
+                async def overlapping_run():
+                    await first_classification_started.wait()
+                    result = await dl.triage_memories(params)
+                    release_first_classification.set()
+                    return result
+
+                first, second = await asyncio.gather(first_run(), overlapping_run())
 
             pool = await postgres.get_pool()
             async with pool.acquire() as conn:
@@ -1044,6 +1263,7 @@ class TestLifecyclePipelineStaging:
             assert second.analyzed == 0
             assert second.actions == []
             assert staged_count == 50
+            assert classifier_calls == 1
         finally:
             pool = await postgres.get_pool()
             async with pool.acquire() as conn:
