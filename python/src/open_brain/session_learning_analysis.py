@@ -317,14 +317,14 @@ def route_candidate(candidate: LearningCandidate) -> LearningCandidate:
     imperative_statement = bool(_IMPERATIVE_ACTION_RE.match(candidate.statement))
 
     if candidate.kind is CandidateKind.TODO:
-        if candidate.concrete_action and candidate.target:
-            return candidate
         if complete_contract and not imperative_statement:
             return replace(
                 candidate,
                 kind=CandidateKind.LEARNING,
                 routing_reason="descriptive_todo_reconsidered_as_learning",
             )
+        if candidate.concrete_action and candidate.target and imperative_statement:
+            return candidate
         return replace(
             candidate,
             kind=CandidateKind.NOISE,
@@ -476,7 +476,8 @@ Hard learning gate:
 - A learning requires non-empty `observation`, `cause`, `future_behavior`, and `evidence`.
 - `generalizable` must be true and the claim must apply beyond the exact file or incident.
 - Imperatives such as fix, update, add, implement, ensure, configure, or increase are "todo".
-- A "todo" requires both `concrete_action` and `target`; otherwise classify the causal claim by its evidence contract or use "noise".
+- A "todo" requires an explicitly pending imperative `statement` plus both `concrete_action` and `target`.
+- Never invent follow-up work from a descriptive claim about completed work; classify that causal claim by its evidence contract or use "noise".
 - Merely reporting what was changed is not a learning.
 - Existing policy copied from AGENTS.md, a standard, or a skill is `duplicate_doctrine`, not a new learning.
 

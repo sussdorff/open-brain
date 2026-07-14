@@ -346,13 +346,14 @@ def test_partitioned_report_keeps_non_learning_routes_separate() -> None:
         ),
         analysis.route_candidate(
             analysis.LearningCandidate.from_dict(
-                _candidate(
-                    "102-1",
-                    source_memory_id=102,
-                    kind="todo",
-                    concrete_action="Update the installer",
-                    target="hooks/install.py",
-                )
+                    _candidate(
+                        "102-1",
+                        source_memory_id=102,
+                        kind="todo",
+                        statement="Update the installer reconciliation logic.",
+                        concrete_action="Update the installer",
+                        target="hooks/install.py",
+                    )
             )
         ),
         analysis.route_candidate(
