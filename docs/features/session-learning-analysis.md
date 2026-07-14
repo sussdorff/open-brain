@@ -88,7 +88,12 @@ Summaries that explicitly advertise causal material through headings such as
 findings", or "Root cause" receive a dedicated extraction call. Routine status
 summaries remain grouped in bounded batches. This prevents a learning-rich
 session from being omitted because it competed with unrelated summaries in the
-same model context.
+same model context. The focused prompt explicitly treats a completed recovery as
+possible evidence of a durable failure mechanism, including divergence between
+tracker state and the actual external result. If a focused call still returns no
+candidates, the command retries that summary exactly once with an explicit
+coverage reminder. The retry is bounded and remains part of the manual,
+read-only analysis.
 
 Only validated `learning` candidates enter semantic clustering. A cluster is
 review-eligible only when it has support from at least two distinct source

@@ -1766,6 +1766,25 @@ def test_extraction_prompt_requires_atomic_claims_and_distinct_findings() -> Non
     assert "generated imperative is not evidence" in normalized_prompt
 
 
+def test_focused_extraction_prompt_requires_causal_coverage() -> None:
+    summary_raw = _summary(21617, session_ref="polaris-kydi")
+    summary_raw["content"] = (
+        "Key findings: a failed push left the bead closed while commits were not "
+        "on main. Recovery skipped duplicate closure and completed the Git merge."
+    )
+    summary = analysis.SessionSummary(**summary_raw)
+
+    first_prompt = analysis.build_extraction_prompt([summary])
+    retry_prompt = analysis.build_extraction_prompt(
+        [summary],
+        retry_after_empty=True,
+    )
+
+    assert "Focused coverage requirement" in first_prompt
+    assert "completed recovery can still evidence" in first_prompt
+    assert "previous pass returned no candidates" in retry_prompt
+
+
 def test_learning_rich_summaries_receive_focused_extraction_batches() -> None:
     routine_one = analysis.SessionSummary(**_summary(101))
     focused_raw = _summary(102, session_ref="session-102")
@@ -1782,6 +1801,45 @@ def test_learning_rich_summaries_receive_focused_extraction_batches() -> None:
         [102],
         [103],
     ]
+
+
+@pytest.mark.asyncio
+async def test_empty_focused_extraction_is_retried_once() -> None:
+    summary_raw = _summary(21617, session_ref="polaris-kydi")
+    summary_raw["content"] = (
+        "Key findings: a failed push left the bead closed while commits were not "
+        "on main. Recovery skipped duplicate closure and completed the Git merge."
+    )
+    summary = analysis.SessionSummary(**summary_raw)
+    recovered_candidate = _candidate(
+        "ignored",
+        source_memory_id=21617,
+        statement="Tracker closure does not prove Git landedness after a failed push.",
+        observation="The bead was closed while commits were absent from main.",
+        cause="The push failed after the tracker transition completed.",
+        future_behavior="Recover Git without repeating the tracker closure.",
+        evidence=[
+            "a failed push left the bead closed while commits were not on main"
+        ],
+    )
+
+    with patch.object(
+        analysis,
+        "llm_complete",
+        new_callable=AsyncMock,
+        side_effect=[
+            json.dumps({"candidates": []}),
+            json.dumps({"candidates": [recovered_candidate]}),
+        ],
+    ) as complete:
+        candidates = await analysis._extract_candidates([summary], model=None)
+
+    assert len(candidates) == 1
+    assert candidates[0].source_memory_id == 21617
+    assert candidates[0].kind is analysis.CandidateKind.LEARNING
+    assert complete.await_count == 2
+    retry_prompt = complete.await_args_list[1].args[0][0].content
+    assert "previous pass returned no candidates" in retry_prompt
 
 
 def test_reconciliation_prompt_allows_method_when_it_is_the_causal_learning() -> None:
