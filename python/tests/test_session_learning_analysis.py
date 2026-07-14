@@ -917,7 +917,40 @@ async def test_reconciliation_embedding_length_mismatch_is_visible(
 
 
 @pytest.mark.asyncio
-async def test_single_initial_cluster_skips_reconciliation() -> None:
+async def test_first_pass_failure_preserves_singletons() -> None:
+    candidates = [
+        analysis.LearningCandidate.from_dict(
+            _candidate("471-1", source_memory_id=471)
+        ),
+        analysis.LearningCandidate.from_dict(
+            _candidate("472-1", source_memory_id=472)
+        ),
+    ]
+
+    with (
+        patch.object(
+            analysis,
+            "llm_complete",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("proposal unavailable"),
+        ),
+        patch.object(
+            analysis,
+            "embed_batch",
+            new_callable=AsyncMock,
+        ) as embeddings,
+    ):
+        clusters = await analysis._cluster_candidates(candidates, model=None)
+
+    assert [cluster.candidate_ids for cluster in clusters] == [
+        ["471-1"],
+        ["472-1"],
+    ]
+    embeddings.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_single_candidate_skips_clustering_calls() -> None:
     candidate = analysis.LearningCandidate.from_dict(_candidate("451-1"))
 
     with (
@@ -925,8 +958,7 @@ async def test_single_initial_cluster_skips_reconciliation() -> None:
             analysis,
             "llm_complete",
             new_callable=AsyncMock,
-            return_value=json.dumps({"clusters": []}),
-        ),
+        ) as complete,
         patch.object(
             analysis,
             "embed_batch",
@@ -936,6 +968,7 @@ async def test_single_initial_cluster_skips_reconciliation() -> None:
         clusters = await analysis._cluster_candidates([candidate], model=None)
 
     assert len(clusters) == 1
+    complete.assert_not_awaited()
     embeddings.assert_not_awaited()
 
 
