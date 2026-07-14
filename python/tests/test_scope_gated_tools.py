@@ -53,6 +53,27 @@ class TestScopeGatedToolList:
             _current_scopes.reset(token)
 
     @pytest.mark.asyncio
+    async def test_regression_session_learning_analysis_is_evolution_scoped(self):
+        """The batch analyzer must never appear in the memory-only tool pool."""
+        from open_brain.server import mcp
+
+        assert "analyze_session_learnings" in _EVOLUTION_TOOLS
+
+        memory_token = _current_scopes.set(("memory",))
+        try:
+            memory_tools = {tool.name for tool in await mcp.list_tools()}
+            assert "analyze_session_learnings" not in memory_tools
+        finally:
+            _current_scopes.reset(memory_token)
+
+        evolution_token = _current_scopes.set(("memory", "evolution"))
+        try:
+            evolution_tools = {tool.name for tool in await mcp.list_tools()}
+            assert "analyze_session_learnings" in evolution_tools
+        finally:
+            _current_scopes.reset(evolution_token)
+
+    @pytest.mark.asyncio
     async def test_evolution_tools_hidden_without_evolution_scope(self):
         """Evolution tools are absent from list_tools() when caller lacks evolution scope."""
         from open_brain.server import mcp

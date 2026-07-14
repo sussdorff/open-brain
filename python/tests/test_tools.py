@@ -216,6 +216,48 @@ class TestGetObservationsTool:
             assert data == []
 
 
+class TestSessionLearningAnalysisTool:
+    @pytest.mark.asyncio
+    async def test_regression_session_learning_analysis_tool_is_read_only(self):
+        """The scoped server tool delegates to the shared observational analyzer."""
+        import open_brain.server as server
+
+        tool = getattr(server, "analyze_session_learnings", None)
+        assert tool is not None
+        expected = {
+            "read_only": True,
+            "write_side_effects": False,
+            "counts": {"source_summaries": 5},
+            "queues": {},
+        }
+        with patch.object(
+            server,
+            "_analyze_session_learnings",
+            new_callable=AsyncMock,
+            return_value=expected,
+        ) as analyze:
+            token = server._current_scopes.set(("memory", "evolution"))
+            try:
+                result = json.loads(
+                    await tool(
+                        limit=5,
+                        project="open-brain",
+                        source="session-close",
+                        model=None,
+                    )
+                )
+            finally:
+                server._current_scopes.reset(token)
+
+        assert result == expected
+        analyze.assert_awaited_once_with(
+            limit=5,
+            project="open-brain",
+            source="session-close",
+            model=None,
+        )
+
+
 # ─── SaveMemory tool ──────────────────────────────────────────────────────────
 
 class TestSaveMemoryTool:

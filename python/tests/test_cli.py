@@ -158,6 +158,7 @@ class TestLearningsCommand:
         assert args.project is None
         assert args.source is None
         assert args.model is None
+        assert args.direct is False
 
     def test_analyze_filters(self):
         args = parse(
@@ -180,24 +181,65 @@ class TestLearningsCommand:
         assert args.model == "openai/gpt-4.1-mini"
 
     @pytest.mark.asyncio
-    async def test_analyze_dispatches_to_read_only_analysis(self):
+    async def test_regression_analyze_uses_remote_tool_by_default(self):
         args = parse(["learnings", "analyze", "--limit", "10"])
         expected = {"counts": {"source_summaries": 10}, "queues": {}}
 
-        with patch(
-            "open_brain.cli.main.analyze_session_learnings",
-            new_callable=AsyncMock,
-            return_value=expected,
-        ) as analyze:
+        with (
+            patch(
+                "open_brain.cli.main.call_tool",
+                new_callable=AsyncMock,
+                return_value=expected,
+            ) as call,
+            patch(
+                "open_brain.cli.main.analyze_session_learnings",
+                new_callable=AsyncMock,
+            ) as analyze,
+        ):
             result = await cli_main._cmd_learnings(args)
 
         assert result == expected
+        call.assert_awaited_once_with(
+            "analyze_session_learnings",
+            {
+                "limit": 10,
+                "project": None,
+                "source": None,
+                "model": None,
+            },
+        )
+        analyze.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_explicit_direct_mode_prepares_local_database_analysis(self):
+        args = parse(["learnings", "analyze", "--limit", "10", "--direct"])
+        expected = {"counts": {"source_summaries": 10}, "queues": {}}
+
+        with (
+            patch(
+                "open_brain.cli.direct.load_database_url",
+                return_value="postgresql://local/open_brain",
+            ) as load_database_url,
+            patch("open_brain.cli.direct.prepare_direct_env") as prepare_direct_env,
+            patch(
+                "open_brain.cli.main.analyze_session_learnings",
+                new_callable=AsyncMock,
+                return_value=expected,
+            ) as analyze,
+            patch("open_brain.cli.main.call_tool", new_callable=AsyncMock) as call,
+        ):
+            result = await cli_main._cmd_learnings(args)
+
+        assert result == expected
+        load_database_url.assert_called_once_with()
+        prepare_direct_env.assert_called_once_with("postgresql://local/open_brain")
         analyze.assert_awaited_once_with(
             limit=10,
             project=None,
             source=None,
             model=None,
         )
+        call.assert_not_awaited()
 
 
 class TestPortableBackupCommands:
