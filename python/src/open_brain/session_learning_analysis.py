@@ -69,7 +69,8 @@ _EXPLICIT_PENDING_SUPPORT_RE = re.compile(
     r"(?:filed|created|written|deployed|implemented|completed|merged|landed|released)\b|"
     r"\b(?:fix|change|bead|issue|ticket|deployment|release|migration|"
     r"implementation|work item)\b.{0,80}\b(?:is|are|was|were)?\s*still pending\b|"
-    r"\bfollow-up (?:needed|required)\b",
+    r"\bfollow-up\b.{0,80}\bmust still\s+(?:be\s+)?"
+    r"(?:filed|created|written|implemented|completed|merged|landed)\b",
     re.IGNORECASE,
 )
 _DECISION_MARKER_RE = re.compile(r"\bkey decisions?\s*:", re.IGNORECASE)

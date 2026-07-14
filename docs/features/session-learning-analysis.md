@@ -52,8 +52,8 @@ Explicit unresolved markers are checked at two strengths. Existing TODOs,
 decisions, and non-generalizable candidates may use concrete work-object phrases
 such as "a bead should be filed" or a specific action that is "not yet
 deployed". Generalizable candidates require stronger unresolved markers such as
-"must still be deployed" or "follow-up required" in the statement,
-observation, or future behavior, so a durable rule or historical "not yet"
+"the fix must still be deployed" in the statement, observation, or future
+behavior, so a durable rule or historical "not yet"
 observation does not become a TODO. These strong markers must name a concrete
 work object, and quoted evidence is considered only for non-generalizable
 candidates. Recovered work uses the matching field as its action and the source

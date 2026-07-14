@@ -503,6 +503,20 @@ def test_historical_follow_up_required_evidence_remains_learning() -> None:
     assert routed.kind is analysis.CandidateKind.LEARNING
 
 
+def test_prescriptive_follow_up_required_future_remains_learning() -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "101-1",
+            statement="Risky migrations need sustained verification.",
+            future_behavior="Continuous follow-up required for safety.",
+        )
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.LEARNING
+
+
 def test_historical_not_yet_evidence_remains_learning() -> None:
     candidate = analysis.LearningCandidate.from_dict(
         _candidate(
