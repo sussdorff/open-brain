@@ -704,10 +704,10 @@ class DeleteByRunIdResult:
 
 LIFECYCLE_POLICY_VERSION = "memory-lifecycle.v1"
 LIFECYCLE_ACTION_STATES: frozenset[str] = frozenset(
-    ["classifying", "staged", "applied", "needs_review", "failed"]
+    ["classifying", "staged", "resolved", "needs_review", "failed"]
 )
 LIFECYCLE_REVIEW_STATES: frozenset[str] = frozenset(
-    ["staged", "applied", "needs_review", "failed"]
+    ["staged", "resolved", "needs_review", "failed"]
 )
 
 

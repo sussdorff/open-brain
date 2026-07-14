@@ -120,6 +120,14 @@ The pipeline returns a combined report with the decay summary, proposed actions,
 and the number of newly staged actions. It never materializes proposals.
 Priority boosts use a 24-hour `last_boost_at` guard, matching the existing
 decay guard, so an immediate repeated pipeline run does not mutate priorities.
+This boost throttle is a separate `decay_memories` behavior change from the
+lifecycle proposal ledger: it applies to direct decay calls as well as pipeline
+runs and prevents repeated priority multiplication within 24 hours.
+
+Before enabling an unattended trigger, run the rollout in four observable
+phases: `dry_run=true` for a write-free preview, `dry_run=false` to populate the
+queue, `list_lifecycle_actions(state="staged")` to inspect persisted proposals,
+and only then enable the trigger. A dry-run never creates queue entries.
 
 ### Appearance in Weekly Briefing
 

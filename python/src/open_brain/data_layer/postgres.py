@@ -430,13 +430,14 @@ async def _run_migrations(conn: asyncpg.Connection) -> None:
                 CHECK (action IS NULL OR action IN ('keep', 'merge', 'promote', 'scaffold', 'archive')),
             reason TEXT,
             state TEXT NOT NULL DEFAULT 'classifying'
-                CHECK (state IN ('classifying', 'staged', 'applied', 'needs_review', 'failed')),
+                CHECK (state IN ('classifying', 'staged', 'resolved', 'needs_review', 'failed')),
             reservation_token TEXT,
             resolution_note TEXT,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             CHECK (
                 state = 'classifying'
+                OR (state = 'failed' AND reason IS NOT NULL)
                 OR (action IS NOT NULL AND reason IS NOT NULL)
             ),
             UNIQUE (memory_id, policy_version)
@@ -2408,15 +2409,17 @@ class PostgresDataLayer:
                 FROM memory_lifecycle_actions
                 WHERE memory_lifecycle_actions.memory_id = memories.id
                   AND memory_lifecycle_actions.policy_version = $1
+                  AND memory_lifecycle_actions.state != 'failed'
             )
         """
+        candidate_ledger_filter = "" if params.dry_run else _unstaged_filter
 
         async def _fetch_candidates(conn: asyncpg.Connection) -> list[asyncpg.Record]:
             if scope.startswith("project:"):
                 project = scope[8:]
                 index_id = await self._resolve_index_id(conn, project)
                 return await conn.fetch(
-                    f"SELECT * FROM memories WHERE index_id = $2 {_lifecycle_filter} {_unstaged_filter} ORDER BY created_at DESC LIMIT $3",
+                    f"SELECT * FROM memories WHERE index_id = $2 {_lifecycle_filter} {candidate_ledger_filter} ORDER BY created_at DESC LIMIT $3",
                     policy_version,
                     self._scope_index_id(index_id),
                     limit,
@@ -2424,27 +2427,27 @@ class PostgresDataLayer:
             if scope.startswith("type:"):
                 mem_type = scope[5:]
                 return await conn.fetch(
-                    f"SELECT * FROM memories WHERE type = $2 {_lifecycle_filter} {_unstaged_filter} ORDER BY created_at DESC LIMIT $3",
+                    f"SELECT * FROM memories WHERE type = $2 {_lifecycle_filter} {candidate_ledger_filter} ORDER BY created_at DESC LIMIT $3",
                     policy_version,
                     mem_type,
                     limit,
                 )
             if scope == "low-priority":
                 return await conn.fetch(
-                    f"SELECT * FROM memories WHERE priority < 0.2 AND importance NOT IN ('critical', 'high') {_lifecycle_filter} {_unstaged_filter} ORDER BY priority ASC LIMIT $2",
+                    f"SELECT * FROM memories WHERE priority < 0.2 AND importance NOT IN ('critical', 'high') {_lifecycle_filter} {candidate_ledger_filter} ORDER BY priority ASC LIMIT $2",
                     policy_version,
                     limit,
                 )
             if scope.startswith("session_ref:"):
                 prefix = scope[len("session_ref:"):]
                 return await conn.fetch(
-                    f"SELECT * FROM memories WHERE session_ref LIKE $2 {_lifecycle_filter} {_unstaged_filter} ORDER BY created_at DESC LIMIT $3",
+                    f"SELECT * FROM memories WHERE session_ref LIKE $2 {_lifecycle_filter} {candidate_ledger_filter} ORDER BY created_at DESC LIMIT $3",
                     policy_version,
                     prefix + "%",
                     limit,
                 )
             return await conn.fetch(
-                f"SELECT * FROM memories WHERE 1=1 {_lifecycle_filter} {_unstaged_filter} ORDER BY created_at DESC LIMIT $2",
+                f"SELECT * FROM memories WHERE 1=1 {_lifecycle_filter} {candidate_ledger_filter} ORDER BY created_at DESC LIMIT $2",
                 policy_version,
                 limit,
             )
@@ -2478,7 +2481,14 @@ class PostgresDataLayer:
                                 state,
                                 reservation_token
                             ) VALUES ($1, $2, 'classifying', $3)
-                            ON CONFLICT (memory_id, policy_version) DO NOTHING
+                            ON CONFLICT (memory_id, policy_version) DO UPDATE
+                            SET action = NULL,
+                                reason = NULL,
+                                state = 'classifying',
+                                reservation_token = EXCLUDED.reservation_token,
+                                resolution_note = NULL,
+                                updated_at = NOW()
+                            WHERE memory_lifecycle_actions.state = 'failed'
                             RETURNING id
                             """,
                             selected_row["id"],
@@ -2490,6 +2500,31 @@ class PostgresDataLayer:
 
             candidates = [_row_to_memory(row) for row in rows]
 
+        reserved_memory_ids = (
+            [candidate.id for candidate in candidates] if not params.dry_run else []
+        )
+
+        async def _fail_owned_reservations(memory_ids: list[int]) -> None:
+            if not memory_ids:
+                return
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    UPDATE memory_lifecycle_actions
+                    SET state = 'failed',
+                        reason = 'Lifecycle classification did not complete',
+                        reservation_token = NULL,
+                        updated_at = NOW()
+                    WHERE memory_id = ANY($1::int[])
+                      AND policy_version = $2
+                      AND state = 'classifying'
+                      AND reservation_token = $3
+                    """,
+                    memory_ids,
+                    policy_version,
+                    reservation_token,
+                )
+
         if not candidates:
             return TriageResult(
                 analyzed=0,
@@ -2497,45 +2532,58 @@ class PostgresDataLayer:
                 summary=f"No candidates found for policy {policy_version}",
             )
 
-        actions = await triage_with_llm(candidates)
+        failed_count = 0
+        try:
+            actions = await triage_with_llm(candidates)
 
-        if not params.dry_run:
-            staged_actions = []
-            async with pool.acquire() as conn:
-                for action in actions:
-                    reason = (
-                        action.reason
-                        if isinstance(action.reason, str)
-                        else "" if action.reason is None else str(action.reason)
-                    )
-                    row = await conn.fetchrow(
-                        """
-                        UPDATE memory_lifecycle_actions
-                        SET action = $3,
-                            reason = $4,
-                            state = 'staged',
-                            reservation_token = NULL,
-                            updated_at = NOW()
-                        WHERE memory_id = $1
-                          AND policy_version = $2
-                          AND state = 'classifying'
-                          AND reservation_token = $5
-                        RETURNING id
-                        """,
-                        action.memory_id,
-                        policy_version,
-                        action.action,
-                        reason,
-                        reservation_token,
-                    )
-                    if row is None:
-                        continue
-                    action.reason = reason
-                    action.lifecycle_action_id = row["id"]
-                    action.policy_version = policy_version
-                    action.state = "staged"
-                    staged_actions.append(action)
-            actions = staged_actions
+            if not params.dry_run:
+                staged_actions = []
+                returned_memory_ids = {action.memory_id for action in actions}
+                missing_memory_ids = [
+                    memory_id
+                    for memory_id in reserved_memory_ids
+                    if memory_id not in returned_memory_ids
+                ]
+                async with pool.acquire() as conn:
+                    for action in actions:
+                        reason = (
+                            action.reason
+                            if isinstance(action.reason, str)
+                            else "" if action.reason is None else str(action.reason)
+                        )
+                        row = await conn.fetchrow(
+                            """
+                            UPDATE memory_lifecycle_actions
+                            SET action = $3,
+                                reason = $4,
+                                state = 'staged',
+                                reservation_token = NULL,
+                                updated_at = NOW()
+                            WHERE memory_id = $1
+                              AND policy_version = $2
+                              AND state = 'classifying'
+                              AND reservation_token = $5
+                            RETURNING id
+                            """,
+                            action.memory_id,
+                            policy_version,
+                            action.action,
+                            reason,
+                            reservation_token,
+                        )
+                        if row is None:
+                            continue
+                        action.reason = reason
+                        action.lifecycle_action_id = row["id"]
+                        action.policy_version = policy_version
+                        action.state = "staged"
+                        staged_actions.append(action)
+                await _fail_owned_reservations(missing_memory_ids)
+                failed_count = len(missing_memory_ids)
+                actions = staged_actions
+        except Exception:
+            await _fail_owned_reservations(reserved_memory_ids)
+            raise
 
         action_counts: dict[str, int] = {}
         for a in actions:
@@ -2550,7 +2598,8 @@ class PostgresDataLayer:
         else:
             summary = (
                 f"Staged {len(actions)} actions from {len(candidates)} analyzed memories: "
-                f"{', '.join(summary_parts)} (policy {policy_version})"
+                f"{', '.join(summary_parts)} (policy {policy_version}; "
+                f"{failed_count} incomplete classifications failed)"
             )
 
         return TriageResult(analyzed=len(candidates), actions=actions, summary=summary)

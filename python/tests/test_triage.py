@@ -785,7 +785,8 @@ class TestLifecyclePipelineStaging:
                 memory_id, policy_version = args[:2]
                 key = (memory_id, policy_version)
                 if "INSERT INTO memory_lifecycle_actions" in query:
-                    assert "ON CONFLICT (memory_id, policy_version) DO NOTHING" in query
+                    assert "ON CONFLICT (memory_id, policy_version) DO UPDATE" in query
+                    assert "memory_lifecycle_actions.state = 'failed'" in query
                     if key in self.staged:
                         return None
                     action_id = len(self.staged) + 1
@@ -911,11 +912,22 @@ class TestLifecyclePipelineStaging:
                 return None
 
             async def fetch(self, query: str, *args):
-                return self.rows
+                retries_failed_rows = "state != 'failed'" in query
+                return [
+                    row
+                    for row in self.rows
+                    if self.states.get(row["id"]) is None
+                    or (
+                        retries_failed_rows
+                        and self.states.get(row["id"]) == "failed"
+                    )
+                ]
 
             async def fetchrow(self, query: str, *args):
                 memory_id = args[0]
                 if "INSERT INTO memory_lifecycle_actions" in query:
+                    if self.states.get(memory_id) not in (None, "failed"):
+                        return None
                     self.states[memory_id] = "classifying"
                     self.tokens[memory_id] = args[2]
                     return {"id": memory_id}
@@ -950,21 +962,37 @@ class TestLifecyclePipelineStaging:
             patch(
                 "open_brain.data_layer.triage.triage_with_llm",
                 new_callable=AsyncMock,
-                return_value=[
-                    TriageAction(
-                        action="keep",
-                        memory_id=1,
-                        reason="Still useful",
-                        memory_type="observation",
-                        memory_title="Test Memory",
-                    )
+                side_effect=[
+                    [
+                        TriageAction(
+                            action="keep",
+                            memory_id=1,
+                            reason="Still useful",
+                            memory_type="observation",
+                            memory_title="Test Memory",
+                        )
+                    ],
+                    [
+                        TriageAction(
+                            action="keep",
+                            memory_id=2,
+                            reason="Recovered on retry",
+                            memory_type="observation",
+                            memory_title="Test Memory",
+                        )
+                    ],
                 ],
             ),
         ):
-            result = await PostgresDataLayer().triage_memories(TriageParams(limit=2))
+            dl = PostgresDataLayer()
+            result = await dl.triage_memories(TriageParams(limit=2))
+            retry = await dl.triage_memories(TriageParams(limit=2))
 
         assert len(result.actions) == 1
-        assert conn.states == {1: "staged", 2: "failed"}
+        assert "1 incomplete classifications failed" in result.summary
+        assert retry.analyzed == 1
+        assert len(retry.actions) == 1
+        assert conn.states == {1: "staged", 2: "staged"}
 
     @pytest.mark.asyncio
     async def test_regression_classifier_crash_fails_owned_reservations(self):
@@ -1152,18 +1180,18 @@ class TestLifecyclePipelineStaging:
             records = await dl.list_lifecycle_actions(LifecycleActionQueryParams())
             with pytest.raises(ValueError, match="not reviewable"):
                 await dl.set_lifecycle_action_state(
-                    LifecycleActionStateParams(action_id=1, state="applied")
+                    LifecycleActionStateParams(action_id=1, state="resolved")
                 )
 
         assert records == []
 
     @pytest.mark.integration
     @pytest.mark.asyncio
-    async def test_same_fifty_memories_are_staged_once_in_postgres(
+    async def test_concurrent_runs_stage_same_fifty_once_in_postgres(
         self,
         bootstrapped_database_url: str,
     ):
-        """The real unique ledger key makes the second database run a no-op."""
+        """Two overlapping database runs stage exactly one row per memory."""
         from uuid import uuid4
 
         import asyncpg
@@ -1241,11 +1269,15 @@ class TestLifecyclePipelineStaging:
 
                 async def overlapping_run():
                     await first_classification_started.wait()
-                    result = await dl.triage_memories(params)
-                    release_first_classification.set()
-                    return result
+                    try:
+                        return await dl.triage_memories(params)
+                    finally:
+                        release_first_classification.set()
 
-                first, second = await asyncio.gather(first_run(), overlapping_run())
+                first, second = await asyncio.wait_for(
+                    asyncio.gather(first_run(), overlapping_run()),
+                    timeout=10,
+                )
 
             pool = await postgres.get_pool()
             async with pool.acquire() as conn:
@@ -1285,9 +1317,10 @@ class TestLifecyclePipelineStaging:
         assert "UNIQUE (memory_id, policy_version)" in source
         assert "reservation_token" in source
         assert "state = 'classifying'" in source
+        assert "state = 'failed' AND reason IS NOT NULL" in source
         assert "action IS NOT NULL AND reason IS NOT NULL" in source
         assert "last_boost_at" in source
-        for state in ("classifying", "staged", "applied", "needs_review", "failed"):
+        for state in ("classifying", "staged", "resolved", "needs_review", "failed"):
             assert state in source
 
     @pytest.mark.asyncio
@@ -1308,24 +1341,24 @@ class TestLifecyclePipelineStaging:
             created_at="2026-07-14T12:00:00+00:00",
             updated_at="2026-07-14T12:00:00+00:00",
         )
-        applied = LifecycleActionRecord(
-            **{**vars(record), "state": "applied", "resolution_note": "Reviewed"}
+        resolved = LifecycleActionRecord(
+            **{**vars(record), "state": "resolved", "resolution_note": "Reviewed"}
         )
         mock_dl = MagicMock()
         mock_dl.list_lifecycle_actions = AsyncMock(return_value=[record])
-        mock_dl.set_lifecycle_action_state = AsyncMock(return_value=applied)
+        mock_dl.set_lifecycle_action_state = AsyncMock(return_value=resolved)
 
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             listed = json.loads(await list_lifecycle_actions())
             transitioned = json.loads(
-                await set_lifecycle_action_state(7, "applied", "Reviewed")
+                await set_lifecycle_action_state(7, "resolved", "Reviewed")
             )
 
         assert listed["count"] == 1
         assert listed["actions"][0]["memory_id"] == 42
         query_params = mock_dl.list_lifecycle_actions.await_args.args[0]
         assert query_params.policy_version is None
-        assert transitioned["state"] == "applied"
+        assert transitioned["state"] == "resolved"
         assert transitioned["resolution_note"] == "Reviewed"
 
 

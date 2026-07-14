@@ -213,10 +213,12 @@ write follows the `update_memory` patterns in the
 `open-brain/memory-status-conventions` standard.
 
 For actions loaded from `list_lifecycle_actions`, call
-`set_lifecycle_action_state` after the decision: `applied` after a successful
+`set_lifecycle_action_state` after the decision: `resolved` after a successful
 approved action or keep decision, `needs_review` when deferred, and `failed`
-when execution fails. Include a concise resolution note. This ledger transition
-does not replace the memory `metadata.status` write described below.
+when execution fails. Include a concise resolution note naming any external
+effect. `resolved` records the review outcome; it is not proof that the ledger
+tool executed an effect. This transition does not replace the memory
+`metadata.status` write described below.
 
 1. **Merge**: Call `mcp__open-brain__refine_memories(scope="duplicates")` or
    `mcp__open-brain__update_memory` to update the surviving memory with merged

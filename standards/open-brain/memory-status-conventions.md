@@ -44,25 +44,45 @@ audit and history but do not surface in `/ob-triage` runs.
 
 `mcp__open-brain__run_lifecycle_pipeline(scope=..., dry_run=...)`:
 
-- `scope="recent"` — classify the newest memories without an action for the
-  active policy version
-- `scope=None` (omit) — classify open memories without an action for the active
-  policy version
-- `dry_run=true` — classify and return proposed actions without writing
+- `scope="recent"` — classify the newest eligible memories
+- `scope=None` (omit) — classify eligible open memories
+- `dry_run=true` — classify and return a read-only preview of the eligible
+  scope, including memories that already have a proposal for the active policy;
+  it never populates the review queue
 - `dry_run=false` — persist proposals in `memory_lifecycle_actions`; never
-  materialize, archive, write files, create beads, or delete memories
+  materialize, archive, write files, create beads, or delete memories; memories
+  with an action for the active policy version are excluded
 
 The ledger uses `(memory_id, policy_version)` as its idempotency key. Every
 classification, including `keep`, creates at most one row for the active policy.
 Non-dry runs reserve rows in the internal `classifying` state before invoking
-the LLM, then move completed proposals to `staged`. Reservations abandoned for
-more than one hour are reclaimed on the next run. Review/apply workflows may
-transition staged rows to `applied`, `needs_review`, or `failed`.
+the LLM, then move completed proposals to `staged`. If classification raises or
+returns fewer proposals than were reserved, the unfinished owned rows move to
+`failed` immediately. The one-hour reclaim remains a fallback for abrupt process
+termination before cleanup can run. Review workflows may transition staged rows
+to `resolved`, `needs_review`, or `failed`.
+Failed classifications are eligible for reservation again on the next non-dry
+run under the same policy; the existing ledger row is reused with a new ownership
+token rather than duplicated.
 
 `list_lifecycle_actions(state="staged")` is the read path for the review queue
 across policy versions; callers may pass `policy_version` to restrict it.
 After a human decision, `set_lifecycle_action_state` records the reviewed state
-and a resolution note. Neither tool executes the proposed action.
+and a resolution note. `resolved` means the review workflow recorded an outcome;
+it does not by itself prove or execute materialization. Neither tool executes the
+proposed action.
+
+### Scheduler Rollout Sequence
+
+Use this order before enabling an unattended lifecycle trigger:
+
+1. Run `run_lifecycle_pipeline(..., dry_run=true)` to inspect the preview. The
+   queue is unchanged and `newly_staged_count` is zero.
+2. Run `run_lifecycle_pipeline(..., dry_run=false)` to persist proposals.
+3. Run `list_lifecycle_actions(state="staged")` and inspect the actual queue.
+4. Review the staged records and record their outcomes as `resolved`,
+   `needs_review`, or `failed`.
+5. Enable the scheduled trigger only after the staged output is understood.
 
 Heartbeat callers use `dry_run=false`. Triage callers always start with
 `dry_run=true`, present results to the user, then execute approved actions

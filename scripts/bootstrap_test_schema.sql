@@ -123,13 +123,14 @@ CREATE TABLE IF NOT EXISTS memory_lifecycle_actions (
     CHECK (action IS NULL OR action IN ('keep', 'merge', 'promote', 'scaffold', 'archive')),
   reason TEXT,
   state TEXT NOT NULL DEFAULT 'classifying'
-    CHECK (state IN ('classifying', 'staged', 'applied', 'needs_review', 'failed')),
+    CHECK (state IN ('classifying', 'staged', 'resolved', 'needs_review', 'failed')),
   reservation_token TEXT,
   resolution_note TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CHECK (
     state = 'classifying'
+    OR (state = 'failed' AND reason IS NOT NULL)
     OR (action IS NOT NULL AND reason IS NOT NULL)
   ),
   UNIQUE (memory_id, policy_version)

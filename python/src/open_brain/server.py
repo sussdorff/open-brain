@@ -1132,7 +1132,8 @@ async def refine_memories(
 @mcp.tool(
     description="Classify memories into lifecycle actions: keep | merge | promote | scaffold | archive. "
     "Uses LLM with type-aware logic: learning→promote, session_summary→archive, observation→keep/merge. "
-    "dry_run=true previews without writes; dry_run=false stages each proposal once for the active policy. "
+    "dry_run=true previews the full eligible scope without writes, including memories already proposed "
+    "under the active policy; dry_run=false stages each not-yet-proposed memory once. "
     "Params: scope (recent|project:<name>|type:<name>|low-priority|session_ref:<prefix>), limit, dry_run"
 )
 @logged_tool
@@ -1189,7 +1190,8 @@ async def list_lifecycle_actions(
 
 @mcp.tool(
     description="Record the reviewed state of a persisted lifecycle proposal. "
-    "Allowed states: staged, applied, needs_review, failed. This changes only the ledger; "
+    "Allowed states: staged, resolved, needs_review, failed. Resolved records a reviewed "
+    "outcome; it does not prove or execute materialization. This changes only the ledger; "
     "it never materializes, archives, writes files, creates beads, or deletes memories. "
     "Params: action_id, state, note"
 )
@@ -1252,7 +1254,8 @@ async def materialize_memories(
 @mcp.tool(
     description="Run the safe memory lifecycle pipeline: decay → triage → stage for review. "
     "Never materializes, archives, writes files, or creates beads. Repeated runs stage each memory "
-    "at most once for the active policy version. Returns decay and staging summaries. "
+    "at most once for the active policy version. A dry run previews but does not populate the queue. "
+    "Returns decay and staging summaries. "
     "Params: scope, dry_run"
 )
 @logged_tool
