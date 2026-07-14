@@ -889,7 +889,7 @@ def build_learning_clusters(
 def build_extraction_prompt(
     summaries: list[SessionSummary],
     *,
-    retry_after_empty: bool = False,
+    retry_after_no_learning: bool = False,
 ) -> str:
     """Build the strict extraction and routing prompt."""
     payload = [summary.prompt_payload() for summary in summaries]
@@ -901,9 +901,9 @@ def build_extraction_prompt(
     focused_requirement = ""
     if focused_summary:
         retry_context = (
-            " A previous pass returned no candidates, so re-inspect every distinct "
-            "finding before answering."
-            if retry_after_empty
+            " A previous pass returned no deterministically valid learning, so "
+            "re-inspect every distinct finding before answering."
+            if retry_after_no_learning
             else ""
         )
         focused_requirement = f"""
@@ -1422,6 +1422,41 @@ def _parse_json_object(text: str) -> dict[str, Any]:
     return payload
 
 
+def _merge_extraction_attempts(
+    summary: SessionSummary,
+    first: list[LearningCandidate],
+    retry: list[LearningCandidate],
+) -> list[LearningCandidate]:
+    """Combine focused attempts by atomic statement and assign stable IDs."""
+    by_statement: dict[str, LearningCandidate] = {}
+    order: list[str] = []
+    for candidate in [*first, *retry]:
+        key = _normalize_evidence_text(candidate.statement)
+        if not key:
+            key = f"{candidate.kind.value}:{len(order)}"
+        existing = by_statement.get(key)
+        if existing is None:
+            order.append(key)
+            by_statement[key] = candidate
+            continue
+        candidate_is_learning = (
+            route_candidate(candidate).kind is CandidateKind.LEARNING
+        )
+        existing_is_learning = (
+            route_candidate(existing).kind is CandidateKind.LEARNING
+        )
+        if candidate_is_learning and not existing_is_learning:
+            by_statement[key] = candidate
+
+    return [
+        replace(candidate, candidate_id=f"{summary.id}-{ordinal}")
+        for ordinal, candidate in enumerate(
+            (by_statement[key] for key in order),
+            start=1,
+        )
+    ]
+
+
 async def _extract_candidates(
     summaries: list[SessionSummary],
     *,
@@ -1438,18 +1473,22 @@ async def _extract_candidates(
         )
         payload = _parse_json_object(response)
         parsed = _parse_batch_extraction_response(batch, payload)
-        if (
-            not parsed
-            and len(batch) == 1
+        focused_without_learning = (
+            len(batch) == 1
             and _requires_focused_extraction(batch[0])
-        ):
+            and not any(
+                route_candidate(candidate).kind is CandidateKind.LEARNING
+                for candidate in parsed
+            )
+        )
+        if focused_without_learning:
             response = await llm_complete(
                 [
                     LlmMessage(
                         role="user",
                         content=build_extraction_prompt(
                             batch,
-                            retry_after_empty=True,
+                            retry_after_no_learning=True,
                         ),
                     )
                 ],
@@ -1458,9 +1497,14 @@ async def _extract_candidates(
                 response_format={"type": "json_object"},
                 disable_reasoning=True,
             )
-            parsed = _parse_batch_extraction_response(
+            retry_candidates = _parse_batch_extraction_response(
                 batch,
                 _parse_json_object(response),
+            )
+            parsed = _merge_extraction_attempts(
+                batch[0],
+                parsed,
+                retry_candidates,
             )
         candidates.extend(parsed)
     return [route_candidate(candidate) for candidate in candidates]

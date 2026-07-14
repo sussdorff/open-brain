@@ -1820,12 +1820,12 @@ def test_focused_extraction_prompt_requires_causal_coverage() -> None:
     first_prompt = analysis.build_extraction_prompt([summary])
     retry_prompt = analysis.build_extraction_prompt(
         [summary],
-        retry_after_empty=True,
+        retry_after_no_learning=True,
     )
 
     assert "Focused coverage requirement" in first_prompt
     assert "completed recovery can still evidence" in first_prompt
-    assert "previous pass returned no candidates" in retry_prompt
+    assert "previous pass returned no deterministically valid learning" in retry_prompt
 
 
 def test_learning_rich_summaries_receive_focused_extraction_batches() -> None:
@@ -1847,7 +1847,7 @@ def test_learning_rich_summaries_receive_focused_extraction_batches() -> None:
 
 
 @pytest.mark.asyncio
-async def test_empty_focused_extraction_is_retried_once() -> None:
+async def test_focused_extraction_without_learning_is_retried_once() -> None:
     summary_raw = _summary(21617, session_ref="polaris-kydi")
     summary_raw["content"] = (
         "Key findings: a failed push left the bead closed while commits were not "
@@ -1882,7 +1882,87 @@ async def test_empty_focused_extraction_is_retried_once() -> None:
     assert candidates[0].kind is analysis.CandidateKind.LEARNING
     assert complete.await_count == 2
     retry_prompt = complete.await_args_list[1].args[0][0].content
-    assert "previous pass returned no candidates" in retry_prompt
+    assert "previous pass returned no deterministically valid learning" in retry_prompt
+
+
+@pytest.mark.asyncio
+async def test_focused_decision_and_retry_learning_are_merged_with_stable_ids() -> None:
+    summary_raw = _summary(21617, session_ref="polaris-kydi")
+    summary_raw["content"] = (
+        "Key findings: a failed push left the bead closed while commits were not "
+        "on main. Recovery skipped duplicate closure and completed the Git merge."
+    )
+    summary = analysis.SessionSummary(**summary_raw)
+    decision = _candidate(
+        "ignored",
+        source_memory_id=21617,
+        kind="decision",
+        statement="The recovery used a double merge before publishing the release.",
+        generalizable=False,
+    )
+    learning = _candidate(
+        "ignored",
+        source_memory_id=21617,
+        statement="Tracker closure does not prove Git landedness after a failed push.",
+        observation="The bead was closed while commits were absent from main.",
+        cause="The push failed after the tracker transition completed.",
+        future_behavior="Recover Git without repeating the tracker closure.",
+        evidence=[
+            "a failed push left the bead closed while commits were not on main"
+        ],
+    )
+
+    with patch.object(
+        analysis,
+        "llm_complete",
+        new_callable=AsyncMock,
+        side_effect=[
+            json.dumps({"candidates": [decision]}),
+            json.dumps({"candidates": [learning]}),
+        ],
+    ) as complete:
+        candidates = await analysis._extract_candidates([summary], model=None)
+
+    assert [candidate.candidate_id for candidate in candidates] == [
+        "21617-1",
+        "21617-2",
+    ]
+    assert [candidate.kind for candidate in candidates] == [
+        analysis.CandidateKind.DECISION,
+        analysis.CandidateKind.LEARNING,
+    ]
+    assert complete.await_count == 2
+
+
+def test_invalid_retry_learning_does_not_replace_same_statement_decision() -> None:
+    summary = analysis.SessionSummary(**_summary(21617))
+    statement = "The recovery used a double merge before publishing the release."
+    decision = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "21617-1",
+            source_memory_id=21617,
+            kind="decision",
+            statement=statement,
+            generalizable=False,
+        )
+    )
+    invalid_learning_raw = _candidate(
+        "21617-1",
+        source_memory_id=21617,
+        statement=statement,
+    )
+    invalid_learning_raw["cause"] = None
+    invalid_learning = analysis.LearningCandidate.from_dict(invalid_learning_raw)
+
+    merged = analysis._merge_extraction_attempts(
+        summary,
+        [decision],
+        [invalid_learning],
+    )
+
+    assert len(merged) == 1
+    assert merged[0].kind is analysis.CandidateKind.DECISION
+    assert merged[0].candidate_id == "21617-1"
 
 
 def test_reconciliation_prompt_allows_method_when_it_is_the_causal_learning() -> None:
