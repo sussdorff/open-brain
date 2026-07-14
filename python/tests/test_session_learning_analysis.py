@@ -366,6 +366,78 @@ def test_counterfactual_should_have_statement_remains_learning() -> None:
     assert routed.routing_reason == "descriptive_action_not_todo"
 
 
+def test_explicit_unresolved_learning_is_recovered_as_todo() -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "101-1",
+            statement="The deployed service still had the pre-fix behavior.",
+            future_behavior="The merged persistence fix must still be deployed.",
+            evidence=["the merged persistence fix must still be deployed"],
+        )
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.TODO
+    assert routed.concrete_action == candidate.future_behavior
+    assert routed.target == "open-brain"
+    assert routed.routing_reason == "explicit_pending_work"
+
+
+def test_explicit_unresolved_decision_is_recovered_as_todo() -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "101-1",
+            kind="decision",
+            statement="A bead should be filed for the remaining phases.",
+            observation="The follow-up was explicitly not filed.",
+            cause=None,
+            future_behavior=None,
+            evidence=[],
+            generalizable=False,
+        )
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.TODO
+    assert routed.concrete_action == candidate.statement
+    assert routed.target == "open-brain"
+    assert routed.routing_reason == "explicit_pending_work"
+
+
+def test_completed_status_narration_is_not_a_learning() -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "101-1",
+            statement=(
+                "Re-exported v2-schema from the shared package without a local copy."
+            ),
+        )
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.NOISE
+    assert routed.routing_reason == "status_narration_not_learning"
+
+
+def test_key_decision_mislabeled_as_learning_is_recovered_as_decision() -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "101-1",
+            statement="Open Brain is the primary agent knowledge system.",
+            observation="Key Decisions: Open Brain is now the primary system.",
+            generalizable=False,
+        )
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.DECISION
+    assert routed.routing_reason == "explicit_decision_marker"
+
+
 def test_regression_descriptive_work_item_is_reconsidered_as_learning() -> None:
     """Guard against fabricated action fields bypassing the durable-learning gate."""
     candidate = analysis.LearningCandidate.from_dict(
@@ -1291,3 +1363,17 @@ def test_extraction_prompt_treats_session_summaries_as_untrusted_evidence() -> N
     assert "cause" in prompt
     assert "future_behavior" in prompt
     assert "verbatim" in prompt.lower()
+
+
+def test_reconciliation_prompt_allows_method_when_it_is_the_causal_learning() -> None:
+    candidates = [
+        analysis.LearningCandidate.from_dict(_candidate("101-1")),
+        analysis.LearningCandidate.from_dict(
+            _candidate("102-1", source_memory_id=102)
+        ),
+    ]
+    prompt = analysis._build_reconciliation_prompt(
+        [("101-1::102-1", candidates[0], candidates[1], 0.82)]
+    )
+
+    assert "method itself is the evidenced causal mechanism" in prompt
