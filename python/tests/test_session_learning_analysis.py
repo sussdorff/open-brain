@@ -316,16 +316,52 @@ def test_two_distinct_source_sessions_make_cluster_reviewable() -> None:
     assert cluster.hold_reason is None
 
 
-def test_high_severity_evidenced_singleton_is_reviewable() -> None:
+@pytest.mark.parametrize("severity", ["high", "critical"])
+def test_regression_severe_evidenced_singleton_requires_recurrence(
+    severity: str,
+) -> None:
     candidate = analysis.route_candidate(
         analysis.LearningCandidate.from_dict(
-            _candidate("101-1", severity="high", evidence=["production outage trace"])
+            _candidate(
+                "101-1",
+                severity=severity,
+                evidence=["production outage trace"],
+            )
         )
     )
 
     cluster = analysis.build_learning_clusters([candidate], [])[0]
 
-    assert cluster.review_eligible is True
+    assert cluster.review_eligible is False
+    assert cluster.hold_reason == "needs_cross_session_recurrence"
+    assert cluster.severity == severity
+    assert cluster.evidence == ["production outage trace"]
+
+
+def test_regression_multiple_candidates_from_one_source_are_held() -> None:
+    candidates = [
+        analysis.route_candidate(
+            analysis.LearningCandidate.from_dict(_candidate("101-1"))
+        ),
+        analysis.route_candidate(
+            analysis.LearningCandidate.from_dict(_candidate("101-2"))
+        ),
+    ]
+
+    cluster = analysis.build_learning_clusters(
+        candidates,
+        [
+            {
+                "candidate_ids": ["101-1", "101-2"],
+                "canonical_learning": "Installers must reconcile target state.",
+                "reason": "Two observations from one session",
+            }
+        ],
+    )[0]
+
+    assert cluster.source_memory_ids == [101]
+    assert cluster.review_eligible is False
+    assert cluster.hold_reason == "needs_cross_session_recurrence"
 
 
 def test_ordinary_singleton_is_held() -> None:
@@ -336,7 +372,7 @@ def test_ordinary_singleton_is_held() -> None:
     cluster = analysis.build_learning_clusters([candidate], [])[0]
 
     assert cluster.review_eligible is False
-    assert cluster.hold_reason == "needs_recurrence_or_severe_evidence"
+    assert cluster.hold_reason == "needs_cross_session_recurrence"
 
 
 def test_partitioned_report_keeps_non_learning_routes_separate() -> None:
