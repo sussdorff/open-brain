@@ -610,8 +610,6 @@ def _pairs_from_cluster_proposals(
     embeddings: list[list[float]],
 ) -> list[tuple[str, LearningCandidate, LearningCandidate, float]]:
     """Expand first-pass group proposals into untrusted pair candidates."""
-    if len(embeddings) != len(candidates):
-        return []
     candidate_by_id = {
         candidate.candidate_id: candidate
         for candidate in candidates
@@ -863,18 +861,26 @@ async def _cluster_candidates(
     ]
     if not learnings:
         return []
-    response = await llm_complete(
-        [LlmMessage(role="user", content=_build_cluster_prompt(learnings))],
-        model=model,
-        max_tokens=2048,
-        response_format={"type": "json_object"},
-        disable_reasoning=True,
-    )
-    payload = _parse_json_object(response)
-    raw_clusters = payload.get("clusters", [])
-    cluster_specs = raw_clusters if isinstance(raw_clusters, list) else []
     conservative_clusters = build_learning_clusters(learnings, [])
     if len(conservative_clusters) < 2:
+        return conservative_clusters
+
+    try:
+        response = await llm_complete(
+            [LlmMessage(role="user", content=_build_cluster_prompt(learnings))],
+            model=model,
+            max_tokens=2048,
+            response_format={"type": "json_object"},
+            disable_reasoning=True,
+        )
+        payload = _parse_json_object(response)
+        raw_clusters = payload.get("clusters", [])
+        cluster_specs = raw_clusters if isinstance(raw_clusters, list) else []
+    except Exception:
+        logger.warning(
+            "Learning cluster proposal failed; preserving singleton clusters",
+            exc_info=True,
+        )
         return conservative_clusters
 
     try:

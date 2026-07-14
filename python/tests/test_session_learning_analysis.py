@@ -426,12 +426,19 @@ async def test_analysis_extracts_all_kinds_but_clusters_only_valid_learnings() -
                 ),
                 "candidate_id": None,
             },
+            {
+                **_candidate(
+                    "ignored",
+                    statement="State reconciliation prevents duplicate registrations.",
+                ),
+                "candidate_id": None,
+            },
         ]
     }
     clustering = {
         "clusters": [
             {
-                "candidate_ids": ["101-1", "101-2"],
+                "candidate_ids": ["101-1", "101-3"],
                 "canonical_learning": "Installers must reconcile target state.",
                 "reason": "Same installer topic",
             }
@@ -454,14 +461,21 @@ async def test_analysis_extracts_all_kinds_but_clusters_only_valid_learnings() -
                 json.dumps(clustering),
             ],
         ) as complete,
+        patch.object(
+            analysis,
+            "embed_batch",
+            new_callable=AsyncMock,
+            return_value=[[1.0, 0.0], [0.95, 0.05]],
+        ),
     ):
         report = await analysis.analyze_session_learnings(limit=50)
 
-    assert report["counts"]["candidates"] == 2
+    assert report["counts"]["candidates"] == 3
     assert report["counts"]["todos"] == 1
     assert report["queues"]["held_learning_clusters"][0]["candidate_ids"] == ["101-1"]
     cluster_prompt = complete.await_args_list[1].args[0][0].content
     assert "101-1" in cluster_prompt
+    assert "101-3" in cluster_prompt
     assert "101-2" not in cluster_prompt
     assert report["write_side_effects"] is False
 

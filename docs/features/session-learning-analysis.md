@@ -64,7 +64,8 @@ the embedding threshold. Pair identities and member order are canonical, so
 first-pass response ordering cannot duplicate adjudication work. A failed
 reconciliation preserves the conservative singleton partition. An incomplete
 embedding response is logged and also falls back to singletons instead of
-silently disabling reconciliation.
+silently disabling reconciliation. Failure in either LLM pass also fails closed
+to singletons. Runs with zero or one learning candidate skip clustering calls.
 
 ## Usage
 
