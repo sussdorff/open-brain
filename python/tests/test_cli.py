@@ -852,6 +852,39 @@ class TestWithUrlToken:
 
 class TestCallToolAuth:
     @pytest.mark.asyncio
+    async def test_regression_analysis_tool_uses_batch_timeout(self):
+        init_resp = MagicMock()
+        init_resp.headers = {"mcp-session-id": "session-1"}
+        init_resp.raise_for_status.return_value = None
+        notif_resp = MagicMock()
+        call_resp = MagicMock()
+        call_resp.headers = {"content-type": "application/json"}
+        call_resp.json.return_value = {
+            "result": {"content": [{"type": "text", "text": "{}"}]}
+        }
+        call_resp.raise_for_status.return_value = None
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(side_effect=[init_resp, notif_resp, call_resp])
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+
+        with (
+            patch(
+                "open_brain.cli.client._get_server_url",
+                return_value="https://brain.example.com/mcp",
+            ),
+            patch("open_brain.cli.client._load_token", return_value="oauth-token"),
+            patch(
+                "open_brain.cli.client.httpx.AsyncClient",
+                return_value=mock_client,
+            ) as client_factory,
+        ):
+            await call_tool("analyze_session_learnings", {"limit": 50})
+
+        assert client_factory.call_args.kwargs["timeout"] == 180.0
+
+    @pytest.mark.asyncio
     async def test_uses_api_key_header_when_configured(self, monkeypatch):
         monkeypatch.setenv("OB_URL", "https://brain.example.com/mcp")
         monkeypatch.delenv("OB_TOKEN", raising=False)
