@@ -176,10 +176,10 @@ class TestPostgresPoolMigrations:
 
     @pytest.mark.integration
     @pytest.mark.asyncio
-    async def test_get_pool_drops_legacy_function_overloads(
+    async def test_regression_get_pool_drops_all_legacy_function_overloads(
         self, bootstrapped_database_url: str
     ):
-        """Runtime migrations remove legacy function overloads before recreating."""
+        """Runtime migrations remove every production-observed legacy overload."""
         from open_brain.config import get_config
         from open_brain.data_layer import postgres as pg_module
 
@@ -203,12 +203,75 @@ class TestPostgresPoolMigrations:
                 DROP FUNCTION IF EXISTS public.hybrid_search(
                     TEXT, vector, INTEGER, INTEGER, INTEGER
                 );
+                DROP FUNCTION IF EXISTS public.hybrid_search(
+                    TEXT, vector, INTEGER, INTEGER, INTEGER, TEXT
+                );
+                DROP FUNCTION IF EXISTS public.hybrid_search(
+                    TEXT, vector, INTEGER, INTEGER, INTEGER, TEXT, JSONB
+                );
                 CREATE OR REPLACE FUNCTION public.hybrid_search(
                     query_text TEXT,
                     query_embedding vector,
                     match_limit INTEGER,
                     rrf_k INTEGER,
                     p_index_id INTEGER
+                )
+                RETURNS TABLE(
+                    id INTEGER,
+                    title TEXT,
+                    subtitle TEXT,
+                    type TEXT,
+                    score REAL,
+                    created_at TIMESTAMP WITH TIME ZONE
+                )
+                LANGUAGE sql
+                STABLE
+                AS $fn$
+                    SELECT
+                        NULL::INTEGER,
+                        NULL::TEXT,
+                        NULL::TEXT,
+                        NULL::TEXT,
+                        NULL::REAL,
+                        NULL::TIMESTAMP WITH TIME ZONE
+                    WHERE FALSE;
+                $fn$;
+                CREATE OR REPLACE FUNCTION public.hybrid_search(
+                    query_text TEXT,
+                    query_embedding vector,
+                    match_limit INTEGER,
+                    rrf_k INTEGER,
+                    p_index_id INTEGER,
+                    p_user_id TEXT
+                )
+                RETURNS TABLE(
+                    id INTEGER,
+                    title TEXT,
+                    subtitle TEXT,
+                    type TEXT,
+                    score REAL,
+                    created_at TIMESTAMP WITH TIME ZONE
+                )
+                LANGUAGE sql
+                STABLE
+                AS $fn$
+                    SELECT
+                        NULL::INTEGER,
+                        NULL::TEXT,
+                        NULL::TEXT,
+                        NULL::TEXT,
+                        NULL::REAL,
+                        NULL::TIMESTAMP WITH TIME ZONE
+                    WHERE FALSE;
+                $fn$;
+                CREATE OR REPLACE FUNCTION public.hybrid_search(
+                    query_text TEXT,
+                    query_embedding vector,
+                    match_limit INTEGER,
+                    rrf_k INTEGER,
+                    p_index_id INTEGER,
+                    p_user_id TEXT,
+                    p_metadata_filter JSONB
                 )
                 RETURNS TABLE(
                     id INTEGER,

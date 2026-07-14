@@ -142,8 +142,8 @@ def test_hybrid_search_definitions_apply_same_priority_factor():
 
     assert PRIORITY_FACTOR_SQL in runtime_sql
     assert PRIORITY_FACTOR_SQL in bootstrap_sql
-    assert runtime_sql.count("DROP FUNCTION IF EXISTS public.hybrid_search") == 2
-    assert bootstrap_sql.count("DROP FUNCTION IF EXISTS public.hybrid_search") == 2
+    assert runtime_sql.count("DROP FUNCTION IF EXISTS public.hybrid_search") == 4
+    assert bootstrap_sql.count("DROP FUNCTION IF EXISTS public.hybrid_search") == 4
 
 
 @pytest.mark.integration

@@ -221,6 +221,8 @@ CREATE TABLE IF NOT EXISTS url_tokens (
 -- (schema-qualified, and independent of return type) guarantees an idempotent
 -- rebuild from ANY of this codebase's historical hybrid_search states.
 DROP FUNCTION IF EXISTS public.hybrid_search(TEXT, vector, INTEGER, INTEGER, INTEGER);
+DROP FUNCTION IF EXISTS public.hybrid_search(TEXT, vector, INTEGER, INTEGER, INTEGER, TEXT);
+DROP FUNCTION IF EXISTS public.hybrid_search(TEXT, vector, INTEGER, INTEGER, INTEGER, TEXT, JSONB);
 DROP FUNCTION IF EXISTS public.hybrid_search(TEXT, vector, INTEGER, INTEGER, INTEGER, TEXT, JSONB, TEXT);
 CREATE OR REPLACE FUNCTION public.hybrid_search(
   query_text TEXT,

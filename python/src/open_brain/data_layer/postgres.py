@@ -503,17 +503,20 @@ async def _run_migrations(conn: asyncpg.Connection) -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
     """)
-    # Drop both known hybrid_search signatures before recreating the canonical one.
+    # Drop every known hybrid_search signature before recreating the canonical one.
     # Postgres treats different argument-type lists as separate overloads, so
     # CREATE OR REPLACE leaves stale legacy signatures untouched; it also cannot
     # change return types, so dropping current+legacy makes rebuild idempotent.
-    # Wrap the drop+recreate in a single transaction so concurrent READ COMMITTED
+    # Historical releases produced 5-, 6-, and 7-argument overloads. Wrap the
+    # drop+recreate in a single transaction so concurrent READ COMMITTED
     # connections keep resolving the OLD definition until commit (MVCC snapshot),
     # eliminating the undefined-function window that separate autocommit statements
     # would otherwise open between DROP and CREATE OR REPLACE.
     async with conn.transaction():
         await conn.execute("""
             DROP FUNCTION IF EXISTS public.hybrid_search(TEXT, vector, INTEGER, INTEGER, INTEGER);
+            DROP FUNCTION IF EXISTS public.hybrid_search(TEXT, vector, INTEGER, INTEGER, INTEGER, TEXT);
+            DROP FUNCTION IF EXISTS public.hybrid_search(TEXT, vector, INTEGER, INTEGER, INTEGER, TEXT, JSONB);
             DROP FUNCTION IF EXISTS public.hybrid_search(TEXT, vector, INTEGER, INTEGER, INTEGER, TEXT, JSONB, TEXT);
         """)
         await conn.execute("""
