@@ -126,6 +126,41 @@ def test_parse_candidates_accepts_all_explicit_kinds(kind: str) -> None:
     assert candidates[0].candidate_id == "101-1"
 
 
+def test_batch_extraction_rejects_cross_summary_evidence_leakage() -> None:
+    first_raw = _summary(101, session_ref="session-101")
+    first_raw["content"] = "HyperFrames renders deterministic MP4 from HTML."
+    second_raw = _summary(102, session_ref="session-102")
+    second_raw["content"] = "Fixed HZV organization scoping for rule runs."
+    summaries = [
+        analysis.SessionSummary(**first_raw),
+        analysis.SessionSummary(**second_raw),
+    ]
+    payload = {
+        "candidates": [
+            {
+                **_candidate(
+                    "ignored",
+                    source_memory_id=101,
+                    evidence=["HyperFrames renders deterministic MP4 from HTML."],
+                ),
+                "source_memory_id": 101,
+            },
+            {
+                **_candidate(
+                    "ignored",
+                    source_memory_id=102,
+                    evidence=["HyperFrames renders deterministic MP4 from HTML."],
+                ),
+                "source_memory_id": 102,
+            },
+        ]
+    }
+
+    candidates = analysis._parse_batch_extraction_response(summaries, payload)
+
+    assert [candidate.source_memory_id for candidate in candidates] == [101]
+
+
 def test_valid_causal_learning_passes_learning_gate() -> None:
     candidate = analysis.LearningCandidate.from_dict(_candidate("101-1"))
 
@@ -148,6 +183,41 @@ def test_imperative_repository_change_is_rerouted_to_todo() -> None:
 
     assert routed.kind is analysis.CandidateKind.TODO
     assert routed.routing_reason == "imperative_concrete_action"
+
+
+def test_descriptive_completed_change_does_not_become_todo_from_action_field() -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "101-1",
+            statement="Upgrading esbuild resolved the blocking security advisory.",
+            concrete_action="Upgrade esbuild",
+            target="package.json",
+        )
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.LEARNING
+    assert routed.concrete_action is None
+    assert routed.target is None
+    assert routed.routing_reason == "descriptive_action_not_todo"
+
+
+def test_explicitly_pending_modal_work_item_remains_todo() -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "101-1",
+            kind="todo",
+            statement="A follow-up bead should be filed for the remaining phases.",
+            concrete_action="File a follow-up bead",
+            target="remaining initiative phases",
+            generalizable=False,
+        )
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.TODO
 
 
 def test_regression_descriptive_work_item_is_reconsidered_as_learning() -> None:
@@ -314,6 +384,11 @@ def test_two_distinct_source_sessions_make_cluster_reviewable() -> None:
 
     assert cluster.review_eligible is True
     assert cluster.hold_reason is None
+    assert [member["candidate_id"] for member in cluster.member_claims] == [
+        "101-1",
+        "102-1",
+    ]
+    assert all(member["future_behavior"] for member in cluster.member_claims)
 
 
 @pytest.mark.parametrize("severity", ["high", "critical"])
@@ -1069,3 +1144,4 @@ def test_extraction_prompt_treats_session_summaries_as_untrusted_evidence() -> N
     assert '"todo"' in prompt
     assert "cause" in prompt
     assert "future_behavior" in prompt
+    assert "verbatim" in prompt.lower()
