@@ -19,6 +19,7 @@ from open_brain.cli.client import (
     _normalize_mcp_url,
     _with_url_token,
 )
+import open_brain.cli.main as cli_main
 from open_brain.cli.main import _build_parser, _output, _output_result
 
 
@@ -148,6 +149,57 @@ class TestDoctorCommand:
         assert args.command == "doctor"
 
 
+class TestLearningsCommand:
+    def test_analyze_defaults(self):
+        args = parse(["learnings", "analyze"])
+        assert args.command == "learnings"
+        assert args.learnings_command == "analyze"
+        assert args.limit == 50
+        assert args.project is None
+        assert args.source is None
+        assert args.model is None
+
+    def test_analyze_filters(self):
+        args = parse(
+            [
+                "learnings",
+                "analyze",
+                "--limit",
+                "25",
+                "--project",
+                "open-brain",
+                "--source",
+                "session-close",
+                "--model",
+                "openai/gpt-4.1-mini",
+            ]
+        )
+        assert args.limit == 25
+        assert args.project == "open-brain"
+        assert args.source == "session-close"
+        assert args.model == "openai/gpt-4.1-mini"
+
+    @pytest.mark.asyncio
+    async def test_analyze_dispatches_to_read_only_analysis(self):
+        args = parse(["learnings", "analyze", "--limit", "10"])
+        expected = {"counts": {"source_summaries": 10}, "queues": {}}
+
+        with patch(
+            "open_brain.cli.main.analyze_session_learnings",
+            new_callable=AsyncMock,
+            return_value=expected,
+        ) as analyze:
+            result = await cli_main._cmd_learnings(args)
+
+        assert result == expected
+        analyze.assert_awaited_once_with(
+            limit=10,
+            project=None,
+            source=None,
+            model=None,
+        )
+
+
 class TestPortableBackupCommands:
     def test_export_args(self, tmp_path: Path):
         bundle = tmp_path / "bundle"
@@ -268,6 +320,56 @@ class TestOutput:
         _output([1, 2, 3], pretty=False)
         captured = capsys.readouterr()
         assert captured.out.strip() == "[1, 2, 3]"
+
+    def test_learning_analysis_uses_terminal_display_by_default(self, capsys):
+        args = parse(["learnings", "analyze"])
+        _output_result(
+            {
+                "counts": {
+                    "source_summaries": 50,
+                    "candidates": 12,
+                    "reviewable_learning_clusters": 2,
+                    "held_learning_clusters": 3,
+                    "todos": 4,
+                    "decisions": 1,
+                    "standard_candidates": 1,
+                    "skill_candidates": 0,
+                    "duplicate_doctrine": 1,
+                    "noise": 0,
+                },
+                "queues": {
+                    "reviewable_learning_clusters": [
+                        {
+                            "canonical_learning": "Installers must reconcile target state.",
+                            "source_memory_ids": [101, 102],
+                        }
+                    ],
+                    "held_learning_clusters": [],
+                    "todos": [],
+                    "decisions": [],
+                    "standard_candidates": [],
+                    "skill_candidates": [],
+                    "duplicate_doctrine": [],
+                    "noise": [],
+                },
+                "write_side_effects": False,
+            },
+            args,
+        )
+        captured = capsys.readouterr()
+        assert "Session learning analysis" in captured.out
+        assert "Source summaries: 50" in captured.out
+        assert "Reviewable learning clusters: 2" in captured.out
+        assert "Installers must reconcile target state." in captured.out
+        assert "No memories, priorities, lifecycle states, or work items were changed." in captured.out
+        assert '"queues"' not in captured.out
+
+    def test_learning_analysis_json_flag_keeps_json_output(self, capsys):
+        args = parse(["--json", "learnings", "analyze"])
+        payload = {"counts": {"source_summaries": 1}, "queues": {}}
+        _output_result(payload, args)
+        captured = capsys.readouterr()
+        assert json.loads(captured.out) == payload
 
     def test_unicode_output(self, capsys):
         _output({"text": "Ümlauts and émojis"}, pretty=False)

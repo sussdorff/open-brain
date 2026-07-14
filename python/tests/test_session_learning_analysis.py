@@ -1,0 +1,280 @@
+"""Tests for manual session-summary learning analysis."""
+
+from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+import open_brain.session_learning_analysis as analysis
+
+
+def _summary(
+    memory_id: int = 101,
+    *,
+    session_ref: str | None = "session-101",
+) -> dict:
+    return {
+        "id": memory_id,
+        "title": "Session result",
+        "content": "Implemented a repository change and discovered why it failed.",
+        "narrative": "The failure exposed a reusable mechanism.",
+        "project": "open-brain",
+        "source": "session-close",
+        "session_ref": session_ref,
+        "created_at": "2026-07-14T12:00:00+00:00",
+    }
+
+
+def _candidate(
+    candidate_id: str,
+    *,
+    kind: str = "learning",
+    source_memory_id: int = 101,
+    severity: str = "medium",
+    statement: str = "Append-only installers create duplicate registrations.",
+    observation: str = "Repeated installer runs created duplicate registrations.",
+    cause: str = "The installer appended instead of reconciling target state.",
+    future_behavior: str = "Reconcile installers to exactly one target registration.",
+    evidence: list[str] | None = None,
+    generalizable: bool = True,
+    concrete_action: str | None = None,
+) -> dict:
+    return {
+        "candidate_id": candidate_id,
+        "source_memory_id": source_memory_id,
+        "source_session_ref": f"session-{source_memory_id}",
+        "source_project": "open-brain",
+        "kind": kind,
+        "statement": statement,
+        "observation": observation,
+        "cause": cause,
+        "future_behavior": future_behavior,
+        "evidence": evidence if evidence is not None else ["duplicate hook entries"],
+        "confidence": 0.9,
+        "severity": severity,
+        "generalizable": generalizable,
+        "concrete_action": concrete_action,
+        "target": None,
+        "artifact_reference": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_fetch_session_summaries_is_bounded_filtered_and_read_only() -> None:
+    conn = AsyncMock()
+    conn.fetch.return_value = [_summary()]
+    transaction = MagicMock()
+    transaction.__aenter__ = AsyncMock(return_value=None)
+    transaction.__aexit__ = AsyncMock(return_value=None)
+    conn.transaction = MagicMock(return_value=transaction)
+
+    @asynccontextmanager
+    async def acquire():
+        yield conn
+
+    pool = MagicMock()
+    pool.acquire = acquire
+
+    with patch.object(analysis, "get_pool", new_callable=AsyncMock, return_value=pool):
+        result = await analysis.fetch_session_summaries(
+            limit=25,
+            project="open-brain",
+            source="session-close",
+        )
+
+    conn.transaction.assert_called_once_with(
+        isolation="repeatable_read",
+        readonly=True,
+    )
+    query, *params = conn.fetch.call_args.args
+    normalized_query = " ".join(query.lower().split())
+    assert "m.type = 'session_summary'" in normalized_query
+    assert "order by m.created_at desc" in normalized_query
+    assert "limit $3" in normalized_query
+    assert "update " not in normalized_query
+    assert "insert " not in normalized_query
+    assert "delete " not in normalized_query
+    assert params == ["open-brain", "session-close", 25]
+    assert result[0].id == 101
+    assert result[0].project == "open-brain"
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "learning",
+        "todo",
+        "decision",
+        "standard_candidate",
+        "skill_candidate",
+        "duplicate_doctrine",
+        "noise",
+    ],
+)
+def test_parse_candidates_accepts_all_explicit_kinds(kind: str) -> None:
+    payload = {"candidates": [{**_candidate("101-1", kind=kind), "candidate_id": None}]}
+
+    candidates = analysis.parse_extraction_response(
+        analysis.SessionSummary(**_summary()),
+        payload,
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0].kind.value == kind
+    assert candidates[0].candidate_id == "101-1"
+
+
+def test_valid_causal_learning_passes_learning_gate() -> None:
+    candidate = analysis.LearningCandidate.from_dict(_candidate("101-1"))
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.LEARNING
+    assert routed.routing_reason is None
+
+
+def test_imperative_repository_change_is_rerouted_to_todo() -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "101-1",
+            statement="Update the hook installer in hooks/install.py.",
+            concrete_action="Update hooks/install.py",
+        )
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.TODO
+    assert routed.routing_reason == "imperative_concrete_action"
+
+
+@pytest.mark.parametrize("missing_field", ["observation", "cause", "future_behavior"])
+def test_incomplete_learning_is_not_kept_as_learning(missing_field: str) -> None:
+    raw = _candidate("101-1")
+    raw[missing_field] = None
+    candidate = analysis.LearningCandidate.from_dict(raw)
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.NOISE
+    assert routed.routing_reason == "incomplete_learning_contract"
+
+
+def test_non_generalizable_learning_is_not_kept_as_learning() -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate("101-1", generalizable=False)
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.NOISE
+
+
+def test_clusters_include_only_validated_learning_candidates() -> None:
+    learning = analysis.route_candidate(
+        analysis.LearningCandidate.from_dict(_candidate("101-1"))
+    )
+    todo = analysis.route_candidate(
+        analysis.LearningCandidate.from_dict(
+            _candidate(
+                "102-1",
+                source_memory_id=102,
+                kind="todo",
+                statement="Fix the installer.",
+                concrete_action="Fix hooks/install.py",
+            )
+        )
+    )
+
+    clusters = analysis.build_learning_clusters(
+        [learning, todo],
+        [
+            {
+                "candidate_ids": ["101-1", "102-1"],
+                "canonical_learning": "Installers must reconcile target state.",
+                "reason": "Same installer failure mode",
+            }
+        ],
+    )
+
+    assert len(clusters) == 1
+    assert clusters[0].candidate_ids == ["101-1"]
+    assert clusters[0].source_memory_ids == [101]
+
+
+def test_two_distinct_source_sessions_make_cluster_reviewable() -> None:
+    candidates = [
+        analysis.route_candidate(
+            analysis.LearningCandidate.from_dict(_candidate("101-1"))
+        ),
+        analysis.route_candidate(
+            analysis.LearningCandidate.from_dict(
+                _candidate("102-1", source_memory_id=102)
+            )
+        ),
+    ]
+
+    cluster = analysis.build_learning_clusters(
+        candidates,
+        [
+            {
+                "candidate_ids": ["101-1", "102-1"],
+                "canonical_learning": "Installers must reconcile target state.",
+                "reason": "Repeated across sessions",
+            }
+        ],
+    )[0]
+
+    assert cluster.review_eligible is True
+    assert cluster.hold_reason is None
+
+
+def test_high_severity_evidenced_singleton_is_reviewable() -> None:
+    candidate = analysis.route_candidate(
+        analysis.LearningCandidate.from_dict(
+            _candidate("101-1", severity="high", evidence=["production outage trace"])
+        )
+    )
+
+    cluster = analysis.build_learning_clusters([candidate], [])[0]
+
+    assert cluster.review_eligible is True
+
+
+def test_ordinary_singleton_is_held() -> None:
+    candidate = analysis.route_candidate(
+        analysis.LearningCandidate.from_dict(_candidate("101-1"))
+    )
+
+    cluster = analysis.build_learning_clusters([candidate], [])[0]
+
+    assert cluster.review_eligible is False
+    assert cluster.hold_reason == "needs_recurrence_or_severe_evidence"
+
+
+def test_partitioned_report_keeps_non_learning_routes_separate() -> None:
+    candidates = [
+        analysis.route_candidate(
+            analysis.LearningCandidate.from_dict(_candidate("101-1"))
+        ),
+        analysis.route_candidate(
+            analysis.LearningCandidate.from_dict(
+                _candidate("102-1", source_memory_id=102, kind="todo")
+            )
+        ),
+        analysis.route_candidate(
+            analysis.LearningCandidate.from_dict(
+                _candidate("103-1", source_memory_id=103, kind="decision")
+            )
+        ),
+    ]
+    clusters = analysis.build_learning_clusters(candidates, [])
+
+    report = analysis.build_analysis_report([analysis.SessionSummary(**_summary())], candidates, clusters)
+
+    assert report["counts"]["source_summaries"] == 1
+    assert report["counts"]["todos"] == 1
+    assert report["counts"]["decisions"] == 1
+    assert report["counts"]["held_learning_clusters"] == 1
+    assert report["write_side_effects"] is False
+    assert report["queues"]["todos"][0]["candidate_id"] == "102-1"
