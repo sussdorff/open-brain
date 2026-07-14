@@ -57,16 +57,19 @@ _PENDING_ACTION_RE = re.compile(
 _EXPLICIT_PENDING_PRIMARY_RE = re.compile(
     r"\b(?:bead|issue|ticket|follow-up)\b.{0,60}\b"
     r"(?:must|should|needs? to)\s+be\s+(?:filed|created|written)\b|"
-    r"\b(?:must still(?:\s+be)?|still (?:needs?|requires?) to|remains? to be)\s+"
+    r"\b(?:must still(?:\s+be)?|still (?:needs?|requires?) to be|remains? to be)\s+"
     r"(?:deployed|implemented|completed|merged|landed|released)\b|"
     r"\bnot yet\s+(?:filed|deployed|implemented|completed|merged|landed|released)\b|"
     r"\b(?:still pending|follow-up (?:needed|required)|TODO:)\b",
     re.IGNORECASE,
 )
 _EXPLICIT_PENDING_SUPPORT_RE = re.compile(
-    r"\bmust still\s+(?:be\s+)?"
+    r"\b(?:fix|change|bead|issue|ticket|deployment|release|migration|"
+    r"implementation|work item|follow-up)\b.{0,80}\bmust still\s+(?:be\s+)?"
     r"(?:filed|created|written|deployed|implemented|completed|merged|landed|released)\b|"
-    r"\b(?:still pending|follow-up (?:needed|required))\b",
+    r"\b(?:fix|change|bead|issue|ticket|deployment|release|migration|"
+    r"implementation|work item)\b.{0,80}\b(?:is|are|was|were)?\s*still pending\b|"
+    r"\bfollow-up (?:needed|required)\b",
     re.IGNORECASE,
 )
 _DECISION_MARKER_RE = re.compile(r"\bkey decisions?\s*:", re.IGNORECASE)
@@ -443,7 +446,7 @@ def route_candidate(candidate: LearningCandidate) -> LearningCandidate:
         candidate.statement,
         candidate.observation or "",
         candidate.future_behavior or "",
-        *(candidate.evidence or []),
+        *((candidate.evidence or []) if broad_pending_allowed else []),
     ]
     explicit_pending_field = next(
         (

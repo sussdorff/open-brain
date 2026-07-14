@@ -52,12 +52,15 @@ Explicit unresolved markers are checked at two strengths. Existing TODOs,
 decisions, and non-generalizable candidates may use concrete work-object phrases
 such as "a bead should be filed" or a specific action that is "not yet
 deployed". Generalizable candidates require stronger unresolved markers such as
-"must still be deployed" or "follow-up required" in any field, so a durable
-rule or historical "not yet" observation does not become a TODO. Recovered work
-uses the matching field as its action and the source project as a fallback
-target. An observation marked as a key decision is routed to decisions only
-when the candidate is non-generalizable. Completed status narration is left to
-the extraction gate instead of relying on ambiguous leading-verb filters.
+"must still be deployed" or "follow-up required" in the statement,
+observation, or future behavior, so a durable rule or historical "not yet"
+observation does not become a TODO. These strong markers must name a concrete
+work object, and quoted evidence is considered only for non-generalizable
+candidates. Recovered work uses the matching field as its action and the source
+project as a fallback target. An observation marked as a key decision is routed
+to decisions only when the candidate is non-generalizable. Completed status
+narration is left to the extraction gate instead of relying on ambiguous
+leading-verb filters.
 
 In multi-summary batches, learning, standard, and skill candidates require
 evidence. TODO and decision candidates may omit it. Whenever evidence is
