@@ -48,6 +48,12 @@ action field. Standard and skill candidates must also satisfy the causal
 evidence contract. A `duplicate_doctrine` candidate must name the existing
 artifact it duplicates.
 
+Candidates are atomic: their statement, observation, cause, future behavior,
+and evidence must describe one mechanism. Fields from adjacent bullets or
+independent findings must not be combined. A key decision remains a decision,
+but its heading does not suppress a separate evidence-backed causal finding in
+the same summary.
+
 Explicit unresolved markers are checked at two strengths. Existing TODOs,
 decisions, and non-generalizable candidates may use concrete work-object phrases
 such as "a bead should be filed" or a specific action that is "not yet
@@ -59,8 +65,12 @@ work object, and quoted evidence is considered only for non-generalizable
 candidates. Recovered work uses the matching field as its action and the source
 project as a fallback target. An observation marked as a key decision is routed
 to decisions only when the candidate is non-generalizable. Completed status
-narration is left to the extraction gate instead of relying on ambiguous
-leading-verb filters.
+narration is normally left to the extraction gate. As a deterministic backstop,
+a TODO whose observation or evidence explicitly says the work was added,
+implemented, fixed, merged, deployed, or otherwise completed is removed from the
+work queue unless a stronger explicit pending marker identifies unfinished work.
+Completed candidates with a full causal contract return to learning review;
+incomplete ones route to noise.
 
 In multi-summary batches, learning, standard, and skill candidates require
 evidence. TODO and decision candidates may omit it. Whenever evidence is

@@ -54,6 +54,37 @@ _PENDING_ACTION_RE = re.compile(
     r"follow-up (?:needed|required))\b",
     re.IGNORECASE,
 )
+_COMPLETED_WORK_RE = re.compile(
+    r"\b(?:added|addressed|completed|deployed|fixed|implemented|landed|merged|"
+    r"released|resolved|shipped|updated|verified)\b",
+    re.IGNORECASE,
+)
+_NON_COMPLETION_PREFIX_RE = re.compile(
+    r"\b(?:not|never|to|will|would|should|must|can|could|may|might|needs?|"
+    r"remains?|still)\b(?:\s+\w+){0,4}\s*$",
+    re.IGNORECASE,
+)
+_ACTION_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_-]{3,}", re.IGNORECASE)
+_ACTION_TOKEN_STOPWORDS = {
+    "added",
+    "addressed",
+    "bead",
+    "change",
+    "completed",
+    "deployed",
+    "every",
+    "fixed",
+    "implemented",
+    "landed",
+    "merged",
+    "missing",
+    "released",
+    "resolved",
+    "shipped",
+    "should",
+    "updated",
+    "verified",
+}
 _EXPLICIT_PENDING_PRIMARY_RE = re.compile(
     r"\b(?:bead|issue|ticket|follow-up)\b.{0,60}\b"
     r"(?:must|should|needs? to)\s+be\s+(?:filed|created|written)\b|"
@@ -119,6 +150,28 @@ def _candidate_kind(value: Any) -> CandidateKind:
         return CandidateKind(str(value))
     except ValueError:
         return CandidateKind.NOISE
+
+
+def _asserted_completion_fields(fields: tuple[str, ...]) -> tuple[str, ...]:
+    """Return asserted completion fields, excluding negated or modal mentions."""
+    completed: list[str] = []
+    for field in fields:
+        for match in _COMPLETED_WORK_RE.finditer(field):
+            prefix = field[max(0, match.start() - 64) : match.start()]
+            if not _NON_COMPLETION_PREFIX_RE.search(prefix):
+                completed.append(field)
+                break
+    return tuple(completed)
+
+
+def _action_tokens(value: str) -> set[str]:
+    """Return normalized content tokens for completion-to-action matching."""
+    tokens: set[str] = set()
+    for raw_token in _ACTION_TOKEN_RE.findall(value.lower()):
+        token = raw_token[:-1] if raw_token.endswith("s") else raw_token
+        if token not in _ACTION_TOKEN_STOPWORDS:
+            tokens.add(token)
+    return tokens
 
 
 @dataclass(frozen=True)
@@ -486,6 +539,42 @@ def route_candidate(candidate: LearningCandidate) -> LearningCandidate:
         )
 
     if candidate.kind is CandidateKind.TODO:
+        completed_fields = _asserted_completion_fields(
+            (
+                candidate.observation or "",
+                *(candidate.evidence or []),
+            )
+        )
+        action_tokens = _action_tokens(
+            " ".join(
+                (
+                    candidate.statement,
+                    candidate.concrete_action or "",
+                    candidate.target or "",
+                )
+            )
+        )
+        completed_context = bool(completed_fields) and (
+            not pending_statement
+            or any(
+                len(action_tokens & _action_tokens(field)) >= 2
+                for field in completed_fields
+            )
+        )
+        if completed_context:
+            if complete_contract:
+                return replace(
+                    candidate,
+                    kind=CandidateKind.LEARNING,
+                    concrete_action=None,
+                    target=None,
+                    routing_reason="completed_todo_reconsidered_as_learning",
+                )
+            return replace(
+                candidate,
+                kind=CandidateKind.NOISE,
+                routing_reason="completed_work_not_todo",
+            )
         if complete_contract and not pending_statement:
             return replace(
                 candidate,
@@ -683,6 +772,9 @@ Classify every extracted claim into exactly one kind:
 - "noise": generic advice, status narration, unsupported synthesis, or an unhelpful fragment
 
 Hard learning gate:
+- Emit one atomic claim per candidate. The statement, observation, cause,
+  future_behavior, and evidence must describe the same mechanism. Never combine the
+  cause or future behavior from adjacent bullets or independent findings.
 - A learning requires non-empty `observation`, `cause`, `future_behavior`, and `evidence`.
 - Standard and skill candidates also require non-empty `evidence`; TODO and decision evidence may be null.
 - `generalizable` must be true and the claim must apply beyond the exact file or incident.
@@ -690,7 +782,11 @@ Hard learning gate:
 - A "todo" requires an explicitly pending imperative `statement` plus both `concrete_action` and `target`.
 - Put explicitly unresolved work in "todo" even when the source labels it a caveat or decision; phrases such as "must still", "not yet", "follow-up needed", and "should be filed" are unresolved work.
 - Never invent follow-up work from a descriptive claim about completed work; classify that causal claim by its evidence contract or use "noise".
-- Completed changelog bullets and key decisions are status/decision records, not learnings; do not invent generic causes or future behavior to make them pass the learning gate.
+- Completed changelog bullets and key decisions are status/decision records, not
+  learnings; do not invent generic causes or future behavior to make them pass the
+  learning gate. A decision heading does not suppress a separate evidence-backed
+  causal finding in the same summary; emit that distinct finding independently when
+  it satisfies the learning contract.
 - Whenever `evidence` is present, every item must be a verbatim excerpt from the same summary identified by `source_memory_id`; include at least one excerpt unique within this input batch, and never paraphrase or copy evidence between summaries.
 - Merely reporting what was changed is not a learning.
 - Existing policy copied from AGENTS.md, a standard, or a skill is `duplicate_doctrine`, not a new learning.

@@ -330,6 +330,128 @@ def test_descriptive_completed_change_does_not_become_todo_from_action_field() -
     assert routed.routing_reason == "descriptive_action_not_todo"
 
 
+def test_completed_imperative_todo_with_causal_contract_becomes_learning() -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "101-1",
+            kind="todo",
+            statement=(
+                "Every radiation-relevant ChargeItem must produce a Procedure."
+            ),
+            observation=(
+                "Implemented the linkage mapper and validation gate for ChargeItems."
+            ),
+            cause="Missing structural linkage prevented compliance logging.",
+            future_behavior=(
+                "Radiation-relevant ChargeItems now produce linked Procedures."
+            ),
+            evidence=[
+                "Implemented ChargeItem to Procedure linkage mapper and validation gate"
+            ],
+            concrete_action="enforce ChargeItem to Procedure linkage",
+            target="ChargeItem processing",
+        )
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.LEARNING
+    assert routed.concrete_action is None
+    assert routed.target is None
+    assert routed.routing_reason == "completed_todo_reconsidered_as_learning"
+
+
+def test_completed_imperative_without_causal_contract_becomes_noise() -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "101-1",
+            kind="todo",
+            statement="add org-kind:nursing-home Organization entry to manifest",
+            observation="The bead added the missing manifest entry and updated tests.",
+            cause="Manifest registry mismatch",
+            future_behavior=None,
+            evidence=["This bead added the missing third entry"],
+            generalizable=False,
+            concrete_action="add missing Organization entry",
+            target="manifest configuration",
+        )
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.NOISE
+    assert routed.routing_reason == "completed_work_not_todo"
+
+
+def test_explicit_pending_remainder_wins_over_completed_context() -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "101-1",
+            kind="todo",
+            statement="The parser was implemented but the fix must still be deployed.",
+            observation="Implemented and merged the parser change.",
+            concrete_action="deploy the parser fix",
+            target="production",
+        )
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.TODO
+    assert routed.routing_reason == "explicit_pending_work"
+
+
+def test_completed_background_does_not_close_different_imperative_todo() -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "101-1",
+            kind="todo",
+            statement="Add validation for edge cases.",
+            observation="Implemented the base mapper and merged it to main.",
+            concrete_action="add edge-case validation",
+            target="validation tests",
+        )
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.TODO
+    assert routed.routing_reason is None
+
+
+@pytest.mark.parametrize(
+    "observation",
+    [
+        "The migration is not implemented because the schema is unavailable.",
+        "The migration is not properly implemented because validation is absent.",
+        "The migration is not yet fully implemented.",
+        "The migration was never fully implemented.",
+        "The migration will be implemented after the schema release.",
+        "The migration will eventually be merged after review.",
+        "The migration should be implemented in a follow-up.",
+        "The migration should probably be implemented in a follow-up.",
+    ],
+)
+def test_negated_or_modal_completion_words_do_not_close_todo(
+    observation: str,
+) -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "101-1",
+            kind="todo",
+            statement="Implement the migration.",
+            observation=observation,
+            concrete_action="implement the migration",
+            target="migration",
+        )
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.TODO
+    assert routed.routing_reason is None
+
+
 def test_explicitly_pending_modal_work_item_remains_todo() -> None:
     candidate = analysis.LearningCandidate.from_dict(
         _candidate(
@@ -1578,6 +1700,21 @@ def test_extraction_prompt_treats_session_summaries_as_untrusted_evidence() -> N
     assert "cause" in prompt
     assert "future_behavior" in prompt
     assert "verbatim" in prompt.lower()
+
+
+def test_extraction_prompt_requires_atomic_claims_and_distinct_findings() -> None:
+    prompt = analysis.build_extraction_prompt([analysis.SessionSummary(**_summary())])
+    normalized_prompt = " ".join(prompt.split())
+
+    assert "one atomic claim" in normalized_prompt
+    assert (
+        "Never combine the cause or future behavior from adjacent bullets"
+        in normalized_prompt
+    )
+    assert (
+        "does not suppress a separate evidence-backed causal finding"
+        in normalized_prompt
+    )
 
 
 def test_reconciliation_prompt_allows_method_when_it_is_the_causal_learning() -> None:
