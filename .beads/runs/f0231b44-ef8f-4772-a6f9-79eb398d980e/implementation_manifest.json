@@ -1,0 +1,115 @@
+{
+  "contract_version": "1",
+  "bead_id": "open-brain-xpms",
+  "acceptance_criteria": [
+    {
+      "id": 1,
+      "status": "done",
+      "changed_files": [
+        "python/src/open_brain/data_layer/postgres.py",
+        "scripts/bootstrap_test_schema.sql",
+        "python/tests/test_search.py",
+        "python/tests/test_bootstrap_schema_parity.py"
+      ],
+      "evidence_refs": ["cmd-red-gate", "cmd-focused-green", "cmd-affected-tests"]
+    },
+    {
+      "id": 2,
+      "status": "done",
+      "changed_files": [
+        "python/src/open_brain/data_layer/postgres.py",
+        "python/src/open_brain/data_layer/reranker.py",
+        "python/tests/test_reranker.py",
+        "python/tests/test_postgres.py"
+      ],
+      "evidence_refs": ["cmd-red-gate", "cmd-focused-green", "cmd-affected-tests"]
+    },
+    {
+      "id": 3,
+      "status": "done",
+      "changed_files": [
+        "python/src/open_brain/data_layer/postgres.py",
+        "python/tests/test_postgres.py",
+        "python/tests/test_search.py"
+      ],
+      "evidence_refs": ["cmd-red-gate", "cmd-focused-green", "cmd-affected-tests"]
+    },
+    {
+      "id": 4,
+      "status": "partial",
+      "changed_files": [
+        "python/src/open_brain/data_layer/postgres.py",
+        "scripts/bootstrap_test_schema.sql",
+        "python/tests/test_bootstrap_schema_parity.py",
+        "python/tests/test_postgres.py"
+      ],
+      "evidence_refs": ["cmd-focused-green", "cmd-affected-tests", "cmd-integration-skip-reasons"]
+    },
+    {
+      "id": 5,
+      "status": "done",
+      "changed_files": ["docs/features/memory-decay.md"],
+      "evidence_refs": ["cmd-affected-tests"]
+    }
+  ],
+  "changed_files": [
+    ".beads/runs/f0231b44-ef8f-4772-a6f9-79eb398d980e/evidence_ledger.json",
+    ".beads/runs/f0231b44-ef8f-4772-a6f9-79eb398d980e/implementation_manifest.json",
+    "docs/features/memory-decay.md",
+    "python/src/open_brain/data_layer/postgres.py",
+    "python/src/open_brain/data_layer/reranker.py",
+    "python/tests/test_bootstrap_schema_parity.py",
+    "python/tests/test_postgres.py",
+    "python/tests/test_reranker.py",
+    "python/tests/test_search.py",
+    "scripts/bootstrap_test_schema.sql"
+  ],
+  "commits": [
+    {
+      "hash": "HEAD",
+      "message": "feat(open-brain-xpms): green - priority recall ranking",
+      "status": "created"
+    }
+  ],
+  "tests": [
+    {
+      "ref": "cmd-red-gate",
+      "status": "failed_expected",
+      "summary": "Focused red tests failed for old reranker shape, missing priority helpers, concept raw ordering, and missing SQL priority factor."
+    },
+    {
+      "ref": "cmd-focused-green",
+      "status": "passed",
+      "summary": "8 focused priority-ranking tests passed."
+    },
+    {
+      "ref": "cmd-affected-tests",
+      "status": "passed",
+      "summary": "87 affected non-integration tests passed; 4 integration tests deselected."
+    },
+    {
+      "ref": "cmd-commit-green",
+      "status": "passed",
+      "summary": "Commit hook ran the full non-integration suite: 1560 passed, 36 deselected."
+    },
+    {
+      "ref": "cmd-integration-skip-reasons",
+      "status": "skipped",
+      "summary": "2 focused integration tests skipped because DATABASE_URL is the test placeholder."
+    }
+  ],
+  "external_resources": [],
+  "scope_changes": [],
+  "downstream_impacts": [
+    "Voyage reranker callers now receive RerankResult objects with index and relevance_score instead of bare indices.",
+    "Hybrid and concept recall ordering now applies priority as a bounded prior without filtering low-priority memories."
+  ],
+  "evidence_refs": [
+    "cmd-red-gate",
+    "cmd-focused-green",
+    "cmd-affected-tests",
+    "cmd-integration-skip-reasons",
+    "cmd-red-commit-blocked",
+    "cmd-commit-green"
+  ]
+}

@@ -683,6 +683,64 @@ class TestPostgresSearchByConcept:
         # Verify limit=5 was used in the query (via fetch args)
         assert "results" in result
 
+    @pytest.mark.asyncio
+    async def test_search_by_concept_disabled_reranker_orders_by_priority_score(self, dl):
+        import open_brain.config as config_module
+
+        conn = AsyncMock()
+        conn.fetchrow.return_value = None
+        conn.fetch.return_value = [
+            _make_row({"id": 1, "priority": 0.1, "content": "low", "similarity": 1.0}),
+            _make_row({"id": 2, "priority": 1.0, "content": "high", "similarity": 1.0}),
+        ]
+        pool = _make_pool(conn)
+
+        with (
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch("open_brain.data_layer.postgres.get_config") as mock_config,
+            patch("open_brain.data_layer.postgres.embed_query_with_usage", new_callable=AsyncMock, return_value=([0.1] * 1024, 10)),
+            patch("asyncio.create_task"),
+        ):
+            mock_config.return_value.RERANK_ENABLED = False
+            result = await dl.search_by_concept("query", limit=2)
+
+        assert [memory.id for memory in result["results"]] == [2, 1]
+        config_module._config = None
+
+    @pytest.mark.asyncio
+    async def test_search_by_concept_reranker_blends_relevance_with_priority(self, dl):
+        import open_brain.config as config_module
+        from open_brain.data_layer.reranker import RerankResult
+
+        conn = AsyncMock()
+        conn.fetchrow.return_value = None
+        conn.fetch.return_value = [
+            _make_row({"id": 1, "priority": 0.1, "content": "low"}),
+            _make_row({"id": 2, "priority": 1.0, "content": "high"}),
+        ]
+        pool = _make_pool(conn)
+
+        with (
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch("open_brain.data_layer.postgres.get_config") as mock_config,
+            patch("open_brain.data_layer.postgres.embed_query_with_usage", new_callable=AsyncMock, return_value=([0.1] * 1024, 10)),
+            patch(
+                "open_brain.data_layer.postgres.rerank",
+                new_callable=AsyncMock,
+                return_value=[
+                    RerankResult(index=0, relevance_score=1.0),
+                    RerankResult(index=1, relevance_score=0.3),
+                ],
+            ),
+            patch("asyncio.create_task"),
+        ):
+            mock_config.return_value.RERANK_ENABLED = True
+            mock_config.return_value.RERANK_MODEL = "rerank-2.5"
+            result = await dl.search_by_concept("query", limit=2)
+
+        assert [memory.id for memory in result["results"]] == [1, 2]
+        config_module._config = None
+
 
 class TestPostgresIngestStatus:
     @pytest.fixture

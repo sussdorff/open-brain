@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import asyncpg
 import pytest
 
 SchemaSnapshot = list[dict[str, str]]
 SchemaKey = tuple[str, str, str, str]
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+RUNTIME_SCHEMA_PATH = PROJECT_ROOT / "python/src/open_brain/data_layer/postgres.py"
+BOOTSTRAP_SCHEMA_PATH = PROJECT_ROOT / "scripts/bootstrap_test_schema.sql"
+PRIORITY_FACTOR_SQL = "0.35 + 0.65 * LEAST(GREATEST(m.priority, 0.0), 1.0)"
 
 
 _SCHEMA_SNAPSHOT_SQL = """
@@ -127,6 +134,16 @@ def _format_schema_keys(keys: list[SchemaKey]) -> str:
         f"- kind={kind}, schema={object_schema}, object={object_name}, detail={detail_name}"
         for kind, object_schema, object_name, detail_name in keys
     )
+
+
+def test_hybrid_search_definitions_apply_same_priority_factor():
+    runtime_sql = RUNTIME_SCHEMA_PATH.read_text(encoding="utf-8")
+    bootstrap_sql = BOOTSTRAP_SCHEMA_PATH.read_text(encoding="utf-8")
+
+    assert PRIORITY_FACTOR_SQL in runtime_sql
+    assert PRIORITY_FACTOR_SQL in bootstrap_sql
+    assert runtime_sql.count("DROP FUNCTION IF EXISTS public.hybrid_search") == 2
+    assert bootstrap_sql.count("DROP FUNCTION IF EXISTS public.hybrid_search") == 2
 
 
 @pytest.mark.integration

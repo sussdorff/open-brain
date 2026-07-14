@@ -19,7 +19,7 @@ from open_brain.data_layer.embedding import (
     embed_query_with_usage,
     to_pg_vector,
 )
-from open_brain.data_layer.reranker import rerank
+from open_brain.data_layer.reranker import RerankResult, rerank
 from open_brain.data_layer.interface import (
     CANONICAL_ENTITY_METADATA_KEY,
     CANONICAL_KIND_METADATA_KEY,
@@ -65,6 +65,51 @@ from open_brain.ingest.runs import get_current_run_id
 logger = logging.getLogger(__name__)
 
 DEDUP_WINDOW_DAYS = 30  # How far back the content-hash dedup check looks
+
+
+def _priority_factor(priority: float) -> float:
+    bounded_priority = min(max(priority, 0.0), 1.0)
+    return 0.35 + 0.65 * bounded_priority
+
+
+def _order_by_priority_score(
+    candidates: list[tuple[Memory, float]],
+    limit: int,
+) -> list[Memory]:
+    scored = [
+        (memory, relevance_score * _priority_factor(memory.priority))
+        for memory, relevance_score in candidates
+    ]
+    return [
+        memory
+        for memory, _score in sorted(scored, key=lambda item: item[1], reverse=True)[:limit]
+    ]
+
+
+def _order_by_rerank_results(
+    memories: list[Memory],
+    rerank_results: list[RerankResult | int],
+    limit: int,
+) -> list[Memory]:
+    candidates: list[tuple[Memory, float]] = []
+    for fallback_rank, result in enumerate(rerank_results):
+        if isinstance(result, int):
+            index = result
+            relevance_score = 1.0 / (fallback_rank + 1)
+        else:
+            index = result.index
+            relevance_score = result.relevance_score
+        if 0 <= index < len(memories):
+            candidates.append((memories[index], relevance_score))
+    return _order_by_priority_score(candidates, limit)
+
+
+def _row_float(row: Any, key: str, default: float = 0.0) -> float:
+    try:
+        value = row[key]
+    except (KeyError, IndexError, TypeError):
+        value = row.get(key, default)
+    return float(default if value is None else value)
 
 # ─── compact_memories helpers ─────────────────────────────────────────────────
 
@@ -520,10 +565,16 @@ async def _run_migrations(conn: asyncpg.Connection) -> None:
                 FROM fts f
                 FULL OUTER JOIN vec v ON f.id = v.id
               )
-              SELECT m.id, m.title, m.subtitle, m.type, c.score, m.created_at
+              SELECT
+                m.id,
+                m.title,
+                m.subtitle,
+                m.type,
+                (c.score * (0.35 + 0.65 * LEAST(GREATEST(m.priority, 0.0), 1.0)))::REAL AS score,
+                m.created_at
               FROM combined c
               JOIN memories m ON m.id = c.id
-              ORDER BY c.score DESC
+              ORDER BY score DESC
               LIMIT match_limit;
             $fn$;
         """)
@@ -816,13 +867,13 @@ class PostgresDataLayer:
                     # Second-pass reranking with Voyage Rerank-2.5
                     if config.RERANK_ENABLED and memories:
                         documents = [m.content for m in memories]
-                        reranked_indices = await rerank(
+                        rerank_results = await rerank(
                             query=query,
                             documents=documents,
                             model=config.RERANK_MODEL,
                             top_k=limit,
                         )
-                        memories = [memories[i] for i in reranked_indices]
+                        memories = _order_by_rerank_results(memories, rerank_results, limit)
                     else:
                         memories = memories[:limit]
 
@@ -1867,15 +1918,21 @@ class PostgresDataLayer:
             # Second-pass reranking with Voyage Rerank-2.5
             if config.RERANK_ENABLED and memories:
                 documents = [m.content for m in memories]
-                reranked_indices = await rerank(
+                rerank_results = await rerank(
                     query=query,
                     documents=documents,
                     model=config.RERANK_MODEL,
                     top_k=max_results,
                 )
-                memories = [memories[i] for i in reranked_indices]
+                memories = _order_by_rerank_results(memories, rerank_results, max_results)
             else:
-                memories = memories[:max_results]
+                memories = _order_by_priority_score(
+                    [
+                        (memory, _row_float(row, "similarity"))
+                        for memory, row in zip(memories, rows, strict=True)
+                    ],
+                    max_results,
+                )
 
             return {"results": memories}
 
