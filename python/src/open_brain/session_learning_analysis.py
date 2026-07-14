@@ -57,22 +57,16 @@ _PENDING_ACTION_RE = re.compile(
 _EXPLICIT_PENDING_PRIMARY_RE = re.compile(
     r"\b(?:bead|issue|ticket|follow-up)\b.{0,60}\b"
     r"(?:must|should|needs? to)\s+be\s+(?:filed|created|written)\b|"
-    r"\b(?:must still|still (?:needs?|requires?) to|remains? to be)\s+"
+    r"\b(?:must still(?:\s+be)?|still (?:needs?|requires?) to|remains? to be)\s+"
     r"(?:deployed|implemented|completed|merged|landed|released)\b|"
     r"\bnot yet\s+(?:filed|deployed|implemented|completed|merged|landed|released)\b|"
-    r"\b(?:still pending|follow-up (?:needed|required)|"
-    r"(?:was|is) explicitly not filed|TODO:)\b",
+    r"\b(?:still pending|follow-up (?:needed|required)|TODO:)\b",
     re.IGNORECASE,
 )
 _EXPLICIT_PENDING_SUPPORT_RE = re.compile(
     r"\bmust still\s+(?:be\s+)?"
     r"(?:filed|created|written|deployed|implemented|completed|merged|landed|released)\b|"
-    r"\b(?:still pending|follow-up (?:needed|required)|"
-    r"(?:was|is) explicitly not filed)\b",
-    re.IGNORECASE,
-)
-_STATUS_NARRATION_RE = re.compile(
-    r"^re-exported\s+|^bead\b.*\b(?:implemented and shipped|was shipped)\b",
+    r"\b(?:still pending|follow-up (?:needed|required))\b",
     re.IGNORECASE,
 )
 _DECISION_MARKER_RE = re.compile(r"\bkey decisions?\s*:", re.IGNORECASE)
@@ -436,8 +430,18 @@ def route_candidate(candidate: LearningCandidate) -> LearningCandidate:
     pending_statement = imperative_statement or bool(
         _PENDING_ACTION_RE.search(candidate.statement)
     )
-    primary_pending_fields = [candidate.statement, candidate.observation or ""]
+    broad_pending_allowed = (
+        not candidate.generalizable
+        or candidate.kind in {CandidateKind.TODO, CandidateKind.DECISION}
+    )
+    primary_pending_fields = (
+        [candidate.statement, candidate.observation or ""]
+        if broad_pending_allowed
+        else []
+    )
     support_pending_fields = [
+        candidate.statement,
+        candidate.observation or "",
         candidate.future_behavior or "",
         *(candidate.evidence or []),
     ]
@@ -501,6 +505,7 @@ def route_candidate(candidate: LearningCandidate) -> LearningCandidate:
     }
     if (
         candidate.kind is CandidateKind.LEARNING
+        and not candidate.generalizable
         and _DECISION_MARKER_RE.search(candidate.observation or "")
     ):
         return replace(
@@ -509,14 +514,6 @@ def route_candidate(candidate: LearningCandidate) -> LearningCandidate:
             concrete_action=None,
             target=None,
             routing_reason="explicit_decision_marker",
-        )
-    if candidate.kind is CandidateKind.LEARNING and _STATUS_NARRATION_RE.search(
-        candidate.statement
-    ):
-        return replace(
-            candidate,
-            kind=CandidateKind.NOISE,
-            routing_reason="status_narration_not_learning",
         )
     if candidate.kind in knowledge_kinds and pending_statement and (
         candidate.concrete_action or candidate.target
