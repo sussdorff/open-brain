@@ -49,11 +49,17 @@ _IMPERATIVE_ACTION_RE = re.compile(
     re.IGNORECASE,
 )
 _PENDING_ACTION_RE = re.compile(
-    r"\b(?:must|should|needs? to|not yet|still pending|remains? to be|"
+    r"\b(?:must(?!\s+have\b)|should(?!\s+have\b)|needs? to|not yet|"
+    r"still pending|remains? to be|"
     r"follow-up (?:needed|required))\b",
     re.IGNORECASE,
 )
-_MIN_EVIDENCE_QUOTE_CHARS = 12
+_MIN_EVIDENCE_QUOTE_CHARS = 20
+_EVIDENCE_REQUIRED_KINDS = {
+    CandidateKind.LEARNING,
+    CandidateKind.STANDARD_CANDIDATE,
+    CandidateKind.SKILL_CANDIDATE,
+}
 
 
 def _optional_text(value: Any) -> str | None:
@@ -310,11 +316,22 @@ def _parse_batch_extraction_response(
         summary = summary_by_id.get(memory_id)
         if summary is None:
             continue
-        if len(summaries) > 1 and not _evidence_is_grounded(summary, raw):
+        kind = _candidate_kind(raw.get("kind"))
+        evidence = _string_list(raw.get("evidence"))
+        evidence_required = kind in _EVIDENCE_REQUIRED_KINDS
+        evidence_invalid = evidence and not _evidence_is_grounded(
+            summary,
+            summaries,
+            evidence,
+        )
+        if len(summaries) > 1 and (
+            (evidence_required and not evidence) or evidence_invalid
+        ):
             logger.warning(
-                "Rejected cross-summary candidate with ungrounded evidence: "
-                "source_memory_id=%d",
+                "Rejected cross-summary candidate with missing, ungrounded, or "
+                "batch-ambiguous evidence: source_memory_id=%d kind=%s",
                 memory_id,
+                kind.value,
             )
             continue
         grouped[memory_id].append(raw)
@@ -332,25 +349,40 @@ def _normalize_evidence_text(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip().casefold()
 
 
-def _evidence_is_grounded(
-    summary: SessionSummary,
-    raw_candidate: dict[str, Any],
-) -> bool:
-    """Require every evidence item to be a verbatim excerpt of its source."""
-    evidence = _string_list(raw_candidate.get("evidence"))
-    if not evidence:
-        return False
-    normalized_evidence = [_normalize_evidence_text(item) for item in evidence]
-    source = _normalize_evidence_text(
+def _summary_evidence_text(summary: SessionSummary) -> str:
+    """Return the bounded source text eligible for evidence matching."""
+    return _normalize_evidence_text(
         "\n".join(
             (
+                summary.title or "",
                 summary.content[:MAX_SUMMARY_CHARS],
                 (summary.narrative or "")[:MAX_SUMMARY_CHARS],
             )
         )
     )
-    return all(
+
+
+def _evidence_is_grounded(
+    summary: SessionSummary,
+    batch_summaries: list[SessionSummary],
+    evidence: list[str],
+) -> bool:
+    """Require grounded evidence with at least one batch-unique excerpt."""
+    normalized_evidence = [_normalize_evidence_text(item) for item in evidence]
+    source = _summary_evidence_text(summary)
+    if not all(
         len(item) >= _MIN_EVIDENCE_QUOTE_CHARS and item in source
+        for item in normalized_evidence
+    ):
+        return False
+
+    other_sources = [
+        _summary_evidence_text(other)
+        for other in batch_summaries
+        if other.id != summary.id
+    ]
+    return any(
+        all(item not in other_source for other_source in other_sources)
         for item in normalized_evidence
     )
 
@@ -557,17 +589,18 @@ Classify every extracted claim into exactly one kind:
 
 Hard learning gate:
 - A learning requires non-empty `observation`, `cause`, `future_behavior`, and `evidence`.
+- Standard and skill candidates also require non-empty `evidence`; TODO and decision evidence may be null.
 - `generalizable` must be true and the claim must apply beyond the exact file or incident.
 - Imperatives such as fix, update, add, implement, ensure, configure, or increase are "todo".
 - A "todo" requires an explicitly pending imperative `statement` plus both `concrete_action` and `target`.
 - Never invent follow-up work from a descriptive claim about completed work; classify that causal claim by its evidence contract or use "noise".
-- Every `evidence` item must be a verbatim excerpt from the same summary identified by `source_memory_id`; never paraphrase or copy evidence between summaries.
+- Whenever `evidence` is present, every item must be a verbatim excerpt from the same summary identified by `source_memory_id`; include at least one excerpt unique within this input batch, and never paraphrase or copy evidence between summaries.
 - Merely reporting what was changed is not a learning.
 - Existing policy copied from AGENTS.md, a standard, or a skill is `duplicate_doctrine`, not a new learning.
 
 Each candidate must contain:
 `source_memory_id`, `kind`, `statement`, `observation`, `cause`,
-`future_behavior`, `evidence` (array of concise source facts), `confidence`
+`future_behavior`, `evidence` (array of concise source excerpts or null), `confidence`
 (0..1), `severity` (low|medium|high|critical), `generalizable`,
 `concrete_action`, `target`, and `artifact_reference`.
 Use null for fields that do not apply. Do not invent evidence.

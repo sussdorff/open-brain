@@ -48,10 +48,14 @@ action field. Standard and skill candidates must also satisfy the causal
 evidence contract. A `duplicate_doctrine` candidate must name the existing
 artifact it duplicates.
 
-In multi-summary batches, every evidence item must be a verbatim excerpt of the
-specific source summary named by `source_memory_id`. Candidates with paraphrased
-or cross-summary evidence are rejected before routing, preventing adjacent
-session summaries from borrowing each other's learnings.
+In multi-summary batches, learning, standard, and skill candidates require
+evidence. TODO and decision candidates may omit it. Whenever evidence is
+present, every item must be a verbatim excerpt of the title, content, or
+narrative of the specific source summary named by `source_memory_id`, and at
+least one excerpt must be unique within the input batch. Candidates with
+missing required evidence, shared boilerplate only, paraphrased evidence, or
+cross-summary evidence are rejected before routing, preventing adjacent session
+summaries from borrowing each other's learnings.
 
 Only validated `learning` candidates enter semantic clustering. A cluster is
 review-eligible only when it has support from at least two distinct source
