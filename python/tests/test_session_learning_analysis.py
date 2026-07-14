@@ -190,6 +190,35 @@ def test_batch_extraction_keeps_todo_without_evidence() -> None:
     assert candidates[0].evidence == []
 
 
+def test_batch_extraction_strips_invalid_optional_todo_evidence() -> None:
+    first_raw = _summary(101, session_ref="session-101")
+    first_raw["content"] = "Follow-up work remains explicitly open."
+    second_raw = _summary(102, session_ref="session-102")
+    summaries = [
+        analysis.SessionSummary(**first_raw),
+        analysis.SessionSummary(**second_raw),
+    ]
+    raw_todo = _candidate(
+        "ignored",
+        source_memory_id=101,
+        kind="todo",
+        statement="File the follow-up bead.",
+        concrete_action="File a follow-up bead",
+        target="remaining work",
+        evidence=["This paraphrase does not occur in the source summary."],
+        generalizable=False,
+    )
+
+    candidates = analysis._parse_batch_extraction_response(
+        summaries,
+        {"candidates": [raw_todo]},
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0].kind is analysis.CandidateKind.TODO
+    assert candidates[0].evidence == []
+
+
 def test_batch_extraction_rejects_evidence_shared_by_multiple_summaries() -> None:
     first_raw = _summary(101, session_ref="session-101")
     first_raw["content"] = "All targeted tests passed after the implementation."
@@ -234,6 +263,29 @@ def test_batch_extraction_accepts_unique_title_evidence() -> None:
 
     assert len(candidates) == 1
     assert candidates[0].source_memory_id == 101
+
+
+def test_batch_extraction_rejects_evidence_spanning_source_fields() -> None:
+    first_raw = _summary(101, session_ref="session-101")
+    first_raw["title"] = "Migration baseline"
+    first_raw["content"] = "tooling removed schema drift."
+    second_raw = _summary(102, session_ref="session-102")
+    summaries = [
+        analysis.SessionSummary(**first_raw),
+        analysis.SessionSummary(**second_raw),
+    ]
+    candidate = _candidate(
+        "ignored",
+        source_memory_id=101,
+        evidence=["Migration baseline tooling removed schema drift."],
+    )
+
+    candidates = analysis._parse_batch_extraction_response(
+        summaries,
+        {"candidates": [candidate]},
+    )
+
+    assert candidates == []
 
 
 def test_valid_causal_learning_passes_learning_gate() -> None:
