@@ -406,6 +406,54 @@ def test_explicit_unresolved_decision_is_recovered_as_todo() -> None:
     assert routed.routing_reason == "explicit_pending_work"
 
 
+def test_explicit_must_be_filed_observation_is_recovered_as_todo() -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "101-1",
+            kind="decision",
+            statement="The remaining phases were discussed.",
+            observation="A follow-up bead must be filed for phases two through six.",
+            cause=None,
+            future_behavior=None,
+            evidence=[],
+            generalizable=False,
+        )
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.TODO
+    assert routed.concrete_action == candidate.observation
+
+
+def test_prescriptive_future_behavior_remains_learning() -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "101-1",
+            statement="Atomic rollbacks prevent partial state.",
+            future_behavior="Rollbacks should be done atomically.",
+        )
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.LEARNING
+
+
+def test_historical_not_yet_evidence_remains_learning() -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "101-1",
+            statement="Starting traffic before migrations complete causes failures.",
+            evidence=["The migration was not yet complete when traffic started."],
+        )
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.LEARNING
+
+
 def test_completed_status_narration_is_not_a_learning() -> None:
     candidate = analysis.LearningCandidate.from_dict(
         _candidate(
@@ -422,6 +470,19 @@ def test_completed_status_narration_is_not_a_learning() -> None:
     assert routed.routing_reason == "status_narration_not_learning"
 
 
+def test_lexically_status_like_causal_statement_remains_learning() -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "101-1",
+            statement="Fixed-point iteration diverges without a convergence bound.",
+        )
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.LEARNING
+
+
 def test_key_decision_mislabeled_as_learning_is_recovered_as_decision() -> None:
     candidate = analysis.LearningCandidate.from_dict(
         _candidate(
@@ -436,6 +497,22 @@ def test_key_decision_mislabeled_as_learning_is_recovered_as_decision() -> None:
 
     assert routed.kind is analysis.CandidateKind.DECISION
     assert routed.routing_reason == "explicit_decision_marker"
+
+
+def test_key_decision_heading_in_evidence_does_not_override_learning() -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "101-1",
+            observation="Promise caching prevented an async stampede.",
+            evidence=[
+                "Key Decisions: store the Promise before awaiting concurrent work."
+            ],
+        )
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.LEARNING
 
 
 def test_regression_descriptive_work_item_is_reconsidered_as_learning() -> None:
