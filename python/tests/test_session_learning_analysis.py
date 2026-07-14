@@ -149,6 +149,55 @@ def test_imperative_repository_change_is_rerouted_to_todo() -> None:
     assert routed.routing_reason == "imperative_concrete_action"
 
 
+def test_regression_descriptive_work_item_is_reconsidered_as_learning() -> None:
+    """Guard against LLM work-item labels bypassing the durable-learning gate."""
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "101-1",
+            kind="todo",
+            statement="Append-only installers create duplicate registrations.",
+            concrete_action=None,
+        )
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.LEARNING
+    assert routed.routing_reason == "descriptive_todo_reconsidered_as_learning"
+
+
+def test_regression_incomplete_work_item_routes_to_noise() -> None:
+    """Guard against non-actionable LLM work-item labels entering the work queue."""
+    raw = _candidate(
+        "101-1",
+        kind="todo",
+        statement="The installer behavior may need further consideration.",
+        concrete_action=None,
+    )
+    raw["cause"] = None
+    candidate = analysis.LearningCandidate.from_dict(raw)
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.NOISE
+    assert routed.routing_reason == "incomplete_todo_contract"
+
+
+def test_concrete_work_item_requires_action_and_target() -> None:
+    raw = _candidate(
+        "101-1",
+        kind="todo",
+        statement="Update the installer to reconcile hook registrations.",
+        concrete_action="Update the installer reconciliation logic",
+    )
+    raw["target"] = "hooks/install.py"
+    candidate = analysis.LearningCandidate.from_dict(raw)
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.TODO
+
+
 @pytest.mark.parametrize("missing_field", ["observation", "cause", "future_behavior"])
 def test_incomplete_learning_is_not_kept_as_learning(missing_field: str) -> None:
     raw = _candidate("101-1")
