@@ -881,6 +881,14 @@ async def _cluster_candidates(
         embeddings = await embed_batch(
             [_behavioral_signature(candidate) for candidate in learnings]
         )
+        if len(embeddings) != len(learnings):
+            logger.warning(
+                "Embedding count mismatch during learning reconciliation: "
+                "expected %d, received %d",
+                len(learnings),
+                len(embeddings),
+            )
+            return conservative_clusters
         semantic_pairs = _shortlist_reconciliation_pairs(
             learnings,
             conservative_clusters,

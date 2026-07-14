@@ -62,7 +62,9 @@ from transitively joining incompatible rules. The shortlist is bounded, and a
 fair bounded budget reserves capacity for proposal-only pairs that fall below
 the embedding threshold. Pair identities and member order are canonical, so
 first-pass response ordering cannot duplicate adjudication work. A failed
-reconciliation preserves the conservative singleton partition.
+reconciliation preserves the conservative singleton partition. An incomplete
+embedding response is logged and also falls back to singletons instead of
+silently disabling reconciliation.
 
 ## Usage
 
