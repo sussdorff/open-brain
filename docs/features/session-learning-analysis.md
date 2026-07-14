@@ -59,7 +59,10 @@ behavior. Pairs that only share a topic, component, vocabulary, or evidence
 remain separate. Confirmed pairs only combine larger groups when every
 cross-group cluster pair was also confirmed, preventing a broad middle claim
 from transitively joining incompatible rules. The shortlist is bounded, and a
-failed reconciliation preserves the conservative singleton partition.
+fair bounded budget reserves capacity for proposal-only pairs that fall below
+the embedding threshold. Pair identities and member order are canonical, so
+first-pass response ordering cannot duplicate adjudication work. A failed
+reconciliation preserves the conservative singleton partition.
 
 ## Usage
 

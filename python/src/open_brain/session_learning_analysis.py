@@ -549,7 +549,18 @@ def _cosine_similarity(left: list[float], right: list[float]) -> float:
 
 
 def _pair_id(left: LearningCandidate, right: LearningCandidate) -> str:
-    return f"{left.candidate_id}::{right.candidate_id}"
+    candidate_ids = sorted((left.candidate_id, right.candidate_id))
+    return "::".join(candidate_ids)
+
+
+def _canonical_pair(
+    left: LearningCandidate,
+    right: LearningCandidate,
+) -> tuple[LearningCandidate, LearningCandidate]:
+    """Order pair members independently of candidate or LLM response order."""
+    if left.candidate_id <= right.candidate_id:
+        return left, right
+    return right, left
 
 
 def _shortlist_reconciliation_pairs(
@@ -580,7 +591,15 @@ def _shortlist_reconciliation_pairs(
             )
             if similarity < RECONCILIATION_SIMILARITY_THRESHOLD:
                 continue
-            pairs.append((_pair_id(left, right), left, right, similarity))
+            pair_left, pair_right = _canonical_pair(left, right)
+            pairs.append(
+                (
+                    _pair_id(pair_left, pair_right),
+                    pair_left,
+                    pair_right,
+                    similarity,
+                )
+            )
     pairs.sort(key=lambda item: (-item[3], item[0]))
     return pairs[:MAX_RECONCILIATION_PAIRS]
 
@@ -624,8 +643,42 @@ def _pairs_from_cluster_proposals(
                     embeddings[index_by_id[left.candidate_id]],
                     embeddings[index_by_id[right.candidate_id]],
                 )
-                pairs[pair_id] = (pair_id, left, right, similarity)
+                pair_left, pair_right = _canonical_pair(left, right)
+                pairs[pair_id] = (pair_id, pair_left, pair_right, similarity)
     return list(pairs.values())
+
+
+def _select_reconciliation_pairs(
+    semantic_pairs: list[
+        tuple[str, LearningCandidate, LearningCandidate, float]
+    ],
+    proposed_pairs: list[
+        tuple[str, LearningCandidate, LearningCandidate, float]
+    ],
+) -> list[tuple[str, LearningCandidate, LearningCandidate, float]]:
+    """Bound adjudication while reserving room for proposal-only recall pairs."""
+    semantic_by_id = {pair[0]: pair for pair in semantic_pairs}
+    proposal_only = {
+        pair[0]: pair
+        for pair in proposed_pairs
+        if pair[0] not in semantic_by_id
+    }
+    ordered_semantic = sorted(
+        semantic_by_id.values(), key=lambda item: (-item[3], item[0])
+    )
+    ordered_proposals = sorted(
+        proposal_only.values(), key=lambda item: (-item[3], item[0])
+    )
+
+    reserved_proposals = min(
+        len(ordered_proposals),
+        MAX_RECONCILIATION_PAIRS // 2,
+    )
+    semantic_budget = MAX_RECONCILIATION_PAIRS - reserved_proposals
+    selected = ordered_semantic[:semantic_budget]
+    proposal_budget = MAX_RECONCILIATION_PAIRS - len(selected)
+    selected.extend(ordered_proposals[:proposal_budget])
+    return sorted(selected, key=lambda item: (-item[3], item[0]))
 
 
 def _build_reconciliation_prompt(
@@ -838,13 +891,7 @@ async def _cluster_candidates(
             cluster_specs,
             embeddings,
         )
-        pair_by_id = {
-            pair[0]: pair for pair in (*semantic_pairs, *proposed_pairs)
-        }
-        pairs = sorted(
-            pair_by_id.values(),
-            key=lambda item: (-item[3], item[0]),
-        )[:MAX_RECONCILIATION_PAIRS]
+        pairs = _select_reconciliation_pairs(semantic_pairs, proposed_pairs)
         if not pairs:
             return conservative_clusters
         reconciliation_response = await llm_complete(
