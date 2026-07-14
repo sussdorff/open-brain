@@ -241,6 +241,24 @@ class TestLearningsCommand:
         )
         call.assert_not_awaited()
 
+    @pytest.mark.asyncio
+    async def test_direct_mode_fails_clearly_without_database_url(self):
+        args = parse(["learnings", "analyze", "--direct"])
+
+        with (
+            patch("open_brain.cli.direct.load_database_url", return_value=""),
+            patch(
+                "open_brain.cli.main.analyze_session_learnings",
+                new_callable=AsyncMock,
+            ) as analyze,
+            patch("open_brain.cli.main.call_tool", new_callable=AsyncMock) as call,
+            pytest.raises(SystemExit),
+        ):
+            await cli_main._cmd_learnings(args)
+
+        analyze.assert_not_awaited()
+        call.assert_not_awaited()
+
 
 class TestPortableBackupCommands:
     def test_export_args(self, tmp_path: Path):

@@ -428,13 +428,24 @@ async def _cmd_learnings(args: argparse.Namespace) -> Any:
     """Run manual read-only session-summary learning analysis."""
     if args.learnings_command != "analyze":
         raise ValueError(f"Unknown learnings command: {args.learnings_command}")
-    suppress_migrations()
-    return await analyze_session_learnings(
-        limit=args.limit,
-        project=args.project,
-        source=args.source,
-        model=args.model,
-    )
+    parameters = {
+        "limit": args.limit,
+        "project": args.project,
+        "source": args.source,
+        "model": args.model,
+    }
+    if args.direct or os.environ.get("OB_DIRECT") == "1":
+        import open_brain.cli.direct as _direct
+
+        database_url = _direct.load_database_url()
+        if not database_url:
+            _error(
+                "--direct requires DATABASE_URL env var or DATABASE_URL in .env file"
+            )
+        _direct.prepare_direct_env(database_url)
+        suppress_migrations()
+        return await analyze_session_learnings(**parameters)
+    return await call_tool("analyze_session_learnings", parameters)
 
 
 async def _cmd_stats(_args: argparse.Namespace) -> Any:
@@ -1089,6 +1100,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p_learnings_analyze.add_argument(
         "--model",
         help="Override the configured LLM model",
+    )
+    p_learnings_analyze.add_argument(
+        "--direct",
+        action="store_true",
+        help="Bypass MCP transport and use a local DATABASE_URL",
     )
 
     # stats

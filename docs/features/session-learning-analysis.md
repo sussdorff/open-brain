@@ -58,6 +58,11 @@ Analyze the newest 50 summaries:
 ob learnings analyze
 ```
 
+The installed CLI uses the authenticated Open Brain MCP endpoint by default, so
+database and LLM credentials remain on the server. The caller needs the
+`evolution` scope because the command sends a bounded batch of stored summaries
+to the configured server-side LLM.
+
 Filter the read by project and writer source:
 
 ```bash
@@ -76,6 +81,14 @@ ob --json learnings analyze
 The command uses the configured Open Brain LLM provider. Session summaries are
 treated as untrusted evidence in both extraction and clustering prompts. An
 optional `--model` value overrides the configured model for one manual run.
+
+Operators with a local `DATABASE_URL` can explicitly bypass MCP transport:
+
+```bash
+ob learnings analyze --direct
+```
+
+`OB_DIRECT=1` provides the same explicit opt-in. Direct mode is not the default.
 
 ## Read-Only Boundary
 

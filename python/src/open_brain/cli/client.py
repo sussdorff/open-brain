@@ -13,6 +13,8 @@ DEFAULT_URL = "https://open-brain.sussdorff.org/mcp/mcp"
 TOKEN_FILE = Path.home() / ".open-brain" / "token"
 URL_TOKEN_FILE = Path.home() / ".open-brain" / "url-token"
 LEGACY_CONFIG_FILE = Path.home() / ".open-brain" / "config.json"
+DEFAULT_REQUEST_TIMEOUT_SECONDS = 30.0
+BATCH_ANALYSIS_TIMEOUT_SECONDS = 180.0
 
 
 class MCPError(Exception):
@@ -209,7 +211,12 @@ async def call_tool(tool_name: str, arguments: dict[str, Any]) -> Any:
         headers["X-API-Key"] = api_key
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        timeout = (
+            BATCH_ANALYSIS_TIMEOUT_SECONDS
+            if tool_name == "analyze_session_learnings"
+            else DEFAULT_REQUEST_TIMEOUT_SECONDS
+        )
+        async with httpx.AsyncClient(timeout=timeout) as client:
             # Step 1: Initialize session
             init_payload = {
                 "jsonrpc": "2.0",

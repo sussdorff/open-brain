@@ -306,19 +306,6 @@ def _parse_batch_extraction_response(
 
 def route_candidate(candidate: LearningCandidate) -> LearningCandidate:
     """Apply deterministic guardrails before knowledge-directed routing."""
-    knowledge_kinds = {
-        CandidateKind.LEARNING,
-        CandidateKind.STANDARD_CANDIDATE,
-        CandidateKind.SKILL_CANDIDATE,
-    }
-    if candidate.kind in knowledge_kinds and (
-        candidate.concrete_action or _IMPERATIVE_ACTION_RE.match(candidate.statement)
-    ):
-        return replace(
-            candidate,
-            kind=CandidateKind.TODO,
-            routing_reason="imperative_concrete_action",
-        )
     complete_contract = all(
         (
             candidate.observation,
@@ -327,6 +314,42 @@ def route_candidate(candidate: LearningCandidate) -> LearningCandidate:
             candidate.evidence,
         )
     ) and candidate.generalizable
+    imperative_statement = bool(_IMPERATIVE_ACTION_RE.match(candidate.statement))
+
+    if candidate.kind is CandidateKind.TODO:
+        if candidate.concrete_action and candidate.target:
+            return candidate
+        if complete_contract and not imperative_statement:
+            return replace(
+                candidate,
+                kind=CandidateKind.LEARNING,
+                routing_reason="descriptive_todo_reconsidered_as_learning",
+            )
+        return replace(
+            candidate,
+            kind=CandidateKind.NOISE,
+            routing_reason="incomplete_todo_contract",
+        )
+
+    knowledge_kinds = {
+        CandidateKind.LEARNING,
+        CandidateKind.STANDARD_CANDIDATE,
+        CandidateKind.SKILL_CANDIDATE,
+    }
+    if candidate.kind in knowledge_kinds and (
+        candidate.concrete_action or imperative_statement
+    ):
+        if not (candidate.concrete_action and candidate.target):
+            return replace(
+                candidate,
+                kind=CandidateKind.NOISE,
+                routing_reason="incomplete_todo_contract",
+            )
+        return replace(
+            candidate,
+            kind=CandidateKind.TODO,
+            routing_reason="imperative_concrete_action",
+        )
     if candidate.kind in knowledge_kinds and not complete_contract:
         reason = (
             "incomplete_learning_contract"
@@ -453,6 +476,7 @@ Hard learning gate:
 - A learning requires non-empty `observation`, `cause`, `future_behavior`, and `evidence`.
 - `generalizable` must be true and the claim must apply beyond the exact file or incident.
 - Imperatives such as fix, update, add, implement, ensure, configure, or increase are "todo".
+- A "todo" requires both `concrete_action` and `target`; otherwise classify the causal claim by its evidence contract or use "noise".
 - Merely reporting what was changed is not a learning.
 - Existing policy copied from AGENTS.md, a standard, or a skill is `duplicate_doctrine`, not a new learning.
 

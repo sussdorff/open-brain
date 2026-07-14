@@ -39,6 +39,7 @@ def _candidate(
     evidence: list[str] | None = None,
     generalizable: bool = True,
     concrete_action: str | None = None,
+    target: str | None = None,
 ) -> dict:
     return {
         "candidate_id": candidate_id,
@@ -55,7 +56,7 @@ def _candidate(
         "severity": severity,
         "generalizable": generalizable,
         "concrete_action": concrete_action,
-        "target": None,
+        "target": target,
         "artifact_reference": None,
     }
 
@@ -135,13 +136,13 @@ def test_valid_causal_learning_passes_learning_gate() -> None:
 
 
 def test_imperative_repository_change_is_rerouted_to_todo() -> None:
-    candidate = analysis.LearningCandidate.from_dict(
-        _candidate(
-            "101-1",
-            statement="Update the hook installer in hooks/install.py.",
-            concrete_action="Update hooks/install.py",
-        )
+    raw = _candidate(
+        "101-1",
+        statement="Update the hook installer in hooks/install.py.",
+        concrete_action="Update hooks/install.py",
     )
+    raw["target"] = "hooks/install.py"
+    candidate = analysis.LearningCandidate.from_dict(raw)
 
     routed = analysis.route_candidate(candidate)
 
@@ -166,13 +167,25 @@ def test_regression_descriptive_work_item_is_reconsidered_as_learning() -> None:
     assert routed.routing_reason == "descriptive_todo_reconsidered_as_learning"
 
 
-def test_regression_incomplete_work_item_routes_to_noise() -> None:
+@pytest.mark.parametrize(
+    ("concrete_action", "target"),
+    [
+        (None, "hooks/install.py"),
+        ("Update the installer reconciliation logic", None),
+        (None, None),
+    ],
+)
+def test_regression_incomplete_work_item_routes_to_noise(
+    concrete_action: str | None,
+    target: str | None,
+) -> None:
     """Guard against non-actionable LLM work-item labels entering the work queue."""
     raw = _candidate(
         "101-1",
         kind="todo",
         statement="The installer behavior may need further consideration.",
-        concrete_action=None,
+        concrete_action=concrete_action,
+        target=target,
     )
     raw["cause"] = None
     candidate = analysis.LearningCandidate.from_dict(raw)
@@ -332,7 +345,13 @@ def test_partitioned_report_keeps_non_learning_routes_separate() -> None:
         ),
         analysis.route_candidate(
             analysis.LearningCandidate.from_dict(
-                _candidate("102-1", source_memory_id=102, kind="todo")
+                _candidate(
+                    "102-1",
+                    source_memory_id=102,
+                    kind="todo",
+                    concrete_action="Update the installer",
+                    target="hooks/install.py",
+                )
             )
         ),
         analysis.route_candidate(
@@ -365,6 +384,7 @@ async def test_analysis_extracts_all_kinds_but_clusters_only_valid_learnings() -
                     kind="todo",
                     statement="Fix hooks/install.py.",
                     concrete_action="Fix hooks/install.py",
+                    target="hooks/install.py",
                 ),
                 "candidate_id": None,
             },

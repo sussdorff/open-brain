@@ -183,7 +183,7 @@ class TestScopeRuntimeEnforcement:
     async def test_evolution_tool_succeeds_with_scope(self, mock_dl):
         """generate_evolution_suggestion does not raise when evolution scope is present."""
         from open_brain.server import generate_evolution_suggestion
-        from open_brain.evolution import EngagementReport, EvolutionSuggestion
+        from open_brain.evolution import EngagementReport
 
         # Mock the analyze_engagement and generate_suggestion calls
         engagement_report = EngagementReport(

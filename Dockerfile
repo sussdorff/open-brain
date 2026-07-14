@@ -9,6 +9,10 @@ COPY python/pyproject.toml python/uv.lock* ./
 # Install dependencies into a virtual environment
 RUN uv sync --frozen --no-dev --no-install-project
 
+# Install the project so the declared `ob` console script exists in the runtime image.
+COPY python/src ./src
+RUN uv sync --frozen --no-dev
+
 # Production stage
 FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim
 

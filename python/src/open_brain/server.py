@@ -73,6 +73,9 @@ from open_brain.people.merge import (
     list_persons_payload,
     run_dry_run as dry_run_people_merge,
 )
+from open_brain.session_learning_analysis import (
+    analyze_session_learnings as _analyze_session_learnings,
+)
 from open_brain.utils import parse_llm_json
 from open_brain.data_layer.postgres import PostgresDataLayer, close_pool, get_pool
 from open_brain.digest import generate_daily_review, generate_weekly_briefing
@@ -170,6 +173,7 @@ def logged_tool(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[An
 
 # Evolution tools require the `evolution` OAuth scope
 _EVOLUTION_TOOLS: frozenset[str] = frozenset({
+    "analyze_session_learnings",
     "weekly_briefing",
     "analyze_briefing_engagement",
     "generate_evolution_suggestion",
@@ -1102,6 +1106,32 @@ async def doctor() -> str:
             "uptime_seconds": round(uptime_seconds, 3) if uptime_seconds is not None else None,
         }
     )
+
+
+@mcp.tool(
+    description=(
+        "Analyze a bounded batch of session summaries into learning, work, decision, "
+        "promotion, duplicate-doctrine, and noise queues. Read-only: does not change "
+        "memories, lifecycle state, priority, access counts, or work items. "
+        "Requires evolution scope. Params: limit, project, source, model"
+    )
+)
+@logged_tool
+async def analyze_session_learnings(
+    limit: int = 50,
+    project: str | None = None,
+    source: str | None = None,
+    model: str | None = None,
+) -> str:
+    """Run the shared manual analyzer behind authenticated MCP transport."""
+    _require_scope("evolution")
+    report = await _analyze_session_learnings(
+        limit=limit,
+        project=project,
+        source=source,
+        model=model,
+    )
+    return json.dumps(report)
 
 
 @mcp.tool(

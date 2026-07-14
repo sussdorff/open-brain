@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -217,6 +217,17 @@ class TestGetObservationsTool:
 
 
 class TestSessionLearningAnalysisTool:
+    @pytest.mark.asyncio
+    async def test_analysis_tool_rejects_memory_only_scope(self):
+        import open_brain.server as server
+
+        token = server._current_scopes.set(("memory",))
+        try:
+            with pytest.raises(server.ScopeDeniedError, match="evolution"):
+                await server.analyze_session_learnings(limit=5)
+        finally:
+            server._current_scopes.reset(token)
+
     @pytest.mark.asyncio
     async def test_regression_session_learning_analysis_tool_is_read_only(self):
         """The scoped server tool delegates to the shared observational analyzer."""
