@@ -589,6 +589,71 @@ async def test_reconciliation_keeps_incompatible_cleanup_rules_separate() -> Non
     assert all(cluster.review_eligible is False for cluster in clusters)
 
 
+def test_pair_id_is_canonical_across_candidate_order() -> None:
+    left = analysis.LearningCandidate.from_dict(
+        _candidate("502-1", source_memory_id=502)
+    )
+    right = analysis.LearningCandidate.from_dict(
+        _candidate("501-1", source_memory_id=501)
+    )
+
+    assert analysis._pair_id(left, right) == "501-1::502-1"
+    assert analysis._pair_id(right, left) == "501-1::502-1"
+
+
+@pytest.mark.asyncio
+async def test_proposed_subthreshold_pair_survives_saturated_semantic_budget() -> None:
+    candidates = [
+        analysis.LearningCandidate.from_dict(
+            _candidate(
+                f"{501 + index}-1",
+                source_memory_id=501 + index,
+                statement=f"Learning claim {index}",
+            )
+        )
+        for index in range(17)
+    ]
+    proposed_pair_id = "501-1::502-1"
+    responses = [
+        json.dumps(
+            {
+                "clusters": [
+                    {
+                        "candidate_ids": ["502-1", "501-1"],
+                        "canonical_learning": "Equivalent behavior despite lexical distance",
+                        "reason": "The future behavior is equivalent",
+                    }
+                ]
+            }
+        ),
+        json.dumps({"equivalent_pair_ids": [proposed_pair_id]}),
+    ]
+    embeddings = [[1.0, 0.0], [0.0, 1.0]] + [[1.0, 0.0]] * 15
+
+    with (
+        patch.object(
+            analysis,
+            "llm_complete",
+            new_callable=AsyncMock,
+            side_effect=responses,
+        ) as complete,
+        patch.object(
+            analysis,
+            "embed_batch",
+            new_callable=AsyncMock,
+            return_value=embeddings,
+        ),
+    ):
+        clusters = await analysis._cluster_candidates(candidates, model=None)
+
+    reconciliation_prompt = complete.await_args_list[1].args[0][0].content
+    assert proposed_pair_id in reconciliation_prompt
+    assert len(clusters) == 16
+    assert any(
+        cluster.candidate_ids == ["501-1", "502-1"] for cluster in clusters
+    )
+
+
 def test_confirmed_pair_chain_does_not_transitively_overmerge() -> None:
     candidates = [
         analysis.LearningCandidate.from_dict(
