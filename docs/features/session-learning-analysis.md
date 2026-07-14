@@ -50,6 +50,15 @@ review-eligible only when it has support from at least two distinct source
 session summaries. Severity alone never promotes a singleton. Held singletons
 retain their severity and evidence so later runs can match genuine recurrence.
 
+Clustering uses two precision gates. The first pass groups equivalent claims
+directly. A second pass batch-embeds the causal learning fields and shortlists
+semantically close candidates that the first pass left in different clusters.
+Similarity alone never merges candidates: the configured LLM must explicitly
+confirm that a shortlisted pair has the same causal mechanism and compatible
+future behavior. Pairs that only share a topic, component, vocabulary, or
+evidence remain separate. The shortlist is bounded, and a failed reconciliation
+preserves the first-pass result.
+
 ## Usage
 
 Analyze the newest 50 summaries:
