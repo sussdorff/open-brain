@@ -384,6 +384,21 @@ def test_explicit_unresolved_learning_is_recovered_as_todo() -> None:
     assert routed.routing_reason == "explicit_pending_work"
 
 
+def test_explicit_unresolved_learning_statement_is_recovered_as_todo() -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "101-1",
+            statement="The merged persistence fix must still be deployed.",
+            evidence=["The merged persistence fix must still be deployed."],
+        )
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.TODO
+    assert routed.concrete_action == candidate.statement
+
+
 def test_explicit_unresolved_decision_is_recovered_as_todo() -> None:
     candidate = analysis.LearningCandidate.from_dict(
         _candidate(
@@ -454,7 +469,53 @@ def test_historical_not_yet_evidence_remains_learning() -> None:
     assert routed.kind is analysis.CandidateKind.LEARNING
 
 
-def test_completed_status_narration_is_not_a_learning() -> None:
+def test_historical_not_yet_observation_remains_learning() -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "101-1",
+            statement="Starting traffic before migrations complete causes failures.",
+            observation="The service was not yet deployed when traffic started.",
+        )
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.LEARNING
+
+
+def test_prescriptive_bead_policy_remains_learning() -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "101-1",
+            statement="A follow-up bead should be filed for every deferred refactor.",
+        )
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.LEARNING
+
+
+def test_deliberate_not_filed_decision_remains_decision() -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "101-1",
+            kind="decision",
+            statement="No follow-up action was selected.",
+            observation="The bead was explicitly not filed because it was out of scope.",
+            cause=None,
+            future_behavior=None,
+            evidence=[],
+            generalizable=False,
+        )
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.DECISION
+
+
+def test_status_like_prefix_does_not_override_causal_contract() -> None:
     candidate = analysis.LearningCandidate.from_dict(
         _candidate(
             "101-1",
@@ -466,8 +527,7 @@ def test_completed_status_narration_is_not_a_learning() -> None:
 
     routed = analysis.route_candidate(candidate)
 
-    assert routed.kind is analysis.CandidateKind.NOISE
-    assert routed.routing_reason == "status_narration_not_learning"
+    assert routed.kind is analysis.CandidateKind.LEARNING
 
 
 def test_lexically_status_like_causal_statement_remains_learning() -> None:
@@ -507,6 +567,22 @@ def test_key_decision_heading_in_evidence_does_not_override_learning() -> None:
             evidence=[
                 "Key Decisions: store the Promise before awaiting concurrent work."
             ],
+        )
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.LEARNING
+
+
+def test_key_decision_observation_does_not_override_generalizable_learning() -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "101-1",
+            observation=(
+                "Key Decisions: store the Promise before awaiting concurrent work."
+            ),
+            generalizable=True,
         )
     )
 
