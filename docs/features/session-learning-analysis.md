@@ -120,8 +120,11 @@ sources. None of the proposal sources can merge candidates. The configured LLM
 must first explicitly confirm each proposed pair has the same causal mechanism
 and compatible future behavior. An independent adversarial verification pass
 then audits only those tentative confirmations and defaults to rejection when it
-finds any material difference. Both passes must confirm the same canonical pair
-ID before a merge is possible. Pairs that only share a topic, component,
+finds a material difference in the evidenced causal mechanism or governing
+failure invariant. Different phase-specific safeguards remain compatible when
+they directly mitigate that same failure state and do not contradict or weaken
+one another. Both passes must confirm the same canonical pair ID before a merge
+is possible. Pairs that only share a topic, component,
 vocabulary, or evidence remain separate. A method shared incidentally remains
 separate, but it may be confirmed when the method itself is the evidenced causal
 mechanism and both sessions derive the same durable future behavior. Claims may

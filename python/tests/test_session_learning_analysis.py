@@ -1379,6 +1379,7 @@ async def test_adversarial_pair_verification_rejects_workflow_vocabulary_match()
     verification_prompt = complete.await_args_list[2].args[0][0].content
     assert pair_id in verification_prompt
     assert "Default to rejection" in verification_prompt
+    assert "same evidenced failure state" in verification_prompt
 
 
 def test_pair_id_is_canonical_across_candidate_order() -> None:
@@ -1979,6 +1980,7 @@ async def test_focused_recovery_bullet_survives_two_empty_llm_passes() -> None:
     assert candidate.routing_reason == "focused_recovery_fallback"
     assert "commits are not on main" in candidate.observation
     assert "push failed" in candidate.cause
+    assert candidate.statement.startswith("When a previous session-close fails")
     assert candidate.future_behavior == "skip bd close and complete the Git push."
     assert complete.await_count == 2
 
@@ -2301,7 +2303,10 @@ async def test_phase_specific_actions_from_same_invariant_reach_adjudication() -
     assert set(clusters[0].candidate_ids) == {"21617-1", "26870-1"}
     proposal_prompt = complete.await_args_list[0].args[0][0].content
     reconciliation_prompt = complete.await_args_list[1].args[0][0].content
+    verification_prompt = complete.await_args_list[2].args[0][0].content
     assert pair_id in reconciliation_prompt
+    assert "different workflow phases" in verification_prompt
+    assert "same evidenced failure state" in verification_prompt
 
     for prompt in (proposal_prompt, reconciliation_prompt):
         normalized_prompt = " ".join(prompt.split())

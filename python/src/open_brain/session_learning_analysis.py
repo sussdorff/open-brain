@@ -169,7 +169,8 @@ _RECOVERY_CLAUSE_RE = re.compile(
     re.IGNORECASE,
 )
 _CONDITIONAL_MECHANISM_RE = re.compile(
-    r"^(?:when|if|after)\s+(?P<cause>.+?)[,;]\s+(?P<observation>.+)$",
+    r"^(?P<condition>when|if|after)\s+"
+    r"(?P<cause>.+?)[,;]\s+(?P<observation>.+)$",
     re.IGNORECASE,
 )
 # Reject short fragments that commonly occur as generic status boilerplate.
@@ -1516,7 +1517,7 @@ def _focused_recovery_fallback(
                 source_project=summary.project,
                 source_session_ref=summary.session_ref,
                 kind=CandidateKind.LEARNING,
-                statement=f"{observation} when {cause}.",
+                statement=f"{mechanism.rstrip('.')}.",
                 observation=observation,
                 cause=cause,
                 future_behavior=recovery,
@@ -1540,11 +1541,14 @@ def _build_pair_verification_prompt(
     base_prompt = _build_reconciliation_prompt(pairs)
     return f"""Independently audit tentative learning-pair merges.
 Default to rejection. Confirm a pair only if you cannot identify a material
-difference between its evidenced causal mechanism and prescribed future behavior.
-Same repository workflow, lifecycle vocabulary, component, or broadly compatible
-advice is not equivalence. A status report or successful verification is not
-equivalent to a failure mode merely because both mention commits, branches, tests,
-beads, or main. Return only a JSON object with an `equivalent_pair_ids` array.
+difference between its evidenced causal mechanism or governing failure invariant.
+Different safeguards at different workflow phases are allowed when both directly
+mitigate the same evidenced failure state and neither weakens nor contradicts the
+other. Same repository workflow, lifecycle vocabulary, component, or broadly
+compatible advice is not equivalence. A status report or successful verification
+is not equivalent to a failure mode merely because both mention commits, branches,
+tests, beads, or main. Return only a JSON object with an
+`equivalent_pair_ids` array.
 
 Tentative pairs to audit:
 {base_prompt.split("Candidate pairs:\n", maxsplit=1)[1]}"""
