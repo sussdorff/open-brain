@@ -615,6 +615,32 @@ def test_pair_id_is_canonical_across_candidate_order() -> None:
     assert analysis._pair_id(right, left) == "501-1::502-1"
 
 
+def test_proposal_budget_prioritizes_subthreshold_recall_and_stays_capped() -> None:
+    left = analysis.LearningCandidate.from_dict(
+        _candidate("521-1", source_memory_id=521)
+    )
+    right = analysis.LearningCandidate.from_dict(
+        _candidate("522-1", source_memory_id=522)
+    )
+    semantic_pairs = [
+        (f"semantic-{index:03d}", left, right, 1.0 - index / 1000)
+        for index in range(100)
+    ]
+    proposed_pairs = [
+        (f"proposal-near-{index:03d}", left, right, 0.9)
+        for index in range(50)
+    ] + [("proposal-distant", left, right, 0.1)]
+
+    selected = analysis._select_reconciliation_pairs(
+        semantic_pairs,
+        proposed_pairs,
+    )
+    selected_ids = {pair_id for pair_id, *_ in selected}
+
+    assert len(selected) == analysis.MAX_RECONCILIATION_PAIRS
+    assert "proposal-distant" in selected_ids
+
+
 @pytest.mark.asyncio
 async def test_proposed_subthreshold_pair_survives_saturated_semantic_budget() -> None:
     candidates = [
@@ -960,6 +986,37 @@ async def test_first_pass_failure_preserves_singletons() -> None:
         ["471-1"],
         ["472-1"],
     ]
+    embeddings.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_no_learning_candidates_skip_clustering_calls() -> None:
+    todo = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "481-1",
+            kind="todo",
+            source_memory_id=481,
+            concrete_action="Fix the repository hook",
+            target="hooks/install.py",
+        )
+    )
+
+    with (
+        patch.object(
+            analysis,
+            "llm_complete",
+            new_callable=AsyncMock,
+        ) as complete,
+        patch.object(
+            analysis,
+            "embed_batch",
+            new_callable=AsyncMock,
+        ) as embeddings,
+    ):
+        clusters = await analysis._cluster_candidates([todo], model=None)
+
+    assert clusters == []
+    complete.assert_not_awaited()
     embeddings.assert_not_awaited()
 
 
