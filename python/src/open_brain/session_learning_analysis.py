@@ -60,7 +60,8 @@ _SOURCE_PENDING_RE = re.compile(
     r"(?:is|are|was|were) (?:missing|unresolved)|"
     r"(?:has|have|had) not been|"
     r"(?:not|never|will|would|should|must)(?:\s+\w+){0,4}\s+"
-    r"(?:deployed|implemented|completed|merged|landed|released))\b",
+    r"(?:created|deployed|filed|implemented|completed|merged|landed|released|"
+    r"written))\b",
     re.IGNORECASE,
 )
 _COMPLETED_WORK_RE = re.compile(
@@ -94,6 +95,47 @@ _ACTION_TOKEN_STOPWORDS = {
     "updated",
     "verified",
 }
+_CLUSTER_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_-]{2,}", re.IGNORECASE)
+_CLUSTER_TOKEN_STOPWORDS = {
+    "after",
+    "also",
+    "always",
+    "before",
+    "behavior",
+    "because",
+    "being",
+    "both",
+    "cause",
+    "could",
+    "every",
+    "from",
+    "future",
+    "have",
+    "into",
+    "learning",
+    "must",
+    "only",
+    "observation",
+    "should",
+    "still",
+    "than",
+    "that",
+    "their",
+    "then",
+    "there",
+    "these",
+    "this",
+    "those",
+    "through",
+    "when",
+    "where",
+    "which",
+    "while",
+    "with",
+    "would",
+}
+MIN_CLUSTER_SHARED_TOKENS = 3
+MIN_CLUSTER_LEXICAL_COSINE = 0.12
 _EXPLICIT_PENDING_PRIMARY_RE = re.compile(
     r"\b(?:bead|issue|ticket|follow-up)\b.{0,60}\b"
     r"(?:must|should|needs? to)\s+be\s+(?:filed|created|written)\b|"
@@ -194,7 +236,6 @@ def _evidence_backed_pending_field(candidate: LearningCandidate) -> str | None:
         normalized = field.lstrip(" -*\t")
         if (
             _IMPERATIVE_ACTION_RE.match(normalized)
-            or _PENDING_ACTION_RE.search(normalized)
             or _SOURCE_PENDING_RE.search(normalized)
         ):
             return field
@@ -969,6 +1010,40 @@ def _behavioral_signature(candidate: LearningCandidate) -> str:
     )
 
 
+def _cluster_tokens(candidate: LearningCandidate) -> set[str]:
+    """Return normalized causal tokens for bounded lexical recall."""
+    tokens: set[str] = set()
+    for raw_token in _CLUSTER_TOKEN_RE.findall(
+        _behavioral_signature(candidate).lower()
+    ):
+        token = raw_token[:-1] if raw_token.endswith("s") else raw_token
+        if token not in _CLUSTER_TOKEN_STOPWORDS:
+            tokens.add(token)
+    return tokens
+
+
+def _lexical_cosine(
+    left: set[str],
+    right: set[str],
+    document_frequency: dict[str, int],
+    document_count: int,
+) -> float:
+    """Calculate set-based TF-IDF cosine for two causal signatures."""
+    if not left or not right:
+        return 0.0
+
+    def weight(token: str) -> float:
+        return math.log((1 + document_count) / (1 + document_frequency[token])) + 1
+
+    intersection = left & right
+    numerator = sum(weight(token) ** 2 for token in intersection)
+    left_norm = math.sqrt(sum(weight(token) ** 2 for token in left))
+    right_norm = math.sqrt(sum(weight(token) ** 2 for token in right))
+    if left_norm == 0.0 or right_norm == 0.0:
+        return 0.0
+    return numerator / (left_norm * right_norm)
+
+
 def _cosine_similarity(left: list[float], right: list[float]) -> float:
     """Calculate cosine similarity without introducing a numerical dependency."""
     if not left or len(left) != len(right):
@@ -1076,6 +1151,75 @@ def _pairs_from_cluster_proposals(
                 pair_left, pair_right = _canonical_pair(left, right)
                 pairs[pair_id] = (pair_id, pair_left, pair_right, similarity)
     return list(pairs.values())
+
+
+def _pairs_from_lexical_overlap(
+    candidates: list[LearningCandidate],
+    clusters: list[LearningCluster],
+    embeddings: list[list[float]],
+) -> list[tuple[str, LearningCandidate, LearningCandidate, float]]:
+    """Propose bounded cross-session pairs sharing rare causal vocabulary."""
+    cluster_by_candidate = {
+        candidate_id: cluster.cluster_id
+        for cluster in clusters
+        for candidate_id in cluster.candidate_ids
+    }
+    token_sets = [_cluster_tokens(candidate) for candidate in candidates]
+    document_frequency: dict[str, int] = {}
+    for tokens in token_sets:
+        for token in tokens:
+            document_frequency[token] = document_frequency.get(token, 0) + 1
+
+    scored: list[
+        tuple[
+            float,
+            str,
+            LearningCandidate,
+            LearningCandidate,
+            float,
+        ]
+    ] = []
+    for left_index, left in enumerate(candidates):
+        for right_index in range(left_index + 1, len(candidates)):
+            right = candidates[right_index]
+            if left.source_memory_id == right.source_memory_id:
+                continue
+            if cluster_by_candidate.get(left.candidate_id) == cluster_by_candidate.get(
+                right.candidate_id
+            ):
+                continue
+            shared_tokens = token_sets[left_index] & token_sets[right_index]
+            if len(shared_tokens) < MIN_CLUSTER_SHARED_TOKENS:
+                continue
+            lexical_similarity = _lexical_cosine(
+                token_sets[left_index],
+                token_sets[right_index],
+                document_frequency,
+                len(candidates),
+            )
+            if lexical_similarity < MIN_CLUSTER_LEXICAL_COSINE:
+                continue
+            pair_left, pair_right = _canonical_pair(left, right)
+            embedding_similarity = _cosine_similarity(
+                embeddings[left_index],
+                embeddings[right_index],
+            )
+            scored.append(
+                (
+                    lexical_similarity,
+                    _pair_id(pair_left, pair_right),
+                    pair_left,
+                    pair_right,
+                    embedding_similarity,
+                )
+            )
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [
+        (pair_id, left, right, embedding_similarity)
+        for _, pair_id, left, right, embedding_similarity in scored[
+            :MAX_RECONCILIATION_PAIRS
+        ]
+    ]
 
 
 def _select_reconciliation_pairs(
@@ -1378,7 +1522,15 @@ async def _cluster_candidates(
             cluster_specs,
             embeddings,
         )
-        pairs = _select_reconciliation_pairs(semantic_pairs, proposed_pairs)
+        lexical_pairs = _pairs_from_lexical_overlap(
+            learnings,
+            conservative_clusters,
+            embeddings,
+        )
+        pairs = _select_reconciliation_pairs(
+            semantic_pairs,
+            [*proposed_pairs, *lexical_pairs],
+        )
         if not pairs:
             return conservative_clusters
         reconciliation_response = await llm_complete(

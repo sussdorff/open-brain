@@ -59,9 +59,12 @@ Explicit unresolved markers are checked in verbatim evidence as well as in the
 candidate fields. Evidence may be a direct imperative or a source statement
 such as "must still", "not yet", "still pending", or "has not been". A
 historical gap such as "was missed" is not sufficient when the summary records
-the subsequent fix. Recovered work uses the matching candidate field as its
-action and the source project as a fallback target. An observation marked as a
-key decision is routed to decisions only when the candidate is
+the subsequent fix. A normative "must" or "should" that states future behavior
+is also not evidence of unfinished work unless it is part of an explicit pending
+marker such as "must still" or "should be filed". Recovered work uses the
+matching candidate field as its action and the source project as a fallback
+target. An observation marked as a key decision is routed to decisions only when
+the candidate is
 non-generalizable. As a deterministic backstop, a TODO whose observation or
 evidence explicitly says the work was added, implemented, fixed, merged,
 deployed, or otherwise completed is removed from the work queue unless stronger
@@ -100,20 +103,24 @@ review-eligible only when it has support from at least two distinct source
 session summaries. Severity alone never promotes a singleton. Held singletons
 retain their severity and evidence so later runs can match genuine recurrence.
 
-Clustering uses two proposal sources and one authoritative precision gate. The
+Clustering uses three proposal sources and one authoritative precision gate. The
 first LLM pass proposes possible equivalent groups, while a batch embedding of
-the causal learning fields independently shortlists semantically close pairs.
-Neither proposal source can merge candidates. The configured LLM must explicitly
-confirm each proposed pair has the same causal mechanism and compatible future
-behavior. Pairs that only share a topic, component, vocabulary, or evidence
-remain separate. A method shared incidentally remains separate, but it may be
-confirmed when the method itself is the evidenced causal mechanism and both
-sessions derive the same durable future behavior. Claims may also express one
-governing invariant through compatible operational consequences at different
-workflow phases. Those pairs remain eligible only when they identify the same
-evidenced failure mode or causal mechanism and neither consequence weakens or
-contradicts the other. Shared workflow vocabulary and merely non-contradictory
-actions are insufficient.
+the causal learning fields independently shortlists semantically close pairs. A
+bounded TF-IDF lexical pass adds cross-session pairs that share at least three
+rare causal terms, covering false splits that fall below the embedding cutoff or
+are omitted from a large first-pass proposal. The lexical pass excludes
+same-session pairs and is capped at the same reconciliation budget as the other
+sources. None of the proposal sources can merge candidates. The configured LLM
+must explicitly confirm each proposed pair has the same causal mechanism and
+compatible future behavior. Pairs that only share a topic, component,
+vocabulary, or evidence remain separate. A method shared incidentally remains
+separate, but it may be confirmed when the method itself is the evidenced causal
+mechanism and both sessions derive the same durable future behavior. Claims may
+also express one governing invariant through compatible operational consequences
+at different workflow phases. Those pairs remain eligible only when they
+identify the same evidenced failure mode or causal mechanism and neither
+consequence weakens or contradicts the other. Shared workflow vocabulary and
+merely non-contradictory actions are insufficient.
 Confirmed pairs only combine
 larger groups when every
 cross-group cluster pair was also confirmed, preventing a broad middle claim

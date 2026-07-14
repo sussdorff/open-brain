@@ -419,6 +419,41 @@ def test_historical_gap_without_pending_evidence_is_not_a_todo() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("statement", "evidence"),
+    [
+        (
+            "Both paths must independently handle the null case.",
+            "Key learning: both paths must independently handle the null case.",
+        ),
+        (
+            "Path variables must always be double-quoted to handle spaces.",
+            "Path variables must always be double-quoted to handle spaces.",
+        ),
+    ],
+)
+def test_normative_must_evidence_is_not_unfinished_work(
+    statement: str,
+    evidence: str,
+) -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "101-1",
+            statement=statement,
+            evidence=[evidence],
+            concrete_action="apply the durable rule",
+            target="future implementations",
+        )
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.LEARNING
+    assert routed.concrete_action is None
+    assert routed.target is None
+    assert routed.routing_reason == "descriptive_action_not_todo"
+
+
 def test_explicit_pending_remainder_wins_over_completed_context() -> None:
     candidate = analysis.LearningCandidate.from_dict(
         _candidate(
@@ -1426,13 +1461,21 @@ def test_complete_confirmed_triangle_merges_one_component() -> None:
 
 
 @pytest.mark.asyncio
-async def test_reconciliation_below_similarity_threshold_skips_adjudication() -> None:
+async def test_reconciliation_without_semantic_or_lexical_signal_skips_adjudication() -> None:
     candidates = [
         analysis.LearningCandidate.from_dict(
             _candidate("421-1", source_memory_id=421)
         ),
         analysis.LearningCandidate.from_dict(
-            _candidate("422-1", source_memory_id=422)
+            _candidate(
+                "422-1",
+                source_memory_id=422,
+                statement="Timeout budgets prevent abandoned network requests.",
+                observation="Unbounded HTTP requests occupied workers indefinitely.",
+                cause="The client configured no request deadline.",
+                future_behavior="Set explicit deadlines on outbound network calls.",
+                evidence=["Unbounded HTTP requests occupied workers indefinitely."],
+            )
         ),
     ]
 
@@ -1854,6 +1897,137 @@ def test_reconciliation_prompt_allows_method_when_it_is_the_causal_learning() ->
     )
 
     assert "method itself is the evidenced causal mechanism" in prompt
+
+
+def test_lexical_recall_shortlists_tracker_git_divergence_below_embedding_cutoff() -> None:
+    candidates = [
+        analysis.LearningCandidate.from_dict(
+            _candidate(
+                "26870-1",
+                source_memory_id=26870,
+                statement=(
+                    "Closed bead status did not prove landed code; closed worktrees "
+                    "still carried unmerged commits against main."
+                ),
+                observation=(
+                    "Closed bead worktrees still carried unmerged commits on main."
+                ),
+                cause=(
+                    "Bead status and Git landedness are independent lifecycle states."
+                ),
+                future_behavior=(
+                    "Verify Git diffs before removing closed bead worktrees."
+                ),
+            )
+        ),
+        analysis.LearningCandidate.from_dict(
+            _candidate(
+                "21617-1",
+                source_memory_id=21617,
+                statement=(
+                    "A failed push left the bead closed while commits were absent "
+                    "from main."
+                ),
+                observation=(
+                    "The bead was closed but its commits were not on main."
+                ),
+                cause=(
+                    "The Git push failed after the bead lifecycle had completed."
+                ),
+                future_behavior=(
+                    "Recover the Git merge and push without closing the bead again."
+                ),
+            )
+        ),
+    ]
+    clusters = analysis.build_learning_clusters(candidates, [])
+
+    pairs = analysis._pairs_from_lexical_overlap(
+        candidates,
+        clusters,
+        [[1.0, 0.0], [0.0, 1.0]],
+    )
+
+    assert [pair[0] for pair in pairs] == ["21617-1::26870-1"]
+    assert pairs[0][3] == 0.0
+
+
+def test_cluster_tokens_exclude_behavioral_signature_labels() -> None:
+    candidate = analysis.LearningCandidate.from_dict(_candidate("101-1"))
+
+    tokens = analysis._cluster_tokens(candidate)
+
+    assert tokens.isdisjoint(
+        {"learning", "observation", "cause", "future", "behavior"}
+    )
+
+
+@pytest.mark.asyncio
+async def test_lexical_recall_pair_reaches_authoritative_adjudication() -> None:
+    candidates = [
+        analysis.LearningCandidate.from_dict(
+            _candidate(
+                "26870-1",
+                source_memory_id=26870,
+                statement=(
+                    "Closed bead status did not prove landed code; closed worktrees "
+                    "still carried unmerged commits against main."
+                ),
+                observation=(
+                    "Closed bead worktrees still carried unmerged commits on main."
+                ),
+                cause=(
+                    "Bead status and Git landedness are independent lifecycle states."
+                ),
+                future_behavior=(
+                    "Verify Git diffs before removing closed bead worktrees."
+                ),
+            )
+        ),
+        analysis.LearningCandidate.from_dict(
+            _candidate(
+                "21617-1",
+                source_memory_id=21617,
+                statement=(
+                    "A failed push left the bead closed while commits were absent "
+                    "from main."
+                ),
+                observation=(
+                    "The bead was closed but its commits were not on main."
+                ),
+                cause=(
+                    "The Git push failed after the bead lifecycle had completed."
+                ),
+                future_behavior=(
+                    "Recover the Git merge and push without closing the bead again."
+                ),
+            )
+        ),
+    ]
+    pair_id = "21617-1::26870-1"
+    with (
+        patch.object(
+            analysis,
+            "llm_complete",
+            new_callable=AsyncMock,
+            side_effect=[
+                json.dumps({"clusters": []}),
+                json.dumps({"equivalent_pair_ids": [pair_id]}),
+            ],
+        ) as complete,
+        patch.object(
+            analysis,
+            "embed_batch",
+            new_callable=AsyncMock,
+            return_value=[[1.0, 0.0], [0.0, 1.0]],
+        ),
+    ):
+        clusters = await analysis._cluster_candidates(candidates, model=None)
+
+    assert len(clusters) == 1
+    assert set(clusters[0].source_memory_ids) == {21617, 26870}
+    reconciliation_prompt = complete.await_args_list[1].args[0][0].content
+    assert pair_id in reconciliation_prompt
 
 
 @pytest.mark.asyncio
