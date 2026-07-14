@@ -41,9 +41,17 @@ A claim remains a `learning` only when it includes all of the following:
 - a generalizability signal.
 
 Imperative concrete changes such as "fix", "update", "add", "implement",
-"ensure", or "configure" route to `todo`. Standard and skill candidates must
-also satisfy the causal evidence contract. A `duplicate_doctrine` candidate
-must name the existing artifact it duplicates.
+"ensure", or "configure" route to `todo`, as do explicit pending statements
+using terms such as "must", "should", or "not yet". A descriptive statement
+about completed work does not become a TODO merely because the model emitted an
+action field. Standard and skill candidates must also satisfy the causal
+evidence contract. A `duplicate_doctrine` candidate must name the existing
+artifact it duplicates.
+
+In multi-summary batches, every evidence item must be a verbatim excerpt of the
+specific source summary named by `source_memory_id`. Candidates with paraphrased
+or cross-summary evidence are rejected before routing, preventing adjacent
+session summaries from borrowing each other's learnings.
 
 Only validated `learning` candidates enter semantic clustering. A cluster is
 review-eligible only when it has support from at least two distinct source
@@ -68,6 +76,8 @@ reconciliation preserves the conservative singleton partition. An incomplete
 embedding response is logged and also falls back to singletons instead of
 silently disabling reconciliation. Failure in either LLM pass also fails closed
 to singletons. Runs with zero or one learning candidate skip clustering calls.
+Review clusters include every member's causal fields and source evidence so a
+human can audit equivalence without reopening each session summary.
 
 ## Usage
 
