@@ -562,7 +562,17 @@ async def test_reconciliation_keeps_incompatible_cleanup_rules_separate() -> Non
             "llm_complete",
             new_callable=AsyncMock,
             side_effect=[
-                json.dumps({"clusters": []}),
+                json.dumps(
+                    {
+                        "clusters": [
+                            {
+                                "candidate_ids": ["301-1", "302-1"],
+                                "canonical_learning": "Closed-bead cleanup policy",
+                                "reason": "Shared cleanup vocabulary",
+                            }
+                        ]
+                    }
+                ),
                 json.dumps({"equivalent_pair_ids": []}),
             ],
         ),
