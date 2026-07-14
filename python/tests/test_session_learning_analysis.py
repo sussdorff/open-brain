@@ -740,7 +740,7 @@ async def test_reconciliation_below_similarity_threshold_skips_adjudication() ->
 
 
 @pytest.mark.asyncio
-async def test_reconciliation_embedding_failure_preserves_first_pass() -> None:
+async def test_reconciliation_embedding_failure_preserves_singletons() -> None:
     candidates = [
         analysis.LearningCandidate.from_dict(
             _candidate("431-1", source_memory_id=431)
@@ -755,7 +755,17 @@ async def test_reconciliation_embedding_failure_preserves_first_pass() -> None:
             analysis,
             "llm_complete",
             new_callable=AsyncMock,
-            return_value=json.dumps({"clusters": []}),
+            return_value=json.dumps(
+                {
+                    "clusters": [
+                        {
+                            "candidate_ids": ["431-1", "432-1"],
+                            "canonical_learning": "Proposed grouping",
+                            "reason": "Possible equivalent behavior",
+                        }
+                    ]
+                }
+            ),
         ),
         patch.object(
             analysis,
@@ -773,7 +783,7 @@ async def test_reconciliation_embedding_failure_preserves_first_pass() -> None:
 
 
 @pytest.mark.asyncio
-async def test_reconciliation_merge_failure_preserves_first_pass() -> None:
+async def test_reconciliation_merge_failure_preserves_singletons() -> None:
     candidates = [
         analysis.LearningCandidate.from_dict(
             _candidate("441-1", source_memory_id=441)
@@ -789,7 +799,17 @@ async def test_reconciliation_merge_failure_preserves_first_pass() -> None:
             "llm_complete",
             new_callable=AsyncMock,
             side_effect=[
-                json.dumps({"clusters": []}),
+                json.dumps(
+                    {
+                        "clusters": [
+                            {
+                                "candidate_ids": ["441-1", "442-1"],
+                                "canonical_learning": "Proposed grouping",
+                                "reason": "Possible equivalent behavior",
+                            }
+                        ]
+                    }
+                ),
                 json.dumps({"equivalent_pair_ids": ["441-1::442-1"]}),
             ],
         ),
@@ -811,6 +831,89 @@ async def test_reconciliation_merge_failure_preserves_first_pass() -> None:
         ["441-1"],
         ["442-1"],
     ]
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_invalid_pair_shape_preserves_singletons() -> None:
+    candidates = [
+        analysis.LearningCandidate.from_dict(
+            _candidate("451-1", source_memory_id=451)
+        ),
+        analysis.LearningCandidate.from_dict(
+            _candidate("452-1", source_memory_id=452)
+        ),
+    ]
+
+    with (
+        patch.object(
+            analysis,
+            "llm_complete",
+            new_callable=AsyncMock,
+            side_effect=[
+                json.dumps(
+                    {
+                        "clusters": [
+                            {
+                                "candidate_ids": ["451-1", "452-1"],
+                                "canonical_learning": "Proposed grouping",
+                                "reason": "Possible equivalent behavior",
+                            }
+                        ]
+                    }
+                ),
+                json.dumps({"equivalent_pair_ids": "451-1::452-1"}),
+            ],
+        ),
+        patch.object(
+            analysis,
+            "embed_batch",
+            new_callable=AsyncMock,
+            return_value=[[1.0, 0.0], [0.95, 0.05]],
+        ),
+    ):
+        clusters = await analysis._cluster_candidates(candidates, model=None)
+
+    assert [cluster.candidate_ids for cluster in clusters] == [
+        ["451-1"],
+        ["452-1"],
+    ]
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_embedding_length_mismatch_is_visible(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    candidates = [
+        analysis.LearningCandidate.from_dict(
+            _candidate("461-1", source_memory_id=461)
+        ),
+        analysis.LearningCandidate.from_dict(
+            _candidate("462-1", source_memory_id=462)
+        ),
+    ]
+
+    with (
+        patch.object(
+            analysis,
+            "llm_complete",
+            new_callable=AsyncMock,
+            return_value=json.dumps({"clusters": []}),
+        ),
+        patch.object(
+            analysis,
+            "embed_batch",
+            new_callable=AsyncMock,
+            return_value=[[1.0, 0.0]],
+        ),
+        caplog.at_level("WARNING", logger=analysis.__name__),
+    ):
+        clusters = await analysis._cluster_candidates(candidates, model=None)
+
+    assert [cluster.candidate_ids for cluster in clusters] == [
+        ["461-1"],
+        ["462-1"],
+    ]
+    assert "Embedding count mismatch" in caplog.text
 
 
 @pytest.mark.asyncio
