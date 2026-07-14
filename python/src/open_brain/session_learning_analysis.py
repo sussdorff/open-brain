@@ -626,41 +626,63 @@ def _merge_confirmed_pairs(
     clusters: list[LearningCluster],
     confirmed_pairs: list[tuple[LearningCandidate, LearningCandidate]],
 ) -> list[LearningCluster]:
-    """Merge confirmed edges into deterministic connected components."""
+    """Merge only components with complete pairwise confirmation between them."""
     learning_by_id = {
         candidate.candidate_id: candidate
         for candidate in candidates
         if candidate.kind is CandidateKind.LEARNING and candidate.candidate_id
     }
-    parent = {candidate_id: candidate_id for candidate_id in learning_by_id}
+    cluster_by_id = {cluster.cluster_id: cluster for cluster in clusters}
+    cluster_id_by_candidate = {
+        candidate_id: cluster.cluster_id
+        for cluster in clusters
+        for candidate_id in cluster.candidate_ids
+    }
+    cluster_order = {
+        cluster.cluster_id: position for position, cluster in enumerate(clusters)
+    }
+    parent = {cluster_id: cluster_id for cluster_id in cluster_by_id}
+    members = {cluster_id: {cluster_id} for cluster_id in cluster_by_id}
 
-    def find(candidate_id: str) -> str:
-        while parent[candidate_id] != candidate_id:
-            parent[candidate_id] = parent[parent[candidate_id]]
-            candidate_id = parent[candidate_id]
-        return candidate_id
+    def find(cluster_id: str) -> str:
+        while parent[cluster_id] != cluster_id:
+            parent[cluster_id] = parent[parent[cluster_id]]
+            cluster_id = parent[cluster_id]
+        return cluster_id
 
-    def union(left_id: str, right_id: str) -> None:
+    confirmed_cluster_edges: set[frozenset[str]] = set()
+    for left, right in confirmed_pairs:
+        left_cluster = cluster_id_by_candidate.get(left.candidate_id)
+        right_cluster = cluster_id_by_candidate.get(right.candidate_id)
+        if left_cluster and right_cluster and left_cluster != right_cluster:
+            confirmed_cluster_edges.add(frozenset((left_cluster, right_cluster)))
+
+    ordered_edges = sorted(
+        confirmed_cluster_edges,
+        key=lambda edge: tuple(sorted(cluster_order[item] for item in edge)),
+    )
+    for edge in ordered_edges:
+        left_id, right_id = sorted(edge, key=cluster_order.__getitem__)
         left_root = find(left_id)
         right_root = find(right_id)
-        if left_root != right_root:
-            parent[right_root] = left_root
-
-    for cluster in clusters:
-        member_ids = [
-            candidate_id
-            for candidate_id in cluster.candidate_ids
-            if candidate_id in learning_by_id
-        ]
-        for candidate_id in member_ids[1:]:
-            union(member_ids[0], candidate_id)
-    for left, right in confirmed_pairs:
-        if left.candidate_id in parent and right.candidate_id in parent:
-            union(left.candidate_id, right.candidate_id)
+        if left_root == right_root:
+            continue
+        if not all(
+            frozenset((left_member, right_member)) in confirmed_cluster_edges
+            for left_member in members[left_root]
+            for right_member in members[right_root]
+        ):
+            continue
+        if cluster_order[left_root] > cluster_order[right_root]:
+            left_root, right_root = right_root, left_root
+        parent[right_root] = left_root
+        members[left_root].update(members.pop(right_root))
 
     components: dict[str, list[str]] = {}
     for candidate_id in learning_by_id:
-        components.setdefault(find(candidate_id), []).append(candidate_id)
+        cluster_id = cluster_id_by_candidate.get(candidate_id)
+        if cluster_id:
+            components.setdefault(find(cluster_id), []).append(candidate_id)
 
     cluster_by_candidate = {
         candidate_id: cluster
@@ -676,7 +698,10 @@ def _merge_confirmed_pairs(
                 prior_clusters.append(prior)
         canonical_source = max(
             prior_clusters,
-            key=lambda cluster: (len(cluster.candidate_ids), -int(cluster.cluster_id[1:])),
+            key=lambda cluster: (
+                len(cluster.candidate_ids),
+                -cluster_order[cluster.cluster_id],
+            ),
             default=None,
         )
         merged_prior_clusters = len(prior_clusters) > 1
@@ -797,7 +822,14 @@ async def _cluster_candidates(
     ]
     if not confirmed_pairs:
         return initial_clusters
-    return _merge_confirmed_pairs(learnings, initial_clusters, confirmed_pairs)
+    try:
+        return _merge_confirmed_pairs(learnings, initial_clusters, confirmed_pairs)
+    except Exception:
+        logger.warning(
+            "Learning cluster merge failed; preserving first-pass clusters",
+            exc_info=True,
+        )
+        return initial_clusters
 
 
 def build_analysis_report(

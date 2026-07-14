@@ -698,6 +698,70 @@ async def test_reconciliation_embedding_failure_preserves_first_pass() -> None:
 
 
 @pytest.mark.asyncio
+async def test_reconciliation_merge_failure_preserves_first_pass() -> None:
+    candidates = [
+        analysis.LearningCandidate.from_dict(
+            _candidate("441-1", source_memory_id=441)
+        ),
+        analysis.LearningCandidate.from_dict(
+            _candidate("442-1", source_memory_id=442)
+        ),
+    ]
+
+    with (
+        patch.object(
+            analysis,
+            "llm_complete",
+            new_callable=AsyncMock,
+            side_effect=[
+                json.dumps({"clusters": []}),
+                json.dumps({"equivalent_pair_ids": ["441-1::442-1"]}),
+            ],
+        ),
+        patch.object(
+            analysis,
+            "embed_batch",
+            new_callable=AsyncMock,
+            return_value=[[1.0, 0.0], [0.95, 0.05]],
+        ),
+        patch.object(
+            analysis,
+            "_merge_confirmed_pairs",
+            side_effect=RuntimeError("merge failed"),
+        ),
+    ):
+        clusters = await analysis._cluster_candidates(candidates, model=None)
+
+    assert [cluster.candidate_ids for cluster in clusters] == [
+        ["441-1"],
+        ["442-1"],
+    ]
+
+
+@pytest.mark.asyncio
+async def test_single_initial_cluster_skips_reconciliation() -> None:
+    candidate = analysis.LearningCandidate.from_dict(_candidate("451-1"))
+
+    with (
+        patch.object(
+            analysis,
+            "llm_complete",
+            new_callable=AsyncMock,
+            return_value=json.dumps({"clusters": []}),
+        ),
+        patch.object(
+            analysis,
+            "embed_batch",
+            new_callable=AsyncMock,
+        ) as embeddings,
+    ):
+        clusters = await analysis._cluster_candidates([candidate], model=None)
+
+    assert len(clusters) == 1
+    embeddings.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_analysis_with_no_summaries_skips_llm() -> None:
     with (
         patch.object(

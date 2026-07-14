@@ -56,8 +56,10 @@ semantically close candidates that the first pass left in different clusters.
 Similarity alone never merges candidates: the configured LLM must explicitly
 confirm that a shortlisted pair has the same causal mechanism and compatible
 future behavior. Pairs that only share a topic, component, vocabulary, or
-evidence remain separate. The shortlist is bounded, and a failed reconciliation
-preserves the first-pass result.
+evidence remain separate. Confirmed pairs only combine larger groups when every
+cross-group cluster pair was also confirmed, preventing a broad middle claim
+from transitively joining incompatible rules. The shortlist is bounded, and a
+failed reconciliation preserves the first-pass result.
 
 ## Usage
 
