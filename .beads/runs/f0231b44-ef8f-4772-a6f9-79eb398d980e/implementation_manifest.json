@@ -4,7 +4,7 @@
   "acceptance_criteria": [
     {
       "id": 1,
-      "status": "implemented",
+      "status": "done",
       "changed_files": [
         "python/src/open_brain/data_layer/postgres.py",
         "scripts/bootstrap_test_schema.sql",
@@ -15,7 +15,7 @@
     },
     {
       "id": 2,
-      "status": "implemented",
+      "status": "done",
       "changed_files": [
         "python/src/open_brain/data_layer/postgres.py",
         "python/src/open_brain/data_layer/reranker.py",
@@ -26,7 +26,7 @@
     },
     {
       "id": 3,
-      "status": "implemented",
+      "status": "done",
       "changed_files": [
         "python/src/open_brain/data_layer/postgres.py",
         "python/tests/test_postgres.py",
@@ -36,7 +36,7 @@
     },
     {
       "id": 4,
-      "status": "implemented_unit_verified_integration_skipped",
+      "status": "partial",
       "changed_files": [
         "python/src/open_brain/data_layer/postgres.py",
         "scripts/bootstrap_test_schema.sql",
@@ -47,7 +47,7 @@
     },
     {
       "id": 5,
-      "status": "implemented",
+      "status": "done",
       "changed_files": ["docs/features/memory-decay.md"],
       "evidence_refs": ["cmd-affected-tests"]
     }
