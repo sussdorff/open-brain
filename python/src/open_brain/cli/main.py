@@ -9,12 +9,13 @@ from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, NoReturn
 
 from open_brain.cli.client import MCPError, call_tool
 from open_brain.data_layer.postgres import PostgresDataLayer, suppress_migrations
 from open_brain.portable_backup import export_bundle, restore_bundle, verify_round_trip
 from open_brain.runtime import run_server
+from open_brain.session_learning_analysis import analyze_session_learnings
 
 
 def _output(data: Any, pretty: bool) -> None:
@@ -54,6 +55,15 @@ def _should_render_macwhisper(args: argparse.Namespace) -> bool:
     )
 
 
+def _should_render_learning_analysis(args: argparse.Namespace) -> bool:
+    """Return True when learning analysis should use terminal output."""
+    return (
+        args.command == "learnings"
+        and args.learnings_command == "analyze"
+        and not _wants_json(args)
+    )
+
+
 def _output_result(data: Any, args: argparse.Namespace) -> None:
     """Print command result using the command's default presentation."""
     if _should_render_people_list(args) and isinstance(data, dict):
@@ -66,6 +76,10 @@ def _output_result(data: Any, args: argparse.Namespace) -> None:
         print(_render_macwhisper_payload(data, args), end="")
         return
 
+    if _should_render_learning_analysis(args) and isinstance(data, dict):
+        print(_render_learning_analysis(data), end="")
+        return
+
     _output(data, pretty=args.pretty)
 
 
@@ -74,6 +88,84 @@ def _render_macwhisper_payload(data: dict[str, Any], args: argparse.Namespace) -
     if args.macwhisper_command == "list":
         return _render_macwhisper_list(data)
     return _render_macwhisper_entry(data, args)
+
+
+def _render_learning_analysis(data: dict[str, Any]) -> str:
+    """Render the manual analysis queues for terminal review."""
+    def append_review_details(item: dict[str, Any]) -> None:
+        confidence = item.get("confidence")
+        if isinstance(confidence, (int, float)):
+            lines.append(f"  Confidence: {confidence:.2f}")
+        severity = item.get("severity")
+        if severity:
+            lines.append(f"  Severity: {severity}")
+        evidence = item.get("evidence") or []
+        if evidence:
+            lines.append(f"  Evidence: {'; '.join(str(value) for value in evidence)}")
+
+    counts = data.get("counts") or {}
+    queues = data.get("queues") or {}
+    lines = [
+        "Session learning analysis",
+        f"Source summaries: {counts.get('source_summaries', 0)}",
+        f"Candidates: {counts.get('candidates', 0)}",
+        f"Reviewable learning clusters: {counts.get('reviewable_learning_clusters', 0)}",
+        f"Held learning clusters: {counts.get('held_learning_clusters', 0)}",
+        f"Concrete work items: {counts.get('todos', 0)}",
+        f"Decisions: {counts.get('decisions', 0)}",
+        f"Standard candidates: {counts.get('standard_candidates', 0)}",
+        f"Skill candidates: {counts.get('skill_candidates', 0)}",
+        f"Duplicate doctrine: {counts.get('duplicate_doctrine', 0)}",
+        f"Noise: {counts.get('noise', 0)}",
+    ]
+
+    reviewable = queues.get("reviewable_learning_clusters") or []
+    if reviewable:
+        lines.extend(["", "Reviewable learning clusters"])
+        for cluster in reviewable:
+            source_ids = ", ".join(
+                str(memory_id) for memory_id in cluster.get("source_memory_ids", [])
+            )
+            lines.append(f"- {cluster.get('canonical_learning', '')}")
+            lines.append(f"  Sources: {source_ids or '-'}")
+            append_review_details(cluster)
+
+    held = queues.get("held_learning_clusters") or []
+    if held:
+        lines.extend(["", "Held learning clusters"])
+        for cluster in held:
+            lines.append(f"- {cluster.get('canonical_learning', '')}")
+            source_ids = ", ".join(
+                str(memory_id) for memory_id in cluster.get("source_memory_ids", [])
+            )
+            lines.append(f"  Sources: {source_ids or '-'}")
+            append_review_details(cluster)
+
+    routed_sections = (
+        ("Concrete work items", "todos"),
+        ("Decisions", "decisions"),
+        ("Standard candidates", "standard_candidates"),
+        ("Skill candidates", "skill_candidates"),
+        ("Duplicate doctrine", "duplicate_doctrine"),
+        ("Noise", "noise"),
+    )
+    for heading, key in routed_sections:
+        items = queues.get(key) or []
+        if not items:
+            continue
+        lines.extend(["", heading])
+        for item in items:
+            source_id = item.get("source_memory_id", "-")
+            lines.append(f"- [{source_id}] {item.get('statement', '')}")
+            append_review_details(item)
+
+    lines.extend(
+        [
+            "",
+            "No memories, priorities, lifecycle states, or work items were changed.",
+        ]
+    )
+    return "\n".join(lines) + "\n"
 
 
 def _render_macwhisper_list(data: dict[str, Any]) -> str:
@@ -194,7 +286,7 @@ def _format_ingest_status(item: dict[str, Any]) -> str:
     return f"ingested{suffix}"
 
 
-def _error(msg: str) -> None:
+def _error(msg: str) -> NoReturn:
     """Print error message to stderr and exit.
 
     Args:
@@ -330,6 +422,19 @@ async def _cmd_context(args: argparse.Namespace) -> Any:
     if args.limit:
         kwargs["limit"] = args.limit
     return await call_tool("get_context", kwargs)
+
+
+async def _cmd_learnings(args: argparse.Namespace) -> Any:
+    """Run manual read-only session-summary learning analysis."""
+    if args.learnings_command != "analyze":
+        raise ValueError(f"Unknown learnings command: {args.learnings_command}")
+    suppress_migrations()
+    return await analyze_session_learnings(
+        limit=args.limit,
+        project=args.project,
+        source=args.source,
+        model=args.model,
+    )
 
 
 async def _cmd_stats(_args: argparse.Namespace) -> Any:
@@ -608,13 +713,12 @@ async def _fetch_ingest_statuses(source_refs: list[str]) -> dict[str, dict[str, 
     for start in range(0, len(source_refs), chunk_size):
         chunk = source_refs[start: start + chunk_size]
         payload = await call_tool("ingest_status", {"source_refs": chunk})
-        statuses.update(
-            {
-                item.get("source_ref"): item
-                for item in (payload.get("items") or [])
-                if isinstance(item, dict)
-            }
-        )
+        for item in payload.get("items") or []:
+            if not isinstance(item, dict):
+                continue
+            source_ref = item.get("source_ref")
+            if isinstance(source_ref, str):
+                statuses[source_ref] = item
     return statuses
 
 
@@ -956,6 +1060,36 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_context.add_argument("--project", help="Filter by project")
     p_context.add_argument("--limit", type=int, help="Maximum number of results")
+
+    # learnings
+    p_learnings = subparsers.add_parser(
+        "learnings",
+        help="Analyze session summaries into typed learning and work queues",
+    )
+    learnings_sub = p_learnings.add_subparsers(
+        dest="learnings_command",
+        metavar="ACTION",
+    )
+    learnings_sub.required = True
+    p_learnings_analyze = learnings_sub.add_parser(
+        "analyze",
+        help="Analyze recent session summaries without writing results",
+    )
+    p_learnings_analyze.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="Newest session summaries to analyze (default: 50; maximum: 200)",
+    )
+    p_learnings_analyze.add_argument("--project", help="Filter by project")
+    p_learnings_analyze.add_argument(
+        "--source",
+        help="Filter by session-summary metadata.source",
+    )
+    p_learnings_analyze.add_argument(
+        "--model",
+        help="Override the configured LLM model",
+    )
 
     # stats
     subparsers.add_parser(
@@ -1322,6 +1456,7 @@ _COMMAND_MAP = {
     "timeline": _cmd_timeline,
     "daily": _cmd_daily,
     "context": _cmd_context,
+    "learnings": _cmd_learnings,
     "stats": _cmd_stats,
     "doctor": _cmd_doctor,
     "export": _cmd_export,

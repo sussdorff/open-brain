@@ -342,6 +342,9 @@ class TestOutput:
                         {
                             "canonical_learning": "Installers must reconcile target state.",
                             "source_memory_ids": [101, 102],
+                            "evidence": ["Two installer runs created duplicate hooks."],
+                            "confidence": 0.9,
+                            "severity": "high",
                         }
                     ],
                     "held_learning_clusters": [],
@@ -361,6 +364,8 @@ class TestOutput:
         assert "Source summaries: 50" in captured.out
         assert "Reviewable learning clusters: 2" in captured.out
         assert "Installers must reconcile target state." in captured.out
+        assert "Confidence: 0.90" in captured.out
+        assert "Evidence: Two installer runs created duplicate hooks." in captured.out
         assert "No memories, priorities, lifecycle states, or work items were changed." in captured.out
         assert '"queues"' not in captured.out
 
