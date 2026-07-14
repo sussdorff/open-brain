@@ -579,6 +579,124 @@ async def test_reconciliation_keeps_incompatible_cleanup_rules_separate() -> Non
     assert all(cluster.review_eligible is False for cluster in clusters)
 
 
+def test_confirmed_pair_chain_does_not_transitively_overmerge() -> None:
+    candidates = [
+        analysis.LearningCandidate.from_dict(
+            _candidate("401-1", source_memory_id=401)
+        ),
+        analysis.LearningCandidate.from_dict(
+            _candidate("402-1", source_memory_id=402)
+        ),
+        analysis.LearningCandidate.from_dict(
+            _candidate("403-1", source_memory_id=403)
+        ),
+    ]
+    initial = analysis.build_learning_clusters(candidates, [])
+
+    merged = analysis._merge_confirmed_pairs(
+        candidates,
+        initial,
+        [(candidates[0], candidates[1]), (candidates[1], candidates[2])],
+    )
+
+    assert [cluster.candidate_ids for cluster in merged] == [
+        ["401-1", "402-1"],
+        ["403-1"],
+    ]
+
+
+def test_complete_confirmed_triangle_merges_one_component() -> None:
+    candidates = [
+        analysis.LearningCandidate.from_dict(
+            _candidate("411-1", source_memory_id=411)
+        ),
+        analysis.LearningCandidate.from_dict(
+            _candidate("412-1", source_memory_id=412)
+        ),
+        analysis.LearningCandidate.from_dict(
+            _candidate("413-1", source_memory_id=413)
+        ),
+    ]
+    initial = analysis.build_learning_clusters(candidates, [])
+
+    merged = analysis._merge_confirmed_pairs(
+        candidates,
+        initial,
+        [
+            (candidates[0], candidates[1]),
+            (candidates[0], candidates[2]),
+            (candidates[1], candidates[2]),
+        ],
+    )
+
+    assert len(merged) == 1
+    assert merged[0].candidate_ids == ["411-1", "412-1", "413-1"]
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_below_similarity_threshold_skips_adjudication() -> None:
+    candidates = [
+        analysis.LearningCandidate.from_dict(
+            _candidate("421-1", source_memory_id=421)
+        ),
+        analysis.LearningCandidate.from_dict(
+            _candidate("422-1", source_memory_id=422)
+        ),
+    ]
+
+    with (
+        patch.object(
+            analysis,
+            "llm_complete",
+            new_callable=AsyncMock,
+            return_value=json.dumps({"clusters": []}),
+        ) as complete,
+        patch.object(
+            analysis,
+            "embed_batch",
+            new_callable=AsyncMock,
+            return_value=[[1.0, 0.0], [0.0, 1.0]],
+        ),
+    ):
+        clusters = await analysis._cluster_candidates(candidates, model=None)
+
+    assert len(clusters) == 2
+    assert complete.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_embedding_failure_preserves_first_pass() -> None:
+    candidates = [
+        analysis.LearningCandidate.from_dict(
+            _candidate("431-1", source_memory_id=431)
+        ),
+        analysis.LearningCandidate.from_dict(
+            _candidate("432-1", source_memory_id=432)
+        ),
+    ]
+
+    with (
+        patch.object(
+            analysis,
+            "llm_complete",
+            new_callable=AsyncMock,
+            return_value=json.dumps({"clusters": []}),
+        ),
+        patch.object(
+            analysis,
+            "embed_batch",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("embedding unavailable"),
+        ),
+    ):
+        clusters = await analysis._cluster_candidates(candidates, model=None)
+
+    assert [cluster.candidate_ids for cluster in clusters] == [
+        ["431-1"],
+        ["432-1"],
+    ]
+
+
 @pytest.mark.asyncio
 async def test_analysis_with_no_summaries_skips_llm() -> None:
     with (
