@@ -98,14 +98,18 @@ deterministically valid learning, the command retries that summary exactly once
 with an explicit coverage reminder. Decisions and other distinct first-pass
 claims are preserved, while duplicate atomic statements are reconciled in favor
 of a validated learning and receive stable source-derived candidate IDs. The
-retry is bounded and remains part of the manual, read-only analysis.
+retry is bounded and remains part of the manual, read-only analysis. If both
+model passes still miss an explicit conditional bullet that contains its own
+`Recovery:` safeguard, a conservative parser recovers that one causal contract
+directly from the quoted source text. It does not synthesize generic lessons from
+ordinary status bullets or from adjacent summary fields.
 
 Only validated `learning` candidates enter semantic clustering. A cluster is
 review-eligible only when it has support from at least two distinct source
 session summaries. Severity alone never promotes a singleton. Held singletons
 retain their severity and evidence so later runs can match genuine recurrence.
 
-Clustering uses three proposal sources and one authoritative precision gate. The
+Clustering uses three proposal sources and two independent precision gates. The
 first LLM pass proposes possible equivalent groups, while a batch embedding of
 the causal learning fields independently shortlists semantically close pairs. A
 bounded TF-IDF lexical pass adds cross-session pairs that share at least three
@@ -113,8 +117,11 @@ rare causal terms, covering false splits that fall below the embedding cutoff or
 are omitted from a large first-pass proposal. The lexical pass excludes
 same-session pairs and is capped at the same reconciliation budget as the other
 sources. None of the proposal sources can merge candidates. The configured LLM
-must explicitly confirm each proposed pair has the same causal mechanism and
-compatible future behavior. Pairs that only share a topic, component,
+must first explicitly confirm each proposed pair has the same causal mechanism
+and compatible future behavior. An independent adversarial verification pass
+then audits only those tentative confirmations and defaults to rejection when it
+finds any material difference. Both passes must confirm the same canonical pair
+ID before a merge is possible. Pairs that only share a topic, component,
 vocabulary, or evidence remain separate. A method shared incidentally remains
 separate, but it may be confirmed when the method itself is the evidenced causal
 mechanism and both sessions derive the same durable future behavior. Claims may
@@ -132,10 +139,10 @@ the embedding threshold. When that proposal budget is saturated, sub-threshold
 pairs are selected before proposal pairs already covered by semantic proximity.
 Pair identities and member order are canonical, so
 first-pass response ordering cannot duplicate adjudication work. A failed
-reconciliation preserves the conservative singleton partition. An incomplete
+reconciliation or verification preserves the conservative singleton partition. An incomplete
 embedding response is logged and also falls back to singletons instead of
-silently disabling reconciliation. Failure in either LLM pass also fails closed
-to singletons. Runs with zero or one learning candidate skip clustering calls.
+silently disabling reconciliation. Failure in any LLM pass also fails closed to
+singletons. Runs with zero or one learning candidate skip clustering calls.
 Review clusters include every member's causal fields and source evidence so a
 human can audit equivalence without reopening each session summary.
 

@@ -161,6 +161,17 @@ _FOCUSED_EXTRACTION_RE = re.compile(
     r"challenges encountered|surprising findings|failure analysis)\b",
     re.IGNORECASE,
 )
+_BULLET_START_RE = re.compile(r"^[ \t]*[-*][ \t]+(?P<text>\S.*)$")
+_BULLET_CONTINUATION_RE = re.compile(r"^[ \t]+(?P<text>\S.*)$")
+_RECOVERY_CLAUSE_RE = re.compile(
+    r"^(?P<mechanism>(?:when|if|after)\s+.+?[,;]\s+.+?)"
+    r"\s+recovery:\s*(?P<recovery>.+?)\s*$",
+    re.IGNORECASE,
+)
+_CONDITIONAL_MECHANISM_RE = re.compile(
+    r"^(?:when|if|after)\s+(?P<cause>.+?)[,;]\s+(?P<observation>.+)$",
+    re.IGNORECASE,
+)
 # Reject short fragments that commonly occur as generic status boilerplate.
 _MIN_EVIDENCE_QUOTE_CHARS = 20
 _EVIDENCE_REQUIRED_KINDS = {
@@ -1457,6 +1468,88 @@ def _merge_extraction_attempts(
     ]
 
 
+def _focused_recovery_fallback(
+    summary: SessionSummary,
+) -> list[LearningCandidate]:
+    """Recover explicit causal safeguards when focused LLM passes miss them."""
+    recovered: list[LearningCandidate] = []
+    bullet_blocks: list[str] = []
+    for value in (summary.content, summary.narrative):
+        if not value:
+            continue
+        current: list[str] | None = None
+        for line in value.splitlines():
+            bullet_match = _BULLET_START_RE.match(line)
+            if bullet_match:
+                if current:
+                    bullet_blocks.append(" ".join(current))
+                current = [bullet_match.group("text")]
+                continue
+            continuation_match = _BULLET_CONTINUATION_RE.match(line)
+            if current and continuation_match:
+                current.append(continuation_match.group("text"))
+                continue
+            if current:
+                bullet_blocks.append(" ".join(current))
+                current = None
+        if current:
+            bullet_blocks.append(" ".join(current))
+
+    for bullet in bullet_blocks:
+        match = _RECOVERY_CLAUSE_RE.match(bullet)
+        if match is None:
+            continue
+        mechanism = " ".join(match.group("mechanism").split())
+        recovery = " ".join(match.group("recovery").split())
+        causal_match = _CONDITIONAL_MECHANISM_RE.match(mechanism)
+        if causal_match is None:
+            continue
+        cause = " ".join(causal_match.group("cause").split())
+        observation = " ".join(causal_match.group("observation").split())
+        if not re.search(r"\b(?:but|while|yet|fails?|failed|missing|absent)\b", mechanism, re.IGNORECASE):
+            continue
+        evidence = " ".join(bullet.split())
+        recovered.append(
+            LearningCandidate(
+                candidate_id=f"{summary.id}-fallback-{len(recovered) + 1}",
+                source_memory_id=summary.id,
+                source_project=summary.project,
+                source_session_ref=summary.session_ref,
+                kind=CandidateKind.LEARNING,
+                statement=f"{observation} when {cause}.",
+                observation=observation,
+                cause=cause,
+                future_behavior=recovery,
+                evidence=[evidence],
+                confidence=0.9,
+                severity="high",
+                generalizable=True,
+                concrete_action=None,
+                target=None,
+                artifact_reference=None,
+                routing_reason="focused_recovery_fallback",
+            )
+        )
+    return recovered
+
+
+def _build_pair_verification_prompt(
+    pairs: list[tuple[str, LearningCandidate, LearningCandidate, float]],
+) -> str:
+    """Build an independent adversarial confirmation for tentative merges."""
+    base_prompt = _build_reconciliation_prompt(pairs)
+    return f"""Independently audit tentative learning-pair merges.
+Default to rejection. Confirm a pair only if you cannot identify a material
+difference between its evidenced causal mechanism and prescribed future behavior.
+Same repository workflow, lifecycle vocabulary, component, or broadly compatible
+advice is not equivalence. A status report or successful verification is not
+equivalent to a failure mode merely because both mention commits, branches, tests,
+beads, or main. Return only a JSON object with an `equivalent_pair_ids` array.
+
+Tentative pairs to audit:
+{base_prompt.split("Candidate pairs:\n", maxsplit=1)[1]}"""
+
+
 async def _extract_candidates(
     summaries: list[SessionSummary],
     *,
@@ -1506,6 +1599,15 @@ async def _extract_candidates(
                 parsed,
                 retry_candidates,
             )
+            if not any(
+                route_candidate(candidate).kind is CandidateKind.LEARNING
+                for candidate in parsed
+            ):
+                parsed = _merge_extraction_attempts(
+                    batch[0],
+                    parsed,
+                    _focused_recovery_fallback(batch[0]),
+                )
         candidates.extend(parsed)
     return [route_candidate(candidate) for candidate in candidates]
 
@@ -1605,6 +1707,45 @@ async def _cluster_candidates(
         pair_by_id[str(pair_id)]
         for pair_id in raw_pair_ids
         if str(pair_id) in pair_by_id
+    ]
+    if not confirmed_pairs:
+        return conservative_clusters
+    confirmed_pair_ids = {
+        _pair_id(left, right) for left, right in confirmed_pairs
+    }
+    tentative_pairs = [
+        (pair_id, left, right, similarity)
+        for pair_id, left, right, similarity in pairs
+        if pair_id in confirmed_pair_ids
+    ]
+    try:
+        verification_response = await llm_complete(
+            [
+                LlmMessage(
+                    role="user",
+                    content=_build_pair_verification_prompt(tentative_pairs),
+                )
+            ],
+            model=model,
+            max_tokens=2048,
+            response_format={"type": "json_object"},
+            disable_reasoning=True,
+        )
+        verification = _parse_json_object(verification_response)
+    except Exception:
+        logger.warning(
+            "Learning pair verification failed; preserving singleton clusters",
+            exc_info=True,
+        )
+        return conservative_clusters
+    verified_pair_ids = verification.get("equivalent_pair_ids", [])
+    if not isinstance(verified_pair_ids, list):
+        return conservative_clusters
+    verified_id_set = {str(pair_id) for pair_id in verified_pair_ids}
+    confirmed_pairs = [
+        (left, right)
+        for left, right in confirmed_pairs
+        if _pair_id(left, right) in verified_id_set
     ]
     if not confirmed_pairs:
         return conservative_clusters

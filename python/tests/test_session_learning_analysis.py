@@ -1232,6 +1232,9 @@ async def test_reconciliation_merges_cleanup_gate_paraphrases_across_sessions() 
         json.dumps(
             {"equivalent_pair_ids": ["26783-1::26944-1"]}
         ),
+        json.dumps(
+            {"equivalent_pair_ids": ["26783-1::26944-1"]}
+        ),
     ]
 
     with (
@@ -1315,6 +1318,69 @@ async def test_reconciliation_keeps_incompatible_cleanup_rules_separate() -> Non
     assert all(cluster.review_eligible is False for cluster in clusters)
 
 
+@pytest.mark.asyncio
+async def test_adversarial_pair_verification_rejects_workflow_vocabulary_match() -> None:
+    candidates = [
+        analysis.LearningCandidate.from_dict(
+            _candidate(
+                "18857-1",
+                source_memory_id=18857,
+                statement="A routing fix was already verified on main.",
+                observation="All routing tests passed for the existing commits.",
+                cause="Earlier commits had already fixed the routing defect.",
+                future_behavior="Keep the verified routing behavior unchanged.",
+            )
+        ),
+        analysis.LearningCandidate.from_dict(
+            _candidate(
+                "26870-1",
+                source_memory_id=26870,
+                statement="Closed bead status does not prove that code landed on main.",
+                observation="Closed worktrees still carried unmerged commits.",
+                cause="Tracker state and Git landedness are independent.",
+                future_behavior="Verify Git diffs before branch cleanup.",
+            )
+        ),
+    ]
+    pair_id = "18857-1::26870-1"
+
+    with (
+        patch.object(
+            analysis,
+            "llm_complete",
+            new_callable=AsyncMock,
+            side_effect=[
+                json.dumps(
+                    {
+                        "clusters": [
+                            {
+                                "candidate_ids": ["18857-1", "26870-1"],
+                                "canonical_learning": "Commit state must be verified.",
+                                "reason": "Shared workflow vocabulary",
+                            }
+                        ]
+                    }
+                ),
+                json.dumps({"equivalent_pair_ids": [pair_id]}),
+                json.dumps({"equivalent_pair_ids": []}),
+            ],
+        ) as complete,
+        patch.object(
+            analysis,
+            "embed_batch",
+            new_callable=AsyncMock,
+            return_value=[[1.0, 0.0], [0.95, 0.05]],
+        ),
+    ):
+        clusters = await analysis._cluster_candidates(candidates, model=None)
+
+    assert len(clusters) == 2
+    assert all(cluster.review_eligible is False for cluster in clusters)
+    verification_prompt = complete.await_args_list[2].args[0][0].content
+    assert pair_id in verification_prompt
+    assert "Default to rejection" in verification_prompt
+
+
 def test_pair_id_is_canonical_across_candidate_order() -> None:
     left = analysis.LearningCandidate.from_dict(
         _candidate("502-1", source_memory_id=502)
@@ -1378,6 +1444,7 @@ async def test_proposed_subthreshold_pair_survives_saturated_semantic_budget() -
                 ]
             }
         ),
+        json.dumps({"equivalent_pair_ids": [proposed_pair_id]}),
         json.dumps({"equivalent_pair_ids": [proposed_pair_id]}),
     ]
     embeddings = [[1.0, 0.0], [0.0, 1.0]] + [[1.0, 0.0]] * 15
@@ -1886,6 +1953,55 @@ async def test_focused_extraction_without_learning_is_retried_once() -> None:
 
 
 @pytest.mark.asyncio
+async def test_focused_recovery_bullet_survives_two_empty_llm_passes() -> None:
+    summary_raw = _summary(21617, session_ref="polaris-kydi")
+    summary_raw["content"] = """Key findings:
+- When a previous session-close fails mid-way (push failed), bead is already CLOSED
+  in Dolt but commits are not on main. Recovery: skip bd close and complete the Git push.
+"""
+    summary = analysis.SessionSummary(**summary_raw)
+
+    with patch.object(
+        analysis,
+        "llm_complete",
+        new_callable=AsyncMock,
+        side_effect=[
+            json.dumps({"candidates": []}),
+            json.dumps({"candidates": []}),
+        ],
+    ) as complete:
+        candidates = await analysis._extract_candidates([summary], model=None)
+
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.candidate_id == "21617-1"
+    assert candidate.kind is analysis.CandidateKind.LEARNING
+    assert candidate.routing_reason == "focused_recovery_fallback"
+    assert "commits are not on main" in candidate.observation
+    assert "push failed" in candidate.cause
+    assert candidate.future_behavior == "skip bd close and complete the Git push."
+    assert complete.await_count == 2
+
+
+def test_focused_recovery_fallback_does_not_cross_bullet_boundaries() -> None:
+    summary_raw = _summary(21617, session_ref="polaris-kydi")
+    summary_raw["content"] = """Key findings:
+- When a push fails, the bead may close while commits remain absent from main.
+- After a schema mismatch, validation fails. Recovery: update the schema and rerun.
+"""
+    summary = analysis.SessionSummary(**summary_raw)
+
+    candidates = analysis._focused_recovery_fallback(summary)
+
+    assert len(candidates) == 1
+    assert candidates[0].cause == "a schema mismatch"
+    assert "push fails" not in candidates[0].statement
+    assert candidates[0].evidence == [
+        "After a schema mismatch, validation fails. Recovery: update the schema and rerun."
+    ]
+
+
+@pytest.mark.asyncio
 async def test_focused_decision_and_retry_learning_are_merged_with_stable_ids() -> None:
     summary_raw = _summary(21617, session_ref="polaris-kydi")
     summary_raw["content"] = (
@@ -2093,6 +2209,7 @@ async def test_lexical_recall_pair_reaches_authoritative_adjudication() -> None:
             side_effect=[
                 json.dumps({"clusters": []}),
                 json.dumps({"equivalent_pair_ids": [pair_id]}),
+                json.dumps({"equivalent_pair_ids": [pair_id]}),
             ],
         ) as complete,
         patch.object(
@@ -2167,6 +2284,7 @@ async def test_phase_specific_actions_from_same_invariant_reach_adjudication() -
                         ]
                     }
                 ),
+                json.dumps({"equivalent_pair_ids": [pair_id]}),
                 json.dumps({"equivalent_pair_ids": [pair_id]}),
             ],
         ) as complete,
