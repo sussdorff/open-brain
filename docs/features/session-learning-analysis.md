@@ -41,12 +41,13 @@ A claim remains a `learning` only when it includes all of the following:
 - a generalizability signal.
 
 Imperative concrete changes such as "fix", "update", "add", "implement",
-"ensure", or "configure" route to `todo`, as do explicit pending statements
-using terms such as "must", "should", or "not yet". A descriptive statement
-about completed work does not become a TODO merely because the model emitted an
-action field. Standard and skill candidates must also satisfy the causal
-evidence contract. A `duplicate_doctrine` candidate must name the existing
-artifact it duplicates.
+"ensure", or "configure" route to `todo` only when a verbatim source excerpt
+also states that the work remains unfinished. The action and target are not
+enough: a model-generated imperative is not source evidence. A descriptive
+statement about completed work does not become a TODO merely because the model
+emitted an action field. Standard and skill candidates must also satisfy the
+causal evidence contract. A `duplicate_doctrine` candidate must name the
+existing artifact it duplicates.
 
 Candidates are atomic: their statement, observation, cause, future behavior,
 and evidence must describe one mechanism. Fields from adjacent bullets or
@@ -54,36 +55,40 @@ independent findings must not be combined. A key decision remains a decision,
 but its heading does not suppress a separate evidence-backed causal finding in
 the same summary.
 
-Explicit unresolved markers are checked at two strengths. Existing TODOs,
-decisions, and non-generalizable candidates may use concrete work-object phrases
-such as "a bead should be filed" or a specific action that is "not yet
-deployed". Generalizable candidates require stronger unresolved markers such as
-"the fix must still be deployed" in the statement, observation, or future
-behavior, so a durable rule or historical "not yet"
-observation does not become a TODO. These strong markers must name a concrete
-work object, and quoted evidence is considered only for non-generalizable
-candidates. Recovered work uses the matching field as its action and the source
-project as a fallback target. An observation marked as a key decision is routed
-to decisions only when the candidate is non-generalizable. Completed status
-narration is normally left to the extraction gate. As a deterministic backstop,
-a TODO whose observation or evidence explicitly says the work was added,
-implemented, fixed, merged, deployed, or otherwise completed is removed from the
-work queue unless a stronger explicit pending marker identifies unfinished work.
-Completed candidates with a full causal contract return to learning review;
+Explicit unresolved markers are checked in verbatim evidence as well as in the
+candidate fields. Evidence may be a direct imperative or a source statement
+such as "must still", "not yet", "still pending", or "has not been". A
+historical gap such as "was missed" is not sufficient when the summary records
+the subsequent fix. Recovered work uses the matching candidate field as its
+action and the source project as a fallback target. An observation marked as a
+key decision is routed to decisions only when the candidate is
+non-generalizable. As a deterministic backstop, a TODO whose observation or
+evidence explicitly says the work was added, implemented, fixed, merged,
+deployed, or otherwise completed is removed from the work queue unless stronger
+pending evidence identifies unfinished work. Completed candidates and
+unsupported TODO labels with a full causal contract return to learning review;
 incomplete ones route to noise.
 
 In multi-summary batches, learning, standard, and skill candidates require
-evidence. TODO and decision candidates may omit it. Whenever evidence is
-present, every item must be a verbatim excerpt of the title, content, or
+evidence. A TODO additionally requires evidence to survive deterministic
+routing; decisions may omit it. Whenever evidence is present, every item must
+be a verbatim excerpt of the title, content, or
 narrative of the specific source summary named by `source_memory_id`, and at
 least one excerpt must be unique within the input batch. Candidates with
 missing required evidence, shared boilerplate only, paraphrased evidence, or
 cross-summary evidence are rejected before routing, preventing adjacent session
 summaries from borrowing each other's learnings. Invalid optional evidence on a
-TODO or decision is stripped instead of discarding an otherwise valid action or
-choice. Identical summaries or candidates supported only by shared boilerplate
-remain held out intentionally; this favors precision over recall during manual
-review.
+TODO or decision is stripped. A TODO with stripped or absent pending evidence
+then routes to learning or noise rather than entering the work queue. Identical
+summaries or candidates supported only by shared boilerplate remain held out
+intentionally; this favors precision over recall during manual review.
+
+Summaries that explicitly advertise causal material through headings such as
+"Key learning", "Key findings", "Challenges encountered", "Surprising
+findings", or "Root cause" receive a dedicated extraction call. Routine status
+summaries remain grouped in bounded batches. This prevents a learning-rich
+session from being omitted because it competed with unrelated summaries in the
+same model context.
 
 Only validated `learning` candidates enter semantic clustering. A cluster is
 review-eligible only when it has support from at least two distinct source

@@ -54,6 +54,15 @@ _PENDING_ACTION_RE = re.compile(
     r"follow-up (?:needed|required))\b",
     re.IGNORECASE,
 )
+_SOURCE_PENDING_RE = re.compile(
+    r"\b(?:TODO:|follow-up (?:needed|required)|not yet|still pending|"
+    r"must still|still (?:needs?|requires?)|remains? to be|"
+    r"(?:is|are|was|were) (?:missing|unresolved)|"
+    r"(?:has|have|had) not been|"
+    r"(?:not|never|will|would|should|must)(?:\s+\w+){0,4}\s+"
+    r"(?:deployed|implemented|completed|merged|landed|released))\b",
+    re.IGNORECASE,
+)
 _COMPLETED_WORK_RE = re.compile(
     r"\b(?:added|addressed|completed|deployed|fixed|implemented|landed|merged|"
     r"released|resolved|shipped|updated|verified)\b",
@@ -105,6 +114,11 @@ _EXPLICIT_PENDING_SUPPORT_RE = re.compile(
     re.IGNORECASE,
 )
 _DECISION_MARKER_RE = re.compile(r"\bkey decisions?\s*:", re.IGNORECASE)
+_FOCUSED_EXTRACTION_RE = re.compile(
+    r"\b(?:key learnings?|lessons? learned|key findings|root cause|"
+    r"challenges encountered|surprising findings|failure analysis)\b",
+    re.IGNORECASE,
+)
 # Reject short fragments that commonly occur as generic status boilerplate.
 _MIN_EVIDENCE_QUOTE_CHARS = 20
 _EVIDENCE_REQUIRED_KINDS = {
@@ -174,6 +188,19 @@ def _action_tokens(value: str) -> set[str]:
     return tokens
 
 
+def _evidence_backed_pending_field(candidate: LearningCandidate) -> str | None:
+    """Return source evidence that explicitly states unfinished work."""
+    for field in candidate.evidence or []:
+        normalized = field.lstrip(" -*\t")
+        if (
+            _IMPERATIVE_ACTION_RE.match(normalized)
+            or _PENDING_ACTION_RE.search(normalized)
+            or _SOURCE_PENDING_RE.search(normalized)
+        ):
+            return field
+    return None
+
+
 @dataclass(frozen=True)
 class SessionSummary:
     """Read-only input record for one session-summary memory."""
@@ -199,6 +226,41 @@ class SessionSummary:
             "narrative": (self.narrative or "")[:MAX_SUMMARY_CHARS],
             "created_at": self.created_at,
         }
+
+
+def _requires_focused_extraction(summary: SessionSummary) -> bool:
+    """Return whether a summary explicitly advertises causal learning content."""
+    return bool(
+        _FOCUSED_EXTRACTION_RE.search(
+            "\n".join(
+                value
+                for value in (summary.title, summary.content, summary.narrative)
+                if value
+            )
+        )
+    )
+
+
+def _extraction_batches(
+    summaries: list[SessionSummary],
+) -> list[list[SessionSummary]]:
+    """Give learning-rich summaries dedicated attention; batch routine status logs."""
+    batches: list[list[SessionSummary]] = []
+    routine_batch: list[SessionSummary] = []
+    for summary in summaries:
+        if _requires_focused_extraction(summary):
+            if routine_batch:
+                batches.append(routine_batch)
+                routine_batch = []
+            batches.append([summary])
+            continue
+        routine_batch.append(summary)
+        if len(routine_batch) == EXTRACTION_BATCH_SIZE:
+            batches.append(routine_batch)
+            routine_batch = []
+    if routine_batch:
+        batches.append(routine_batch)
+    return batches
 
 
 @dataclass(frozen=True)
@@ -517,6 +579,7 @@ def route_candidate(candidate: LearningCandidate) -> LearningCandidate:
         ),
         None,
     )
+    evidence_pending_field = _evidence_backed_pending_field(candidate)
     actionable_kinds = {
         CandidateKind.LEARNING,
         CandidateKind.TODO,
@@ -524,7 +587,11 @@ def route_candidate(candidate: LearningCandidate) -> LearningCandidate:
         CandidateKind.STANDARD_CANDIDATE,
         CandidateKind.SKILL_CANDIDATE,
     }
-    if explicit_pending_field and candidate.kind in actionable_kinds:
+    if (
+        explicit_pending_field
+        and evidence_pending_field
+        and candidate.kind in actionable_kinds
+    ):
         return replace(
             candidate,
             kind=CandidateKind.TODO,
@@ -575,6 +642,20 @@ def route_candidate(candidate: LearningCandidate) -> LearningCandidate:
                 kind=CandidateKind.NOISE,
                 routing_reason="completed_work_not_todo",
             )
+        if not evidence_pending_field:
+            if complete_contract:
+                return replace(
+                    candidate,
+                    kind=CandidateKind.LEARNING,
+                    concrete_action=None,
+                    target=None,
+                    routing_reason="todo_without_pending_evidence_reconsidered_as_learning",
+                )
+            return replace(
+                candidate,
+                kind=CandidateKind.NOISE,
+                routing_reason="todo_without_pending_evidence",
+            )
         if complete_contract and not pending_statement:
             return replace(
                 candidate,
@@ -608,8 +689,13 @@ def route_candidate(candidate: LearningCandidate) -> LearningCandidate:
             target=None,
             routing_reason="explicit_decision_marker",
         )
-    if candidate.kind in knowledge_kinds and pending_statement and (
+    if (
+        candidate.kind in knowledge_kinds
+        and pending_statement
+        and evidence_pending_field
+        and (
         candidate.concrete_action or candidate.target
+        )
     ):
         if not (candidate.concrete_action and candidate.target):
             return replace(
@@ -622,7 +708,11 @@ def route_candidate(candidate: LearningCandidate) -> LearningCandidate:
             kind=CandidateKind.TODO,
             routing_reason="imperative_concrete_action",
         )
-    if candidate.kind in knowledge_kinds and imperative_statement:
+    if (
+        candidate.kind in knowledge_kinds
+        and imperative_statement
+        and evidence_pending_field
+    ):
         return replace(
             candidate,
             kind=CandidateKind.NOISE,
@@ -779,9 +869,15 @@ Hard learning gate:
 - Standard and skill candidates also require non-empty `evidence`; TODO and decision evidence may be null.
 - `generalizable` must be true and the claim must apply beyond the exact file or incident.
 - Imperatives such as fix, update, add, implement, ensure, configure, or increase are "todo".
-- A "todo" requires an explicitly pending imperative `statement` plus both `concrete_action` and `target`.
+- A "todo" requires an explicitly pending imperative `statement`, both
+  `concrete_action` and `target`, and at least one verbatim `evidence` excerpt that
+  explicitly states the work is still unfinished. A generated imperative is not
+  evidence of unfinished work.
 - Put explicitly unresolved work in "todo" even when the source labels it a caveat or decision; phrases such as "must still", "not yet", "follow-up needed", and "should be filed" are unresolved work.
-- Never invent follow-up work from a descriptive claim about completed work; classify that causal claim by its evidence contract or use "noise".
+- Never invent follow-up work from a descriptive claim about completed work. A
+  historical gap such as "was missed" is not proof that work remains open when the
+  same summary reports the fix as completed. Classify the causal claim by its
+  evidence contract or use "noise".
 - Completed changelog bullets and key decisions are status/decision records, not
   learnings; do not invent generic causes or future behavior to make them pass the
   learning gate. A decision heading does not suppress a separate evidence-backed
@@ -1159,8 +1255,7 @@ async def _extract_candidates(
     model: str | None,
 ) -> list[LearningCandidate]:
     candidates: list[LearningCandidate] = []
-    for offset in range(0, len(summaries), EXTRACTION_BATCH_SIZE):
-        batch = summaries[offset : offset + EXTRACTION_BATCH_SIZE]
+    for batch in _extraction_batches(summaries):
         response = await llm_complete(
             [LlmMessage(role="user", content=build_extraction_prompt(batch))],
             model=model,

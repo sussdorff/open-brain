@@ -297,7 +297,7 @@ def test_valid_causal_learning_passes_learning_gate() -> None:
     assert routed.routing_reason is None
 
 
-def test_imperative_repository_change_is_rerouted_to_todo() -> None:
+def test_generated_imperative_without_pending_evidence_stays_learning() -> None:
     raw = _candidate(
         "101-1",
         statement="Update the hook installer in hooks/install.py.",
@@ -308,8 +308,8 @@ def test_imperative_repository_change_is_rerouted_to_todo() -> None:
 
     routed = analysis.route_candidate(candidate)
 
-    assert routed.kind is analysis.CandidateKind.TODO
-    assert routed.routing_reason == "imperative_concrete_action"
+    assert routed.kind is analysis.CandidateKind.LEARNING
+    assert routed.routing_reason == "descriptive_action_not_todo"
 
 
 def test_descriptive_completed_change_does_not_become_todo_from_action_field() -> None:
@@ -383,6 +383,42 @@ def test_completed_imperative_without_causal_contract_becomes_noise() -> None:
     assert routed.routing_reason == "completed_work_not_todo"
 
 
+def test_historical_gap_without_pending_evidence_is_not_a_todo() -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "24020-1",
+            source_memory_id=24020,
+            kind="todo",
+            statement=(
+                "The tombstone pattern should be applied in delta-sync and "
+                "master-handlers."
+            ),
+            observation=(
+                "Clearing Hinweis previously left a stale flag in master-handlers."
+            ),
+            cause=(
+                "The two paths handled the same null case independently and one "
+                "path was missed."
+            ),
+            future_behavior="Check both paths when changing tombstone emission.",
+            evidence=[
+                "The pattern: delta-sync got the tombstone fix in polaris-3bca, "
+                "master-handlers (scheduled path) was missed."
+            ],
+            concrete_action="apply the tombstone pattern in both paths",
+            target="Hinweis flag emission",
+        )
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.LEARNING
+    assert (
+        routed.routing_reason
+        == "todo_without_pending_evidence_reconsidered_as_learning"
+    )
+
+
 def test_explicit_pending_remainder_wins_over_completed_context() -> None:
     candidate = analysis.LearningCandidate.from_dict(
         _candidate(
@@ -390,6 +426,7 @@ def test_explicit_pending_remainder_wins_over_completed_context() -> None:
             kind="todo",
             statement="The parser was implemented but the fix must still be deployed.",
             observation="Implemented and merged the parser change.",
+            evidence=["The parser was implemented but the fix must still be deployed."],
             concrete_action="deploy the parser fix",
             target="production",
         )
@@ -408,6 +445,7 @@ def test_completed_background_does_not_close_different_imperative_todo() -> None
             kind="todo",
             statement="Add validation for edge cases.",
             observation="Implemented the base mapper and merged it to main.",
+            evidence=["Add validation for edge cases."],
             concrete_action="add edge-case validation",
             target="validation tests",
         )
@@ -441,6 +479,7 @@ def test_negated_or_modal_completion_words_do_not_close_todo(
             kind="todo",
             statement="Implement the migration.",
             observation=observation,
+            evidence=[observation],
             concrete_action="implement the migration",
             target="migration",
         )
@@ -458,6 +497,7 @@ def test_explicitly_pending_modal_work_item_remains_todo() -> None:
             "101-1",
             kind="todo",
             statement="A follow-up bead should be filed for the remaining phases.",
+            evidence=["A follow-up bead should be filed for the remaining phases."],
             concrete_action="File a follow-up bead",
             target="remaining initiative phases",
             generalizable=False,
@@ -530,7 +570,7 @@ def test_explicit_unresolved_decision_is_recovered_as_todo() -> None:
             observation="The follow-up was explicitly not filed.",
             cause=None,
             future_behavior=None,
-            evidence=[],
+            evidence=["A bead should be filed for the remaining phases."],
             generalizable=False,
         )
     )
@@ -552,7 +592,7 @@ def test_explicit_must_be_filed_observation_is_recovered_as_todo() -> None:
             observation="A follow-up bead must be filed for phases two through six.",
             cause=None,
             future_behavior=None,
-            evidence=[],
+            evidence=["A follow-up bead must be filed for phases two through six."],
             generalizable=False,
         )
     )
@@ -572,7 +612,7 @@ def test_natural_still_needs_to_be_deployed_is_recovered_as_todo() -> None:
             observation="Deployment remains open.",
             cause=None,
             future_behavior=None,
-            evidence=[],
+            evidence=["The persistence fix still needs to be deployed."],
             generalizable=False,
         )
     )
@@ -790,7 +830,10 @@ def test_regression_descriptive_work_item_is_reconsidered_as_learning() -> None:
     routed = analysis.route_candidate(candidate)
 
     assert routed.kind is analysis.CandidateKind.LEARNING
-    assert routed.routing_reason == "descriptive_todo_reconsidered_as_learning"
+    assert (
+        routed.routing_reason
+        == "todo_without_pending_evidence_reconsidered_as_learning"
+    )
 
 
 @pytest.mark.parametrize(
@@ -819,7 +862,7 @@ def test_regression_incomplete_work_item_routes_to_noise(
     routed = analysis.route_candidate(candidate)
 
     assert routed.kind is analysis.CandidateKind.NOISE
-    assert routed.routing_reason == "incomplete_todo_contract"
+    assert routed.routing_reason == "todo_without_pending_evidence"
 
 
 def test_concrete_work_item_requires_action_and_target() -> None:
@@ -827,6 +870,7 @@ def test_concrete_work_item_requires_action_and_target() -> None:
         "101-1",
         kind="todo",
         statement="Update the installer to reconcile hook registrations.",
+        evidence=["Update the installer to reconcile hook registrations."],
         concrete_action="Update the installer reconciliation logic",
     )
     raw["target"] = "hooks/install.py"
@@ -892,8 +936,9 @@ def test_clusters_include_only_validated_learning_candidates() -> None:
                 "102-1",
                 source_memory_id=102,
                 kind="todo",
-                statement="Fix the installer.",
-                concrete_action="Fix hooks/install.py",
+                    statement="Fix the installer.",
+                    evidence=["Fix the installer."],
+                    concrete_action="Fix hooks/install.py",
             )
         )
     )
@@ -1017,6 +1062,7 @@ def test_partitioned_report_keeps_non_learning_routes_separate() -> None:
                         source_memory_id=102,
                         kind="todo",
                         statement="Update the installer reconciliation logic.",
+                        evidence=["Update the installer reconciliation logic."],
                         concrete_action="Update the installer",
                         target="hooks/install.py",
                     )
@@ -1051,6 +1097,7 @@ async def test_analysis_extracts_all_kinds_but_clusters_only_valid_learnings() -
                     "ignored",
                     kind="todo",
                     statement="Fix hooks/install.py.",
+                    evidence=["Fix hooks/install.py."],
                     concrete_action="Fix hooks/install.py",
                     target="hooks/install.py",
                 ),
@@ -1715,6 +1762,26 @@ def test_extraction_prompt_requires_atomic_claims_and_distinct_findings() -> Non
         "does not suppress a separate evidence-backed causal finding"
         in normalized_prompt
     )
+    assert "verbatim `evidence` excerpt" in normalized_prompt
+    assert "generated imperative is not evidence" in normalized_prompt
+
+
+def test_learning_rich_summaries_receive_focused_extraction_batches() -> None:
+    routine_one = analysis.SessionSummary(**_summary(101))
+    focused_raw = _summary(102, session_ref="session-102")
+    focused_raw["content"] = (
+        "Key findings: a failed push can leave tracker and Git state divergent."
+    )
+    focused = analysis.SessionSummary(**focused_raw)
+    routine_two = analysis.SessionSummary(**_summary(103, session_ref="session-103"))
+
+    batches = analysis._extraction_batches([routine_one, focused, routine_two])
+
+    assert [[summary.id for summary in batch] for batch in batches] == [
+        [101],
+        [102],
+        [103],
+    ]
 
 
 def test_reconciliation_prompt_allows_method_when_it_is_the_causal_learning() -> None:
