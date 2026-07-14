@@ -54,6 +54,19 @@ _PENDING_ACTION_RE = re.compile(
     r"follow-up (?:needed|required))\b",
     re.IGNORECASE,
 )
+_EXPLICIT_PENDING_RE = re.compile(
+    r"\b(?:must still|still (?:needs?|requires?) to|not yet|still pending|"
+    r"remains? to be|follow-up (?:needed|required)|"
+    r"should (?:still )?be (?:filed|created|implemented|deployed|completed|done)|"
+    r"(?:was|is) (?:explicitly )?not filed)\b",
+    re.IGNORECASE,
+)
+_STATUS_NARRATION_RE = re.compile(
+    r"^(?:added|amended|classified|fixed|implemented|migrated|moved|re-exported|"
+    r"rewrote|shipped|split|updated)\b|^bead\b.*\b(?:implemented|shipped)\b",
+    re.IGNORECASE,
+)
+_DECISION_MARKER_RE = re.compile(r"\bkey decisions?\s*:", re.IGNORECASE)
 # Reject short fragments that commonly occur as generic status boilerplate.
 _MIN_EVIDENCE_QUOTE_CHARS = 20
 _EVIDENCE_REQUIRED_KINDS = {
@@ -414,6 +427,36 @@ def route_candidate(candidate: LearningCandidate) -> LearningCandidate:
     pending_statement = imperative_statement or bool(
         _PENDING_ACTION_RE.search(candidate.statement)
     )
+    candidate_fields = [
+        candidate.statement,
+        candidate.observation or "",
+        candidate.future_behavior or "",
+        *(candidate.evidence or []),
+    ]
+    explicit_pending_field = next(
+        (field for field in candidate_fields if _EXPLICIT_PENDING_RE.search(field)),
+        None,
+    )
+    actionable_kinds = {
+        CandidateKind.LEARNING,
+        CandidateKind.TODO,
+        CandidateKind.DECISION,
+        CandidateKind.STANDARD_CANDIDATE,
+        CandidateKind.SKILL_CANDIDATE,
+    }
+    if explicit_pending_field and candidate.kind in actionable_kinds:
+        return replace(
+            candidate,
+            kind=CandidateKind.TODO,
+            concrete_action=candidate.concrete_action or explicit_pending_field,
+            target=(
+                candidate.target
+                or candidate.artifact_reference
+                or candidate.source_project
+                or f"memory:{candidate.source_memory_id}"
+            ),
+            routing_reason="explicit_pending_work",
+        )
 
     if candidate.kind is CandidateKind.TODO:
         if complete_contract and not pending_statement:
@@ -437,6 +480,28 @@ def route_candidate(candidate: LearningCandidate) -> LearningCandidate:
         CandidateKind.STANDARD_CANDIDATE,
         CandidateKind.SKILL_CANDIDATE,
     }
+    decision_context = "\n".join(
+        [candidate.observation or "", *(candidate.evidence or [])]
+    )
+    if (
+        candidate.kind is CandidateKind.LEARNING
+        and _DECISION_MARKER_RE.search(decision_context)
+    ):
+        return replace(
+            candidate,
+            kind=CandidateKind.DECISION,
+            concrete_action=None,
+            target=None,
+            routing_reason="explicit_decision_marker",
+        )
+    if candidate.kind is CandidateKind.LEARNING and _STATUS_NARRATION_RE.search(
+        candidate.statement
+    ):
+        return replace(
+            candidate,
+            kind=CandidateKind.NOISE,
+            routing_reason="status_narration_not_learning",
+        )
     if candidate.kind in knowledge_kinds and pending_statement and (
         candidate.concrete_action or candidate.target
     ):
@@ -606,7 +671,9 @@ Hard learning gate:
 - `generalizable` must be true and the claim must apply beyond the exact file or incident.
 - Imperatives such as fix, update, add, implement, ensure, configure, or increase are "todo".
 - A "todo" requires an explicitly pending imperative `statement` plus both `concrete_action` and `target`.
+- Put explicitly unresolved work in "todo" even when the source labels it a caveat or decision; phrases such as "must still", "not yet", "follow-up needed", and "should be filed" are unresolved work.
 - Never invent follow-up work from a descriptive claim about completed work; classify that causal claim by its evidence contract or use "noise".
+- Completed changelog bullets and key decisions are status/decision records, not learnings; do not invent generic causes or future behavior to make them pass the learning gate.
 - Whenever `evidence` is present, every item must be a verbatim excerpt from the same summary identified by `source_memory_id`; include at least one excerpt unique within this input batch, and never paraphrase or copy evidence between summaries.
 - Merely reporting what was changed is not a learning.
 - Existing policy copied from AGENTS.md, a standard, or a skill is `duplicate_doctrine`, not a new learning.
@@ -841,9 +908,11 @@ Return only a JSON object with an `equivalent_pair_ids` array.
 
 Confirm a pair only when both candidates express the same durable causal mechanism
 and prescribe compatible future behavior, with each claim grounded by its quoted
-source evidence. Reject pairs from different incidents that merely share a review
-method, topic, component, vocabulary, or evidence; reject opposite or materially
-different rules.
+source evidence. Reject pairs from different incidents that merely share a method,
+topic, component, vocabulary, or evidence. However, a shared method is equivalent
+when the method itself is the evidenced causal mechanism and both candidates derive
+the same durable future behavior from it. Reject opposite or materially different
+rules.
 Embedding similarity is only a shortlist signal and is never sufficient for a merge.
 
 Candidate pairs:

@@ -48,6 +48,13 @@ action field. Standard and skill candidates must also satisfy the causal
 evidence contract. A `duplicate_doctrine` candidate must name the existing
 artifact it duplicates.
 
+Explicit unresolved markers are checked across the statement, observation,
+future behavior, and evidence. High-confidence phrases such as "must still",
+"not yet", "follow-up needed", or "should be filed" recover mislabeled work as
+a TODO using the quoted pending field as its action and the source project as a
+fallback target. Conversely, completed status narration is excluded from the
+learning queue, and source text marked as a key decision is routed to decisions.
+
 In multi-summary batches, learning, standard, and skill candidates require
 evidence. TODO and decision candidates may omit it. Whenever evidence is
 present, every item must be a verbatim excerpt of the title, content, or
@@ -72,7 +79,10 @@ the causal learning fields independently shortlists semantically close pairs.
 Neither proposal source can merge candidates. The configured LLM must explicitly
 confirm each proposed pair has the same causal mechanism and compatible future
 behavior. Pairs that only share a topic, component, vocabulary, or evidence
-remain separate. Confirmed pairs only combine larger groups when every
+remain separate. A method shared incidentally remains separate, but it may be
+confirmed when the method itself is the evidenced causal mechanism and both
+sessions derive the same durable future behavior. Confirmed pairs only combine
+larger groups when every
 cross-group cluster pair was also confirmed, preventing a broad middle claim
 from transitively joining incompatible rules. The shortlist is bounded, and a
 fair bounded budget reserves capacity for proposal-only pairs that fall below
