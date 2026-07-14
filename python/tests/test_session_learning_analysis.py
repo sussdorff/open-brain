@@ -467,6 +467,119 @@ async def test_analysis_extracts_all_kinds_but_clusters_only_valid_learnings() -
 
 
 @pytest.mark.asyncio
+async def test_reconciliation_merges_cleanup_gate_paraphrases_across_sessions() -> None:
+    candidates = [
+        analysis.LearningCandidate.from_dict(
+            _candidate(
+                "26783-1",
+                source_memory_id=26783,
+                statement=(
+                    "Use diff-based verification as the gate for worktree and branch "
+                    "removal instead of trusting bead status."
+                ),
+                observation="Closed beads can still have unlanded branch content.",
+                cause="Bead lifecycle and Git landedness are independent states.",
+                future_behavior=(
+                    "Verify semantic Git diffs before removing a worktree or branch."
+                ),
+            )
+        ),
+        analysis.LearningCandidate.from_dict(
+            _candidate(
+                "26944-1",
+                source_memory_id=26944,
+                severity="critical",
+                statement=(
+                    "Semantic diff checks must decide branch cleanup because a closed "
+                    "work item does not prove that its code landed."
+                ),
+                observation="A branch remained unmerged when its bead reached close.",
+                cause="Tracking status does not establish Git content equivalence.",
+                future_behavior=(
+                    "Gate worktree and branch deletion on a semantic diff against main."
+                ),
+            )
+        ),
+    ]
+    responses = [
+        json.dumps({"clusters": []}),
+        json.dumps(
+            {"equivalent_pair_ids": ["26783-1::26944-1"]}
+        ),
+    ]
+
+    with (
+        patch.object(
+            analysis,
+            "llm_complete",
+            new_callable=AsyncMock,
+            side_effect=responses,
+        ),
+        patch(
+            "open_brain.session_learning_analysis.embed_batch",
+            new_callable=AsyncMock,
+            return_value=[[1.0, 0.0], [0.95, 0.05]],
+            create=True,
+        ),
+    ):
+        clusters = await analysis._cluster_candidates(candidates, model=None)
+
+    assert len(clusters) == 1
+    assert clusters[0].candidate_ids == ["26783-1", "26944-1"]
+    assert clusters[0].source_memory_ids == [26783, 26944]
+    assert clusters[0].review_eligible is True
+    assert clusters[0].severity == "critical"
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_keeps_incompatible_cleanup_rules_separate() -> None:
+    candidates = [
+        analysis.LearningCandidate.from_dict(
+            _candidate(
+                "301-1",
+                source_memory_id=301,
+                statement="Closed beads allow their worktrees to be removed immediately.",
+                observation="A bead status changed to closed.",
+                cause="Closure is treated as proof that work landed.",
+                future_behavior="Remove the branch as soon as the bead closes.",
+            )
+        ),
+        analysis.LearningCandidate.from_dict(
+            _candidate(
+                "302-1",
+                source_memory_id=302,
+                statement="Closed beads still require semantic Git checks before cleanup.",
+                observation="A closed bead retained unlanded branch content.",
+                cause="Bead state and Git landedness can diverge.",
+                future_behavior="Keep the branch until a semantic diff proves it landed.",
+            )
+        ),
+    ]
+
+    with (
+        patch.object(
+            analysis,
+            "llm_complete",
+            new_callable=AsyncMock,
+            side_effect=[
+                json.dumps({"clusters": []}),
+                json.dumps({"equivalent_pair_ids": []}),
+            ],
+        ),
+        patch(
+            "open_brain.session_learning_analysis.embed_batch",
+            new_callable=AsyncMock,
+            return_value=[[1.0, 0.0], [0.95, 0.05]],
+            create=True,
+        ),
+    ):
+        clusters = await analysis._cluster_candidates(candidates, model=None)
+
+    assert len(clusters) == 2
+    assert all(cluster.review_eligible is False for cluster in clusters)
+
+
+@pytest.mark.asyncio
 async def test_analysis_with_no_summaries_skips_llm() -> None:
     with (
         patch.object(
