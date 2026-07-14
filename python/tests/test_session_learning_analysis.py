@@ -151,13 +151,14 @@ def test_imperative_repository_change_is_rerouted_to_todo() -> None:
 
 
 def test_regression_descriptive_work_item_is_reconsidered_as_learning() -> None:
-    """Guard against LLM work-item labels bypassing the durable-learning gate."""
+    """Guard against fabricated action fields bypassing the durable-learning gate."""
     candidate = analysis.LearningCandidate.from_dict(
         _candidate(
             "101-1",
             kind="todo",
             statement="Append-only installers create duplicate registrations.",
-            concrete_action=None,
+            concrete_action="Implement installer reconciliation",
+            target="hooks/install.py",
         )
     )
 
