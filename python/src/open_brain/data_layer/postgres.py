@@ -68,10 +68,13 @@ DEDUP_WINDOW_DAYS = 30  # How far back the content-hash dedup check looks
 
 # ─── compact_memories helpers ─────────────────────────────────────────────────
 
+
 def canonical_entity_protection_predicate(alias: str | None = None) -> str:
     """Return the shared SQL predicate that excludes protected canonical entities."""
     metadata_ref = f"{alias}.metadata" if alias else "metadata"
-    return f"({metadata_ref}->>'{CANONICAL_ENTITY_METADATA_KEY}') IS DISTINCT FROM 'true'"
+    return (
+        f"({metadata_ref}->>'{CANONICAL_ENTITY_METADATA_KEY}') IS DISTINCT FROM 'true'"
+    )
 
 
 def canonical_entity_select_predicate(alias: str | None = None) -> str:
@@ -207,6 +210,7 @@ async def _repoint_relationships(
     total_affected += _parse_execute_count(result)
     return total_affected
 
+
 def _build_clusters(ids: list[int], edges: list[tuple[int, int]]) -> list[list[int]]:
     """Union-find over edges; return only clusters with >= 2 members."""
     parent: dict[int, int] = {i: i for i in ids}
@@ -259,8 +263,7 @@ _active_lifecycle_filter = (
     "OR metadata->>'do_not_compact' != 'true')"
 )
 _compact_lifecycle_filter = (
-    f"{_active_lifecycle_filter} "
-    f"{_canonical_entity_protection_filter()}"
+    f"{_active_lifecycle_filter} {_canonical_entity_protection_filter()}"
 )
 
 _LIFECYCLE_STATUS_VALUES: frozenset[str] = frozenset(
@@ -305,10 +308,10 @@ async def _ensure_metadata_column(conn: asyncpg.Connection) -> None:
 async def _init_conn(conn: asyncpg.Connection) -> None:
     """Register JSONB codec so asyncpg returns dicts instead of raw JSON strings."""
     await conn.set_type_codec(
-        'jsonb',
+        "jsonb",
         encoder=_json.dumps,
         decoder=_json.loads,
-        schema='pg_catalog',
+        schema="pg_catalog",
     )
 
 
@@ -343,7 +346,9 @@ _IMPORTANCE_MULTIPLIERS: dict[str, float] = {
 RECALL_DECAY_FACTOR: float = 0.9
 
 
-def compute_decay_delta(importance: str, access_count: int, base_decay_delta: float) -> float:
+def compute_decay_delta(
+    importance: str, access_count: int, base_decay_delta: float
+) -> float:
     """Compute the effective decay delta for a memory given importance and access count.
 
     Implements: delta = base_decay_delta * mult / (1 + access_count * 0.1)
@@ -364,7 +369,9 @@ def compute_decay_delta(importance: str, access_count: int, base_decay_delta: fl
         # safe because a DB CHECK constraint prevents any unknown importance value from
         # being stored in the first place; the warning is logged for observability but the
         # function must not crash so that lifecycle pipelines remain resilient.
-        logger.warning("Unknown importance %r, defaulting to medium multiplier", importance)
+        logger.warning(
+            "Unknown importance %r, defaulting to medium multiplier", importance
+        )
         mult = 1.0
     if mult == 0.0:
         return 0.0
@@ -384,9 +391,7 @@ async def _run_migrations(conn: asyncpg.Connection) -> None:
     await conn.execute(
         "ALTER TABLE memories ADD COLUMN IF NOT EXISTS session_ref TEXT;"
     )
-    await conn.execute(
-        "ALTER TABLE memories ADD COLUMN IF NOT EXISTS user_id TEXT;"
-    )
+    await conn.execute("ALTER TABLE memories ADD COLUMN IF NOT EXISTS user_id TEXT;")
     await conn.execute(
         "ALTER TABLE memories ADD COLUMN IF NOT EXISTS importance VARCHAR(8) NOT NULL DEFAULT 'medium' "
         "CHECK (importance IN ('critical', 'high', 'medium', 'low'));"
@@ -596,7 +601,9 @@ async def get_pool(run_migrations: bool | None = None) -> asyncpg.Pool:
             config.DATABASE_URL, min_size=2, max_size=10, init=_init_conn
         )
 
-    do_migrate = run_migrations if run_migrations is not None else not _migrations_suppressed
+    do_migrate = (
+        run_migrations if run_migrations is not None else not _migrations_suppressed
+    )
     if do_migrate and not _migrations_ensured:
         async with _pool.acquire() as conn:
             await _run_migrations(conn)
@@ -644,12 +651,16 @@ def _row_to_memory(row: asyncpg.Record) -> Memory:
         priority=float(row["priority"]),
         stability=row["stability"],
         access_count=row["access_count"],
-        last_accessed_at=str(row["last_accessed_at"]) if row.get("last_accessed_at") else None,
+        last_accessed_at=str(row["last_accessed_at"])
+        if row.get("last_accessed_at")
+        else None,
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
         user_id=row.get("user_id"),
         importance=row.get("importance", "medium"),
-        last_decay_at=str(row.get("last_decay_at")) if row.get("last_decay_at") else None,
+        last_decay_at=str(row.get("last_decay_at"))
+        if row.get("last_decay_at")
+        else None,
     )
 
 
@@ -679,7 +690,9 @@ class PostgresDataLayer:
             return 1
         return index_id
 
-    async def _resolve_index_id(self, conn: asyncpg.Connection, project: str | None) -> int | None:
+    async def _resolve_index_id(
+        self, conn: asyncpg.Connection, project: str | None
+    ) -> int | None:
         """Resolve a project name to its memory_indexes.id, creating if needed."""
         if not project:
             return None
@@ -756,7 +769,9 @@ class PostgresDataLayer:
                 try:
                     config = get_config()
                     query_embedding, query_tokens = await embed_query_with_usage(query)
-                    asyncio.create_task(self._log_embedding_tokens("query", query_tokens))
+                    asyncio.create_task(
+                        self._log_embedding_tokens("query", query_tokens)
+                    )
 
                     # Fetch 3x candidates for reranking (capped at 100)
                     fetch_limit = min(limit * 3, 100)
@@ -766,11 +781,18 @@ class PostgresDataLayer:
                     # metadata_filter is pre-constrained inside hybrid_search as $6 (NULL if not set)
                     # capture_status is pre-constrained inside hybrid_search as $7 (NULL if not set)
                     # so inbox items are not dropped by the function's internal candidate truncation.
-                    metadata_jsonb = params.metadata_filter if params.metadata_filter else None
+                    metadata_jsonb = (
+                        params.metadata_filter if params.metadata_filter else None
+                    )
                     post_conditions: list[str] = []
                     post_values: list[Any] = [
-                        query, to_pg_vector(query_embedding), fetch_limit * 3, index_id, params.author,
-                        metadata_jsonb, params.capture_status,
+                        query,
+                        to_pg_vector(query_embedding),
+                        fetch_limit * 3,
+                        index_id,
+                        params.author,
+                        metadata_jsonb,
+                        params.capture_status,
                     ]
                     param_idx = 8  # after the 7 hybrid_search params ($1–$7)
 
@@ -787,14 +809,20 @@ class PostgresDataLayer:
                         post_values.append(_parse_date(params.date_end))
                         param_idx += 1
                     if params.file_path:
-                        post_conditions.append(f"m.metadata->>'filePath' = ${param_idx}")
+                        post_conditions.append(
+                            f"m.metadata->>'filePath' = ${param_idx}"
+                        )
                         post_values.append(params.file_path)
                         param_idx += 1
                     # metadata_filter ($6) and capture_status ($7) are now pre-constrained inside
                     # hybrid_search, not post-filters — they must gate candidate selection BEFORE
                     # the function's internal LIMIT match_limit * 2 truncation.
 
-                    post_where = f"AND {' AND '.join(post_conditions)}" if post_conditions else ""
+                    post_where = (
+                        f"AND {' AND '.join(post_conditions)}"
+                        if post_conditions
+                        else ""
+                    )
 
                     rows = await conn.fetch(
                         f"""WITH scored AS (
@@ -808,7 +836,9 @@ class PostgresDataLayer:
                         WHERE 1=1 {post_where}
                         ORDER BY s.score DESC
                         LIMIT ${param_idx} OFFSET ${param_idx + 1}""",
-                        *post_values, fetch_limit, offset,
+                        *post_values,
+                        fetch_limit,
+                        offset,
                     )
 
                     memories = [_row_to_memory(r) for r in rows]
@@ -827,16 +857,19 @@ class PostgresDataLayer:
                         memories = memories[:limit]
 
                     asyncio.create_task(
-                        self._log_usage_background([m.id for m in memories], "search_hit")
+                        self._log_usage_background(
+                            [m.id for m in memories], "search_hit"
+                        )
                     )
                     # Recall-triggered decay: batch all candidates into ONE background task
                     # to avoid N concurrent pool acquisitions causing connection contention.
                     decay_candidates = [
-                        (m.id, m.importance, m.access_count)
-                        for m in memories
+                        (m.id, m.importance, m.access_count) for m in memories
                     ]
                     if decay_candidates:
-                        asyncio.create_task(self._apply_recall_decay_background(decay_candidates))
+                        asyncio.create_task(
+                            self._apply_recall_decay_background(decay_candidates)
+                        )
                     return SearchResult(results=memories, total=len(memories))
 
                 except Exception:
@@ -891,15 +924,21 @@ class PostgresDataLayer:
                 param_idx += 1
 
             where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-            order_by = "m.created_at ASC" if params.order_by == "oldest" else "m.created_at DESC"
+            order_by = (
+                "m.created_at ASC"
+                if params.order_by == "oldest"
+                else "m.created_at DESC"
+            )
 
             rows = await conn.fetch(
                 f"""SELECT m.id, m.index_id, m.session_id, m.type, m.title, m.subtitle, m.narrative, m.content,
                         m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.last_decay_at, m.created_at, m.updated_at, m.user_id, m.importance
                  FROM memories m {where}
                  ORDER BY {order_by}
-                 LIMIT ${param_idx} OFFSET ${param_idx+1}""",
-                *values, limit, offset,
+                 LIMIT ${param_idx} OFFSET ${param_idx + 1}""",
+                *values,
+                limit,
+                offset,
             )
 
             count_row = await conn.fetchrow(
@@ -913,12 +952,11 @@ class PostgresDataLayer:
             )
             # Recall-triggered decay: batch all candidates into ONE background task
             # to avoid N concurrent pool acquisitions causing connection contention.
-            decay_candidates = [
-                (m.id, m.importance, m.access_count)
-                for m in memories
-            ]
+            decay_candidates = [(m.id, m.importance, m.access_count) for m in memories]
             if decay_candidates:
-                asyncio.create_task(self._apply_recall_decay_background(decay_candidates))
+                asyncio.create_task(
+                    self._apply_recall_decay_background(decay_candidates)
+                )
             return SearchResult(results=memories, total=count_row["total"])
 
     async def ingest_status_by_source_refs(
@@ -1050,11 +1088,15 @@ class PostgresDataLayer:
             pool = await get_pool()
             async with pool.acquire() as conn:
                 for memory_id, importance, access_count in candidates:
-                    await self._apply_recall_decay(conn, memory_id, importance, access_count)
+                    await self._apply_recall_decay(
+                        conn, memory_id, importance, access_count
+                    )
         except Exception as err:
             logger.warning("Recall decay background batch failed: %s", err)
 
-    async def _log_usage_background(self, memory_ids: list[int], event_type: str) -> None:
+    async def _log_usage_background(
+        self, memory_ids: list[int], event_type: str
+    ) -> None:
         """Log usage in background (fire-and-forget)."""
         if not memory_ids:
             return
@@ -1078,7 +1120,11 @@ class PostgresDataLayer:
             index_id = await self._resolve_index_id(conn, params.project)
 
             # ── Date window mode ──
-            if not anchor_id and not params.query and (params.date_start or params.date_end):
+            if (
+                not anchor_id
+                and not params.query
+                and (params.date_start or params.date_end)
+            ):
                 conditions: list[str] = []
                 values: list[Any] = []
                 param_idx = 1
@@ -1105,9 +1151,12 @@ class PostgresDataLayer:
                      FROM memories m {where}
                      ORDER BY m.created_at ASC
                      LIMIT ${param_idx}""",
-                    *values, limit,
+                    *values,
+                    limit,
                 )
-                return TimelineResult(results=[_row_to_memory(r) for r in rows], anchor_id=None)
+                return TimelineResult(
+                    results=[_row_to_memory(r) for r in rows], anchor_id=None
+                )
 
             # ── Anchor mode ──
             # If query provided, find best match as anchor
@@ -1159,7 +1208,9 @@ class PostgresDataLayer:
                 *base_values,
             )
 
-            return TimelineResult(results=[_row_to_memory(r) for r in rows], anchor_id=anchor_id)
+            return TimelineResult(
+                results=[_row_to_memory(r) for r in rows], anchor_id=anchor_id
+            )
 
     async def get_observations(self, ids: list[int]) -> list[Memory]:
         """Bulk fetch memories by IDs."""
@@ -1167,7 +1218,7 @@ class PostgresDataLayer:
             return []
         pool = await get_pool()
         async with pool.acquire() as conn:
-            placeholders = ", ".join(f"${i+1}" for i in range(len(ids)))
+            placeholders = ", ".join(f"${i + 1}" for i in range(len(ids)))
             rows = await conn.fetch(
                 f"SELECT * FROM memories WHERE id IN ({placeholders}) ORDER BY created_at ASC",
                 *ids,
@@ -1247,7 +1298,9 @@ class PostgresDataLayer:
                         # replacing content for this session_ref; duplicates across other
                         # sessions are irrelevant).
                         base_metadata = dict(params.metadata) if params.metadata else {}
-                        content_hash_replace = hashlib.sha256(params.text.encode()).hexdigest()
+                        content_hash_replace = hashlib.sha256(
+                            params.text.encode()
+                        ).hexdigest()
                         base_metadata["content_hash"] = content_hash_replace
                         # Inject run_id if inside an ingest_run context
                         if run_id := get_current_run_id():
@@ -1272,11 +1325,20 @@ class PostgresDataLayer:
                     # Kick off embedding + auto-linking outside the transaction
                     text_to_embed_replace = ": ".join(
                         part
-                        for part in [params.title, params.subtitle, params.narrative, params.text]
+                        for part in [
+                            params.title,
+                            params.subtitle,
+                            params.narrative,
+                            params.text,
+                        ]
                         if part
                     )
-                    asyncio.create_task(self._embed_and_link(memory_id_replace, text_to_embed_replace))
-                    return SaveMemoryResult(id=memory_id_replace, message="Memory saved")
+                    asyncio.create_task(
+                        self._embed_and_link(memory_id_replace, text_to_embed_replace)
+                    )
+                    return SaveMemoryResult(
+                        id=memory_id_replace, message="Memory saved"
+                    )
                 else:
                     # append mode: merge content into existing row
                     existing = await conn.fetchrow(
@@ -1290,7 +1352,9 @@ class PostgresDataLayer:
                     )
                     if existing:
                         existing_id: int = existing["id"]
-                        merged_content = existing["content"] + "\n\n---\n\n" + params.text
+                        merged_content = (
+                            existing["content"] + "\n\n---\n\n" + params.text
+                        )
                         updates: dict[str, Any] = {"content": merged_content}
                         if params.title is not None:
                             updates["title"] = params.title
@@ -1315,16 +1379,27 @@ class PostgresDataLayer:
 
                         text_to_embed = ": ".join(
                             part
-                            for part in [params.title, params.subtitle, params.narrative, merged_content]
+                            for part in [
+                                params.title,
+                                params.subtitle,
+                                params.narrative,
+                                merged_content,
+                            ]
                             if part
                         )
-                        asyncio.create_task(self._embed_and_link(existing_id, text_to_embed))
-                        return SaveMemoryResult(id=existing_id, message="Memory updated (upsert)")
+                        asyncio.create_task(
+                            self._embed_and_link(existing_id, text_to_embed)
+                        )
+                        return SaveMemoryResult(
+                            id=existing_id, message="Memory updated (upsert)"
+                        )
 
             # ── Semantic dedup (dedup_mode == "merge" only) ──
             if params.dedup_mode == "merge":
                 config = get_config()
-                query_embedding, query_tokens = await embed_query_with_usage(params.text)
+                query_embedding, query_tokens = await embed_query_with_usage(
+                    params.text
+                )
                 asyncio.create_task(self._log_embedding_tokens("query", query_tokens))
                 vec_str = to_pg_vector(query_embedding)
                 # Normalize index_id for dedup: match the same scope used by inserts.
@@ -1342,14 +1417,18 @@ class PostgresDataLayer:
                     search_index_id,
                     DEDUP_WINDOW_DAYS,
                 )
-                if match_row is not None and match_row["similarity"] >= config.DEDUP_THRESHOLD:
+                if (
+                    match_row is not None
+                    and match_row["similarity"] >= config.DEDUP_THRESHOLD
+                ):
                     existing_id = match_row["id"]
                     existing_importance: str = match_row["importance"] or "medium"
 
                     # Higher importance wins
                     new_importance = (
                         params.importance
-                        if rank_importance(params.importance) > rank_importance(existing_importance)
+                        if rank_importance(params.importance)
+                        > rank_importance(existing_importance)
                         else existing_importance
                     )
                     # Do not mutate priority — preserve existing value
@@ -1467,7 +1546,9 @@ class PostgresDataLayer:
             set_parts.append("updated_at = NOW()")
 
             values.append(params.id)
-            query = f"UPDATE memories SET {', '.join(set_parts)} WHERE id = ${param_idx}"
+            query = (
+                f"UPDATE memories SET {', '.join(set_parts)} WHERE id = ${param_idx}"
+            )
             await conn.execute(query, *values)
 
         # Re-embed if text-related fields changed
@@ -1480,8 +1561,12 @@ class PostgresDataLayer:
                 part
                 for part in [
                     params.title if params.title is not None else existing["title"],
-                    params.subtitle if params.subtitle is not None else existing["subtitle"],
-                    params.narrative if params.narrative is not None else existing["narrative"],
+                    params.subtitle
+                    if params.subtitle is not None
+                    else existing["subtitle"],
+                    params.narrative
+                    if params.narrative is not None
+                    else existing["narrative"],
                     params.text if params.text is not None else existing["content"],
                 ]
                 if part
@@ -1490,7 +1575,9 @@ class PostgresDataLayer:
 
         return SaveMemoryResult(id=params.id, message="Memory updated")
 
-    async def set_capture_status(self, params: CaptureTransitionParams) -> SaveMemoryResult:
+    async def set_capture_status(
+        self, params: CaptureTransitionParams
+    ) -> SaveMemoryResult:
         """Change capture inbox status without changing lifecycle status by default."""
         validate_capture_status(params.capture_status)
         if params.lifecycle_status is not None:
@@ -1604,7 +1691,9 @@ class PostgresDataLayer:
             set_parts.append("updated_at = NOW()")
 
             values.append(params.id)
-            query = f"UPDATE memories SET {', '.join(set_parts)} WHERE id = ${param_idx}"
+            query = (
+                f"UPDATE memories SET {', '.join(set_parts)} WHERE id = ${param_idx}"
+            )
             await conn.execute(query, *values)
 
         content_changed = any(
@@ -1616,8 +1705,12 @@ class PostgresDataLayer:
                 part
                 for part in [
                     params.title if params.title is not None else existing["title"],
-                    params.subtitle if params.subtitle is not None else existing["subtitle"],
-                    params.narrative if params.narrative is not None else existing["narrative"],
+                    params.subtitle
+                    if params.subtitle is not None
+                    else existing["subtitle"],
+                    params.narrative
+                    if params.narrative is not None
+                    else existing["narrative"],
                     params.text if params.text is not None else existing["content"],
                 ]
                 if part
@@ -1839,7 +1932,9 @@ class PostgresDataLayer:
             max_results = limit or 10
 
             # Fetch 3x candidates when reranking is enabled
-            fetch_limit = min(max_results * 3, 100) if config.RERANK_ENABLED else max_results
+            fetch_limit = (
+                min(max_results * 3, 100) if config.RERANK_ENABLED else max_results
+            )
 
             conditions = ["m.embedding IS NOT NULL"]
             values: list[Any] = [to_pg_vector(query_embedding)]
@@ -1857,7 +1952,7 @@ class PostgresDataLayer:
                         m.metadata, m.priority, m.stability, m.access_count, m.last_accessed_at, m.last_decay_at, m.created_at, m.updated_at, m.user_id, m.importance,
                         1 - (m.embedding <=> $1::vector) AS similarity
                  FROM memories m
-                 WHERE {' AND '.join(conditions)}
+                 WHERE {" AND ".join(conditions)}
                  ORDER BY m.embedding <=> $1::vector
                  LIMIT ${param_idx}""",
                 *values,
@@ -1915,8 +2010,12 @@ class PostgresDataLayer:
         """Get database aggregate statistics including type taxonomy and per-user counts."""
         pool = await get_pool()
         async with pool.acquire() as conn:
-            memories_row = await conn.fetchrow("SELECT COUNT(*)::int AS count FROM memories")
-            sessions_row = await conn.fetchrow("SELECT COUNT(*)::int AS count FROM sessions")
+            memories_row = await conn.fetchrow(
+                "SELECT COUNT(*)::int AS count FROM memories"
+            )
+            sessions_row = await conn.fetchrow(
+                "SELECT COUNT(*)::int AS count FROM sessions"
+            )
             relationships_row = await conn.fetchrow(
                 "SELECT COUNT(*)::int AS count FROM memory_relationships"
             )
@@ -1937,7 +2036,9 @@ class PostgresDataLayer:
 
         size_bytes = int(db_size_row["size"])
         embeddings_today = int(embedding_row["count"]) if embedding_row else 0
-        embedding_tokens_today = int(embedding_row["total_tokens"]) if embedding_row else 0
+        embedding_tokens_today = (
+            int(embedding_row["total_tokens"]) if embedding_row else 0
+        )
         # Voyage-4 pricing: $0.00000012 per token (= $0.12 per 1M tokens)
         estimated_cost = round(embedding_tokens_today * 0.00000012, 6)
         return {
@@ -1947,7 +2048,9 @@ class PostgresDataLayer:
             "db_size_bytes": size_bytes,
             "db_size_mb": round(size_bytes / 1024 / 1024, 2),
             "types": {row["type"]: row["count"] for row in type_rows},
-            "by_user": {(row["user_id"] or "unknown"): row["count"] for row in user_rows},
+            "by_user": {
+                (row["user_id"] or "unknown"): row["count"] for row in user_rows
+            },
             "embeddings_today": embeddings_today,
             "embedding_tokens_today": embedding_tokens_today,
             "estimated_embedding_cost_today": estimated_cost,
@@ -1957,9 +2060,15 @@ class PostgresDataLayer:
         """Return row counts for the portable knowledge closure."""
         pool = await get_pool()
         async with pool.acquire() as conn:
-            indexes = await conn.fetchrow("SELECT COUNT(*)::int AS count FROM memory_indexes")
-            sessions = await conn.fetchrow("SELECT COUNT(*)::int AS count FROM sessions")
-            memories = await conn.fetchrow("SELECT COUNT(*)::int AS count FROM memories")
+            indexes = await conn.fetchrow(
+                "SELECT COUNT(*)::int AS count FROM memory_indexes"
+            )
+            sessions = await conn.fetchrow(
+                "SELECT COUNT(*)::int AS count FROM sessions"
+            )
+            memories = await conn.fetchrow(
+                "SELECT COUNT(*)::int AS count FROM memories"
+            )
             relationships = await conn.fetchrow(
                 "SELECT COUNT(*)::int AS count FROM memory_relationships"
             )
@@ -2109,9 +2218,7 @@ class PostgresDataLayer:
                 missing_ids = await self._memories_missing_embeddings(
                     [m["id"] for m in memories if m.get("id") is not None]
                 )
-                memories_to_embed = [
-                    m for m in memories if m.get("id") in missing_ids
-                ]
+                memories_to_embed = [m for m in memories if m.get("id") in missing_ids]
             for memory in memories_to_embed:
                 text_to_embed = ": ".join(
                     str(part)
@@ -2324,7 +2431,9 @@ class PostgresDataLayer:
             all_merge_ids = list({mid for a in merge_actions for mid in a.memory_ids})
             if all_merge_ids:
                 async with pool.acquire() as conn:
-                    placeholders = ", ".join(f"${i+1}" for i in range(len(all_merge_ids)))
+                    placeholders = ", ".join(
+                        f"${i + 1}" for i in range(len(all_merge_ids))
+                    )
                     sim_rows = await conn.fetch(
                         f"""SELECT m1.id AS id1, m2.id AS id2,
                                    1 - (m1.embedding <=> m2.embedding) AS similarity
@@ -2348,14 +2457,20 @@ class PostgresDataLayer:
             elif scope == "duplicates":
                 ids = action.memory_ids
                 min_sim = min(
-                    (similarity_map.get((min(a, b), max(a, b)), 0.0)
-                     for a in ids for b in ids if a != b),
+                    (
+                        similarity_map.get((min(a, b), max(a, b)), 0.0)
+                        for a in ids
+                        for b in ids
+                        if a != b
+                    ),
                     default=0.0,
                 )
                 action.similarity = min_sim
                 if min_sim < 0.4:
                     # Too dissimilar — likely a false positive from the LLM
-                    logger.info("Dropping merge %s — similarity %.3f below floor", ids, min_sim)
+                    logger.info(
+                        "Dropping merge %s — similarity %.3f below floor", ids, min_sim
+                    )
                     actions.remove(action)
                 elif min_sim >= 0.92:
                     action.skip_llm_merge = True
@@ -2413,42 +2528,44 @@ class PostgresDataLayer:
             )
         """
         candidate_ledger_filter = "" if params.dry_run else _unstaged_filter
+        ledger_args = () if params.dry_run else (policy_version,)
+        first_scope_param = len(ledger_args) + 1
 
         async def _fetch_candidates(conn: asyncpg.Connection) -> list[asyncpg.Record]:
             if scope.startswith("project:"):
                 project = scope[8:]
                 index_id = await self._resolve_index_id(conn, project)
                 return await conn.fetch(
-                    f"SELECT * FROM memories WHERE index_id = $2 {_lifecycle_filter} {candidate_ledger_filter} ORDER BY created_at DESC LIMIT $3",
-                    policy_version,
+                    f"SELECT * FROM memories WHERE index_id = ${first_scope_param} {_lifecycle_filter} {candidate_ledger_filter} ORDER BY created_at DESC LIMIT ${first_scope_param + 1}",
+                    *ledger_args,
                     self._scope_index_id(index_id),
                     limit,
                 )
             if scope.startswith("type:"):
                 mem_type = scope[5:]
                 return await conn.fetch(
-                    f"SELECT * FROM memories WHERE type = $2 {_lifecycle_filter} {candidate_ledger_filter} ORDER BY created_at DESC LIMIT $3",
-                    policy_version,
+                    f"SELECT * FROM memories WHERE type = ${first_scope_param} {_lifecycle_filter} {candidate_ledger_filter} ORDER BY created_at DESC LIMIT ${first_scope_param + 1}",
+                    *ledger_args,
                     mem_type,
                     limit,
                 )
             if scope == "low-priority":
                 return await conn.fetch(
-                    f"SELECT * FROM memories WHERE priority < 0.2 AND importance NOT IN ('critical', 'high') {_lifecycle_filter} {candidate_ledger_filter} ORDER BY priority ASC LIMIT $2",
-                    policy_version,
+                    f"SELECT * FROM memories WHERE priority < 0.2 AND importance NOT IN ('critical', 'high') {_lifecycle_filter} {candidate_ledger_filter} ORDER BY priority ASC LIMIT ${first_scope_param}",
+                    *ledger_args,
                     limit,
                 )
             if scope.startswith("session_ref:"):
-                prefix = scope[len("session_ref:"):]
+                prefix = scope[len("session_ref:") :]
                 return await conn.fetch(
-                    f"SELECT * FROM memories WHERE session_ref LIKE $2 {_lifecycle_filter} {candidate_ledger_filter} ORDER BY created_at DESC LIMIT $3",
-                    policy_version,
+                    f"SELECT * FROM memories WHERE session_ref LIKE ${first_scope_param} {_lifecycle_filter} {candidate_ledger_filter} ORDER BY created_at DESC LIMIT ${first_scope_param + 1}",
+                    *ledger_args,
                     prefix + "%",
                     limit,
                 )
             return await conn.fetch(
-                f"SELECT * FROM memories WHERE 1=1 {_lifecycle_filter} {candidate_ledger_filter} ORDER BY created_at DESC LIMIT $2",
-                policy_version,
+                f"SELECT * FROM memories WHERE 1=1 {_lifecycle_filter} {candidate_ledger_filter} ORDER BY created_at DESC LIMIT ${first_scope_param}",
+                *ledger_args,
                 limit,
             )
 
@@ -2549,7 +2666,9 @@ class PostgresDataLayer:
                         reason = (
                             action.reason
                             if isinstance(action.reason, str)
-                            else "" if action.reason is None else str(action.reason)
+                            else ""
+                            if action.reason is None
+                            else str(action.reason)
                         )
                         row = await conn.fetchrow(
                             """
@@ -2589,7 +2708,9 @@ class PostgresDataLayer:
         for a in actions:
             action_counts[a.action] = action_counts.get(a.action, 0) + 1
 
-        summary_parts = [f"{count} {act}" for act, count in sorted(action_counts.items())]
+        summary_parts = [
+            f"{count} {act}" for act, count in sorted(action_counts.items())
+        ]
         if params.dry_run:
             summary = (
                 f"Proposed {len(actions)} actions for {len(candidates)} memories: "
@@ -2665,18 +2786,22 @@ class PostgresDataLayer:
             )
         return _row_to_lifecycle_action(row)
 
-    async def materialize_memories(self, params: MaterializeParams) -> MaterializeResult:
+    async def materialize_memories(
+        self, params: MaterializeParams
+    ) -> MaterializeResult:
         """Execute materialization for a list of triage actions."""
         from open_brain.data_layer.materialize import execute_triage_actions
 
         if not params.triage_actions:
-            return MaterializeResult(processed=0, results=[], summary="No actions to materialize")
+            return MaterializeResult(
+                processed=0, results=[], summary="No actions to materialize"
+            )
 
         # Collect all memory IDs and fetch them in one query
         memory_ids = [a.memory_id for a in params.triage_actions]
         pool = await get_pool()
         async with pool.acquire() as conn:
-            placeholders = ", ".join(f"${i+1}" for i in range(len(memory_ids)))
+            placeholders = ", ".join(f"${i + 1}" for i in range(len(memory_ids)))
             rows = await conn.fetch(
                 f"SELECT * FROM memories WHERE id IN ({placeholders})",
                 *memory_ids,
@@ -2685,7 +2810,7 @@ class PostgresDataLayer:
             index_ids = list({row["index_id"] for row in rows if row["index_id"]})
             project_rows = []
             if index_ids:
-                idx_placeholders = ", ".join(f"${i+1}" for i in range(len(index_ids)))
+                idx_placeholders = ", ".join(f"${i + 1}" for i in range(len(index_ids)))
                 project_rows = await conn.fetch(
                     f"SELECT id, name FROM memory_indexes WHERE id IN ({idx_placeholders})",
                     *index_ids,
@@ -2706,6 +2831,7 @@ class PostgresDataLayer:
         if params.dry_run:
             # In dry run, return what would happen without executing
             from open_brain.data_layer.interface import MaterializeActionResult
+
             results = [
                 MaterializeActionResult(
                     memory_id=a.memory_id,
@@ -2728,7 +2854,9 @@ class PostgresDataLayer:
         summary = f"Materialized {succeeded}/{len(results)} actions" + (
             f" ({failed} failed)" if failed else ""
         )
-        return MaterializeResult(processed=len(results), results=results, summary=summary)
+        return MaterializeResult(
+            processed=len(results), results=results, summary=summary
+        )
 
     async def compact_memories(self, params: CompactParams) -> CompactResult:
         """Cluster and hard-delete near-duplicate memories using pgvector cosine similarity."""
@@ -2800,14 +2928,18 @@ class PostgresDataLayer:
                     "Expected None, 'project:<name>', or 'type:<name>'"
                 )
 
-            protected_rows = [row for row in mem_rows if _row_is_protected_canonical_entity(row)]
+            protected_rows = [
+                row for row in mem_rows if _row_is_protected_canonical_entity(row)
+            ]
             if protected_rows:
                 protected_canonical_entities = max(
                     protected_canonical_entities,
                     len(protected_rows),
                 )
                 mem_rows = [
-                    row for row in mem_rows if not _row_is_protected_canonical_entity(row)
+                    row
+                    for row in mem_rows
+                    if not _row_is_protected_canonical_entity(row)
                 ]
 
             # Step 2: If fewer than 2 memories → return early
@@ -2857,12 +2989,14 @@ class PostgresDataLayer:
             for cluster_id, members in enumerate(clusters):
                 canonical = _select_canonical(members, rows_by_id, params.strategy)
                 to_delete = [m for m in members if m != canonical]
-                plan.append(ClusterPlan(
-                    cluster_id=cluster_id,
-                    members=members,
-                    canonical_id=canonical,
-                    to_delete=to_delete,
-                ))
+                plan.append(
+                    ClusterPlan(
+                        cluster_id=cluster_id,
+                        members=members,
+                        canonical_id=canonical,
+                        to_delete=to_delete,
+                    )
+                )
                 all_to_delete.extend(to_delete)
 
             # Memories kept = all_ids minus to_delete
@@ -2909,7 +3043,9 @@ class PostgresDataLayer:
                 memories_kept = [i for i in all_ids if i not in delete_set]
 
             for loser_id in all_to_delete:
-                await _repoint_relationships(conn, loser_id, survivor_by_loser[loser_id])
+                await _repoint_relationships(
+                    conn, loser_id, survivor_by_loser[loser_id]
+                )
 
             await conn.execute(
                 "DELETE FROM memory_usage_log WHERE memory_id = ANY($1::int[])",
@@ -2931,7 +3067,9 @@ class PostgresDataLayer:
                 protected_canonical_entities=protected_canonical_entities,
             )
 
-    async def get_wake_up_memories(self, limit: int = 500, project: str | None = None) -> list[Memory]:
+    async def get_wake_up_memories(
+        self, limit: int = 500, project: str | None = None
+    ) -> list[Memory]:
         """Fetch memories with project_name for wake-up pack construction.
 
         Returns memories ordered by updated_at DESC, optionally filtered to a specific project.
@@ -3005,7 +3143,10 @@ class PostgresDataLayer:
             )
         logger.info(
             "Created relationship id=%d source=%d target=%d link_type=%s",
-            rel_id, source_id, target_id, link_type,
+            rel_id,
+            source_id,
+            target_id,
+            link_type,
         )
         return rel_id
 
@@ -3096,13 +3237,15 @@ class PostgresDataLayer:
                 if edge_id in visited_edges:
                     continue
                 visited_edges.add(edge_id)
-                results.append({
-                    "id": edge_id,
-                    "link_type": row["link_type"],
-                    "depth": current_depth,
-                    "source_id": src,
-                    "target_id": tgt,
-                })
+                results.append(
+                    {
+                        "id": edge_id,
+                        "link_type": row["link_type"],
+                        "depth": current_depth,
+                        "source_id": src,
+                        "target_id": tgt,
+                    }
+                )
                 if neighbor in visited:
                     continue
                 visited.add(neighbor)
@@ -3218,19 +3361,25 @@ class PostgresDataLayer:
         results: list[dict[str, Any]] = []
         for row in rows:
             date_val = row["created_at"]
-            date_str = date_val.isoformat() if hasattr(date_val, "isoformat") else str(date_val)
+            date_str = (
+                date_val.isoformat()
+                if hasattr(date_val, "isoformat")
+                else str(date_val)
+            )
 
             # Filter by since if provided
             if since is not None:
                 if date_str < since:
                     continue
 
-            results.append({
-                "memory_id": row["id"],
-                "title": row["title"],
-                "date": date_str,
-                "link_type": neighbor_link.get(row["id"], "unknown"),
-            })
+            results.append(
+                {
+                    "memory_id": row["id"],
+                    "title": row["title"],
+                    "date": date_str,
+                    "link_type": neighbor_link.get(row["id"], "unknown"),
+                }
+            )
 
         # Sort by date descending, apply limit
         results.sort(key=lambda r: r["date"], reverse=True)
@@ -3280,7 +3429,9 @@ class PostgresDataLayer:
         results: list[dict[str, Any]] = []
         for row in rows:
             metadata = row["metadata"] or {}
-            last_contact_raw = metadata.get("last_contact") if isinstance(metadata, dict) else None
+            last_contact_raw = (
+                metadata.get("last_contact") if isinstance(metadata, dict) else None
+            )
             if last_contact_raw:
                 try:
                     lc_dt = datetime.fromisoformat(last_contact_raw)
@@ -3295,12 +3446,14 @@ class PostgresDataLayer:
                 last_contact = None
                 days_stale = None
 
-            results.append({
-                "memory_id": row["id"],
-                "title": row["title"],
-                "last_contact": last_contact,
-                "days_stale": days_stale,
-            })
+            results.append(
+                {
+                    "memory_id": row["id"],
+                    "title": row["title"],
+                    "last_contact": last_contact,
+                    "days_stale": days_stale,
+                }
+            )
 
         return results
 
@@ -3406,15 +3559,20 @@ class PostgresDataLayer:
                 idx += 1
 
             if not conditions:
-                raise ValueError("At least one filter (ids, project, type, before) is required")
+                raise ValueError(
+                    "At least one filter (ids, project, type, before) is required"
+                )
 
             where = " AND ".join(conditions)
-            result = await conn.execute(
-                f"DELETE FROM memories WHERE {where}", *values
-            )
+            result = await conn.execute(f"DELETE FROM memories WHERE {where}", *values)
             count = int(result.split()[-1])
-            logger.info("Deleted %d memories (project=%s, type=%s, before=%s)",
-                        count, params.project, params.type, params.before)
+            logger.info(
+                "Deleted %d memories (project=%s, type=%s, before=%s)",
+                count,
+                params.project,
+                params.type,
+                params.before,
+            )
             return DeleteResult(deleted=count)
 
     async def delete_by_run_id(self, run_id: str) -> DeleteByRunIdResult:
@@ -3466,7 +3624,9 @@ class PostgresDataLayer:
 
         logger.info(
             "delete_by_run_id: deleted %d memories, %d relationships for run_id=%s",
-            mem_count, rel_count, run_id,
+            mem_count,
+            rel_count,
+            run_id,
         )
         return DeleteByRunIdResult(memories=mem_count, relationships=rel_count)
 
@@ -3500,8 +3660,7 @@ def _filter_protected_refine_actions(
         if is_canonical_entity(memory)
     }
     return sum(
-        _filter_refine_action_protected_ids(action, protected_ids)
-        for action in actions
+        _filter_refine_action_protected_ids(action, protected_ids) for action in actions
     )
 
 
@@ -3552,7 +3711,11 @@ async def _execute_refine_actions(actions: list[RefineAction]) -> int:
     for action in actions:
         remaining = [mid for mid in action.memory_ids if mid not in deleted_ids]
         if not remaining or (action.action == "merge" and len(remaining) < 2):
-            logger.info("Skipping %s on %s — IDs already deleted", action.action, action.memory_ids)
+            logger.info(
+                "Skipping %s on %s — IDs already deleted",
+                action.action,
+                action.memory_ids,
+            )
             action.memory_ids = []
             continue
         action.memory_ids = remaining
@@ -3581,16 +3744,21 @@ async def _execute_refine_actions(actions: list[RefineAction]) -> int:
 
     # Execute waves: actions within a wave run in parallel
     for wave_idx, wave in enumerate(waves):
-        logger.info("Executing wave %d/%d (%d actions)", wave_idx + 1, len(waves), len(wave))
+        logger.info(
+            "Executing wave %d/%d (%d actions)", wave_idx + 1, len(waves), len(wave)
+        )
         if len(wave) == 1:
             async with pool.acquire() as conn:
                 protected_skipped += await _execute_refine_action(conn, wave[0])
         else:
+
             async def _run_action(act: RefineAction) -> int:
                 async with pool.acquire() as conn:
                     return await _execute_refine_action(conn, act)
 
-            protected_skipped += sum(await asyncio.gather(*[_run_action(a) for a in wave]))
+            protected_skipped += sum(
+                await asyncio.gather(*[_run_action(a) for a in wave])
+            )
 
     return protected_skipped
 
@@ -3598,7 +3766,9 @@ async def _execute_refine_actions(actions: list[RefineAction]) -> int:
 async def _execute_refine_action(conn: asyncpg.Connection, action: RefineAction) -> int:
     """Execute a single refinement action against the database."""
     protected_skipped = await _filter_refine_action_at_mutation_site(conn, action)
-    if not action.memory_ids or (action.action == "merge" and len(action.memory_ids) < 2):
+    if not action.memory_ids or (
+        action.action == "merge" and len(action.memory_ids) < 2
+    ):
         return protected_skipped
 
     match action.action:
@@ -3615,7 +3785,7 @@ async def _execute_refine_action(conn: asyncpg.Connection, action: RefineAction)
 
                 # Fetch full memories for LLM merge
                 all_ids = action.memory_ids
-                placeholders = ", ".join(f"${i+1}" for i in range(len(all_ids)))
+                placeholders = ", ".join(f"${i + 1}" for i in range(len(all_ids)))
                 rows = await conn.fetch(
                     f"SELECT * FROM memories WHERE id IN ({placeholders})", *all_ids
                 )
@@ -3654,12 +3824,14 @@ async def _execute_refine_action(conn: asyncpg.Connection, action: RefineAction)
 
                 # Re-embed with updated content
                 text_to_embed = ": ".join(
-                    part for part in [
+                    part
+                    for part in [
                         merged.get("title"),
                         merged.get("subtitle"),
                         merged.get("narrative"),
                         merged.get("content"),
-                    ] if part
+                    ]
+                    if part
                 )
                 if text_to_embed:
                     try:
@@ -3667,7 +3839,8 @@ async def _execute_refine_action(conn: asyncpg.Connection, action: RefineAction)
                         pg_vec = to_pg_vector(embedding)
                         await conn.execute(
                             "UPDATE memories SET embedding = $1 WHERE id = $2",
-                            pg_vec, keep_id,
+                            pg_vec,
+                            keep_id,
                         )
                     except Exception as err:
                         logger.warning("Re-embedding failed for %d: %s", keep_id, err)

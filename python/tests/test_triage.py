@@ -71,12 +71,16 @@ class TestTriageClassification:
     async def test_triage_classification(self):
         """Mocked LLM returns triage JSON; verify TriageAction created correctly."""
         memories = [_make_memory(1), _make_memory(2)]
-        llm_response = json.dumps([
-            {"memory_id": 1, "action": "keep", "reason": "Important observation"},
-            {"memory_id": 2, "action": "archive", "reason": "Outdated note"},
-        ])
+        llm_response = json.dumps(
+            [
+                {"memory_id": 1, "action": "keep", "reason": "Important observation"},
+                {"memory_id": 2, "action": "archive", "reason": "Outdated note"},
+            ]
+        )
 
-        with patch("open_brain.data_layer.triage.llm_complete", new_callable=AsyncMock) as mock_llm:
+        with patch(
+            "open_brain.data_layer.triage.llm_complete", new_callable=AsyncMock
+        ) as mock_llm:
             mock_llm.return_value = llm_response
             actions = await triage_with_llm(memories)
 
@@ -94,15 +98,19 @@ class TestTriageClassification:
     async def test_all_valid_actions_parsed(self):
         """All five valid actions are parsed from LLM response."""
         memories = [_make_memory(i) for i in range(1, 6)]
-        llm_response = json.dumps([
-            {"memory_id": 1, "action": "keep", "reason": "Keep"},
-            {"memory_id": 2, "action": "merge", "reason": "Duplicate"},
-            {"memory_id": 3, "action": "promote", "reason": "Reusable"},
-            {"memory_id": 4, "action": "scaffold", "reason": "Todo"},
-            {"memory_id": 5, "action": "archive", "reason": "Old"},
-        ])
+        llm_response = json.dumps(
+            [
+                {"memory_id": 1, "action": "keep", "reason": "Keep"},
+                {"memory_id": 2, "action": "merge", "reason": "Duplicate"},
+                {"memory_id": 3, "action": "promote", "reason": "Reusable"},
+                {"memory_id": 4, "action": "scaffold", "reason": "Todo"},
+                {"memory_id": 5, "action": "archive", "reason": "Old"},
+            ]
+        )
 
-        with patch("open_brain.data_layer.triage.llm_complete", new_callable=AsyncMock) as mock_llm:
+        with patch(
+            "open_brain.data_layer.triage.llm_complete", new_callable=AsyncMock
+        ) as mock_llm:
             mock_llm.return_value = llm_response
             actions = await triage_with_llm(memories)
 
@@ -117,11 +125,15 @@ class TestTriageClassification:
     async def test_invalid_action_defaults_to_keep(self):
         """Unknown action values are replaced with 'keep'."""
         memories = [_make_memory(1)]
-        llm_response = json.dumps([
-            {"memory_id": 1, "action": "zap", "reason": "Unknown action"},
-        ])
+        llm_response = json.dumps(
+            [
+                {"memory_id": 1, "action": "zap", "reason": "Unknown action"},
+            ]
+        )
 
-        with patch("open_brain.data_layer.triage.llm_complete", new_callable=AsyncMock) as mock_llm:
+        with patch(
+            "open_brain.data_layer.triage.llm_complete", new_callable=AsyncMock
+        ) as mock_llm:
             mock_llm.return_value = llm_response
             actions = await triage_with_llm(memories)
 
@@ -131,11 +143,15 @@ class TestTriageClassification:
     async def test_null_reason_is_normalized_to_empty_string(self):
         """Nullable LLM reasons remain persistable text values."""
         memories = [_make_memory(1)]
-        llm_response = json.dumps([
-            {"memory_id": 1, "action": "keep", "reason": None},
-        ])
+        llm_response = json.dumps(
+            [
+                {"memory_id": 1, "action": "keep", "reason": None},
+            ]
+        )
 
-        with patch("open_brain.data_layer.triage.llm_complete", new_callable=AsyncMock) as mock_llm:
+        with patch(
+            "open_brain.data_layer.triage.llm_complete", new_callable=AsyncMock
+        ) as mock_llm:
             mock_llm.return_value = llm_response
             actions = await triage_with_llm(memories)
 
@@ -146,11 +162,15 @@ class TestTriageClassification:
         """Memories omitted by LLM get type-based default actions."""
         memories = [_make_memory(1, "learning"), _make_memory(2, "session_summary")]
         # LLM only classifies memory 1
-        llm_response = json.dumps([
-            {"memory_id": 1, "action": "promote", "reason": "Good learning"},
-        ])
+        llm_response = json.dumps(
+            [
+                {"memory_id": 1, "action": "promote", "reason": "Good learning"},
+            ]
+        )
 
-        with patch("open_brain.data_layer.triage.llm_complete", new_callable=AsyncMock) as mock_llm:
+        with patch(
+            "open_brain.data_layer.triage.llm_complete", new_callable=AsyncMock
+        ) as mock_llm:
             mock_llm.return_value = llm_response
             actions = await triage_with_llm(memories)
 
@@ -169,7 +189,10 @@ class TestTriageClassification:
             _make_memory(3, "observation"),
         ]
 
-        with patch("open_brain.data_layer.triage.llm_complete", side_effect=RuntimeError("API down")):
+        with patch(
+            "open_brain.data_layer.triage.llm_complete",
+            side_effect=RuntimeError("API down"),
+        ):
             actions = await triage_with_llm(memories)
 
         action_map = {a.memory_id: a.action for a in actions}
@@ -184,6 +207,7 @@ class TestTriageClassification:
 
         with patch.dict("os.environ", {"ANTHROPIC_API_KEY": ""}):
             import open_brain.config as cfg
+
             cfg._config = None
             actions = await triage_with_llm(memories)
 
@@ -196,12 +220,16 @@ class TestTriageClassification:
         """LLM returning memory_id as string '1234' instead of int 1234 is handled."""
         memories = [_make_memory(1, "learning"), _make_memory(2, "observation")]
         # LLM returns IDs as strings — a common LLM quirk
-        llm_response = json.dumps([
-            {"memory_id": "1", "action": "promote", "reason": "Good learning"},
-            {"memory_id": "2", "action": "archive", "reason": "Old note"},
-        ])
+        llm_response = json.dumps(
+            [
+                {"memory_id": "1", "action": "promote", "reason": "Good learning"},
+                {"memory_id": "2", "action": "archive", "reason": "Old note"},
+            ]
+        )
 
-        with patch("open_brain.data_layer.triage.llm_complete", new_callable=AsyncMock) as mock_llm:
+        with patch(
+            "open_brain.data_layer.triage.llm_complete", new_callable=AsyncMock
+        ) as mock_llm:
             mock_llm.return_value = llm_response
             actions = await triage_with_llm(memories)
 
@@ -217,11 +245,15 @@ class TestTriageClassification:
     async def test_llm_call_uses_4096_max_tokens(self):
         """triage_with_llm passes max_tokens=4096 to llm_complete to avoid truncation."""
         memories = [_make_memory(1)]
-        llm_response = json.dumps([
-            {"memory_id": 1, "action": "keep", "reason": "Fine"},
-        ])
+        llm_response = json.dumps(
+            [
+                {"memory_id": 1, "action": "keep", "reason": "Fine"},
+            ]
+        )
 
-        with patch("open_brain.data_layer.triage.llm_complete", new_callable=AsyncMock) as mock_llm:
+        with patch(
+            "open_brain.data_layer.triage.llm_complete", new_callable=AsyncMock
+        ) as mock_llm:
             mock_llm.return_value = llm_response
             await triage_with_llm(memories)
 
@@ -239,13 +271,25 @@ class TestTriageClassification:
             _make_memory(2, "session_summary"),
             _make_memory(3, "observation"),
         ]
-        llm_response = json.dumps([
-            {"memory_id": 1, "action": "keep", "reason": "Already well-known pattern"},
-            {"memory_id": 2, "action": "archive", "reason": "Routine session"},
-            {"memory_id": 3, "action": "scaffold", "reason": "Describes a todo item"},
-        ])
+        llm_response = json.dumps(
+            [
+                {
+                    "memory_id": 1,
+                    "action": "keep",
+                    "reason": "Already well-known pattern",
+                },
+                {"memory_id": 2, "action": "archive", "reason": "Routine session"},
+                {
+                    "memory_id": 3,
+                    "action": "scaffold",
+                    "reason": "Describes a todo item",
+                },
+            ]
+        )
 
-        with patch("open_brain.data_layer.triage.llm_complete", new_callable=AsyncMock) as mock_llm:
+        with patch(
+            "open_brain.data_layer.triage.llm_complete", new_callable=AsyncMock
+        ) as mock_llm:
             mock_llm.return_value = llm_response
             actions = await triage_with_llm(memories)
 
@@ -310,7 +354,9 @@ class TestMemoryTypes:
 class TestMaterializePromote:
     def test_promote_writes_to_file(self, tmp_path):
         """promote action appends memory content to the target file."""
-        memory = _make_memory(1, "learning", title="Test Title", content="Test content here")
+        memory = _make_memory(
+            1, "learning", title="Test Title", content="Test content here"
+        )
         memory.metadata["materialize_path"] = str(tmp_path / "MEMORY.md")
 
         result = materialize_promote(memory)
@@ -379,14 +425,18 @@ class TestMaterializePromote:
 class TestMaterializeScaffold:
     def test_scaffold_calls_bd_create(self):
         """scaffold action runs bd create with title and description."""
-        memory = _make_memory(1, title="Fix the thing", content="We should fix the thing")
+        memory = _make_memory(
+            1, title="Fix the thing", content="We should fix the thing"
+        )
 
         mock_result = MagicMock()
         mock_result.returncode = 0
         mock_result.stdout = "Created issue open-brain-42\n"
         mock_result.stderr = ""
 
-        with patch("open_brain.data_layer.materialize.subprocess.run", return_value=mock_result) as mock_run:
+        with patch(
+            "open_brain.data_layer.materialize.subprocess.run", return_value=mock_result
+        ) as mock_run:
             result = materialize_scaffold(memory)
 
         assert result.success is True
@@ -408,7 +458,9 @@ class TestMaterializeScaffold:
         mock_result.stdout = ""
         mock_result.stderr = "Error: bd not initialized"
 
-        with patch("open_brain.data_layer.materialize.subprocess.run", return_value=mock_result):
+        with patch(
+            "open_brain.data_layer.materialize.subprocess.run", return_value=mock_result
+        ):
             result = materialize_scaffold(memory)
 
         assert result.success is False
@@ -418,7 +470,10 @@ class TestMaterializeScaffold:
         """scaffold returns failure when bd command is not found."""
         memory = _make_memory(1, title="Task")
 
-        with patch("open_brain.data_layer.materialize.subprocess.run", side_effect=FileNotFoundError()):
+        with patch(
+            "open_brain.data_layer.materialize.subprocess.run",
+            side_effect=FileNotFoundError(),
+        ):
             result = materialize_scaffold(memory)
 
         assert result.success is False
@@ -427,9 +482,13 @@ class TestMaterializeScaffold:
     def test_scaffold_handles_timeout(self):
         """scaffold returns failure on timeout."""
         import subprocess
+
         memory = _make_memory(1, title="Task")
 
-        with patch("open_brain.data_layer.materialize.subprocess.run", side_effect=subprocess.TimeoutExpired("bd", 30)):
+        with patch(
+            "open_brain.data_layer.materialize.subprocess.run",
+            side_effect=subprocess.TimeoutExpired("bd", 30),
+        ):
             result = materialize_scaffold(memory)
 
         assert result.success is False
@@ -527,12 +586,14 @@ class TestExecuteTriageActions:
         """keep action produces a success no-op result."""
         memory = _make_memory(1)
         action = TriageAction(
-            action="keep", memory_id=1, reason="Fine", memory_type="observation", memory_title="T"
+            action="keep",
+            memory_id=1,
+            reason="Fine",
+            memory_type="observation",
+            memory_title="T",
         )
 
-        results = await execute_triage_actions(
-            [action], {1: memory}, AsyncMock()
-        )
+        results = await execute_triage_actions([action], {1: memory}, AsyncMock())
 
         assert results[0].success is True
         assert results[0].action == "keep"
@@ -542,7 +603,11 @@ class TestExecuteTriageActions:
     async def test_missing_memory_produces_failure(self):
         """Actions for missing memory IDs produce failure results."""
         action = TriageAction(
-            action="keep", memory_id=999, reason="Missing", memory_type="observation", memory_title=None
+            action="keep",
+            memory_id=999,
+            reason="Missing",
+            memory_type="observation",
+            memory_title=None,
         )
 
         results = await execute_triage_actions([action], {}, AsyncMock())
@@ -555,7 +620,11 @@ class TestExecuteTriageActions:
         """merge action produces a delegation result."""
         memory = _make_memory(1)
         action = TriageAction(
-            action="merge", memory_id=1, reason="Dup", memory_type="observation", memory_title="T"
+            action="merge",
+            memory_id=1,
+            reason="Dup",
+            memory_type="observation",
+            memory_title="T",
         )
 
         results = await execute_triage_actions([action], {1: memory}, AsyncMock())
@@ -597,7 +666,10 @@ class TestPipelineDryRun:
             summary="Triaged 2 memories: 1 keep, 1 promote (dry run)",
         )
 
-        from open_brain.data_layer.interface import MaterializeResult, MaterializeActionResult
+        from open_brain.data_layer.interface import (
+            MaterializeResult,
+            MaterializeActionResult,
+        )
 
         materialize_result = MaterializeResult(
             processed=1,
@@ -616,7 +688,9 @@ class TestPipelineDryRun:
         mock_dl.materialize_memories = AsyncMock(return_value=materialize_result)
 
         # Simulate what run_lifecycle_pipeline does
-        triage = await mock_dl.triage_memories(TriageParams(scope="recent", dry_run=True))
+        triage = await mock_dl.triage_memories(
+            TriageParams(scope="recent", dry_run=True)
+        )
         non_keep = [a for a in triage.actions if a.action != "keep"]
         mat = await mock_dl.materialize_memories(
             MaterializeParams(triage_actions=non_keep, dry_run=True)
@@ -700,7 +774,9 @@ class TestLifecyclePipelineStaging:
         assert report["analyzed_count"] == 50
         assert report["newly_staged_count"] == 50
         assert report["actions_taken"] == []
-        assert report["materialization_summary"] == "Disabled: actions staged for review"
+        assert (
+            report["materialization_summary"] == "Disabled: actions staged for review"
+        )
 
     @pytest.mark.asyncio
     async def test_dry_run_previews_without_staging_or_materialization(self):
@@ -751,7 +827,9 @@ class TestLifecyclePipelineStaging:
 
         class LifecycleLedgerConnection:
             def __init__(self) -> None:
-                self.rows = [vars(_make_memory(memory_id)) for memory_id in range(1, 51)]
+                self.rows = [
+                    vars(_make_memory(memory_id)) for memory_id in range(1, 51)
+                ]
                 self.staged: dict[tuple[int, str], int] = {}
                 self.tokens: dict[tuple[int, str], str] = {}
 
@@ -844,12 +922,31 @@ class TestLifecyclePipelineStaging:
         assert len(conn.staged) == 50
 
     @pytest.mark.asyncio
-    async def test_regression_dry_run_rechecks_staged_memories(self):
+    @pytest.mark.parametrize(
+        "scope",
+        [
+            "recent",
+            "project:open-brain",
+            "type:observation",
+            "low-priority",
+            "session_ref:test-session",
+        ],
+    )
+    async def test_regression_dry_run_rechecks_staged_memories(self, scope: str):
         """A dry-run previews the selected scope, not only the next unstaged batch."""
         from open_brain.data_layer.postgres import PostgresDataLayer
 
         class DryRunConnection:
+            async def fetchrow(self, query: str, *args):
+                for position, _arg in enumerate(args, start=1):
+                    assert f"${position}" in query
+                return {"id": 1}
+
             async def fetch(self, query: str, *args):
+                # asyncpg rejects unused positional arguments because PostgreSQL
+                # cannot infer a type for a parameter absent from the query.
+                for position, _arg in enumerate(args, start=1):
+                    assert f"${position}" in query
                 if "NOT EXISTS" in query:
                     return []
                 return [vars(_make_memory(1))]
@@ -884,7 +981,7 @@ class TestLifecyclePipelineStaging:
             ),
         ):
             result = await PostgresDataLayer().triage_memories(
-                TriageParams(limit=1, dry_run=True)
+                TriageParams(scope=scope, limit=1, dry_run=True)
             )
 
         assert result.analyzed == 1
@@ -917,10 +1014,7 @@ class TestLifecyclePipelineStaging:
                     row
                     for row in self.rows
                     if self.states.get(row["id"]) is None
-                    or (
-                        retries_failed_rows
-                        and self.states.get(row["id"]) == "failed"
-                    )
+                    or (retries_failed_rows and self.states.get(row["id"]) == "failed")
                 ]
 
             async def fetchrow(self, query: str, *args):
@@ -1187,6 +1281,76 @@ class TestLifecyclePipelineStaging:
 
     @pytest.mark.integration
     @pytest.mark.asyncio
+    async def test_regression_dry_run_bindings_execute_in_postgres(
+        self,
+        bootstrapped_database_url: str,
+    ):
+        """A real asyncpg dry-run must bind every argument used by PostgreSQL."""
+        from uuid import uuid4
+
+        import asyncpg
+
+        from open_brain.config import get_config
+        from open_brain.data_layer import postgres
+        from open_brain.data_layer.postgres import PostgresDataLayer
+
+        policy_version = f"memory-lifecycle.test.{uuid4()}"
+        get_config().DATABASE_URL = bootstrapped_database_url
+        await postgres.close_pool()
+
+        setup_conn = await asyncpg.connect(bootstrapped_database_url)
+        try:
+            memory_id = await setup_conn.fetchval(
+                """
+                INSERT INTO memories (type, title, content, metadata, stability)
+                VALUES ('observation', 'Dry-run binding regression', 'Test content', '{}'::jsonb, 'stable')
+                RETURNING id
+                """
+            )
+        finally:
+            await setup_conn.close()
+
+        try:
+            with patch(
+                "open_brain.data_layer.triage.triage_with_llm",
+                new_callable=AsyncMock,
+                return_value=[
+                    TriageAction(
+                        action="keep",
+                        memory_id=memory_id,
+                        reason="Still useful",
+                        memory_type="observation",
+                        memory_title="Dry-run binding regression",
+                    )
+                ],
+            ):
+                result = await PostgresDataLayer().triage_memories(
+                    TriageParams(
+                        scope="recent",
+                        limit=1,
+                        dry_run=True,
+                        policy_version=policy_version,
+                    )
+                )
+
+            pool = await postgres.get_pool()
+            async with pool.acquire() as conn:
+                queue_count = await conn.fetchval(
+                    "SELECT COUNT(*) FROM memory_lifecycle_actions WHERE policy_version = $1",
+                    policy_version,
+                )
+
+            assert result.analyzed == 1
+            assert len(result.actions) == 1
+            assert queue_count == 0
+        finally:
+            pool = await postgres.get_pool()
+            async with pool.acquire() as conn:
+                await conn.execute("DELETE FROM memories WHERE id = $1", memory_id)
+            await postgres.close_pool()
+
+    @pytest.mark.integration
+    @pytest.mark.asyncio
     async def test_concurrent_runs_stage_same_fifty_once_in_postgres(
         self,
         bootstrapped_database_url: str,
@@ -1264,6 +1428,7 @@ class TestLifecyclePipelineStaging:
                     limit=50,
                     policy_version=policy_version,
                 )
+
                 async def first_run():
                     return await dl.triage_memories(params)
 
@@ -1374,27 +1539,53 @@ class TestSessionRefScope:
         from contextlib import asynccontextmanager
         from unittest.mock import AsyncMock, patch
 
-        llm_response = json.dumps([
-            {"memory_id": 1, "action": "keep", "reason": "Useful observation"},
-            {"memory_id": 2, "action": "archive", "reason": "Outdated feedback"},
-        ])
+        llm_response = json.dumps(
+            [
+                {"memory_id": 1, "action": "keep", "reason": "Useful observation"},
+                {"memory_id": 2, "action": "archive", "reason": "Outdated feedback"},
+            ]
+        )
 
         db_rows = [
             {
-                "id": 1, "index_id": 1, "session_id": None, "type": "observation",
-                "title": "Claude Memory 1", "subtitle": None, "narrative": None,
-                "content": "Some content", "metadata": {}, "priority": 0.5,
-                "stability": "stable", "access_count": 0, "last_accessed_at": None,
-                "created_at": "2026-01-01", "updated_at": "2026-01-01",
-                "session_ref": "ccmem:abc123", "user_id": None, "embedding": None,
+                "id": 1,
+                "index_id": 1,
+                "session_id": None,
+                "type": "observation",
+                "title": "Claude Memory 1",
+                "subtitle": None,
+                "narrative": None,
+                "content": "Some content",
+                "metadata": {},
+                "priority": 0.5,
+                "stability": "stable",
+                "access_count": 0,
+                "last_accessed_at": None,
+                "created_at": "2026-01-01",
+                "updated_at": "2026-01-01",
+                "session_ref": "ccmem:abc123",
+                "user_id": None,
+                "embedding": None,
             },
             {
-                "id": 2, "index_id": 1, "session_id": None, "type": "feedback",
-                "title": "Claude Memory 2", "subtitle": None, "narrative": None,
-                "content": "Feedback content", "metadata": {}, "priority": 0.5,
-                "stability": "stable", "access_count": 0, "last_accessed_at": None,
-                "created_at": "2026-01-01", "updated_at": "2026-01-01",
-                "session_ref": "ccmem:def456", "user_id": None, "embedding": None,
+                "id": 2,
+                "index_id": 1,
+                "session_id": None,
+                "type": "feedback",
+                "title": "Claude Memory 2",
+                "subtitle": None,
+                "narrative": None,
+                "content": "Feedback content",
+                "metadata": {},
+                "priority": 0.5,
+                "stability": "stable",
+                "access_count": 0,
+                "last_accessed_at": None,
+                "created_at": "2026-01-01",
+                "updated_at": "2026-01-01",
+                "session_ref": "ccmem:def456",
+                "user_id": None,
+                "embedding": None,
             },
         ]
 
@@ -1409,12 +1600,19 @@ class TestSessionRefScope:
         mock_pool.acquire = _acquire
 
         with (
-            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=mock_pool),
-            patch("open_brain.data_layer.triage.llm_complete", new_callable=AsyncMock) as mock_llm,
+            patch(
+                "open_brain.data_layer.postgres.get_pool",
+                new_callable=AsyncMock,
+                return_value=mock_pool,
+            ),
+            patch(
+                "open_brain.data_layer.triage.llm_complete", new_callable=AsyncMock
+            ) as mock_llm,
         ):
             mock_llm.return_value = llm_response
 
             from open_brain.data_layer.postgres import PostgresDataLayer
+
             dl = PostgresDataLayer()
             result = await dl.triage_memories(
                 TriageParams(scope="session_ref:ccmem:", limit=200, dry_run=True)
@@ -1445,7 +1643,7 @@ class TestSessionRefScope:
         # This tests AK1: LIKE '<prefix>%' semantics
         params = TriageParams(scope="session_ref:ccmem:", limit=10, dry_run=True)
         assert params.scope is not None
-        prefix = params.scope[len("session_ref:"):]
+        prefix = params.scope[len("session_ref:") :]
         assert prefix == "ccmem:"
         # The LIKE pattern appends %
         like_pattern = prefix + "%"
