@@ -2413,42 +2413,44 @@ class PostgresDataLayer:
             )
         """
         candidate_ledger_filter = "" if params.dry_run else _unstaged_filter
+        ledger_args = () if params.dry_run else (policy_version,)
+        first_scope_param = len(ledger_args) + 1
 
         async def _fetch_candidates(conn: asyncpg.Connection) -> list[asyncpg.Record]:
             if scope.startswith("project:"):
                 project = scope[8:]
                 index_id = await self._resolve_index_id(conn, project)
                 return await conn.fetch(
-                    f"SELECT * FROM memories WHERE index_id = $2 {_lifecycle_filter} {candidate_ledger_filter} ORDER BY created_at DESC LIMIT $3",
-                    policy_version,
+                    f"SELECT * FROM memories WHERE index_id = ${first_scope_param} {_lifecycle_filter} {candidate_ledger_filter} ORDER BY created_at DESC LIMIT ${first_scope_param + 1}",
+                    *ledger_args,
                     self._scope_index_id(index_id),
                     limit,
                 )
             if scope.startswith("type:"):
                 mem_type = scope[5:]
                 return await conn.fetch(
-                    f"SELECT * FROM memories WHERE type = $2 {_lifecycle_filter} {candidate_ledger_filter} ORDER BY created_at DESC LIMIT $3",
-                    policy_version,
+                    f"SELECT * FROM memories WHERE type = ${first_scope_param} {_lifecycle_filter} {candidate_ledger_filter} ORDER BY created_at DESC LIMIT ${first_scope_param + 1}",
+                    *ledger_args,
                     mem_type,
                     limit,
                 )
             if scope == "low-priority":
                 return await conn.fetch(
-                    f"SELECT * FROM memories WHERE priority < 0.2 AND importance NOT IN ('critical', 'high') {_lifecycle_filter} {candidate_ledger_filter} ORDER BY priority ASC LIMIT $2",
-                    policy_version,
+                    f"SELECT * FROM memories WHERE priority < 0.2 AND importance NOT IN ('critical', 'high') {_lifecycle_filter} {candidate_ledger_filter} ORDER BY priority ASC LIMIT ${first_scope_param}",
+                    *ledger_args,
                     limit,
                 )
             if scope.startswith("session_ref:"):
                 prefix = scope[len("session_ref:"):]
                 return await conn.fetch(
-                    f"SELECT * FROM memories WHERE session_ref LIKE $2 {_lifecycle_filter} {candidate_ledger_filter} ORDER BY created_at DESC LIMIT $3",
-                    policy_version,
+                    f"SELECT * FROM memories WHERE session_ref LIKE ${first_scope_param} {_lifecycle_filter} {candidate_ledger_filter} ORDER BY created_at DESC LIMIT ${first_scope_param + 1}",
+                    *ledger_args,
                     prefix + "%",
                     limit,
                 )
             return await conn.fetch(
-                f"SELECT * FROM memories WHERE 1=1 {_lifecycle_filter} {candidate_ledger_filter} ORDER BY created_at DESC LIMIT $2",
-                policy_version,
+                f"SELECT * FROM memories WHERE 1=1 {_lifecycle_filter} {candidate_ledger_filter} ORDER BY created_at DESC LIMIT ${first_scope_param}",
+                *ledger_args,
                 limit,
             )
 

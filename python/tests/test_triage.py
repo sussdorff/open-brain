@@ -844,12 +844,31 @@ class TestLifecyclePipelineStaging:
         assert len(conn.staged) == 50
 
     @pytest.mark.asyncio
-    async def test_regression_dry_run_rechecks_staged_memories(self):
+    @pytest.mark.parametrize(
+        "scope",
+        [
+            "recent",
+            "project:open-brain",
+            "type:observation",
+            "low-priority",
+            "session_ref:test-session",
+        ],
+    )
+    async def test_regression_dry_run_rechecks_staged_memories(self, scope: str):
         """A dry-run previews the selected scope, not only the next unstaged batch."""
         from open_brain.data_layer.postgres import PostgresDataLayer
 
         class DryRunConnection:
+            async def fetchrow(self, query: str, *args):
+                for position, _arg in enumerate(args, start=1):
+                    assert f"${position}" in query
+                return {"id": 1}
+
             async def fetch(self, query: str, *args):
+                # asyncpg rejects unused positional arguments because PostgreSQL
+                # cannot infer a type for a parameter absent from the query.
+                for position, _arg in enumerate(args, start=1):
+                    assert f"${position}" in query
                 if "NOT EXISTS" in query:
                     return []
                 return [vars(_make_memory(1))]
@@ -884,7 +903,7 @@ class TestLifecyclePipelineStaging:
             ),
         ):
             result = await PostgresDataLayer().triage_memories(
-                TriageParams(limit=1, dry_run=True)
+                TriageParams(scope=scope, limit=1, dry_run=True)
             )
 
         assert result.analyzed == 1
@@ -1184,6 +1203,76 @@ class TestLifecyclePipelineStaging:
                 )
 
         assert records == []
+
+    @pytest.mark.integration
+    @pytest.mark.asyncio
+    async def test_regression_dry_run_bindings_execute_in_postgres(
+        self,
+        bootstrapped_database_url: str,
+    ):
+        """A real asyncpg dry-run must bind every argument used by PostgreSQL."""
+        from uuid import uuid4
+
+        import asyncpg
+
+        from open_brain.config import get_config
+        from open_brain.data_layer import postgres
+        from open_brain.data_layer.postgres import PostgresDataLayer
+
+        policy_version = f"memory-lifecycle.test.{uuid4()}"
+        get_config().DATABASE_URL = bootstrapped_database_url
+        await postgres.close_pool()
+
+        setup_conn = await asyncpg.connect(bootstrapped_database_url)
+        try:
+            memory_id = await setup_conn.fetchval(
+                """
+                INSERT INTO memories (type, title, content, metadata, stability)
+                VALUES ('observation', 'Dry-run binding regression', 'Test content', '{}'::jsonb, 'stable')
+                RETURNING id
+                """
+            )
+        finally:
+            await setup_conn.close()
+
+        try:
+            with patch(
+                "open_brain.data_layer.triage.triage_with_llm",
+                new_callable=AsyncMock,
+                return_value=[
+                    TriageAction(
+                        action="keep",
+                        memory_id=memory_id,
+                        reason="Still useful",
+                        memory_type="observation",
+                        memory_title="Dry-run binding regression",
+                    )
+                ],
+            ):
+                result = await PostgresDataLayer().triage_memories(
+                    TriageParams(
+                        scope="recent",
+                        limit=1,
+                        dry_run=True,
+                        policy_version=policy_version,
+                    )
+                )
+
+            pool = await postgres.get_pool()
+            async with pool.acquire() as conn:
+                queue_count = await conn.fetchval(
+                    "SELECT COUNT(*) FROM memory_lifecycle_actions WHERE policy_version = $1",
+                    policy_version,
+                )
+
+            assert result.analyzed == 1
+            assert len(result.actions) == 1
+            assert queue_count == 0
+        finally:
+            pool = await postgres.get_pool()
+            async with pool.acquire() as conn:
+                await conn.execute("DELETE FROM memories WHERE id = $1", memory_id)
+            await postgres.close_pool()
 
     @pytest.mark.integration
     @pytest.mark.asyncio
