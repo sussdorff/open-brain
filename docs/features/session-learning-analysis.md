@@ -88,7 +88,13 @@ confirm each proposed pair has the same causal mechanism and compatible future
 behavior. Pairs that only share a topic, component, vocabulary, or evidence
 remain separate. A method shared incidentally remains separate, but it may be
 confirmed when the method itself is the evidenced causal mechanism and both
-sessions derive the same durable future behavior. Confirmed pairs only combine
+sessions derive the same durable future behavior. Claims may also express one
+governing invariant through compatible operational consequences at different
+workflow phases. Those pairs remain eligible only when they identify the same
+evidenced failure mode or causal mechanism and neither consequence weakens or
+contradicts the other. Shared workflow vocabulary and merely non-contradictory
+actions are insufficient.
+Confirmed pairs only combine
 larger groups when every
 cross-group cluster pair was also confirmed, preventing a broad middle claim
 from transitively joining incompatible rules. The shortlist is bounded, and a

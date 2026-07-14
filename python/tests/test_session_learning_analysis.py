@@ -1592,3 +1592,90 @@ def test_reconciliation_prompt_allows_method_when_it_is_the_causal_learning() ->
     )
 
     assert "method itself is the evidenced causal mechanism" in prompt
+
+
+@pytest.mark.asyncio
+async def test_phase_specific_actions_from_same_invariant_reach_adjudication() -> None:
+    candidates = [
+        analysis.LearningCandidate.from_dict(
+            _candidate(
+                "26870-1",
+                source_memory_id=26870,
+                statement=(
+                    "A closed bead does not prove that its Git work landed, so "
+                    "cleanup requires a semantic diff."
+                ),
+                cause=(
+                    "Cleanup trusted tracker state without checking repository content."
+                ),
+                future_behavior=(
+                    "Verify semantic Git diffs before removing branches or worktrees."
+                ),
+            )
+        ),
+        analysis.LearningCandidate.from_dict(
+            _candidate(
+                "21617-1",
+                source_memory_id=21617,
+                statement=(
+                    "A failed session-close push can leave the bead closed while "
+                    "commits are absent from main."
+                ),
+                cause="The push failed after the tracker had already closed the bead.",
+                future_behavior=(
+                    "Recover the Git merge and push without repeating bead closure."
+                ),
+            )
+        ),
+    ]
+
+    pair_id = "21617-1::26870-1"
+    with (
+        patch.object(
+            analysis,
+            "llm_complete",
+            new_callable=AsyncMock,
+            side_effect=[
+                json.dumps(
+                    {
+                        "clusters": [
+                            {
+                                "candidate_ids": ["26870-1", "21617-1"],
+                                "canonical_learning": (
+                                    "Tracker closure does not prove Git landedness."
+                                ),
+                                "reason": (
+                                    "Same invariant with cleanup and recovery consequences."
+                                ),
+                            }
+                        ]
+                    }
+                ),
+                json.dumps({"equivalent_pair_ids": [pair_id]}),
+            ],
+        ) as complete,
+        patch.object(
+            analysis,
+            "embed_batch",
+            new_callable=AsyncMock,
+            return_value=[[1.0, 0.0], [0.0, 1.0]],
+        ),
+    ):
+        clusters = await analysis._cluster_candidates(candidates, model=None)
+
+    assert len(clusters) == 1
+    assert set(clusters[0].candidate_ids) == {"21617-1", "26870-1"}
+    proposal_prompt = complete.await_args_list[0].args[0][0].content
+    reconciliation_prompt = complete.await_args_list[1].args[0][0].content
+    assert pair_id in reconciliation_prompt
+
+    for prompt in (proposal_prompt, reconciliation_prompt):
+        normalized_prompt = " ".join(prompt.split())
+        assert "same governing invariant" in normalized_prompt
+        assert "different workflow phases" in normalized_prompt
+        assert "compatible operational consequences" in normalized_prompt
+        assert "same evidenced failure mode or causal mechanism" in normalized_prompt
+        assert (
+            "Shared workflow vocabulary and merely non-contradictory actions are "
+            "insufficient"
+        ) in normalized_prompt
