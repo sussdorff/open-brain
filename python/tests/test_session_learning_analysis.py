@@ -161,6 +161,81 @@ def test_batch_extraction_rejects_cross_summary_evidence_leakage() -> None:
     assert [candidate.source_memory_id for candidate in candidates] == [101]
 
 
+def test_batch_extraction_keeps_todo_without_evidence() -> None:
+    first_raw = _summary(101, session_ref="session-101")
+    first_raw["content"] = "Follow-up work remains explicitly open."
+    second_raw = _summary(102, session_ref="session-102")
+    summaries = [
+        analysis.SessionSummary(**first_raw),
+        analysis.SessionSummary(**second_raw),
+    ]
+    raw_todo = _candidate(
+        "ignored",
+        source_memory_id=101,
+        kind="todo",
+        statement="File the follow-up bead.",
+        concrete_action="File a follow-up bead",
+        target="remaining work",
+        evidence=[],
+        generalizable=False,
+    )
+
+    candidates = analysis._parse_batch_extraction_response(
+        summaries,
+        {"candidates": [raw_todo]},
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0].kind is analysis.CandidateKind.TODO
+    assert candidates[0].evidence == []
+
+
+def test_batch_extraction_rejects_evidence_shared_by_multiple_summaries() -> None:
+    first_raw = _summary(101, session_ref="session-101")
+    first_raw["content"] = "All targeted tests passed after the implementation."
+    second_raw = _summary(102, session_ref="session-102")
+    second_raw["content"] = "All targeted tests passed after the implementation."
+    summaries = [
+        analysis.SessionSummary(**first_raw),
+        analysis.SessionSummary(**second_raw),
+    ]
+    candidate = _candidate(
+        "ignored",
+        source_memory_id=101,
+        evidence=["All targeted tests passed after the implementation."],
+    )
+
+    candidates = analysis._parse_batch_extraction_response(
+        summaries,
+        {"candidates": [candidate]},
+    )
+
+    assert candidates == []
+
+
+def test_batch_extraction_accepts_unique_title_evidence() -> None:
+    first_raw = _summary(101, session_ref="session-101")
+    first_raw["title"] = "Unique migration baseline tooling session"
+    second_raw = _summary(102, session_ref="session-102")
+    summaries = [
+        analysis.SessionSummary(**first_raw),
+        analysis.SessionSummary(**second_raw),
+    ]
+    candidate = _candidate(
+        "ignored",
+        source_memory_id=101,
+        evidence=["Unique migration baseline tooling session"],
+    )
+
+    candidates = analysis._parse_batch_extraction_response(
+        summaries,
+        {"candidates": [candidate]},
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0].source_memory_id == 101
+
+
 def test_valid_causal_learning_passes_learning_gate() -> None:
     candidate = analysis.LearningCandidate.from_dict(_candidate("101-1"))
 
@@ -218,6 +293,25 @@ def test_explicitly_pending_modal_work_item_remains_todo() -> None:
     routed = analysis.route_candidate(candidate)
 
     assert routed.kind is analysis.CandidateKind.TODO
+
+
+def test_counterfactual_should_have_statement_remains_learning() -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate(
+            "101-1",
+            statement=(
+                "The retry logic should have been idempotent, which explains "
+                "the duplicate requests."
+            ),
+            concrete_action="Make retries idempotent",
+            target="retry handler",
+        )
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.LEARNING
+    assert routed.routing_reason == "descriptive_action_not_todo"
 
 
 def test_regression_descriptive_work_item_is_reconsidered_as_learning() -> None:
