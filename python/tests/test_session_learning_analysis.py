@@ -171,6 +171,29 @@ def test_non_generalizable_learning_is_not_kept_as_learning() -> None:
     assert routed.kind is analysis.CandidateKind.NOISE
 
 
+@pytest.mark.parametrize("kind", ["standard_candidate", "skill_candidate"])
+def test_promotion_candidate_requires_causal_evidence_contract(kind: str) -> None:
+    raw = _candidate("101-1", kind=kind)
+    raw["cause"] = None
+    candidate = analysis.LearningCandidate.from_dict(raw)
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.NOISE
+    assert routed.routing_reason == "incomplete_promotion_contract"
+
+
+def test_duplicate_doctrine_requires_concrete_artifact_reference() -> None:
+    candidate = analysis.LearningCandidate.from_dict(
+        _candidate("101-1", kind="duplicate_doctrine")
+    )
+
+    routed = analysis.route_candidate(candidate)
+
+    assert routed.kind is analysis.CandidateKind.NOISE
+    assert routed.routing_reason == "missing_doctrine_reference"
+
+
 def test_clusters_include_only_validated_learning_candidates() -> None:
     learning = analysis.route_candidate(
         analysis.LearningCandidate.from_dict(_candidate("101-1"))
