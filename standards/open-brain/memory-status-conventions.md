@@ -44,11 +44,25 @@ audit and history but do not surface in `/ob-triage` runs.
 
 `mcp__open-brain__run_lifecycle_pipeline(scope=..., dry_run=...)`:
 
-- `scope="recent"` — process memories created since the last successful run
-- `scope=None` (omit) — full triage of all open memories (weekly)
+- `scope="recent"` — classify the newest memories without an action for the
+  active policy version
+- `scope=None` (omit) — classify open memories without an action for the active
+  policy version
 - `dry_run=true` — classify and return proposed actions without writing
-- `dry_run=false` — apply server-side actions; client is responsible for any
-  client-side follow-up (forge writes, marketplace commits)
+- `dry_run=false` — persist proposals in `memory_lifecycle_actions`; never
+  materialize, archive, write files, create beads, or delete memories
+
+The ledger uses `(memory_id, policy_version)` as its idempotency key. Every
+classification, including `keep`, creates at most one row for the active policy.
+Non-dry runs reserve rows in the internal `classifying` state before invoking
+the LLM, then move completed proposals to `staged`. Reservations abandoned for
+more than one hour are reclaimed on the next run. Review/apply workflows may
+transition staged rows to `applied`, `needs_review`, or `failed`.
+
+`list_lifecycle_actions(state="staged")` is the read path for the review queue
+across policy versions; callers may pass `policy_version` to restrict it.
+After a human decision, `set_lifecycle_action_state` records the reviewed state
+and a resolution note. Neither tool executes the proposed action.
 
 Heartbeat callers use `dry_run=false`. Triage callers always start with
 `dry_run=true`, present results to the user, then execute approved actions
@@ -104,8 +118,9 @@ update_memory(id=<id>, type='archived', metadata={
 })
 ```
 
-The status field is the single signal future triage and heartbeat runs use to
-skip already-handled memories.
+The status field excludes memories that have completed the knowledge lifecycle.
+The lifecycle-action ledger independently prevents heartbeat and triage from
+classifying the same memory twice under one policy version.
 
 ## Consumers
 

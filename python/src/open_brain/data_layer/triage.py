@@ -128,6 +128,8 @@ Every memory in the input must appear exactly once in the output.""",
         if action not in ("keep", "merge", "promote", "scaffold", "archive"):
             logger.warning("Unknown triage action %r for memory %d — defaulting to keep", action, memory_id)
             action = "keep"
+        if not isinstance(reason, str):
+            reason = "" if reason is None else str(reason)
 
         seen_ids.add(memory_id)
         mem = memory_by_id[memory_id]

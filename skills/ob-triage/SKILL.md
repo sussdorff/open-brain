@@ -41,7 +41,12 @@ Interactive memory lifecycle management with human-in-the-loop review.
 
 ### Step 1: Run Triage (always dry-run first)
 
-Call `mcp__open-brain__triage_memories` with the user's scope and `dry_run=true`.
+First call `mcp__open-brain__list_lifecycle_actions(state="staged")`. These are
+proposals prepared by the heartbeat and must be reviewed before generating new
+classifications. If staged actions exist, continue with those records at Step 2.
+
+If no staged actions exist, call `mcp__open-brain__triage_memories` with the
+user's scope and `dry_run=true`.
 
 ```
 triage_memories(scope="<from args>", dry_run=true)
@@ -206,6 +211,12 @@ AskUserQuestion:
 After the user has reviewed and approved actions, execute them. Every status
 write follows the `update_memory` patterns in the
 `open-brain/memory-status-conventions` standard.
+
+For actions loaded from `list_lifecycle_actions`, call
+`set_lifecycle_action_state` after the decision: `applied` after a successful
+approved action or keep decision, `needs_review` when deferred, and `failed`
+when execution fails. Include a concise resolution note. This ledger transition
+does not replace the memory `metadata.status` write described below.
 
 1. **Merge**: Call `mcp__open-brain__refine_memories(scope="duplicates")` or
    `mcp__open-brain__update_memory` to update the surviving memory with merged

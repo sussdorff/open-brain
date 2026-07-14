@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json as _json
 import logging
+import uuid
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -35,6 +36,9 @@ from open_brain.data_layer.interface import (
     DeleteByRunIdResult,
     DeleteParams,
     DeleteResult,
+    LifecycleActionQueryParams,
+    LifecycleActionRecord,
+    LifecycleActionStateParams,
     MaterializeParams,
     MaterializeResult,
     Memory,
@@ -391,6 +395,9 @@ async def _run_migrations(conn: asyncpg.Connection) -> None:
         "ALTER TABLE memories ADD COLUMN IF NOT EXISTS last_decay_at TIMESTAMPTZ;"
     )
     await conn.execute(
+        "ALTER TABLE memories ADD COLUMN IF NOT EXISTS last_boost_at TIMESTAMPTZ;"
+    )
+    await conn.execute(
         "UPDATE memories SET last_decay_at = updated_at WHERE last_decay_at IS NULL;"
     )
     await conn.execute("""
@@ -413,6 +420,31 @@ async def _run_migrations(conn: asyncpg.Connection) -> None:
     await conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_memory_capture_status
         ON memories ((metadata->>'capture_status'));
+    """)
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS memory_lifecycle_actions (
+            id BIGSERIAL PRIMARY KEY,
+            memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+            policy_version TEXT NOT NULL,
+            action TEXT
+                CHECK (action IS NULL OR action IN ('keep', 'merge', 'promote', 'scaffold', 'archive')),
+            reason TEXT,
+            state TEXT NOT NULL DEFAULT 'classifying'
+                CHECK (state IN ('classifying', 'staged', 'applied', 'needs_review', 'failed')),
+            reservation_token TEXT,
+            resolution_note TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CHECK (
+                state = 'classifying'
+                OR (action IS NOT NULL AND reason IS NOT NULL)
+            ),
+            UNIQUE (memory_id, policy_version)
+        );
+    """)
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_memory_lifecycle_actions_state
+        ON memory_lifecycle_actions (policy_version, state);
     """)
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS url_tokens (
@@ -617,6 +649,23 @@ def _row_to_memory(row: asyncpg.Record) -> Memory:
         user_id=row.get("user_id"),
         importance=row.get("importance", "medium"),
         last_decay_at=str(row.get("last_decay_at")) if row.get("last_decay_at") else None,
+    )
+
+
+def _row_to_lifecycle_action(row: asyncpg.Record) -> LifecycleActionRecord:
+    """Convert a joined lifecycle-action row into its public record."""
+    return LifecycleActionRecord(
+        id=row["id"],
+        memory_id=row["memory_id"],
+        policy_version=row["policy_version"],
+        action=row.get("action"),
+        reason=row.get("reason"),
+        state=row["state"],
+        memory_type=row["memory_type"],
+        memory_title=row.get("memory_title"),
+        resolution_note=row.get("resolution_note"),
+        created_at=str(row["created_at"]),
+        updated_at=str(row["updated_at"]),
     )
 
 
@@ -1615,8 +1664,11 @@ class PostgresDataLayer:
                 )
                 boosted = await conn.fetchval(
                     """SELECT COUNT(*) FROM memories
-                       WHERE access_count >= $1""",
+                       WHERE access_count >= $1
+                         AND LEAST(priority * $2, 1.0) > priority
+                         AND (last_boost_at IS NULL OR last_boost_at < NOW() - interval '24 hours')""",
                     params.boost_threshold,
+                    params.boost_factor,
                 )
                 recent_memories = await conn.fetchval(
                     """SELECT COUNT(*) FROM memories
@@ -1649,8 +1701,11 @@ class PostgresDataLayer:
                     """WITH updated AS (
                            UPDATE memories
                            SET priority = LEAST(priority * $1, 1.0),
+                               last_boost_at = NOW(),
                                updated_at = NOW()
                            WHERE access_count >= $2
+                             AND LEAST(priority * $1, 1.0) > priority
+                             AND (last_boost_at IS NULL OR last_boost_at < NOW() - interval '24 hours')
                            RETURNING id
                        )
                        SELECT COUNT(*) FROM updated""",
@@ -2332,71 +2387,234 @@ class PostgresDataLayer:
         )
 
     async def triage_memories(self, params: TriageParams) -> TriageResult:
-        """Classify memories into lifecycle actions using LLM triage."""
+        """Classify memories and persist conflict-safe lifecycle proposals."""
         from open_brain.data_layer.triage import triage_with_llm
 
+        policy_version = params.policy_version
+        if not policy_version.strip():
+            raise ValueError("policy_version must not be empty")
         pool = await get_pool()
         limit = params.limit or 50
         scope = params.scope or "recent"
+        reservation_token = str(uuid.uuid4())
 
-        # Exclude memories already processed or protected by the shared lifecycle filter.
+        # The policy-specific ledger makes every classification terminal for this
+        # policy version, including keep. A future policy version can deliberately
+        # reconsider the same memory without mutating its knowledge lifecycle.
         _lifecycle_filter = _compact_lifecycle_filter
+        _unstaged_filter = """
+            AND NOT EXISTS (
+                SELECT 1
+                FROM memory_lifecycle_actions
+                WHERE memory_lifecycle_actions.memory_id = memories.id
+                  AND memory_lifecycle_actions.policy_version = $1
+            )
+        """
 
-        async with pool.acquire() as conn:
+        async def _fetch_candidates(conn: asyncpg.Connection) -> list[asyncpg.Record]:
             if scope.startswith("project:"):
                 project = scope[8:]
                 index_id = await self._resolve_index_id(conn, project)
-                rows = await conn.fetch(
-                    f"SELECT * FROM memories WHERE index_id = $1 {_lifecycle_filter} ORDER BY created_at DESC LIMIT $2",
+                return await conn.fetch(
+                    f"SELECT * FROM memories WHERE index_id = $2 {_lifecycle_filter} {_unstaged_filter} ORDER BY created_at DESC LIMIT $3",
+                    policy_version,
                     self._scope_index_id(index_id),
                     limit,
                 )
-            elif scope.startswith("type:"):
+            if scope.startswith("type:"):
                 mem_type = scope[5:]
-                rows = await conn.fetch(
-                    f"SELECT * FROM memories WHERE type = $1 {_lifecycle_filter} ORDER BY created_at DESC LIMIT $2",
+                return await conn.fetch(
+                    f"SELECT * FROM memories WHERE type = $2 {_lifecycle_filter} {_unstaged_filter} ORDER BY created_at DESC LIMIT $3",
+                    policy_version,
                     mem_type,
                     limit,
                 )
-            elif scope == "low-priority":
-                rows = await conn.fetch(
-                    f"SELECT * FROM memories WHERE priority < 0.2 AND importance NOT IN ('critical', 'high') {_lifecycle_filter} ORDER BY priority ASC LIMIT $1",
+            if scope == "low-priority":
+                return await conn.fetch(
+                    f"SELECT * FROM memories WHERE priority < 0.2 AND importance NOT IN ('critical', 'high') {_lifecycle_filter} {_unstaged_filter} ORDER BY priority ASC LIMIT $2",
+                    policy_version,
                     limit,
                 )
-            elif scope.startswith("session_ref:"):
+            if scope.startswith("session_ref:"):
                 prefix = scope[len("session_ref:"):]
-                rows = await conn.fetch(
-                    f"SELECT * FROM memories WHERE session_ref LIKE $1 {_lifecycle_filter} ORDER BY created_at DESC LIMIT $2",
+                return await conn.fetch(
+                    f"SELECT * FROM memories WHERE session_ref LIKE $2 {_lifecycle_filter} {_unstaged_filter} ORDER BY created_at DESC LIMIT $3",
+                    policy_version,
                     prefix + "%",
                     limit,
                 )
+            return await conn.fetch(
+                f"SELECT * FROM memories WHERE 1=1 {_lifecycle_filter} {_unstaged_filter} ORDER BY created_at DESC LIMIT $2",
+                policy_version,
+                limit,
+            )
+
+        async with pool.acquire() as conn:
+            if params.dry_run:
+                rows = await _fetch_candidates(conn)
             else:
-                # "recent" — last N memories
-                rows = await conn.fetch(
-                    f"SELECT * FROM memories WHERE 1=1 {_lifecycle_filter} ORDER BY created_at DESC LIMIT $1", limit
-                )
-            candidates = [_row_to_memory(r) for r in rows]
+                async with conn.transaction():
+                    await conn.fetchval(
+                        "SELECT pg_advisory_xact_lock(hashtext($1))",
+                        f"open-brain:lifecycle:{policy_version}",
+                    )
+                    await conn.execute(
+                        """
+                        DELETE FROM memory_lifecycle_actions
+                        WHERE policy_version = $1
+                          AND state = 'classifying'
+                          AND updated_at < NOW() - INTERVAL '1 hour'
+                        """,
+                        policy_version,
+                    )
+                    selected_rows = await _fetch_candidates(conn)
+                    rows = []
+                    for selected_row in selected_rows:
+                        reservation = await conn.fetchrow(
+                            """
+                            INSERT INTO memory_lifecycle_actions (
+                                memory_id,
+                                policy_version,
+                                state,
+                                reservation_token
+                            ) VALUES ($1, $2, 'classifying', $3)
+                            ON CONFLICT (memory_id, policy_version) DO NOTHING
+                            RETURNING id
+                            """,
+                            selected_row["id"],
+                            policy_version,
+                            reservation_token,
+                        )
+                        if reservation is not None:
+                            rows.append(selected_row)
+
+            candidates = [_row_to_memory(row) for row in rows]
 
         if not candidates:
-            return TriageResult(analyzed=0, actions=[], summary="No candidates found")
+            return TriageResult(
+                analyzed=0,
+                actions=[],
+                summary=f"No candidates found for policy {policy_version}",
+            )
 
         actions = await triage_with_llm(candidates)
 
         if not params.dry_run:
-            for action in actions:
-                action.executed = True
+            staged_actions = []
+            async with pool.acquire() as conn:
+                for action in actions:
+                    reason = (
+                        action.reason
+                        if isinstance(action.reason, str)
+                        else "" if action.reason is None else str(action.reason)
+                    )
+                    row = await conn.fetchrow(
+                        """
+                        UPDATE memory_lifecycle_actions
+                        SET action = $3,
+                            reason = $4,
+                            state = 'staged',
+                            reservation_token = NULL,
+                            updated_at = NOW()
+                        WHERE memory_id = $1
+                          AND policy_version = $2
+                          AND state = 'classifying'
+                          AND reservation_token = $5
+                        RETURNING id
+                        """,
+                        action.memory_id,
+                        policy_version,
+                        action.action,
+                        reason,
+                        reservation_token,
+                    )
+                    if row is None:
+                        continue
+                    action.reason = reason
+                    action.lifecycle_action_id = row["id"]
+                    action.policy_version = policy_version
+                    action.state = "staged"
+                    staged_actions.append(action)
+            actions = staged_actions
 
         action_counts: dict[str, int] = {}
         for a in actions:
             action_counts[a.action] = action_counts.get(a.action, 0) + 1
 
         summary_parts = [f"{count} {act}" for act, count in sorted(action_counts.items())]
-        summary = (
-            f"Triaged {len(candidates)} memories: {', '.join(summary_parts)}"
-            f"{' (dry run)' if params.dry_run else ''}"
-        )
+        if params.dry_run:
+            summary = (
+                f"Proposed {len(actions)} actions for {len(candidates)} memories: "
+                f"{', '.join(summary_parts)} (dry run; policy {policy_version})"
+            )
+        else:
+            summary = (
+                f"Staged {len(actions)} actions from {len(candidates)} analyzed memories: "
+                f"{', '.join(summary_parts)} (policy {policy_version})"
+            )
 
         return TriageResult(analyzed=len(candidates), actions=actions, summary=summary)
+
+    async def list_lifecycle_actions(
+        self, params: LifecycleActionQueryParams
+    ) -> list[LifecycleActionRecord]:
+        """Read persisted lifecycle proposals for review or recovery."""
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    lifecycle_actions.*,
+                    memories.type AS memory_type,
+                    memories.title AS memory_title
+                FROM memory_lifecycle_actions AS lifecycle_actions
+                JOIN memories ON memories.id = lifecycle_actions.memory_id
+                WHERE ($1::text IS NULL OR lifecycle_actions.policy_version = $1)
+                  AND ($2::text IS NULL OR lifecycle_actions.state = $2)
+                ORDER BY lifecycle_actions.created_at ASC
+                LIMIT $3
+                """,
+                params.policy_version,
+                params.state,
+                params.limit,
+            )
+        return [_row_to_lifecycle_action(row) for row in rows]
+
+    async def set_lifecycle_action_state(
+        self, params: LifecycleActionStateParams
+    ) -> LifecycleActionRecord:
+        """Record the reviewed state of a persisted lifecycle proposal."""
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                WITH updated AS (
+                    UPDATE memory_lifecycle_actions
+                    SET state = $2,
+                        resolution_note = COALESCE($3, resolution_note),
+                        updated_at = NOW()
+                    WHERE id = $1
+                      AND state != 'classifying'
+                      AND action IS NOT NULL
+                      AND reason IS NOT NULL
+                    RETURNING *
+                )
+                SELECT
+                    updated.*,
+                    memories.type AS memory_type,
+                    memories.title AS memory_title
+                FROM updated
+                JOIN memories ON memories.id = updated.memory_id
+                """,
+                params.action_id,
+                params.state,
+                params.note,
+            )
+        if row is None:
+            raise ValueError(
+                f"Lifecycle action {params.action_id} not found or not reviewable"
+            )
+        return _row_to_lifecycle_action(row)
 
     async def materialize_memories(self, params: MaterializeParams) -> MaterializeResult:
         """Execute materialization for a list of triage actions."""

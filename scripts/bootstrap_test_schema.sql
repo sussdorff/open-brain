@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS memories (
   access_count INTEGER DEFAULT 0,
   last_accessed_at TIMESTAMPTZ,
   last_decay_at TIMESTAMPTZ,
+  last_boost_at TIMESTAMPTZ,
   search_vector TSVECTOR GENERATED ALWAYS AS (
     setweight(to_tsvector('english', COALESCE(title, '')), 'A') ||
     setweight(to_tsvector('english', COALESCE(subtitle, '')), 'B') ||
@@ -87,6 +88,7 @@ ALTER TABLE memories ADD COLUMN IF NOT EXISTS last_accessed_at TIMESTAMPTZ;
 ALTER TABLE memories ADD COLUMN IF NOT EXISTS importance VARCHAR(8) NOT NULL DEFAULT 'medium'
   CHECK (importance IN ('critical', 'high', 'medium', 'low'));
 ALTER TABLE memories ADD COLUMN IF NOT EXISTS last_decay_at TIMESTAMPTZ;
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS last_boost_at TIMESTAMPTZ;
 ALTER TABLE memories ADD COLUMN IF NOT EXISTS search_vector TSVECTOR
   GENERATED ALWAYS AS (
     setweight(to_tsvector('english', COALESCE(title, '')), 'A') ||
@@ -112,6 +114,29 @@ CREATE INDEX IF NOT EXISTS idx_memories_content_hash
   WHERE metadata->>'content_hash' IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_memory_capture_status
   ON memories ((metadata->>'capture_status'));
+
+CREATE TABLE IF NOT EXISTS memory_lifecycle_actions (
+  id BIGSERIAL PRIMARY KEY,
+  memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+  policy_version TEXT NOT NULL,
+  action TEXT
+    CHECK (action IS NULL OR action IN ('keep', 'merge', 'promote', 'scaffold', 'archive')),
+  reason TEXT,
+  state TEXT NOT NULL DEFAULT 'classifying'
+    CHECK (state IN ('classifying', 'staged', 'applied', 'needs_review', 'failed')),
+  reservation_token TEXT,
+  resolution_note TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CHECK (
+    state = 'classifying'
+    OR (action IS NOT NULL AND reason IS NOT NULL)
+  ),
+  UNIQUE (memory_id, policy_version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_memory_lifecycle_actions_state
+  ON memory_lifecycle_actions (policy_version, state);
 
 CREATE TABLE IF NOT EXISTS memory_relationships (
   id SERIAL PRIMARY KEY,

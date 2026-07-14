@@ -702,6 +702,15 @@ class DeleteByRunIdResult:
     relationships: int
 
 
+LIFECYCLE_POLICY_VERSION = "memory-lifecycle.v1"
+LIFECYCLE_ACTION_STATES: frozenset[str] = frozenset(
+    ["classifying", "staged", "applied", "needs_review", "failed"]
+)
+LIFECYCLE_REVIEW_STATES: frozenset[str] = frozenset(
+    ["staged", "applied", "needs_review", "failed"]
+)
+
+
 @dataclass
 class TriageParams:
     """Parameters for memory triage."""
@@ -709,6 +718,7 @@ class TriageParams:
     scope: str | None = None  # "recent" | "project:<name>" | "type:<name>" | "session_ref:<prefix>" | None
     limit: int | None = None
     dry_run: bool = False
+    policy_version: str = LIFECYCLE_POLICY_VERSION
 
 
 @dataclass
@@ -721,6 +731,9 @@ class TriageAction:
     memory_type: str
     memory_title: str | None
     executed: bool = False
+    lifecycle_action_id: int | None = None
+    policy_version: str | None = None
+    state: str | None = None
 
 
 @dataclass
@@ -730,6 +743,55 @@ class TriageResult:
     analyzed: int
     actions: list[TriageAction]
     summary: str
+
+
+@dataclass
+class LifecycleActionQueryParams:
+    """Parameters for reading persisted lifecycle proposals."""
+
+    state: str | None = "staged"
+    policy_version: str | None = None
+    limit: int = 100
+
+    def __post_init__(self) -> None:
+        if self.state is not None and self.state not in LIFECYCLE_ACTION_STATES:
+            raise ValueError(f"Unknown lifecycle action state: {self.state!r}")
+        if self.policy_version is not None and not self.policy_version.strip():
+            raise ValueError("policy_version must not be empty")
+        if self.limit < 1 or self.limit > 500:
+            raise ValueError("limit must be between 1 and 500")
+
+
+@dataclass
+class LifecycleActionStateParams:
+    """Parameters for a reviewed lifecycle-action state transition."""
+
+    action_id: int
+    state: str
+    note: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.action_id < 1:
+            raise ValueError("action_id must be positive")
+        if self.state not in LIFECYCLE_REVIEW_STATES:
+            raise ValueError(f"Unknown review state: {self.state!r}")
+
+
+@dataclass
+class LifecycleActionRecord:
+    """A persisted lifecycle proposal and its review state."""
+
+    id: int
+    memory_id: int
+    policy_version: str
+    action: str | None
+    reason: str | None
+    state: str
+    memory_type: str
+    memory_title: str | None
+    resolution_note: str | None
+    created_at: str
+    updated_at: str
 
 
 @dataclass
@@ -896,6 +958,14 @@ class DataLayer(Protocol):
     async def delete_memories(self, params: DeleteParams) -> DeleteResult: ...
 
     async def triage_memories(self, params: TriageParams) -> TriageResult: ...
+
+    async def list_lifecycle_actions(
+        self, params: LifecycleActionQueryParams
+    ) -> list[LifecycleActionRecord]: ...
+
+    async def set_lifecycle_action_state(
+        self, params: LifecycleActionStateParams
+    ) -> LifecycleActionRecord: ...
 
     async def materialize_memories(self, params: MaterializeParams) -> MaterializeResult: ...
 

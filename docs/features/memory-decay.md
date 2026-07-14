@@ -104,7 +104,7 @@ Recent (Protected)  Stale (Decayed)  Decayed Once, Then Boosted
 
 ### Integration with Lifecycle Pipeline
 
-Decay is **Step 0** of the three-step memory lifecycle pipeline:
+Decay is **Step 0** of the staging-only memory lifecycle pipeline:
 
 ```python
 await run_lifecycle_pipeline(scope=None, dry_run=False)
@@ -114,9 +114,12 @@ Execution order:
 
 1. **Step 0 — Decay**: `decay_memories()` — Reduce priority of stale memories, boost frequently accessed ones
 2. **Step 1 — Triage**: `triage_memories()` — Classify remaining memories (keep, merge, promote, scaffold, archive)
-3. **Step 2 — Materialize**: `materialize_memories()` — Generate new memories from triage decisions
+3. **Step 2 — Stage**: Persist each proposal once under `(memory_id, policy_version)` for later review
 
-The pipeline returns a combined report with decay summary, triage actions, and materialization results.
+The pipeline returns a combined report with the decay summary, proposed actions,
+and the number of newly staged actions. It never materializes proposals.
+Priority boosts use a 24-hour `last_boost_at` guard, matching the existing
+decay guard, so an immediate repeated pipeline run does not mutate priorities.
 
 ### Appearance in Weekly Briefing
 
@@ -193,16 +196,19 @@ This runs:
 
 1. **Decay** — `decay_memories(DecayParams(...))` — Returns { decayed, boosted, protected }
 2. **Triage** — `triage_memories(TriageParams(...))` — Classifies memories into lifecycle actions
-3. **Materialize** — `materialize_memories()` — Executes actions (archive, merge, scaffold)
+3. **Stage** — persists actions for later review without executing archive, merge,
+   scaffold, promotion, file-write, bead, or delete side effects
 
 Example result:
 
 ```json
 {
   "decay_summary": "Decay run complete: 12 memories decayed, 3 boosted, 45 protected",
-  "triage_summary": "Classified 150 memories: 100 keep, 20 merge, 15 promote, 10 scaffold, 5 archive",
-  "materialize_summary": "Materialized 30 actions: 5 merged, 15 scaffolded, 10 archived",
-  "total_time_seconds": 8.5
+  "triage_summary": "Staged 50 actions from 50 analyzed memories",
+  "policy_version": "memory-lifecycle.v1",
+  "newly_staged_count": 50,
+  "materialization_summary": "Disabled: actions staged for review",
+  "actions_taken": []
 }
 ```
 
@@ -405,15 +411,15 @@ In `python/src/open_brain/server.py`:
 
 ```python
 @mcp.tool(
-    description="Run the full memory lifecycle pipeline: decay → triage → materialize. "
-    "Returns a structured report with decay summary, triage actions, and materialization results. "
+    description="Run the safe memory lifecycle pipeline: decay → triage → stage for review. "
+    "Never materializes or executes lifecycle proposals. "
     "Params: scope, dry_run"
 )
 async def run_lifecycle_pipeline(
     scope: str | None = None,
     dry_run: bool = False,
 ) -> str:
-    """Chain decay_memories → triage_memories → materialize_memories into one pipeline run."""
+    """Decay priorities and stage proposals without materialization side effects."""
     dl = get_dl()
 
     # Step 0: Decay — reduce priority of stale memories, boost frequently accessed ones
@@ -424,19 +430,13 @@ async def run_lifecycle_pipeline(
         TriageParams(scope=scope, dry_run=dry_run)
     )
 
-    # Step 2: Materialize (executes triage actions)
-    if not triage_result.actions:
-        materialize_result = MaterializeResult(actions=[], summary="No actions to materialize")
-    else:
-        materialize_result = await dl.materialize_memories(
-            MaterializeParams(actions=triage_result.actions, dry_run=dry_run)
-        )
-
-    # Combine all three reports
+    # Step 2: Report staged proposals; materialization is a separate reviewed tool.
     return json.dumps({
         "decay_summary": decay_result.summary,
         "triage_summary": triage_result.summary,
-        "materialize_summary": materialize_result.summary,
+        "newly_staged_count": 0 if dry_run else len(triage_result.actions),
+        "materialization_summary": "Disabled: actions staged for review",
+        "actions_taken": [],
     })
 ```
 
@@ -511,14 +511,14 @@ print(result.summary)
 ### Full Lifecycle Pipeline
 
 ```python
-# Run decay + triage + materialize in one call
+# Run decay + triage + staging in one call
 result = await run_lifecycle_pipeline(dry_run=False)
 
 import json
 summary = json.loads(result)
 print(summary["decay_summary"])
 print(summary["triage_summary"])
-print(summary["materialize_summary"])
+print(summary["newly_staged_count"])
 ```
 
 ### Custom Decay Parameters

@@ -41,6 +41,9 @@ from open_brain.data_layer.interface import (
     CompactParams,
     DecayParams,
     DeleteParams,
+    LIFECYCLE_POLICY_VERSION,
+    LifecycleActionQueryParams,
+    LifecycleActionStateParams,
     MaterializeParams,
     Memory,
     RefineParams,
@@ -1129,6 +1132,7 @@ async def refine_memories(
 @mcp.tool(
     description="Classify memories into lifecycle actions: keep | merge | promote | scaffold | archive. "
     "Uses LLM with type-aware logic: learning→promote, session_summary→archive, observation→keep/merge. "
+    "dry_run=true previews without writes; dry_run=false stages each proposal once for the active policy. "
     "Params: scope (recent|project:<name>|type:<name>|low-priority|session_ref:<prefix>), limit, dry_run"
 )
 @logged_tool
@@ -1146,9 +1150,61 @@ async def triage_memories(
         {
             "analyzed": result.analyzed,
             "summary": result.summary,
+            "policy_version": LIFECYCLE_POLICY_VERSION,
             "actions": [vars(a) for a in result.actions],
         }
     )
+
+
+@mcp.tool(
+    description="List persisted lifecycle proposals for human review or recovery. "
+    "Defaults to staged actions across policy versions; pass state=null to include all states, "
+    "or policy_version to restrict the result. This tool is read-only. "
+    "Params: state, policy_version, limit"
+)
+@logged_tool
+async def list_lifecycle_actions(
+    state: str | None = "staged",
+    policy_version: str | None = None,
+    limit: int = 100,
+) -> str:
+    """Return persisted lifecycle proposals and their review state."""
+    dl = get_dl()
+    records = await dl.list_lifecycle_actions(
+        LifecycleActionQueryParams(
+            state=state,
+            policy_version=policy_version,
+            limit=limit,
+        )
+    )
+    return json.dumps(
+        {
+            "policy_version": policy_version,
+            "state": state,
+            "count": len(records),
+            "actions": [vars(record) for record in records],
+        }
+    )
+
+
+@mcp.tool(
+    description="Record the reviewed state of a persisted lifecycle proposal. "
+    "Allowed states: staged, applied, needs_review, failed. This changes only the ledger; "
+    "it never materializes, archives, writes files, creates beads, or deletes memories. "
+    "Params: action_id, state, note"
+)
+@logged_tool
+async def set_lifecycle_action_state(
+    action_id: int,
+    state: str,
+    note: str | None = None,
+) -> str:
+    """Persist a human-reviewed lifecycle action state."""
+    dl = get_dl()
+    record = await dl.set_lifecycle_action_state(
+        LifecycleActionStateParams(action_id=action_id, state=state, note=note)
+    )
+    return json.dumps(vars(record))
 
 
 @mcp.tool(
@@ -1194,8 +1250,9 @@ async def materialize_memories(
 
 
 @mcp.tool(
-    description="Run the full memory lifecycle pipeline: triage → materialize. "
-    "Returns a structured report with triage summary, actions taken, and materialization results. "
+    description="Run the safe memory lifecycle pipeline: decay → triage → stage for review. "
+    "Never materializes, archives, writes files, or creates beads. Repeated runs stage each memory "
+    "at most once for the active policy version. Returns decay and staging summaries. "
     "Params: scope, dry_run"
 )
 @logged_tool
@@ -1203,50 +1260,33 @@ async def run_lifecycle_pipeline(
     scope: str | None = None,
     dry_run: bool = False,
 ) -> str:
-    """Chain decay_memories → triage_memories → materialize_memories into one pipeline run."""
+    """Decay priorities and stage proposals without materialization side effects."""
     dl = get_dl()
 
-    # Step 0: Decay — reduce priority of stale memories, boost frequently accessed ones
     decay_result = await dl.decay_memories(DecayParams(dry_run=dry_run))
-
-    # Step 1: Triage
     triage_result = await dl.triage_memories(
         TriageParams(scope=scope, dry_run=dry_run)
     )
 
-    if not triage_result.actions:
-        return json.dumps(
-            {
-                "decay_summary": decay_result.summary,
-                "decay_protected_canonical_entities": decay_result.protected_canonical_entities,
-                "triage_summary": triage_result.summary,
-                "materialization_summary": "No actions to materialize",
-                "actions_taken": [],
-            }
-        )
-
-    # Step 2: Materialize non-keep actions (keep is a no-op, skip for brevity unless dry_run)
-    non_keep = [a for a in triage_result.actions if a.action != "keep"]
-    keep_count = len(triage_result.actions) - len(non_keep)
-
-    mat_result = await dl.materialize_memories(
-        MaterializeParams(triage_actions=non_keep, dry_run=dry_run)
-    )
-
-    # Step 3: Build pipeline report
     action_counts: dict[str, int] = {}
     for a in triage_result.actions:
         action_counts[a.action] = action_counts.get(a.action, 0) + 1
 
+    proposed_count = len(triage_result.actions)
+    newly_staged_count = 0 if dry_run else proposed_count
     return json.dumps(
         {
             "decay_summary": decay_result.summary,
             "decay_protected_canonical_entities": decay_result.protected_canonical_entities,
             "triage_summary": triage_result.summary,
+            "analyzed_count": triage_result.analyzed,
             "triage_action_counts": action_counts,
-            "materialization_summary": mat_result.summary,
-            "actions_taken": [vars(r) for r in mat_result.results],
-            "kept_count": keep_count,
+            "policy_version": LIFECYCLE_POLICY_VERSION,
+            "proposed_count": proposed_count,
+            "newly_staged_count": newly_staged_count,
+            "staged_actions": [vars(action) for action in triage_result.actions],
+            "materialization_summary": "Disabled: actions staged for review",
+            "actions_taken": [],
             "dry_run": dry_run,
         }
     )

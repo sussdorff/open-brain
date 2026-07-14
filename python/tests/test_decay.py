@@ -139,6 +139,9 @@ async def test_decay_boost():
         "Second fetchval should be the boost count query (access_count >= threshold)"
     )
     assert second_call.args[1] == 10, f"boost_threshold=10 should be passed as int 10, got {second_call.args[1]!r}"
+    assert second_call.args[2] == 1.1
+    assert "last_boost_at" in second_call.args[0]
+    assert "LEAST(priority" in second_call.args[0]
 
 
 # ─── AK3: Recent memories are protected from decay ────────────────────────────
@@ -309,6 +312,9 @@ async def test_decay_overlap_behavior():
 
     assert result.decayed >= 1, "Stale memory should be decayed even with high access_count"
     assert result.boosted >= 1, "Frequently-accessed memory should also be boosted"
+    boost_query = conn.fetchval.call_args_list[1].args[0]
+    assert "last_boost_at = NOW()" in boost_query
+    assert "last_boost_at IS NULL" in boost_query
     # Net effect: boost partially counteracts decay (intentional, documented above)
 
 
@@ -363,7 +369,7 @@ async def test_low_priority_query_excludes_critical_and_high() -> None:
     pool = _make_pool(conn)
 
     with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
-        result = await dl.refine_memories(params)
+        await dl.refine_memories(params)
 
     conn.fetch.assert_called_once()
     sql_called = conn.fetch.call_args.args[0]

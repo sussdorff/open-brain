@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import json
-import tempfile
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from open_brain.data_layer.interface import (
     DecayResult,
+    LifecycleActionQueryParams,
+    LifecycleActionRecord,
+    LifecycleActionStateParams,
     MaterializeParams,
     MaterializeResult,
     Memory,
@@ -123,6 +124,20 @@ class TestTriageClassification:
             actions = await triage_with_llm(memories)
 
         assert actions[0].action == "keep"
+
+    @pytest.mark.asyncio
+    async def test_null_reason_is_normalized_to_empty_string(self):
+        """Nullable LLM reasons remain persistable text values."""
+        memories = [_make_memory(1)]
+        llm_response = json.dumps([
+            {"memory_id": 1, "action": "keep", "reason": None},
+        ])
+
+        with patch("open_brain.data_layer.triage.llm_complete", new_callable=AsyncMock) as mock_llm:
+            mock_llm.return_value = llm_response
+            actions = await triage_with_llm(memories)
+
+        assert actions[0].reason == ""
 
     @pytest.mark.asyncio
     async def test_missing_memory_filled_with_type_default(self):
@@ -330,7 +345,7 @@ class TestMaterializePromote:
         """promote with project name uses ~/.claude/projects/<project>/MEMORY.md."""
         memory = _make_memory(1, title="Project Memory", content="Content")
         # No materialize_path — uses project
-        with patch("open_brain.data_layer.materialize.Path") as mock_path_cls:
+        with patch("open_brain.data_layer.materialize.Path"):
             # We just verify the function doesn't crash and returns a result
             # Real path resolution tested in integration
             pass
@@ -625,20 +640,9 @@ class TestPipelineDryRun:
         memory = _make_memory(1, "learning", title="Learning Title")
         memory.metadata["materialize_path"] = str(tmp_path / "MEMORY.md")
 
-        action = TriageAction(
-            action="promote",
-            memory_id=1,
-            reason="Good",
-            memory_type="learning",
-            memory_title="Learning Title",
-            executed=False,
-        )
-
         # Dry run via PostgresDataLayer.materialize_memories uses dry_run flag
         # In dry_run mode, results are returned without calling execute_triage_actions
         # We test this by ensuring the file was NOT written
-        from open_brain.data_layer.interface import MaterializeParams
-
         # Simulate dry-run path: no file should be written
         assert not (tmp_path / "MEMORY.md").exists()
 
@@ -691,6 +695,7 @@ class TestLifecyclePipelineStaging:
             report = json.loads(await run_lifecycle_pipeline(scope="recent"))
 
         mock_dl.materialize_memories.assert_not_awaited()
+        assert report["analyzed_count"] == 50
         assert report["newly_staged_count"] == 50
         assert report["actions_taken"] == []
         assert report["materialization_summary"] == "Disabled: actions staged for review"
@@ -746,6 +751,22 @@ class TestLifecyclePipelineStaging:
             def __init__(self) -> None:
                 self.rows = [vars(_make_memory(memory_id)) for memory_id in range(1, 51)]
                 self.staged: dict[tuple[int, str], int] = {}
+                self.tokens: dict[tuple[int, str], str] = {}
+
+            def transaction(self):
+                @asynccontextmanager
+                async def transaction_context():
+                    yield
+
+                return transaction_context()
+
+            async def fetchval(self, query: str, *args):
+                assert "pg_advisory_xact_lock" in query
+                return None
+
+            async def execute(self, query: str, *args):
+                assert "state = 'classifying'" in query
+                return "DELETE 0"
 
             async def fetch(self, query: str, *args):
                 assert "memory_lifecycle_actions" in query
@@ -759,14 +780,21 @@ class TestLifecyclePipelineStaging:
                 ][:limit]
 
             async def fetchrow(self, query: str, *args):
-                assert "ON CONFLICT (memory_id, policy_version) DO NOTHING" in query
                 memory_id, policy_version = args[:2]
                 key = (memory_id, policy_version)
-                if key in self.staged:
+                if "INSERT INTO memory_lifecycle_actions" in query:
+                    assert "ON CONFLICT (memory_id, policy_version) DO NOTHING" in query
+                    if key in self.staged:
+                        return None
+                    action_id = len(self.staged) + 1
+                    self.staged[key] = action_id
+                    self.tokens[key] = args[2]
+                    return {"id": action_id}
+                assert "UPDATE memory_lifecycle_actions" in query
+                assert "reservation_token = $5" in query
+                if self.tokens[key] != args[4]:
                     return None
-                action_id = len(self.staged) + 1
-                self.staged[key] = action_id
-                return {"id": action_id}
+                return {"id": self.staged[key]}
 
         conn = LifecycleLedgerConnection()
 
@@ -812,6 +840,219 @@ class TestLifecyclePipelineStaging:
         assert second.actions == []
         assert len(conn.staged) == 50
 
+    @pytest.mark.asyncio
+    async def test_replaced_reservation_rejects_stale_worker_result(self):
+        """A reclaimed reservation cannot be finalized by its original worker."""
+        from contextlib import asynccontextmanager
+
+        from open_brain.data_layer.postgres import PostgresDataLayer
+
+        class ReclaimedReservationConnection:
+            def __init__(self) -> None:
+                self.row = vars(_make_memory(1))
+                self.token: str | None = None
+
+            def transaction(self):
+                @asynccontextmanager
+                async def transaction_context():
+                    yield
+
+                return transaction_context()
+
+            async def fetchval(self, query: str, *args):
+                return None
+
+            async def execute(self, query: str, *args):
+                return "DELETE 0"
+
+            async def fetch(self, query: str, *args):
+                return [self.row] if self.token is None else []
+
+            async def fetchrow(self, query: str, *args):
+                if "INSERT INTO memory_lifecycle_actions" in query:
+                    self.token = args[2]
+                    return {"id": 1}
+                assert "reservation_token = $5" in query
+                return {"id": 1} if args[4] == self.token else None
+
+        conn = ReclaimedReservationConnection()
+
+        @asynccontextmanager
+        async def acquire():
+            yield conn
+
+        pool = MagicMock()
+        pool.acquire = acquire
+
+        async def classify(memories):
+            conn.token = "replacement-worker-token"
+            return [
+                TriageAction(
+                    action="keep",
+                    memory_id=1,
+                    reason="Still useful",
+                    memory_type="observation",
+                    memory_title="Test Memory",
+                )
+            ]
+
+        with (
+            patch(
+                "open_brain.data_layer.postgres.get_pool",
+                new_callable=AsyncMock,
+                return_value=pool,
+            ),
+            patch(
+                "open_brain.data_layer.triage.triage_with_llm",
+                new_callable=AsyncMock,
+                side_effect=classify,
+            ),
+        ):
+            result = await PostgresDataLayer().triage_memories(TriageParams(limit=1))
+
+        assert result.analyzed == 1
+        assert result.actions == []
+
+    @pytest.mark.asyncio
+    async def test_lifecycle_read_and_review_queries_preserve_queue_safety(self):
+        """Reads span policies and review writes exclude in-flight reservations."""
+        from contextlib import asynccontextmanager
+
+        from open_brain.data_layer.postgres import PostgresDataLayer
+
+        class LifecycleReviewConnection:
+            async def fetch(self, query: str, *args):
+                assert "($1::text IS NULL" in query
+                assert args[0] is None
+                return []
+
+            async def fetchrow(self, query: str, *args):
+                assert "state != 'classifying'" in query
+                assert "action IS NOT NULL" in query
+                assert "reason IS NOT NULL" in query
+                return None
+
+        conn = LifecycleReviewConnection()
+
+        @asynccontextmanager
+        async def acquire():
+            yield conn
+
+        pool = MagicMock()
+        pool.acquire = acquire
+
+        with patch(
+            "open_brain.data_layer.postgres.get_pool",
+            new_callable=AsyncMock,
+            return_value=pool,
+        ):
+            dl = PostgresDataLayer()
+            records = await dl.list_lifecycle_actions(LifecycleActionQueryParams())
+            with pytest.raises(ValueError, match="not reviewable"):
+                await dl.set_lifecycle_action_state(
+                    LifecycleActionStateParams(action_id=1, state="applied")
+                )
+
+        assert records == []
+
+    @pytest.mark.integration
+    @pytest.mark.asyncio
+    async def test_same_fifty_memories_are_staged_once_in_postgres(
+        self,
+        bootstrapped_database_url: str,
+    ):
+        """The real unique ledger key makes the second database run a no-op."""
+        from uuid import uuid4
+
+        import asyncpg
+
+        from open_brain.config import get_config
+        from open_brain.data_layer import postgres
+        from open_brain.data_layer.postgres import PostgresDataLayer
+
+        prefix = f"lifecycle-integration:{uuid4()}:"
+        policy_version = f"memory-lifecycle.test.{uuid4()}"
+        get_config().DATABASE_URL = bootstrapped_database_url
+        await postgres.close_pool()
+
+        setup_conn = await asyncpg.connect(bootstrapped_database_url)
+        try:
+            await setup_conn.execute(
+                """
+                INSERT INTO memories (
+                    type,
+                    title,
+                    content,
+                    session_ref,
+                    metadata,
+                    stability
+                )
+                SELECT
+                    'observation',
+                    'Lifecycle integration ' || item,
+                    'Lifecycle integration content ' || item,
+                    $1 || item,
+                    '{}'::jsonb,
+                    'stable'
+                FROM generate_series(1, 50) AS item
+                """,
+                prefix,
+            )
+        finally:
+            await setup_conn.close()
+
+        async def classify(memories):
+            return [
+                TriageAction(
+                    action="keep",
+                    memory_id=memory.id,
+                    reason="Still useful",
+                    memory_type=memory.type,
+                    memory_title=memory.title,
+                )
+                for memory in memories
+            ]
+
+        try:
+            with patch(
+                "open_brain.data_layer.triage.triage_with_llm",
+                new_callable=AsyncMock,
+                side_effect=classify,
+            ):
+                dl = PostgresDataLayer()
+                params = TriageParams(
+                    scope=f"session_ref:{prefix}",
+                    limit=50,
+                    policy_version=policy_version,
+                )
+                first = await dl.triage_memories(params)
+                second = await dl.triage_memories(params)
+
+            pool = await postgres.get_pool()
+            async with pool.acquire() as conn:
+                staged_count = await conn.fetchval(
+                    """
+                    SELECT COUNT(*)
+                    FROM memory_lifecycle_actions
+                    WHERE policy_version = $1
+                    """,
+                    policy_version,
+                )
+
+            assert first.analyzed == 50
+            assert len(first.actions) == 50
+            assert second.analyzed == 0
+            assert second.actions == []
+            assert staged_count == 50
+        finally:
+            pool = await postgres.get_pool()
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "DELETE FROM memories WHERE session_ref LIKE $1",
+                    prefix + "%",
+                )
+            await postgres.close_pool()
+
     def test_migration_defines_action_states_and_policy_idempotency_key(self):
         """The additive lifecycle ledger has the required durable constraints."""
         import inspect
@@ -822,8 +1063,50 @@ class TestLifecyclePipelineStaging:
 
         assert "CREATE TABLE IF NOT EXISTS memory_lifecycle_actions" in source
         assert "UNIQUE (memory_id, policy_version)" in source
-        for state in ("staged", "applied", "needs_review", "failed"):
+        assert "reservation_token" in source
+        assert "state = 'classifying'" in source
+        assert "action IS NOT NULL AND reason IS NOT NULL" in source
+        assert "last_boost_at" in source
+        for state in ("classifying", "staged", "applied", "needs_review", "failed"):
             assert state in source
+
+    @pytest.mark.asyncio
+    async def test_staged_actions_can_be_listed_and_reviewed(self):
+        """Persisted proposals have a read path and an explicit state transition."""
+        from open_brain.server import list_lifecycle_actions, set_lifecycle_action_state
+
+        record = LifecycleActionRecord(
+            id=7,
+            memory_id=42,
+            policy_version="memory-lifecycle.v1",
+            action="promote",
+            reason="Reusable rule",
+            state="staged",
+            memory_type="learning",
+            memory_title="Use durable triggers",
+            resolution_note=None,
+            created_at="2026-07-14T12:00:00+00:00",
+            updated_at="2026-07-14T12:00:00+00:00",
+        )
+        applied = LifecycleActionRecord(
+            **{**vars(record), "state": "applied", "resolution_note": "Reviewed"}
+        )
+        mock_dl = MagicMock()
+        mock_dl.list_lifecycle_actions = AsyncMock(return_value=[record])
+        mock_dl.set_lifecycle_action_state = AsyncMock(return_value=applied)
+
+        with patch("open_brain.server.get_dl", return_value=mock_dl):
+            listed = json.loads(await list_lifecycle_actions())
+            transitioned = json.loads(
+                await set_lifecycle_action_state(7, "applied", "Reviewed")
+            )
+
+        assert listed["count"] == 1
+        assert listed["actions"][0]["memory_id"] == 42
+        query_params = mock_dl.list_lifecycle_actions.await_args.args[0]
+        assert query_params.policy_version is None
+        assert transitioned["state"] == "applied"
+        assert transitioned["resolution_note"] == "Reviewed"
 
 
 # ─── Test: session_ref scope ──────────────────────────────────────────────────

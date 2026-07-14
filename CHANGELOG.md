@@ -42,6 +42,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- *(open-brain-mkvw)* **Lifecycle pipeline is now idempotent and staging-only** — `run_lifecycle_pipeline` no longer invokes materialization actions that can write files, create beads, or archive memories. Triage proposals are reserved before classification and stored in a dedicated `memory_lifecycle_actions` ledger with a unique `(memory_id, policy_version)` key and explicit review states. `list_lifecycle_actions` and `set_lifecycle_action_state` expose a consumable human-review queue. Repeating the same policy run skips previously classified memories, dry runs remain read-only previews, and priority boosts have a 24-hour repeat guard.
+
 - *(open-brain-ceb3)* **`save_memory` session-summary upsert no longer corrupts unrelated memory types** — The upsert lookup for `type='session_summary'` saves (both append and replace mode) now scopes its existing-row match by memory type and project, in addition to `session_ref`. Previously, appending a session summary could match *any* memory sharing the same `session_ref` — including a `learning` or `debrief` — and silently retitle it and concatenate content into it. Session summaries with the same `session_ref` and project still update idempotently in place; memories of other types or projects are never touched.
 
 - *(open-brain-cd79)* **Second Brain cutover accepts an empty canonical-entity set when filtering works** — The `open_brain_capabilities` gate now verifies the canonical-entity filter query itself and reports its full result total. A successful zero-count query is green, while an unavailable, broken, or malformed query remains red.

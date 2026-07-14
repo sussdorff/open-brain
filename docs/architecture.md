@@ -135,7 +135,7 @@ Memories flow through a defined lifecycle from creation to long-term storage:
 | **Search** | `search`, `timeline`, `get_observations` | On demand | 3-step funnel: search → context → details. Minimizes token usage. |
 | **Refine** | `refine_memories` | Automatic | LLM finds duplicates, merges similar, adjusts priority. Rule-based. |
 | **Decay** | `decay_memories` / `run_lifecycle_pipeline` (Step 0) | Automatic | Reduce priority of stale memories using importance-class multipliers (critical=no decay, high=0.5×, medium=1.0×, low=2.0×). Access-count damping: effective rate ÷ (1 + access_count × 0.1). Boost frequently accessed memories. Recall-triggered decay fires on `search()` if `last_decay_at` > 24 h. Critical/high memories protected from pruning. |
-| **Triage** | `triage_memories` | Human-in-loop | LLM classifies memories; user approves each action. |
+| **Triage** | `triage_memories` / `run_lifecycle_pipeline` | Staging-only | LLM classifies eligible memories and stores one proposal per `(memory_id, policy_version)`. Repeated runs skip memories already classified by the active policy. `list_lifecycle_actions` and `set_lifecycle_action_state` expose the review queue without executing proposals. Dry runs do not write. |
 | **Materialize** | `materialize_memories` | Semi-auto | Writes approved triage actions to their targets (files, issues, etc.). |
 
 ## Capture Router

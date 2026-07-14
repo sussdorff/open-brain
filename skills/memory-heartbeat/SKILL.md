@@ -84,7 +84,7 @@ If the tool call fails (MCP unreachable), emit the standard error message from
 the `open-brain/memory-status-conventions` standard with verb "heartbeat
 skipped".
 
-If the result shows 0 actions processed:
+If the result shows 0 newly staged actions:
 ```
 No pending work in this window.
 ```
@@ -94,8 +94,9 @@ Otherwise summarize:
 Memory Heartbeat — Work Hours
 
 Lifecycle pipeline (scope=recent):
-- Processed: <N> memories
-- <summary of actions taken from result>
+- Analyzed: <N> memories
+- Newly staged: <N> proposals
+- <triage summary from result>
 ```
 
 Then proceed to **Step 3: Provenance Check** (see below).
@@ -175,7 +176,7 @@ Goal: Full triage + weekly summary.
 If any tool call fails, emit the standard MCP error message (see
 `open-brain/memory-status-conventions`).
 
-If lifecycle returned 0 actions and no memories in the past week:
+If lifecycle returned 0 newly staged actions and no memories in the past week:
 ```
 No pending work in this window.
 ```
@@ -266,9 +267,9 @@ Provenance check: N memories scanned, M stale → archived, K verified
 
 The skill is idempotent within a time window by design:
 
-- **WORK-HOURS**: `run_lifecycle_pipeline(scope="recent")` is naturally idempotent — if there's nothing new to process it returns 0 actions → output "No pending work in this window."
+- **WORK-HOURS**: `run_lifecycle_pipeline(scope="recent")` stores proposals behind a `(memory_id, policy_version)` uniqueness constraint. If there is nothing new to stage it returns `newly_staged_count=0`.
 - **END-OF-DAY**: Search returns the same memories on repeated calls → re-running produces the same read-only digest without side effects, which is acceptable idempotency for a stateless skill (no actions are duplicated).
-- **WEEKLY**: `run_lifecycle_pipeline` with no scope is idempotent — already-triaged memories won't be re-processed.
+- **WEEKLY**: `run_lifecycle_pipeline` with no scope uses the same ledger guard, so memories already classified by the active policy are skipped.
 
 ---
 
@@ -277,6 +278,6 @@ The skill is idempotent within a time window by design:
 | Situation | Response |
 |-----------|----------|
 | MCP tool call throws / unreachable | Standard MCP error message (see `open-brain/memory-status-conventions`) with verb "heartbeat skipped" |
-| Lifecycle returns 0 actions | `No pending work in this window.` |
+| Lifecycle returns 0 newly staged actions | `No pending work in this window.` |
 | Search returns 0 results | Include "No memories found today/this week" in digest |
 | date command fails | Fall back to QUIET mode (safe default) |
