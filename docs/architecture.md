@@ -235,7 +235,13 @@ The recommended backlog-cleanup entrypoint is the read-only
 `ob learnings analyze` command. It classifies claims as durable learnings,
 concrete work, decisions, standard or skill candidates, duplicate doctrine, or
 noise before clustering. Only causally complete learnings enter clustering, and
-no result is persisted automatically. See
+no result is persisted automatically. An explicit `ob learnings review` command
+can append one of four cluster-level classifications to a dedicated audit ledger.
+That write is keyed to the exact supporting source-memory set and does not mutate
+the source memories, retrieval priority, lifecycle state, or governance artifacts.
+The write requires an OAuth user identity. Reviewed clusters remain visible in a
+separate report queue; ambiguous duplicate source-set keys and canonical-learning
+drift fail open into active review. See
 [Manual Session Learning Analysis](./features/session-learning-analysis.md).
 
 This command does not enable the periodic or session-close extraction triggers

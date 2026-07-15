@@ -238,6 +238,7 @@ class TestLearningsCommand:
             project=None,
             source=None,
             model=None,
+            allow_missing_review_ledger=True,
         )
         call.assert_not_awaited()
 

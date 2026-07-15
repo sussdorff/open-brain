@@ -139,6 +139,25 @@ CREATE TABLE IF NOT EXISTS memory_lifecycle_actions (
 CREATE INDEX IF NOT EXISTS idx_memory_lifecycle_actions_state
   ON memory_lifecycle_actions (policy_version, state);
 
+CREATE TABLE IF NOT EXISTS session_learning_reviews (
+  id BIGSERIAL PRIMARY KEY,
+  review_key TEXT NOT NULL,
+  source_memory_ids BIGINT[] NOT NULL,
+  decision TEXT NOT NULL
+    CHECK (decision IN ('accept', 'covered_obsolete', 'project_only', 'dismiss')),
+  reason TEXT NOT NULL CHECK (length(btrim(reason)) > 0),
+  canonical_learning TEXT NOT NULL
+    CHECK (length(btrim(canonical_learning)) > 0),
+  reviewed_by TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT session_learning_reviews_reviewed_by_not_blank
+    CHECK (length(btrim(reviewed_by)) > 0),
+  CHECK (cardinality(source_memory_ids) >= 1)
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_learning_reviews_key_created
+  ON session_learning_reviews (review_key, created_at DESC, id DESC);
+
 CREATE TABLE IF NOT EXISTS memory_relationships (
   id SERIAL PRIMARY KEY,
   source_id INTEGER REFERENCES memories(id) ON DELETE CASCADE,

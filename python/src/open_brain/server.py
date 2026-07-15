@@ -76,6 +76,10 @@ from open_brain.people.merge import (
 from open_brain.session_learning_analysis import (
     analyze_session_learnings as _analyze_session_learnings,
 )
+from open_brain.session_learning_reviews import (
+    LearningReviewParams,
+    record_session_learning_review as _record_session_learning_review,
+)
 from open_brain.utils import parse_llm_json
 from open_brain.data_layer.postgres import PostgresDataLayer, close_pool, get_pool
 from open_brain.digest import generate_daily_review, generate_weekly_briefing
@@ -174,6 +178,7 @@ def logged_tool(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[An
 # Evolution tools require the `evolution` OAuth scope
 _EVOLUTION_TOOLS: frozenset[str] = frozenset({
     "analyze_session_learnings",
+    "review_session_learning",
     "weekly_briefing",
     "analyze_briefing_engagement",
     "generate_evolution_suggestion",
@@ -1132,6 +1137,41 @@ async def analyze_session_learnings(
         model=model,
     )
     return json.dumps(report)
+
+
+@mcp.tool(
+    description=(
+        "Record one explicit manual review classification for a session-learning "
+        "cluster. Allowed decisions: accept, covered_obsolete, project_only, dismiss. "
+        "This appends only to the review ledger; it does not change memories, priority, "
+        "lifecycle state, work items, standards, or skills. Requires evolution scope. "
+        "Params: review_key, decision, reason, canonical_learning"
+    )
+)
+@logged_tool
+async def review_session_learning(
+    review_key: str,
+    decision: str,
+    reason: str,
+    canonical_learning: str,
+) -> str:
+    """Append an authenticated manual cluster review decision."""
+    _require_scope("evolution")
+    reviewer = _current_user_id.get()
+    if not reviewer:
+        raise ValueError(
+            "An OAuth reviewer identity is required for learning review decisions"
+        )
+    record = await _record_session_learning_review(
+        LearningReviewParams(
+            review_key=review_key,
+            decision=decision,
+            reason=reason,
+            canonical_learning=canonical_learning,
+            reviewed_by=reviewer,
+        )
+    )
+    return json.dumps(record.to_dict())
 
 
 @mcp.tool(

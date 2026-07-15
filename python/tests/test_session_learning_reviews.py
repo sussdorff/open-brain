@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -108,20 +109,29 @@ def test_review_params_accept_only_explicit_manual_decisions(decision: str) -> N
 
 
 @pytest.mark.parametrize(
-    ("field", "value"),
-    [("decision", "archive"), ("reason", "  "), ("canonical_learning", ""), ("review_key", "session-learning:v2:21617,26870")],
+    ("field", "value", "message"),
+    [
+        ("decision", "archive", "Unknown learning review decision"),
+        ("reason", "  ", "reason must not be empty"),
+        ("canonical_learning", "", "canonical_learning must not be empty"),
+        ("review_key", "session-learning:v2:21617,26870", "review_key must start"),
+        ("reviewed_by", None, "reviewed_by must contain"),
+        ("reviewed_by", "  ", "reviewed_by must contain"),
+    ],
 )
-def test_review_params_reject_invalid_manual_write(field: str, value: str) -> None:
-    values = {
+def test_review_params_reject_invalid_manual_write(
+    field: str, value: object, message: str
+) -> None:
+    values: dict[str, object] = {
         "review_key": "session-learning:v1:21617,26870",
         "decision": "covered_obsolete",
         "reason": "Reviewed manually.",
         "canonical_learning": "A durable learning snapshot.",
-        "reviewed_by": None,
+        "reviewed_by": "oauth-user",
     }
     values[field] = value
-    with pytest.raises(ValueError):
-        LearningReviewParams(**values)
+    with pytest.raises(ValueError, match=message):
+        LearningReviewParams(**values)  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio
@@ -191,6 +201,8 @@ def test_reviewed_cluster_leaves_active_queue_but_remains_auditable() -> None:
     assert report["counts"]["reviewed_learning_clusters"] == 1
     assert report["read_only"] is True
     assert report["write_side_effects"] is False
+    assert "Reviewed by: oauth-user" in cli_main._render_learning_analysis(report)
+
 
 
 def test_duplicate_review_keys_fail_open_as_active_identity_conflicts() -> None:
@@ -202,6 +214,32 @@ def test_duplicate_review_keys_fail_open_as_active_identity_conflicts() -> None:
     active = report["queues"]["reviewable_learning_clusters"]
     assert len(active) == 2
     assert all(item["review_identity_conflict"] is True for item in active)
+    assert all(
+        item["conflicting_review"]["decision"] == "covered_obsolete"
+        for item in active
+    )
+    rendered = cli_main._render_learning_analysis(report)
+    assert "Review identity conflict" in rendered
+    assert "Prior review (identity conflict): covered_obsolete" in rendered
+
+    assert report["queues"]["reviewed_learning_clusters"] == []
+
+
+def test_cross_run_canonical_drift_fails_open_with_stale_review_context() -> None:
+    candidates, clusters = _clusters()
+    key = "session-learning:v1:21617,26870"
+    stale_review = _record(canonical_learning="A different prior learning.")
+
+    report = analysis.build_analysis_report([], candidates, clusters, {key: stale_review})
+
+    active = report["queues"]["reviewable_learning_clusters"]
+    assert len(active) == 1
+    assert active[0]["review_canonical_drift"] is True
+    assert active[0]["stale_review"]["canonical_learning"] == "A different prior learning."
+    rendered = cli_main._render_learning_analysis(report)
+    assert "Prior review (stale): covered_obsolete" in rendered
+    assert "A different prior learning." in rendered
+
     assert report["queues"]["reviewed_learning_clusters"] == []
 
 
@@ -270,11 +308,30 @@ def test_review_ledger_exists_in_runtime_and_bootstrap_schema() -> None:
     root = Path(__file__).resolve().parents[2]
     runtime_sql = (root / "python/src/open_brain/data_layer/postgres.py").read_text()
     bootstrap_sql = (root / "scripts/bootstrap_test_schema.sql").read_text()
-    for schema_sql in (runtime_sql, bootstrap_sql):
-        assert "CREATE TABLE IF NOT EXISTS session_learning_reviews" in schema_sql
-        assert "CHECK (decision IN ('accept', 'covered_obsolete', 'project_only', 'dismiss'))" in schema_sql
-        assert "source_memory_ids BIGINT[] NOT NULL" in schema_sql
-        assert "idx_session_learning_reviews_key_created" in schema_sql
+
+    def normalized_ddl(sql: str, pattern: str) -> str:
+        match = re.search(pattern, sql, re.DOTALL)
+        assert match is not None
+        return " ".join(match.group(0).split())
+
+    table_pattern = (
+        r"CREATE TABLE IF NOT EXISTS session_learning_reviews\s*\(.*?\n\s*\);"
+    )
+    index_pattern = (
+        r"CREATE INDEX IF NOT EXISTS idx_session_learning_reviews_key_created.*?;"
+    )
+    assert normalized_ddl(runtime_sql, table_pattern) == normalized_ddl(
+        bootstrap_sql, table_pattern
+    )
+    assert normalized_ddl(runtime_sql, index_pattern) == normalized_ddl(
+        bootstrap_sql, index_pattern
+    )
+    assert "SET reviewed_by = 'legacy-unattributed'" in runtime_sql
+    assert "ALTER COLUMN reviewed_by SET NOT NULL" in runtime_sql
+    assert (
+        "ADD CONSTRAINT session_learning_reviews_reviewed_by_not_blank"
+        in runtime_sql
+    )
 
 
 @pytest.mark.asyncio
@@ -301,3 +358,131 @@ async def test_review_tool_is_evolution_scoped_and_forwards_oauth_user() -> None
     assert result["decision"] == "covered_obsolete"
     assert record.await_args.args[0].reviewed_by == "oauth-user"
     assert "review_session_learning" in server._EVOLUTION_TOOLS
+
+
+@pytest.mark.asyncio
+async def test_review_tool_rejects_anonymous_evolution_credentials() -> None:
+    import open_brain.server as server
+
+    tool = getattr(server, "review_session_learning")
+    scopes = server._current_scopes.set(("memory", "evolution"))
+    user = server._current_user_id.set(None)
+    try:
+        with patch.object(server, "_record_session_learning_review", new_callable=AsyncMock) as record:
+            with pytest.raises(ValueError, match="OAuth reviewer identity"):
+                await tool(
+                    review_key="session-learning:v1:21617,26870",
+                    decision="covered_obsolete",
+                    reason="Receipt-bound ship now precedes finalize.",
+                    canonical_learning="Closed tracker state did not prove landed code.",
+                )
+    finally:
+        server._current_user_id.reset(user)
+        server._current_scopes.reset(scopes)
+
+    record.assert_not_awaited()
+
+@pytest.mark.asyncio
+async def test_review_tool_rejects_memory_only_scope_before_write() -> None:
+    import open_brain.server as server
+
+    tool = getattr(server, "review_session_learning")
+    scopes = server._current_scopes.set(("memory",))
+    user = server._current_user_id.set("oauth-user")
+    try:
+        with patch.object(server, "_record_session_learning_review", new_callable=AsyncMock) as record:
+            with pytest.raises(server.ScopeDeniedError, match="evolution"):
+                await tool(
+                    review_key="session-learning:v1:21617,26870",
+                    decision="covered_obsolete",
+                    reason="Receipt-bound ship now precedes finalize.",
+                    canonical_learning="Closed tracker state did not prove landed code.",
+                )
+    finally:
+        server._current_user_id.reset(user)
+        server._current_scopes.reset(scopes)
+
+    record.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_missing_review_table_is_optional_only_when_explicitly_requested() -> None:
+    import asyncpg
+
+    conn = AsyncMock()
+    conn.fetch.side_effect = asyncpg.UndefinedTableError("missing review ledger")
+    acquire = MagicMock()
+    acquire.__aenter__ = AsyncMock(return_value=conn)
+    acquire.__aexit__ = AsyncMock(return_value=None)
+    pool = MagicMock()
+    pool.acquire.return_value = acquire
+
+    with patch("open_brain.session_learning_reviews.get_pool", new_callable=AsyncMock, return_value=pool):
+        result = await list_latest_session_learning_reviews(
+            ["session-learning:v1:21617,26870"],
+            allow_missing_table=True,
+        )
+        with pytest.raises(asyncpg.UndefinedTableError):
+            await list_latest_session_learning_reviews(
+                ["session-learning:v1:21617,26870"]
+            )
+
+    assert result == {}
+
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_real_postgres_review_history_is_append_only_and_memory_neutral(
+    bootstrapped_database_url: str,
+) -> None:
+    import asyncpg
+
+    from open_brain.data_layer.postgres import close_pool
+
+    key = "session-learning:v1:900000001,900000002"
+    conn = await asyncpg.connect(bootstrapped_database_url)
+    await close_pool()
+    try:
+        await conn.execute(
+            "DELETE FROM session_learning_reviews WHERE review_key = $1",
+            key,
+        )
+        memory_count_before = await conn.fetchval("SELECT COUNT(*) FROM memories")
+
+        first = await record_session_learning_review(
+            LearningReviewParams(
+                review_key=key,
+                decision="accept",
+                reason="First explicit review.",
+                canonical_learning="A stable integration-test learning.",
+                reviewed_by="integration-oauth-user",
+            )
+        )
+        second = await record_session_learning_review(
+            LearningReviewParams(
+                review_key=key,
+                decision="project_only",
+                reason="Reclassified with additional operator context.",
+                canonical_learning="A stable integration-test learning.",
+                reviewed_by="integration-oauth-user",
+            )
+        )
+        latest = await list_latest_session_learning_reviews([key])
+
+        history_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM session_learning_reviews WHERE review_key = $1",
+            key,
+        )
+        memory_count_after = await conn.fetchval("SELECT COUNT(*) FROM memories")
+        assert second.id > first.id
+        assert history_count == 2
+        assert latest[key].decision == "project_only"
+        assert memory_count_after == memory_count_before
+    finally:
+        await conn.execute(
+            "DELETE FROM session_learning_reviews WHERE review_key = $1",
+            key,
+        )
+        await conn.close()
+        await close_pool()

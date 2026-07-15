@@ -110,6 +110,7 @@ def _render_learning_analysis(data: dict[str, Any]) -> str:
         f"Source summaries: {counts.get('source_summaries', 0)}",
         f"Candidates: {counts.get('candidates', 0)}",
         f"Reviewable learning clusters: {counts.get('reviewable_learning_clusters', 0)}",
+        f"Reviewed learning clusters: {counts.get('reviewed_learning_clusters', 0)}",
         f"Held learning clusters: {counts.get('held_learning_clusters', 0)}",
         f"Concrete work items: {counts.get('todos', 0)}",
         f"Decisions: {counts.get('decisions', 0)}",
@@ -128,7 +129,40 @@ def _render_learning_analysis(data: dict[str, Any]) -> str:
             )
             lines.append(f"- {cluster.get('canonical_learning', '')}")
             lines.append(f"  Sources: {source_ids or '-'}")
+            lines.append(f"  Review key: {cluster.get('review_key', '-')}")
+            if cluster.get("review_identity_conflict"):
+                lines.append(
+                    "  Review identity conflict: multiple active clusters share this key"
+                )
+            conflicting_review = cluster.get("conflicting_review") or {}
+            if conflicting_review:
+                lines.append(
+                    "  Prior review (identity conflict): "
+                    f"{conflicting_review.get('decision', '-')} - "
+                    f"{conflicting_review.get('canonical_learning', '-')} @ "
+                    f"{conflicting_review.get('created_at', '-')}"
+                )
+            stale_review = cluster.get("stale_review") or {}
+            if stale_review:
+                lines.append(
+                    "  Prior review (stale): "
+                    f"{stale_review.get('decision', '-')} - "
+                    f"{stale_review.get('canonical_learning', '-')} @ "
+                    f"{stale_review.get('created_at', '-')}"
+                )
             append_review_details(cluster)
+
+    reviewed = queues.get("reviewed_learning_clusters") or []
+    if reviewed:
+        lines.extend(["", "Reviewed learning clusters"])
+        for cluster in reviewed:
+            review = cluster.get("review") or {}
+            lines.append(f"- {cluster.get('canonical_learning', '')}")
+            lines.append(f"  Review key: {cluster.get('review_key', '-')}")
+            lines.append(f"  Decision: {review.get('decision', '-')}")
+            lines.append(f"  Reason: {review.get('reason', '-')}")
+            lines.append(f"  Reviewed by: {review.get('reviewed_by', '-')}")
+            lines.append(f"  Reviewed at: {review.get('created_at', '-')}")
 
     held = queues.get("held_learning_clusters") or []
     if held:
@@ -425,7 +459,17 @@ async def _cmd_context(args: argparse.Namespace) -> Any:
 
 
 async def _cmd_learnings(args: argparse.Namespace) -> Any:
-    """Run manual read-only session-summary learning analysis."""
+    """Run manual session-learning analysis or explicit cluster review."""
+    if args.learnings_command == "review":
+        return await call_tool(
+            "review_session_learning",
+            {
+                "review_key": args.review_key,
+                "decision": args.decision,
+                "reason": args.reason,
+                "canonical_learning": args.canonical_learning,
+            },
+        )
     if args.learnings_command != "analyze":
         raise ValueError(f"Unknown learnings command: {args.learnings_command}")
     parameters = {
@@ -444,7 +488,10 @@ async def _cmd_learnings(args: argparse.Namespace) -> Any:
             )
         _direct.prepare_direct_env(database_url)
         suppress_migrations()
-        return await analyze_session_learnings(**parameters)
+        return await analyze_session_learnings(
+            **parameters,
+            allow_missing_review_ledger=True,
+        )
     return await call_tool("analyze_session_learnings", parameters)
 
 
@@ -1105,6 +1152,31 @@ def _build_parser() -> argparse.ArgumentParser:
         "--direct",
         action="store_true",
         help="Bypass MCP transport and use a local DATABASE_URL",
+    )
+    p_learnings_review = learnings_sub.add_parser(
+        "review",
+        help="Record an explicit manual review decision for one learning cluster",
+    )
+    p_learnings_review.add_argument(
+        "review_key",
+        help="Stable review key printed by learnings analyze",
+    )
+    p_learnings_review.add_argument(
+        "--decision",
+        required=True,
+        choices=("accept", "covered_obsolete", "project_only", "dismiss"),
+        help="Manual classification only; no promotion or memory mutation",
+    )
+    p_learnings_review.add_argument(
+        "--reason",
+        required=True,
+        help="Auditable reason for the decision",
+    )
+    p_learnings_review.add_argument(
+        "--canonical-learning",
+        required=True,
+        dest="canonical_learning",
+        help="Canonical learning snapshot shown by the analyzer",
     )
 
     # stats

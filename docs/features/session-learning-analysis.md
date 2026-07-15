@@ -194,6 +194,54 @@ ob learnings analyze --direct
 ```
 
 `OB_DIRECT=1` provides the same explicit opt-in. Direct mode is not the default.
+Because direct analysis suppresses migrations, an older database without the
+review-ledger table is treated as having no review decisions. Run the server once
+to apply migrations before relying on reviewed-cluster suppression in direct mode.
+
+## Manual Review Ledger
+
+Each learning cluster includes a stable review key derived from the exact sorted
+set of supporting memory IDs. Transient `L###` display IDs and source ordering do
+not affect this key. Adding or removing a supporting source produces a new key so
+the changed cluster returns to active review.
+
+Record a decision only after inspecting the cluster, its member claims, and its
+evidence:
+
+```bash
+ob learnings review session-learning:v1:21617,26870 \
+  --decision covered_obsolete \
+  --reason "Receipt-bound ship now precedes finalize." \
+  --canonical-learning "Closed tracker state did not prove landed code."
+```
+
+The four decisions are classifications:
+
+- `accept`: the learning is valid for later explicit handling;
+- `covered_obsolete`: a newer enforced workflow covers the former failure mode;
+- `project_only`: the claim is useful only in its project context;
+- `dismiss`: the claim should not continue through learning review.
+
+None of these decisions creates a memory, promotes a standard or skill, changes
+priority, or invokes materialization. The command appends an audit row containing
+the decision, reason, canonical-learning snapshot, source IDs, timestamp, and the
+authenticated OAuth reviewer. API-key and URL-token requests have no human OAuth
+identity and are rejected for this write. Later analysis uses the latest row for
+the key and moves the cluster from `reviewable_learning_clusters` to
+`reviewed_learning_clusters` only when the normalized canonical-learning snapshot
+also matches.
+
+The v1 key deliberately treats the complete source set as the review identity. If
+one run produces more than one reviewable cluster with the same source set, those
+clusters are ambiguous. They remain active with `review_identity_conflict=true`
+even if a prior decision exists. This fail-open behavior prevents a visible
+identity collision from silently hiding a different claim.
+When a prior row exists for the ambiguous key, the report retains it as
+`conflicting_review` for re-adjudication context.
+
+LLM wording or clustering can also change across runs. If the current canonical
+learning differs from the stored snapshot, the cluster remains active with
+`review_canonical_drift=true` and exposes the prior row as `stale_review`.
 
 ## Read-Only Boundary
 
@@ -207,6 +255,9 @@ or apply recall-triggered priority changes. It does not:
 - create beads or other work items;
 - edit standards or skills;
 - activate a scheduler.
+
+Reading review-ledger rows does not change this boundary. The separate
+`learnings review` command writes only the review ledger.
 
 The operator reviews the separated queues and decides what, if anything, should
 be persisted or promoted in a later explicit workflow.

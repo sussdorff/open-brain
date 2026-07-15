@@ -10,6 +10,7 @@ import json
 import logging
 import math
 import re
+from collections import Counter
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from enum import Enum
@@ -18,6 +19,11 @@ from typing import Any
 from open_brain.data_layer.embedding import embed_batch
 from open_brain.data_layer.llm import LlmMessage, llm_complete
 from open_brain.data_layer.postgres import get_pool, suppress_migrations
+from open_brain.session_learning_reviews import (
+    LearningReviewRecord,
+    build_review_key,
+    list_latest_session_learning_reviews,
+)
 from open_brain.utils import parse_llm_json
 
 DEFAULT_SUMMARY_LIMIT = 50
@@ -395,6 +401,7 @@ class LearningCluster:
     """A semantic cluster containing validated learning candidates only."""
 
     cluster_id: str
+    review_key: str
     canonical_learning: str
     reason: str
     candidate_ids: list[str]
@@ -837,6 +844,7 @@ def _make_cluster(
     review_eligible = len(source_ids) >= 2
     return LearningCluster(
         cluster_id=f"L{cluster_number:03d}",
+        review_key=build_review_key(source_ids),
         canonical_learning=canonical_learning,
         reason=reason,
         candidate_ids=[candidate.candidate_id for candidate in candidates],
@@ -1813,12 +1821,16 @@ def build_analysis_report(
     summaries: list[SessionSummary],
     candidates: list[LearningCandidate],
     clusters: list[LearningCluster],
+    reviews: dict[str, LearningReviewRecord] | None = None,
 ) -> dict[str, Any]:
     """Partition analysis results into explicit operator review queues."""
+    reviews = reviews or {}
+    reviewable_key_counts = Counter(
+        cluster.review_key for cluster in clusters if cluster.review_eligible
+    )
     queues: dict[str, list[dict[str, Any]]] = {
-        "reviewable_learning_clusters": [
-            cluster.to_dict() for cluster in clusters if cluster.review_eligible
-        ],
+        "reviewable_learning_clusters": [],
+        "reviewed_learning_clusters": [],
         "held_learning_clusters": [
             cluster.to_dict() for cluster in clusters if not cluster.review_eligible
         ],
@@ -1829,6 +1841,32 @@ def build_analysis_report(
         "duplicate_doctrine": [],
         "noise": [],
     }
+
+    def normalize_learning(value: str) -> str:
+        return " ".join(value.split()).casefold()
+
+    for cluster in clusters:
+        if not cluster.review_eligible:
+            continue
+        payload = cluster.to_dict()
+        identity_conflict = reviewable_key_counts[cluster.review_key] > 1
+        payload["review_identity_conflict"] = identity_conflict
+        review = reviews.get(cluster.review_key)
+        canonical_drift = review is not None and normalize_learning(
+            review.canonical_learning
+        ) != normalize_learning(cluster.canonical_learning)
+        payload["review_canonical_drift"] = canonical_drift
+        if review is not None and not identity_conflict and not canonical_drift:
+            payload["review"] = review.to_dict()
+            queues["reviewed_learning_clusters"].append(payload)
+        else:
+            if review is not None:
+                if identity_conflict:
+                    payload["conflicting_review"] = review.to_dict()
+                elif canonical_drift:
+                    payload["stale_review"] = review.to_dict()
+            queues["reviewable_learning_clusters"].append(payload)
+
     queue_by_kind = {
         CandidateKind.TODO: "todos",
         CandidateKind.DECISION: "decisions",
@@ -1852,6 +1890,9 @@ def build_analysis_report(
             "reviewable_learning_clusters": len(
                 queues["reviewable_learning_clusters"]
             ),
+            "reviewed_learning_clusters": len(
+                queues["reviewed_learning_clusters"]
+            ),
             "held_learning_clusters": len(queues["held_learning_clusters"]),
             "todos": len(queues["todos"]),
             "decisions": len(queues["decisions"]),
@@ -1871,6 +1912,7 @@ async def analyze_session_learnings(
     project: str | None = None,
     source: str | None = None,
     model: str | None = None,
+    allow_missing_review_ledger: bool = False,
 ) -> dict[str, Any]:
     """Run the manual read-only extraction and learning-clustering workflow."""
     summaries = await fetch_session_summaries(
@@ -1883,7 +1925,16 @@ async def analyze_session_learnings(
     else:
         candidates = await _extract_candidates(summaries, model=model)
         clusters = await _cluster_candidates(candidates, model=model)
-        report = build_analysis_report(summaries, candidates, clusters)
+        review_keys = sorted(
+            {cluster.review_key for cluster in clusters if cluster.review_eligible}
+        )
+        if allow_missing_review_ledger:
+            reviews = await list_latest_session_learning_reviews(
+                review_keys, allow_missing_table=True
+            )
+        else:
+            reviews = await list_latest_session_learning_reviews(review_keys)
+        report = build_analysis_report(summaries, candidates, clusters, reviews)
     report["parameters"] = {
         "limit": limit,
         "project": project,

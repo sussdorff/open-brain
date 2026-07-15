@@ -26,9 +26,10 @@ Rejected. It would not be shared across clients or deployments, would be difficu
 - The table is append-only so a later reclassification preserves history; analysis uses the latest row per key.
 - `accept`, `covered_obsolete`, `project_only`, and `dismiss` are classifications only. None performs promotion or mutation outside the ledger.
 - A review write requires the key, decision, reason, and canonical-learning snapshot. Source IDs are parsed and validated from the key.
-- The authenticated user ID is stored when OAuth provides it; direct and API-key callers may have a null reviewer.
+- Review writes require an OAuth user identity; anonymous API-key and URL-token callers are rejected.
 - The analyzer reads review records without retrieval search and keeps `read_only=true` to mean memory-read-only. It reports `review_ledger_writes=false` for the analysis itself.
 - Multiple clusters with the same key in one run are reported with `review_identity_conflict=true` and remain active even if a ledger decision exists.
+- A canonical-learning mismatch across runs is reported as drift and remains active with the stale review attached for context.
 
 ## Implementation Tasks
 

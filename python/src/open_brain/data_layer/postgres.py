@@ -493,6 +493,51 @@ async def _run_migrations(conn: asyncpg.Connection) -> None:
         ON memory_lifecycle_actions (policy_version, state);
     """)
     await conn.execute("""
+        CREATE TABLE IF NOT EXISTS session_learning_reviews (
+            id BIGSERIAL PRIMARY KEY,
+            review_key TEXT NOT NULL,
+            source_memory_ids BIGINT[] NOT NULL,
+            decision TEXT NOT NULL
+                CHECK (decision IN ('accept', 'covered_obsolete', 'project_only', 'dismiss')),
+            reason TEXT NOT NULL CHECK (length(btrim(reason)) > 0),
+            canonical_learning TEXT NOT NULL
+                CHECK (length(btrim(canonical_learning)) > 0),
+            reviewed_by TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT session_learning_reviews_reviewed_by_not_blank
+                CHECK (length(btrim(reviewed_by)) > 0),
+            CHECK (cardinality(source_memory_ids) >= 1)
+        );
+    """)
+    await conn.execute("""
+        UPDATE session_learning_reviews
+        SET reviewed_by = 'legacy-unattributed'
+        WHERE reviewed_by IS NULL OR length(btrim(reviewed_by)) = 0;
+
+        ALTER TABLE session_learning_reviews
+            DROP CONSTRAINT IF EXISTS session_learning_reviews_reviewed_by_check;
+
+        ALTER TABLE session_learning_reviews
+            ALTER COLUMN reviewed_by SET NOT NULL;
+
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conname = 'session_learning_reviews_reviewed_by_not_blank'
+                  AND conrelid = 'session_learning_reviews'::regclass
+            ) THEN
+                ALTER TABLE session_learning_reviews
+                    ADD CONSTRAINT session_learning_reviews_reviewed_by_not_blank
+                    CHECK (length(btrim(reviewed_by)) > 0);
+            END IF;
+        END $$;
+    """)
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_session_learning_reviews_key_created
+        ON session_learning_reviews (review_key, created_at DESC, id DESC);
+    """)
+    await conn.execute("""
         CREATE TABLE IF NOT EXISTS url_tokens (
             id SERIAL PRIMARY KEY,
             name TEXT NOT NULL UNIQUE,
