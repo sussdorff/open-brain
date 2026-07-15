@@ -517,6 +517,13 @@ async def _cmd_doctor(_args: argparse.Namespace) -> Any:
     return await call_tool("doctor", {})
 
 
+async def _cmd_provenance(args: argparse.Namespace) -> Any:
+    """Run a manual, read-only provenance report."""
+    if args.provenance_command == "report":
+        return await call_tool("origin_provenance_report", {})
+    raise ValueError(f"Unknown provenance command: {args.provenance_command}")
+
+
 async def _cmd_export(args: argparse.Namespace) -> Any:
     """Export a portable knowledge bundle."""
     suppress_migrations()
@@ -1196,6 +1203,21 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Run server diagnostics",
     )
 
+    # provenance
+    p_provenance = subparsers.add_parser(
+        "provenance",
+        help="Inspect canonical origin-provenance coverage",
+    )
+    provenance_sub = p_provenance.add_subparsers(
+        dest="provenance_command",
+        metavar="ACTION",
+    )
+    provenance_sub.required = True
+    provenance_sub.add_parser(
+        "report",
+        help="Classify coverage without modifying memories",
+    )
+
     # export
     p_export = subparsers.add_parser(
         "export",
@@ -1552,6 +1574,7 @@ _COMMAND_MAP = {
     "learnings": _cmd_learnings,
     "stats": _cmd_stats,
     "doctor": _cmd_doctor,
+    "provenance": _cmd_provenance,
     "export": _cmd_export,
     "restore": _cmd_restore,
     "verify": _cmd_verify,

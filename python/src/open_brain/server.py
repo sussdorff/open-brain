@@ -894,6 +894,19 @@ async def stats() -> str:
     return json.dumps(result, default=str)
 
 
+@mcp.tool(
+    description=(
+        "Manually inspect canonical origin-provenance coverage. This report is read-only: "
+        "it does not run migrations, recall memories, update usage, or backfill metadata."
+    )
+)
+async def origin_provenance_report() -> str:
+    """Return provenance coverage cohorts without changing the store."""
+    dl = get_dl()
+    result = await dl.origin_provenance_report()
+    return json.dumps(result, default=str)
+
+
 @mcp.tool(description="Get ingest observability stats: counters for ingests, LLM calls, dedup decisions, relationships, memories written, and ingest durations.")
 @logged_tool
 async def people_ingest_stats() -> str:

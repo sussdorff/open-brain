@@ -2132,6 +2132,61 @@ class PostgresDataLayer:
             "estimated_embedding_cost_today": estimated_cost,
         }
 
+    async def origin_provenance_report(self) -> dict[str, Any]:
+        """Classify provenance coverage without migrations or memory side effects."""
+        pool = await get_pool(run_migrations=False)
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """WITH classified AS (
+                       SELECT CASE
+                           WHEN NULLIF(BTRIM(metadata->'provenance'->>'producer'), '') IS NOT NULL
+                            AND COALESCE(metadata->'provenance'->>'source_ref', '')
+                                ~ '^[a-z][a-z0-9-]*:.+$'
+                               THEN 'explicit'
+                           WHEN NULLIF(BTRIM(session_ref), '') IS NOT NULL
+                             OR NULLIF(BTRIM(metadata->>'source_ref'), '') IS NOT NULL
+                             OR NULLIF(BTRIM(metadata->>'session_id'), '') IS NOT NULL
+                             OR NULLIF(BTRIM(metadata->>'session_ref'), '') IS NOT NULL
+                             OR NULLIF(BTRIM(metadata->>'run_id'), '') IS NOT NULL
+                             OR NULLIF(BTRIM(metadata->>'_sqlite_id'), '') IS NOT NULL
+                               THEN 'deterministic_backfill'
+                           WHEN NULLIF(BTRIM(metadata->>'producer'), '') IS NOT NULL
+                             OR NULLIF(BTRIM(metadata->>'source'), '') IS NOT NULL
+                             OR NULLIF(BTRIM(metadata->>'capture_template'), '') IS NOT NULL
+                             OR NULLIF(BTRIM(metadata->>'agent_type'), '') IS NOT NULL
+                             OR type IN (
+                                 'session_summary', 'meeting', 'transcript', 'document',
+                                 'email', 'daily_brief', 'curated_content'
+                             )
+                               THEN 'inferred'
+                           ELSE 'unresolved'
+                       END AS cohort
+                       FROM memories
+                   )
+                   SELECT cohort, COUNT(*)::int AS count
+                   FROM classified
+                   GROUP BY cohort"""
+            )
+
+        counts = {str(row["cohort"]): int(row["count"]) for row in rows}
+        bases = {
+            "explicit": "valid metadata.provenance producer and namespaced source_ref",
+            "deterministic_backfill": "stable legacy session or source reference",
+            "inferred": (
+                "recognizable producer, source, or memory-type marker without a stable reference"
+            ),
+            "unresolved": "no trustworthy origin marker",
+        }
+        cohorts = {
+            cohort: {"count": counts.get(cohort, 0), "basis": basis}
+            for cohort, basis in bases.items()
+        }
+        return {
+            "read_only": True,
+            "total": sum(item["count"] for item in cohorts.values()),
+            "cohorts": cohorts,
+        }
+
     async def portable_closure_counts(self) -> dict[str, int]:
         """Return row counts for the portable knowledge closure."""
         pool = await get_pool()
