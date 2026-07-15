@@ -43,7 +43,10 @@ or external files. Idempotent (see write-patterns standard).
 3. For each approved fact, call:
 
    ```
-   save_memory(text=..., type=..., project=..., title=..., narrative=...)
+   save_memory(
+     text=..., type=..., project=..., title=..., narrative=...,
+     provenance={"producer":"ob-migrate","source_ref":"agent-session:<harness>:<session-id>"}
+   )
    ```
 
    The capture router runs automatically — pass through whatever fields apply.
@@ -88,7 +91,8 @@ Defaults for Markdown:
 2. Parse all items per the format rules above. Count malformed entries as
    errors immediately.
 3. Preview to the user with the count and proposed action — wait for `y/n`.
-4. For each valid item, call `save_memory` with pass-through fields.
+4. For each valid item, call `save_memory` with pass-through fields and one
+   canonical source reference for the conversation or imported file.
 5. Process the response per the write-patterns standard: `duplicate_of` →
    skipped, missing `id` or exception → error, otherwise → migrated.
 6. For imports >10 items, print progress every 10.

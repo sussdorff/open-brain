@@ -88,7 +88,25 @@ metadata: "{\"source_url\": \"...\", \"extraction_date\": \"2026-05-16\"}"
 The `ob save` CLI accepts both forms transparently. Only the MCP signature
 requires the string-encoding.
 
-## 7. Source attribution
+## 7. Canonical origin lineage
+
+Every new write requires a `provenance` object with a non-blank producer and a
+stable namespaced source reference:
+
+```json
+{"producer":"ingest-content","source_ref":"url:https://example.com/article"}
+```
+
+For `ob save`, pass `--source-ref`; its producer defaults to `ob-cli` and can be
+overridden with `--producer`. For MCP, pass the object directly. Memories
+derived from the same session, transcript, or document may share one
+`source_ref`; it is lineage, not a uniqueness key.
+
+Canonical origin lineage is separate from epistemic provenance such as
+`source_label`, `expected_use`, or authorization. Both are stored under
+`metadata.provenance`, and writers must not discard existing epistemic fields.
+
+## 8. Searchable source metadata
 
 Whenever the memory originates from an external source (URL, file, transcript,
 user message), record provenance in `metadata`:
@@ -103,7 +121,7 @@ user message), record provenance in `metadata`:
 This is what makes memory searchable by origin later and enables the
 "already-ingested" check in `ingest-content`.
 
-## 8. Pre-write duplicate check (URL ingestion only)
+## 9. Pre-write duplicate check (URL ingestion only)
 
 For URL-based writers (single-item, expensive to re-extract), search for the URL
 before extracting:

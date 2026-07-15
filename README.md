@@ -458,7 +458,9 @@ The `ob` command is the main human-facing CLI. It intentionally covers normal se
 ob server
 ob --json doctor
 ob search "what did I decide about X?"
-ob save "Decided to use asyncpg for lower overhead" --type decision
+ob save "Decided to use asyncpg for lower overhead" --type decision \
+  --source-ref agent-session:codex:<session-id>
+ob provenance report
 ob ingest transcript --source-ref meeting-2026-04-29 --file transcript.txt
 ob ingest macwhisper list --limit 5
 ob ingest macwhisper entry <entry-id>
@@ -478,6 +480,7 @@ Current `ob` commands:
 | `ob get` | Fetch full observations by ID |
 | `ob context` | Fetch recent session context |
 | `ob save` | Save a memory |
+| `ob provenance report` | Inspect origin-provenance coverage without modifying memories |
 | `ob update` | Update an existing memory |
 | `ob ingest email` | Ingest an IMAP inbox through the MCP server |
 | `ob ingest transcript` | Ingest a transcript file or stdin |

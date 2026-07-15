@@ -101,6 +101,7 @@ text: <extracted content>
 type: curated_content
 project: <user-specified or omit>
 metadata: "{\"source_url\":\"<URL>\",\"extraction_date\":\"YYYY-MM-DD\",\"content_type\":\"video|article|doc\",\"preview_only\":false}"
+provenance: {"producer":"ingest-content","source_ref":"url:<URL>"}
 ```
 
 ## Step 7 — Confirm

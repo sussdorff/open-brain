@@ -390,7 +390,13 @@ async def _cmd_save(args: argparse.Namespace) -> Any:
     Returns:
         Save result from MCP tool.
     """
-    kwargs: dict[str, Any] = {"text": args.text}
+    kwargs: dict[str, Any] = {
+        "text": args.text,
+        "provenance": {
+            "producer": args.producer,
+            "source_ref": args.source_ref,
+        },
+    }
     if args.project:
         kwargs["project"] = args.project
     if args.type:
@@ -1086,6 +1092,17 @@ def _build_parser() -> argparse.ArgumentParser:
     p_save.add_argument("--project", help="Project to associate with")
     p_save.add_argument("--type", help="Memory type (observation, decision, etc.)")
     p_save.add_argument("--title", help="Optional title")
+    p_save.add_argument(
+        "--producer",
+        default="ob-cli",
+        help="Origin producer (default: ob-cli)",
+    )
+    p_save.add_argument(
+        "--source-ref",
+        required=True,
+        dest="source_ref",
+        help="Stable namespaced origin, e.g. agent-session:codex:<session-id>",
+    )
 
     # get
     p_get = subparsers.add_parser(

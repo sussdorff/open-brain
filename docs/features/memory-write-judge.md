@@ -19,8 +19,26 @@ OpenBrain uses a seven-field proposal for memory writes:
 | `retention_scope` | `session`, `project`, `personal`, or `team`. |
 | `risk_flags` | `pii`, `secret`, `credential`, `policy-sensitive`, `external-confidential`. |
 
-Provenance labels are `observed`, `inferred`, `generated`, `confirmed`,
+Epistemic provenance labels are `observed`, `inferred`, `generated`, `confirmed`,
 `disputed`, and `superseded`.
+
+## Origin lineage versus epistemic provenance
+
+Every persisted write also requires canonical origin lineage:
+
+```json
+{"producer":"session-close","source_ref":"agent-session:codex:<stable-session-id>"}
+```
+
+These fields answer different questions:
+
+- origin lineage (`producer`, `source_ref`) says which pipeline wrote the
+  memory and which source event or artifact it came from;
+- epistemic provenance (`source_label`, `expected_use`, authorization) says
+  how strongly the content may be trusted and used.
+
+Both coexist under `metadata.provenance`. Adding origin lineage must preserve
+judge fields already present there.
 
 ## Relationship to Generic Judge Layer
 
@@ -60,10 +78,11 @@ The Python implementation is `open_brain.memory_write_judge`.
 - `memory_metadata_from_judged_proposal()` records provenance, retention,
   expected use, risk flags, and `policy_version` on allowed writes.
 
-`save_memory(..., proposal={...})` invokes the judge before rate-limit slot
+`save_memory(..., proposal={...}, provenance={...})` invokes the judge before rate-limit slot
 claiming and before data-layer persistence. Rejected proposals return
-`memory_write_judge_rejected` and do not call the data layer. Calls without a
-proposal remain backward-compatible for the existing API surface.
+`memory_write_judge_rejected` and do not call the data layer. A proposal remains
+optional, but canonical origin provenance is required for every non-test write
+and is validated before duplicate checks, rate limits, or database access.
 
 ## Evidence Discipline
 

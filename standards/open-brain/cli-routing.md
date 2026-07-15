@@ -27,7 +27,8 @@ Verify: `ob doctor`
 |---|---|---|
 | `ob search <query>` | Hybrid search (vector + FTS) | `ob search "ADR database migration" --limit=5` |
 | `ob concept <query>` | Semantic-only (vector) search | `ob concept "authentication patterns"` |
-| `ob save <text>` | Save a new observation | `ob save "Decided to use JWT" --type=decision --project=mira` |
+| `ob save <text>` | Save a new observation | `ob save "Decided to use JWT" --type=decision --project=mira --source-ref=agent-session:codex:<session-id>` |
+| `ob provenance report` | Inspect origin coverage without writes | `ob provenance report` |
 | `ob get <id>` | Fetch full observation by ID | `ob get mem_abc123` |
 | `ob context` | Recent session context | `ob context --project=library --limit=10` |
 | `ob timeline` | Timeline view of memories | `ob timeline --project=mira` |
@@ -47,7 +48,9 @@ All subcommands support `--json` for machine-readable output.
 ob save "Implemented X, discovered Y, decided Z because W." \
   --type=session_summary \
   --project=<project-name> \
-  --title="Bead CL-xxx: <outcome>"
+  --title="Session outcome" \
+  --producer=session-close \
+  --source-ref=agent-session:<harness>:<session-id>
 ```
 
 ### Recall past work before starting
@@ -63,7 +66,8 @@ ob context --project=<project-name>
 ob save "Use Dolt for beads tracking; provides git-like versioning for structured data." \
   --type=decision \
   --project=library \
-  --title="ADR: Use Dolt for beads"
+  --title="ADR: Use Dolt for beads" \
+  --source-ref=agent-session:<harness>:<session-id>
 ```
 
 ### Search with filters
