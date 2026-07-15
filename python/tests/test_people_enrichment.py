@@ -723,7 +723,7 @@ class TestPersonMetadataFields:
             "role": "CEO",
             "profile_url": "https://linkedin.com/in/alice",
             "confidence": 0.9,
-            "provenance": "https://linkedin.com/in/alice: Alice Smith CEO at Acme.",
+            "provenance_summary": "https://linkedin.com/in/alice: Alice Smith CEO at Acme.",
             "enrich_pending": "true",
         }
 

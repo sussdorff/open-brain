@@ -463,11 +463,13 @@ async def apply_enrichment(
     if result.provenance_snippet:
         metadata["provenance_snippet"] = result.provenance_snippet
     if result.provenance_url and result.provenance_snippet:
-        metadata["provenance"] = f"{result.provenance_url}: {result.provenance_snippet}"
+        metadata["provenance_summary"] = (
+            f"{result.provenance_url}: {result.provenance_snippet}"
+        )
     elif result.provenance_url:
-        metadata["provenance"] = result.provenance_url
+        metadata["provenance_summary"] = result.provenance_url
     elif result.provenance_snippet:
-        metadata["provenance"] = result.provenance_snippet
+        metadata["provenance_summary"] = result.provenance_snippet
 
     await dl.update_memory(
         UpdateMemoryParams(

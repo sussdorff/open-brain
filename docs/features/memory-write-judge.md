@@ -37,8 +37,9 @@ These fields answer different questions:
 - epistemic provenance (`source_label`, `expected_use`, authorization) says
   how strongly the content may be trusted and used.
 
-Both coexist under `metadata.provenance`. Adding origin lineage must preserve
-judge fields already present there.
+Both coexist under `metadata.provenance`: judge fields remain at that level,
+while origin lineage is stored below `metadata.provenance.origin`. This avoids
+colliding with the judge's epistemic `source_ref`.
 
 ## Relationship to Generic Judge Layer
 

@@ -454,6 +454,46 @@ class TestPostgresSaveMemory:
     def dl(self):
         return PostgresDataLayer()
 
+    def test_legacy_enrichment_provenance_string_is_preserved_as_summary(self):
+        from open_brain.data_layer.postgres import _metadata_with_origin_provenance
+
+        metadata = _metadata_with_origin_provenance(
+            {"provenance": "https://example.test/profile: profile evidence"},
+            ORIGIN_PROVENANCE,
+        )
+
+        assert metadata == {
+            "provenance_summary": "https://example.test/profile: profile evidence",
+            "provenance": {"origin": ORIGIN_PROVENANCE},
+        }
+
+    @pytest.mark.asyncio
+    async def test_conflicting_metadata_origin_fails_before_duplicate_or_database(self, dl):
+        with (
+            patch(
+                "open_brain.data_layer.postgres.get_pool",
+                new_callable=AsyncMock,
+            ) as get_pool,
+            pytest.raises(ValueError, match="conflict"),
+        ):
+            await dl.save_memory(
+                SaveMemoryParams(
+                    text="Conflicting origin",
+                    duplicate_of=42,
+                    metadata={
+                        "provenance": {
+                            "origin": {
+                                "producer": "other-writer",
+                                "source_ref": "agent-session:codex:other-session",
+                            }
+                        }
+                    },
+                    provenance=ORIGIN_PROVENANCE,
+                )
+            )
+
+        get_pool.assert_not_awaited()
+
     @pytest.mark.asyncio
     async def test_save_memory_persists_canonical_origin_provenance(self, dl):
         inserted_row = {"id": 99}
@@ -541,7 +581,17 @@ class TestPostgresSaveMemory:
         conn = AsyncMock()
         conn.fetchrow.side_effect = [
             {"id": 7},
-            {"id": 55, "content": "Original", "metadata": {"source": "legacy"}},
+            {
+                "id": 55,
+                "content": "Original",
+                "metadata": {
+                    "source": "legacy",
+                    "provenance": {
+                        "source_ref": "conversation://current/evidence",
+                        "source_label": "observed",
+                    },
+                },
+            },
         ]
         pool = _make_pool(conn)
 
@@ -568,7 +618,11 @@ class TestPostgresSaveMemory:
         metadata_arg = next(arg for arg in update_args if isinstance(arg, dict))
         assert metadata_arg == {
             "source": "legacy",
-            "provenance": {"origin": ORIGIN_PROVENANCE},
+            "provenance": {
+                "source_ref": "conversation://current/evidence",
+                "source_label": "observed",
+                "origin": ORIGIN_PROVENANCE,
+            },
         }
 
     @pytest.mark.asyncio

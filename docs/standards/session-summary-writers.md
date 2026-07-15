@@ -26,10 +26,12 @@ provenance:
   source_ref: agent-session:codex:<stable-session-id>
 ```
 
-The data layer stores this under `metadata.provenance`. `producer` identifies
-the writer; `source_ref` identifies the source event or artifact and must be a
-stable namespaced string. A bead ID may be useful metadata, but it is not a
-substitute for the agent-session reference and is not required.
+The data layer stores this under `metadata.provenance.origin`. `producer`
+identifies the writer; `source_ref` identifies the source event or artifact and
+must be a stable namespaced string. The parent `metadata.provenance` object also
+retains epistemic citation fields written by the Memory-Write Judge. A bead ID
+may be useful metadata, but it is not a substitute for the agent-session
+reference and is not required.
 
 ## Session-summary writer catalog
 

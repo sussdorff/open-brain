@@ -102,9 +102,10 @@ overridden with `--producer`. For MCP, pass the object directly. Memories
 derived from the same session, transcript, or document may share one
 `source_ref`; it is lineage, not a uniqueness key.
 
-Canonical origin lineage is separate from epistemic provenance such as
-`source_label`, `expected_use`, or authorization. Both are stored under
-`metadata.provenance`, and writers must not discard existing epistemic fields.
+Canonical origin lineage is separate from epistemic provenance such as the
+judge's citation `source_ref`, `source_label`, `expected_use`, or authorization.
+Origin is stored under `metadata.provenance.origin`; epistemic fields remain at
+`metadata.provenance`. Writers must not discard either dimension.
 
 ## 8. Searchable source metadata
 

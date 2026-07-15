@@ -205,7 +205,7 @@ class PersonMetadata(TypedDict, total=False):
     # Enrichment fields (set by people enrichment pipeline)
     profile_url: str         # direct profile URL (e.g. LinkedIn/Xing)
     confidence: float        # enrichment confidence score in [0.0, 1.0]
-    provenance: str          # "url: snippet" summary of enrichment source
+    provenance_summary: str  # "url: snippet" summary of enrichment source
     provenance_url: str      # source URL where enrichment data was found
     provenance_snippet: str  # short text snippet from the source
     enrich_pending: str      # "true" when person needs enrichment; "false" after applied

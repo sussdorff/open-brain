@@ -77,10 +77,37 @@ def _metadata_with_origin_provenance(
     """Merge canonical origin fields into metadata without dropping judge fields."""
     merged = dict(metadata) if metadata else {}
     existing = merged.get("provenance")
+    if existing is not None and not isinstance(existing, dict):
+        merged.setdefault("provenance_summary", str(existing))
     nested = dict(existing) if isinstance(existing, dict) else {}
-    nested.update(provenance)
-    merged["provenance"] = nested
+    merged["provenance"] = _provenance_container_with_origin(nested, provenance)
     return merged
+
+
+def _provenance_container_with_origin(
+    container: dict[str, Any],
+    provenance: OriginProvenance,
+) -> dict[str, Any]:
+    """Add origin below a collision-free key and reject incompatible lineage."""
+    normalized = dict(container)
+    if "origin" in normalized:
+        if normalized["origin"] != provenance:
+            raise OriginProvenanceConflictError(
+                "origin provenance conflicts with metadata.provenance.origin"
+            )
+    elif "producer" in normalized:
+        legacy_origin = {
+            "producer": normalized.get("producer"),
+            "source_ref": normalized.get("source_ref"),
+        }
+        if legacy_origin != provenance:
+            raise OriginProvenanceConflictError(
+                "legacy origin provenance conflicts with canonical provenance"
+            )
+        normalized.pop("producer", None)
+        normalized.pop("source_ref", None)
+    normalized["origin"] = dict(provenance)
+    return normalized
 
 
 def _record_metadata(record: Any) -> dict[str, Any]:
@@ -97,31 +124,27 @@ def _merge_append_metadata(
     provenance: OriginProvenance,
 ) -> dict[str, Any]:
     """Merge append metadata while keeping one unambiguous canonical origin."""
-    existing_nested = existing.get("provenance")
-    existing_origin = (
-        {
-            "producer": existing_nested.get("producer"),
-            "source_ref": existing_nested.get("source_ref"),
-        }
-        if isinstance(existing_nested, dict)
-        and existing_nested.get("producer") is not None
-        and existing_nested.get("source_ref") is not None
-        else None
-    )
-    if existing_origin is not None and existing_origin != provenance:
-        raise OriginProvenanceConflictError(
-            "origin provenance conflict while appending session summary"
-        )
-
     merged = {**existing, **(incoming or {})}
+    existing_raw = existing.get("provenance")
+    incoming_raw = (incoming or {}).get("provenance")
+    if existing_raw is not None and not isinstance(existing_raw, dict):
+        merged.setdefault("provenance_summary", str(existing_raw))
+    if incoming_raw is not None and not isinstance(incoming_raw, dict):
+        merged["provenance_summary"] = str(incoming_raw)
+
     combined_nested: dict[str, Any] = {}
-    if isinstance(existing_nested, dict):
-        combined_nested.update(existing_nested)
-    incoming_nested = (incoming or {}).get("provenance")
-    if isinstance(incoming_nested, dict):
-        combined_nested.update(incoming_nested)
-    combined_nested.update(provenance)
-    merged["provenance"] = combined_nested
+    if isinstance(existing_raw, dict):
+        combined_nested.update(
+            _provenance_container_with_origin(existing_raw, provenance)
+        )
+    if isinstance(incoming_raw, dict):
+        combined_nested.update(
+            _provenance_container_with_origin(incoming_raw, provenance)
+        )
+    merged["provenance"] = _provenance_container_with_origin(
+        combined_nested,
+        provenance,
+    )
     return merged
 
 
@@ -1344,6 +1367,10 @@ class PostgresDataLayer:
         inserting a new row.
         """
         provenance = validate_origin_provenance(params.provenance)
+        canonical_metadata = _metadata_with_origin_provenance(
+            params.metadata,
+            provenance,
+        )
 
         # Validate importance BEFORE any DB access (V6)
         if params.importance not in IMPORTANCE_VALUES:
@@ -1405,10 +1432,7 @@ class PostgresDataLayer:
                         # Content-hash dedup is skipped for replace mode (we're intentionally
                         # replacing content for this session_ref; duplicates across other
                         # sessions are irrelevant).
-                        base_metadata = _metadata_with_origin_provenance(
-                            params.metadata,
-                            provenance,
-                        )
+                        base_metadata = dict(canonical_metadata)
                         content_hash_replace = hashlib.sha256(params.text.encode()).hexdigest()
                         base_metadata["content_hash"] = content_hash_replace
                         # Inject run_id if inside an ingest_run context
@@ -1455,7 +1479,7 @@ class PostgresDataLayer:
                         merged_content = existing["content"] + "\n\n---\n\n" + params.text
                         merged_metadata = _merge_append_metadata(
                             _record_metadata(existing),
-                            params.metadata,
+                            canonical_metadata,
                             provenance,
                         )
                         updates: dict[str, Any] = {
@@ -1556,10 +1580,7 @@ class PostgresDataLayer:
                 )
 
             # ── Normal insert path ──
-            base_metadata = _metadata_with_origin_provenance(
-                params.metadata,
-                provenance,
-            )
+            base_metadata = dict(canonical_metadata)
             base_metadata["content_hash"] = content_hash
             base_metadata["capture_status"] = params.capture_status or "inbox"
             # Inject run_id if inside an ingest_run context
@@ -2139,9 +2160,14 @@ class PostgresDataLayer:
             rows = await conn.fetch(
                 """WITH classified AS (
                        SELECT CASE
-                           WHEN NULLIF(BTRIM(metadata->'provenance'->>'producer'), '') IS NOT NULL
-                            AND COALESCE(metadata->'provenance'->>'source_ref', '')
-                                ~ '^[a-z][a-z0-9-]*:.+$'
+                           WHEN NULLIF(
+                                    BTRIM(metadata->'provenance'->'origin'->>'producer'),
+                                    ''
+                                ) IS NOT NULL
+                            AND COALESCE(
+                                    metadata->'provenance'->'origin'->>'source_ref',
+                                    ''
+                                ) ~ '^[a-z][a-z0-9-]*:[^[:cntrl:]]*[^[:space:][:cntrl:]]$'
                                THEN 'explicit'
                            WHEN NULLIF(BTRIM(session_ref), '') IS NOT NULL
                              OR NULLIF(BTRIM(metadata->>'source_ref'), '') IS NOT NULL
@@ -2170,7 +2196,9 @@ class PostgresDataLayer:
 
         counts = {str(row["cohort"]): int(row["count"]) for row in rows}
         bases = {
-            "explicit": "valid metadata.provenance producer and namespaced source_ref",
+            "explicit": (
+                "valid metadata.provenance.origin producer and namespaced source_ref"
+            ),
             "deterministic_backfill": "stable legacy session or source reference",
             "inferred": (
                 "recognizable producer, source, or memory-type marker without a stable reference"

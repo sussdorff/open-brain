@@ -29,7 +29,7 @@ This would make SQL reporting direct, but couples a new-write invariant to a ris
 ## Developer Decisions
 
 - The only required origin fields are non-blank `producer` and a namespaced `source_ref`.
-- Canonical storage is `metadata.provenance`; legacy `metadata.source` remains readable but is insufficient for new writes.
+- Canonical storage is `metadata.provenance.origin`; judge citation fields remain at `metadata.provenance`, and legacy `metadata.source` remains readable but is insufficient for new writes.
 - Transcript and Second Brain writers retain their flat `source_ref` and dual-write the same identity canonically.
 - `source_ref` is lineage, not a uniqueness or upsert key; many memories may share one session reference.
 - Session Close records the logical session being closed. Bead IDs remain optional context.
