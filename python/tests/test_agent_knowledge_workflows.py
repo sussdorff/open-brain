@@ -15,12 +15,7 @@ RESOURCE_URL = "https://fhir-community.example/ig/stationaer-2026"
 
 def _workflow_doc_text() -> str:
     """Return the agent workflow documentation text."""
-    doc = (
-        Path(__file__).resolve().parents[2]
-        / "docs"
-        / "features"
-        / "agent-knowledge-workflows.md"
-    )
+    doc = Path(__file__).resolve().parents[2] / "docs" / "features" / "agent-knowledge-workflows.md"
     assert doc.exists()
     return doc.read_text(encoding="utf-8")
 
@@ -85,10 +80,7 @@ def _capture_payloads(run_id: str) -> list[dict[str, Any]]:
                 "summary": "Supported operations for capture and review through agents.",
                 "related_concepts": ["Open Brain"],
                 "status": "open",
-                "entities": {
-                    "projects": ["Open Brain"],
-                    "concepts": ["Agent knowledge workflows"],
-                },
+                "entities": {"projects": ["Open Brain"], "concepts": ["Agent knowledge workflows"]},
             },
         },
     ]
@@ -105,7 +97,7 @@ def test_documentation_covers_agent_capture_and_inbox_review_operations() -> Non
         "structured knowledge item",
         "review outstanding inbox captures",
         "save_memory",
-        'search(capture_status="inbox"',
+        "search(capture_status=\"inbox\"",
         "set_capture_status",
     ):
         assert expected in text
@@ -131,22 +123,11 @@ async def test_agent_can_capture_supported_knowledge_items(
             project = f"open-brain-5qo-agent-{run_id}"
             with (
                 patch("open_brain.server.get_dl", return_value=dl),
-                patch.object(
-                    PostgresDataLayer, "_embed_and_link", new_callable=AsyncMock
-                ),
+                patch.object(PostgresDataLayer, "_embed_and_link", new_callable=AsyncMock),
             ):
                 saved_ids: list[int] = []
                 for payload in _capture_payloads(run_id):
-                    result = json.loads(
-                        await server.save_memory(
-                            project=project,
-                            **payload,
-                            provenance={
-                                "producer": "test-suite",
-                                "source_ref": "test-suite:test_agent_knowledge_workflows",
-                            },
-                        )
-                    )
+                    result = json.loads(await server.save_memory(project=project, **payload, provenance={"producer": "test-suite", "source_ref": "test-suite:test_agent_knowledge_workflows"}))
                     saved_ids.append(result["id"])
 
                 inbox = json.loads(
@@ -166,14 +147,9 @@ async def test_agent_can_capture_supported_knowledge_items(
             "resource",
             "concept",
         }
-        resource = next(
-            entry for entry in inbox_by_id.values() if entry["type"] == "resource"
-        )
+        resource = next(entry for entry in inbox_by_id.values() if entry["type"] == "resource")
         assert resource["metadata"]["url"] == RESOURCE_URL
-        assert all(
-            entry["metadata"]["capture_status"] == "inbox"
-            for entry in inbox_by_id.values()
-        )
+        assert all(entry["metadata"]["capture_status"] == "inbox" for entry in inbox_by_id.values())
     finally:
         if run_id is not None:
             await dl.delete_by_run_id(run_id)
@@ -201,22 +177,11 @@ async def test_agent_can_review_and_process_outstanding_inbox_captures(
             project = f"open-brain-5qo-inbox-{run_id}"
             with (
                 patch("open_brain.server.get_dl", return_value=dl),
-                patch.object(
-                    PostgresDataLayer, "_embed_and_link", new_callable=AsyncMock
-                ),
+                patch.object(PostgresDataLayer, "_embed_and_link", new_callable=AsyncMock),
             ):
                 saved_ids: list[int] = []
                 for payload in _capture_payloads(run_id):
-                    result = json.loads(
-                        await server.save_memory(
-                            project=project,
-                            **payload,
-                            provenance={
-                                "producer": "test-suite",
-                                "source_ref": "test-suite:test_agent_knowledge_workflows",
-                            },
-                        )
-                    )
+                    result = json.loads(await server.save_memory(project=project, **payload, provenance={"producer": "test-suite", "source_ref": "test-suite:test_agent_knowledge_workflows"}))
                     saved_ids.append(result["id"])
 
                 for memory_id in saved_ids:

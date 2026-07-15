@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from open_brain.data_layer.embedding import to_pg_vector
-from open_brain.data_layer.interface import Memory, SearchParams
+from open_brain.data_layer.interface import Memory, SearchParams, TimelineParams
 from open_brain.data_layer.refine import find_obvious_duplicates
 
 
@@ -32,7 +32,6 @@ def _memory(memory_id: int, priority: float, content: str = "content") -> Memory
 
 
 # ─── pgvector format tests ─────────────────────────────────────────────────────
-
 
 class TestToPgVector:
     def test_basic_format(self):
@@ -64,7 +63,6 @@ class TestToPgVector:
 
 # ─── FindObviousDuplicates tests ───────────────────────────────────────────────
 
-
 class TestFindObviousDuplicates:
     def test_finds_duplicates_by_title(self, sample_memories):
         # sample_memories[0] and [1] both have title "Python best practices"
@@ -75,41 +73,18 @@ class TestFindObviousDuplicates:
 
     def test_no_duplicates(self):
         from open_brain.data_layer.interface import Memory
-
         memories = [
             Memory(
-                id=1,
-                index_id=1,
-                session_id=None,
-                type="obs",
-                title="Unique title A",
-                subtitle=None,
-                narrative=None,
-                content="Content A",
-                metadata={},
-                priority=0.5,
-                stability="stable",
-                access_count=0,
-                last_accessed_at=None,
-                created_at="",
-                updated_at="",
+                id=1, index_id=1, session_id=None, type="obs", title="Unique title A",
+                subtitle=None, narrative=None, content="Content A",
+                metadata={}, priority=0.5, stability="stable", access_count=0,
+                last_accessed_at=None, created_at="", updated_at="",
             ),
             Memory(
-                id=2,
-                index_id=1,
-                session_id=None,
-                type="obs",
-                title="Unique title B",
-                subtitle=None,
-                narrative=None,
-                content="Content B",
-                metadata={},
-                priority=0.5,
-                stability="stable",
-                access_count=0,
-                last_accessed_at=None,
-                created_at="",
-                updated_at="",
+                id=2, index_id=1, session_id=None, type="obs", title="Unique title B",
+                subtitle=None, narrative=None, content="Content B",
+                metadata={}, priority=0.5, stability="stable", access_count=0,
+                last_accessed_at=None, created_at="", updated_at="",
             ),
         ]
         actions = find_obvious_duplicates(memories)
@@ -117,41 +92,18 @@ class TestFindObviousDuplicates:
 
     def test_empty_title_uses_content_prefix(self):
         from open_brain.data_layer.interface import Memory
-
         memories = [
             Memory(
-                id=1,
-                index_id=1,
-                session_id=None,
-                type="obs",
-                title=None,
-                subtitle=None,
-                narrative=None,
-                content="Same content prefix here",
-                metadata={},
-                priority=0.5,
-                stability="stable",
-                access_count=0,
-                last_accessed_at=None,
-                created_at="",
-                updated_at="",
+                id=1, index_id=1, session_id=None, type="obs", title=None,
+                subtitle=None, narrative=None, content="Same content prefix here",
+                metadata={}, priority=0.5, stability="stable", access_count=0,
+                last_accessed_at=None, created_at="", updated_at="",
             ),
             Memory(
-                id=2,
-                index_id=1,
-                session_id=None,
-                type="obs",
-                title=None,
-                subtitle=None,
-                narrative=None,
-                content="Same content prefix here",
-                metadata={},
-                priority=0.5,
-                stability="stable",
-                access_count=0,
-                last_accessed_at=None,
-                created_at="",
-                updated_at="",
+                id=2, index_id=1, session_id=None, type="obs", title=None,
+                subtitle=None, narrative=None, content="Same content prefix here",
+                metadata={}, priority=0.5, stability="stable", access_count=0,
+                last_accessed_at=None, created_at="", updated_at="",
             ),
         ]
         actions = find_obvious_duplicates(memories)
@@ -161,41 +113,18 @@ class TestFindObviousDuplicates:
 
     def test_case_insensitive_matching(self):
         from open_brain.data_layer.interface import Memory
-
         memories = [
             Memory(
-                id=1,
-                index_id=1,
-                session_id=None,
-                type="obs",
-                title="Python Tips",
-                subtitle=None,
-                narrative=None,
-                content="content",
-                metadata={},
-                priority=0.5,
-                stability="stable",
-                access_count=0,
-                last_accessed_at=None,
-                created_at="",
-                updated_at="",
+                id=1, index_id=1, session_id=None, type="obs", title="Python Tips",
+                subtitle=None, narrative=None, content="content",
+                metadata={}, priority=0.5, stability="stable", access_count=0,
+                last_accessed_at=None, created_at="", updated_at="",
             ),
             Memory(
-                id=2,
-                index_id=1,
-                session_id=None,
-                type="obs",
-                title="python tips",
-                subtitle=None,
-                narrative=None,
-                content="content",
-                metadata={},
-                priority=0.5,
-                stability="stable",
-                access_count=0,
-                last_accessed_at=None,
-                created_at="",
-                updated_at="",
+                id=2, index_id=1, session_id=None, type="obs", title="python tips",
+                subtitle=None, narrative=None, content="content",
+                metadata={}, priority=0.5, stability="stable", access_count=0,
+                last_accessed_at=None, created_at="", updated_at="",
             ),
         ]
         actions = find_obvious_duplicates(memories)
@@ -203,24 +132,12 @@ class TestFindObviousDuplicates:
 
     def test_three_duplicates_merge_all(self):
         from open_brain.data_layer.interface import Memory
-
         memories = [
             Memory(
-                id=i,
-                index_id=1,
-                session_id=None,
-                type="obs",
-                title="Same",
-                subtitle=None,
-                narrative=None,
-                content="content",
-                metadata={},
-                priority=0.5,
-                stability="stable",
-                access_count=0,
-                last_accessed_at=None,
-                created_at="",
-                updated_at="",
+                id=i, index_id=1, session_id=None, type="obs", title="Same",
+                subtitle=None, narrative=None, content="content",
+                metadata={}, priority=0.5, stability="stable", access_count=0,
+                last_accessed_at=None, created_at="", updated_at="",
             )
             for i in [10, 20, 30]
         ]
@@ -230,7 +147,6 @@ class TestFindObviousDuplicates:
 
 
 # ─── PostgresDataLayer unit tests (mocked pool) ───────────────────────────────
-
 
 def _make_mock_pool(mock_conn):
     """Build a properly structured asyncpg pool mock."""
@@ -252,7 +168,6 @@ class TestPostgresDataLayerSearch:
     @pytest.fixture
     def dl(self):
         from open_brain.data_layer.postgres import PostgresDataLayer
-
         return PostgresDataLayer()
 
     @pytest.fixture
@@ -274,11 +189,7 @@ class TestPostgresDataLayerSearch:
         mock_conn.fetch.return_value = []
         mock_conn.fetchrow.return_value = {"total": 0}
 
-        with patch(
-            "open_brain.data_layer.postgres.get_pool",
-            new_callable=AsyncMock,
-            return_value=mock_pool,
-        ):
+        with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=mock_pool):
             result = await dl.search(SearchParams())
             assert result.results == []
             assert result.total == 0
@@ -290,15 +201,8 @@ class TestPostgresDataLayerSearch:
         mock_conn.fetch.return_value = []
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=mock_pool,
-            ),
-            patch(
-                "open_brain.data_layer.postgres.embed_query_with_usage",
-                new_callable=AsyncMock,
-            ) as mock_embed,
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=mock_pool),
+            patch("open_brain.data_layer.postgres.embed_query_with_usage", new_callable=AsyncMock) as mock_embed,
             patch("asyncio.create_task"),
         ):
             mock_embed.return_value = ([0.1] * 1024, 10)
@@ -313,15 +217,8 @@ class TestPostgresDataLayerSearch:
         mock_conn.fetchrow.return_value = {"total": 0}
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=mock_pool,
-            ),
-            patch(
-                "open_brain.data_layer.postgres.embed_query_with_usage",
-                side_effect=RuntimeError("API down"),
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=mock_pool),
+            patch("open_brain.data_layer.postgres.embed_query_with_usage", side_effect=RuntimeError("API down")),
         ):
             # Should not raise; falls back to FTS
             result = await dl.search(SearchParams(query="test"))
@@ -364,26 +261,21 @@ class TestPostgresDataLayerStats:
     @pytest.fixture
     def dl(self):
         from open_brain.data_layer.postgres import PostgresDataLayer
-
         return PostgresDataLayer()
 
     @pytest.mark.asyncio
     async def test_stats_returns_correct_keys(self, dl):
         mock_conn = AsyncMock()
         mock_conn.fetchrow.side_effect = [
-            {"count": 42},  # memories
-            {"count": 5},  # sessions
-            {"count": 100},  # relationships
+            {"count": 42},    # memories
+            {"count": 5},     # sessions
+            {"count": 100},   # relationships
             {"size": 10 * 1024 * 1024},  # db size 10MB
             {"count": 0, "total_tokens": 0},  # embedding_token_log today
         ]
         mock_pool = _make_mock_pool(mock_conn)
 
-        with patch(
-            "open_brain.data_layer.postgres.get_pool",
-            new_callable=AsyncMock,
-            return_value=mock_pool,
-        ):
+        with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=mock_pool):
             result = await dl.stats()
 
         assert result["memories"] == 42
@@ -397,7 +289,6 @@ class TestPostgresDataLayerSaveMemory:
     @pytest.fixture
     def dl(self):
         from open_brain.data_layer.postgres import PostgresDataLayer
-
         return PostgresDataLayer()
 
     @pytest.mark.asyncio
@@ -410,24 +301,11 @@ class TestPostgresDataLayerSaveMemory:
         mock_pool = _make_mock_pool(mock_conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=mock_pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=mock_pool),
             patch("asyncio.create_task"),  # prevent background task from running
         ):
             from open_brain.data_layer.interface import SaveMemoryParams
-
-            result = await dl.save_memory(
-                SaveMemoryParams(
-                    text="test memory",
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_search",
-                    },
-                )
-            )
+            result = await dl.save_memory(SaveMemoryParams(text="test memory", provenance={"producer": "test-suite", "source_ref": "test-suite:test_search"}))
 
         assert result.id == 99
         assert result.message == "Memory saved"
@@ -437,7 +315,6 @@ class TestPostgresDataLayerGetObservations:
     @pytest.fixture
     def dl(self):
         from open_brain.data_layer.postgres import PostgresDataLayer
-
         return PostgresDataLayer()
 
     @pytest.mark.asyncio
@@ -448,20 +325,11 @@ class TestPostgresDataLayerGetObservations:
     @pytest.mark.asyncio
     async def test_fetches_by_ids(self, dl):
         mock_data = {
-            "id": 1,
-            "index_id": 1,
-            "session_id": None,
-            "type": "observation",
-            "title": "Test",
-            "subtitle": None,
-            "narrative": None,
-            "content": "test content",
-            "metadata": {},
-            "priority": 0.5,
-            "stability": "stable",
-            "access_count": 0,
-            "last_accessed_at": None,
-            "created_at": "2026-01-01",
+            "id": 1, "index_id": 1, "session_id": None, "type": "observation",
+            "title": "Test", "subtitle": None, "narrative": None,
+            "content": "test content", "metadata": {}, "priority": 0.5,
+            "stability": "stable", "access_count": 0,
+            "last_accessed_at": None, "created_at": "2026-01-01",
             "updated_at": "2026-01-01",
         }
         mock_row = MagicMock()
@@ -473,11 +341,7 @@ class TestPostgresDataLayerGetObservations:
         mock_pool = _make_mock_pool(mock_conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=mock_pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=mock_pool),
             patch("asyncio.create_task"),
         ):
             result = await dl.get_observations([1])
@@ -487,7 +351,6 @@ class TestPostgresDataLayerGetObservations:
 
 
 # ─── Search param mapping tests ────────────────────────────────────────────────
-
 
 class TestSearchParams:
     def test_default_values(self):
@@ -508,7 +371,6 @@ class TestSearchParams:
 
 # ─── metadata_filter pre-condition tests ──────────────────────────────────────
 
-
 class TestMetadataFilterPreCondition:
     """
     Verify that metadata_filter is passed as a pre-condition parameter to
@@ -519,7 +381,6 @@ class TestMetadataFilterPreCondition:
     @pytest.fixture
     def dl(self):
         from open_brain.data_layer.postgres import PostgresDataLayer
-
         return PostgresDataLayer()
 
     @pytest.mark.asyncio
@@ -534,24 +395,15 @@ class TestMetadataFilterPreCondition:
         mock_pool = _make_mock_pool(mock_conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=mock_pool,
-            ),
-            patch(
-                "open_brain.data_layer.postgres.embed_query_with_usage",
-                new_callable=AsyncMock,
-            ) as mock_embed,
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=mock_pool),
+            patch("open_brain.data_layer.postgres.embed_query_with_usage", new_callable=AsyncMock) as mock_embed,
             patch("asyncio.create_task"),
         ):
             mock_embed.return_value = ([0.1] * 1024, 10)
-            await dl.search(
-                SearchParams(
-                    query="test query",
-                    metadata_filter={"source": "claude"},
-                )
-            )
+            await dl.search(SearchParams(
+                query="test query",
+                metadata_filter={"source": "claude"},
+            ))
 
         # Verify conn.fetch was called (hybrid search path)
         mock_conn.fetch.assert_called_once()
@@ -590,15 +442,8 @@ class TestMetadataFilterPreCondition:
         mock_pool = _make_mock_pool(mock_conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=mock_pool,
-            ),
-            patch(
-                "open_brain.data_layer.postgres.embed_query_with_usage",
-                new_callable=AsyncMock,
-            ) as mock_embed,
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=mock_pool),
+            patch("open_brain.data_layer.postgres.embed_query_with_usage", new_callable=AsyncMock) as mock_embed,
             patch("asyncio.create_task"),
         ):
             mock_embed.return_value = ([0.1] * 1024, 10)

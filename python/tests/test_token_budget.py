@@ -19,20 +19,13 @@ import pytest
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
-
-def _make_voyage_response_with_usage(
-    embedding: list[float], token_count: int
-) -> httpx.Response:
+def _make_voyage_response_with_usage(embedding: list[float], token_count: int) -> httpx.Response:
     """Build a mock Voyage API response including usage.total_tokens."""
-    body = json.dumps(
-        {
-            "data": [{"embedding": embedding}],
-            "usage": {"total_tokens": token_count},
-        }
-    )
-    return httpx.Response(
-        200, content=body.encode(), headers={"content-type": "application/json"}
-    )
+    body = json.dumps({
+        "data": [{"embedding": embedding}],
+        "usage": {"total_tokens": token_count},
+    })
+    return httpx.Response(200, content=body.encode(), headers={"content-type": "application/json"})
 
 
 def _mock_httpx_client(response: httpx.Response):
@@ -45,7 +38,6 @@ def _mock_httpx_client(response: httpx.Response):
 
 
 # ─── AK1: embed_with_usage returns (embedding, token_count) ────────────────────
-
 
 class TestEmbedWithUsage:
     """embed_with_usage() and embed_query_with_usage() return (list[float], int)."""
@@ -102,12 +94,10 @@ class TestEmbedWithUsage:
         from open_brain.data_layer.embedding import embed_batch_with_usage
 
         embeddings = [[0.1] * 1024, [0.2] * 1024]
-        body = json.dumps(
-            {
-                "data": [{"embedding": e} for e in embeddings],
-                "usage": {"total_tokens": 50},
-            }
-        )
+        body = json.dumps({
+            "data": [{"embedding": e} for e in embeddings],
+            "usage": {"total_tokens": 50},
+        })
         mock_response = httpx.Response(
             200, content=body.encode(), headers={"content-type": "application/json"}
         )
@@ -122,7 +112,6 @@ class TestEmbedWithUsage:
 
 
 # ─── AK2: stats() exposes embedding cost metrics ──────────────────────────────
-
 
 def _make_mock_pool(conn):
     """Build a properly wired mock pool that supports `async with pool.acquire() as conn`."""
@@ -165,20 +154,13 @@ class TestStatsEmbeddingMetrics:
 
         mock_conn.fetch = fetch_side_effect
 
-        with patch(
-            "open_brain.data_layer.postgres.get_pool",
-            new_callable=AsyncMock,
-            return_value=mock_pool,
-        ):
+        with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=mock_pool):
             from open_brain.data_layer.postgres import PostgresDataLayer
-
             dl = PostgresDataLayer()
             result = await dl.stats()
 
         assert "embeddings_today" in result, "stats() must include 'embeddings_today'"
-        assert "embedding_tokens_today" in result, (
-            "stats() must include 'embedding_tokens_today'"
-        )
+        assert "embedding_tokens_today" in result, "stats() must include 'embedding_tokens_today'"
         assert "estimated_embedding_cost_today" in result, (
             "stats() must include 'estimated_embedding_cost_today'"
         )
@@ -207,13 +189,8 @@ class TestStatsEmbeddingMetrics:
         mock_conn.fetchrow = fetchrow_side_effect
         mock_conn.fetch = AsyncMock(return_value=[])
 
-        with patch(
-            "open_brain.data_layer.postgres.get_pool",
-            new_callable=AsyncMock,
-            return_value=mock_pool,
-        ):
+        with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=mock_pool):
             from open_brain.data_layer.postgres import PostgresDataLayer
-
             dl = PostgresDataLayer()
             result = await dl.stats()
 
@@ -224,7 +201,6 @@ class TestStatsEmbeddingMetrics:
 
 # ─── AK3: MAX_MEMORIES_PER_DAY guard ─────────────────────────────────────────
 
-
 class TestDailyMemoryGuard:
     """save_memory() rejects saves beyond MAX_MEMORIES_PER_DAY."""
 
@@ -232,34 +208,23 @@ class TestDailyMemoryGuard:
     async def test_save_memory_rejected_when_daily_limit_exceeded(self):
         """save_memory() returns error string when today's count >= MAX_MEMORIES_PER_DAY."""
         mock_conn = AsyncMock()
-        mock_conn.fetchval = AsyncMock(
-            return_value=500
-        )  # exactly at MAX_MEMORIES_PER_DAY default
+        mock_conn.fetchval = AsyncMock(return_value=500)  # exactly at MAX_MEMORIES_PER_DAY default
         mock_pool = _make_mock_pool(mock_conn)
 
         import open_brain.server as server_module
-
         server_module._save_timestamps.clear()
 
-        with patch(
-            "open_brain.server.get_pool", new_callable=AsyncMock, return_value=mock_pool
-        ):
+        with patch("open_brain.server.get_pool", new_callable=AsyncMock, return_value=mock_pool):
             result = await server_module.save_memory(
                 text="This should be rejected",
                 is_test=False,
-                provenance={
-                    "producer": "test-suite",
-                    "source_ref": "test-suite:test_token_budget",
-                },
+                provenance={"producer": "test-suite", "source_ref": "test-suite:test_token_budget"},
             )
-
         data = json.loads(result)
         assert "error" in data or "limit" in data.get("message", "").lower(), (
             f"Expected error/limit message, got: {result}"
         )
-        assert (
-            "500" in result or "limit" in result.lower() or "exceeded" in result.lower()
-        )
+        assert "500" in result or "limit" in result.lower() or "exceeded" in result.lower()
 
     @pytest.mark.asyncio
     async def test_save_memory_allowed_below_daily_limit(self):
@@ -270,43 +235,23 @@ class TestDailyMemoryGuard:
 
         mock_dl = AsyncMock()
         from open_brain.data_layer.interface import SaveMemoryResult
-
-        mock_dl.save_memory.return_value = SaveMemoryResult(
-            id=99, message="Memory saved"
-        )
+        mock_dl.save_memory.return_value = SaveMemoryResult(id=99, message="Memory saved")
         mock_dl.update_memory.return_value = None
 
         import open_brain.server as server_module
-
         server_module._save_timestamps.clear()  # clear all per-user buckets
 
         with (
-            patch(
-                "open_brain.server.get_pool",
-                new_callable=AsyncMock,
-                return_value=mock_pool,
-            ),
+            patch("open_brain.server.get_pool", new_callable=AsyncMock, return_value=mock_pool),
             patch("open_brain.server.get_dl", return_value=mock_dl),
-            patch(
-                "open_brain.server.classify_and_extract",
-                new_callable=AsyncMock,
-                return_value={},
-            ),
-            patch(
-                "open_brain.server._extract_entities",
-                new_callable=AsyncMock,
-                return_value={},
-            ),
+            patch("open_brain.server.classify_and_extract", new_callable=AsyncMock, return_value={}),
+            patch("open_brain.server._extract_entities", new_callable=AsyncMock, return_value={}),
         ):
             result = await server_module.save_memory(
                 text="This should be allowed",
                 is_test=False,
-                provenance={
-                    "producer": "test-suite",
-                    "source_ref": "test-suite:test_token_budget",
-                },
+                provenance={"producer": "test-suite", "source_ref": "test-suite:test_token_budget"},
             )
-
         data = json.loads(result)
         assert data.get("id") == 99
 
@@ -314,7 +259,6 @@ class TestDailyMemoryGuard:
     async def test_save_memory_daily_guard_bypassed_for_is_test(self):
         """is_test=True bypasses daily guard without checking DB."""
         import open_brain.server as server_module
-
         server_module._save_timestamps.clear()
         result = await server_module.save_memory(
             text="Test artifact",
@@ -328,10 +272,8 @@ class TestDailyMemoryGuard:
     async def test_max_memories_per_day_config_default(self):
         """Config has MAX_MEMORIES_PER_DAY with default 500."""
         from open_brain.config import Config
-
         # Check the field exists with default 500
         import os
-
         os.environ.setdefault("MAX_MEMORIES_PER_DAY", "500")
         c = Config(
             MCP_SERVER_URL="http://localhost:8091",
@@ -340,14 +282,11 @@ class TestDailyMemoryGuard:
             JWT_SECRET="a" * 32,
             VOYAGE_API_KEY="key",
         )
-        assert hasattr(c, "MAX_MEMORIES_PER_DAY"), (
-            "Config must have MAX_MEMORIES_PER_DAY field"
-        )
+        assert hasattr(c, "MAX_MEMORIES_PER_DAY"), "Config must have MAX_MEMORIES_PER_DAY field"
         assert c.MAX_MEMORIES_PER_DAY == 500
 
 
 # ─── AK4: Rate limit (10/60s) ─────────────────────────────────────────────────
-
 
 class TestSaveMemoryRateLimit:
     """save_memory() is rate-limited to 10 calls per 60 seconds."""
@@ -355,6 +294,7 @@ class TestSaveMemoryRateLimit:
     @pytest.mark.asyncio
     async def test_rate_limit_rejected_after_10_calls(self):
         """11th save_memory call within 60s returns rate-limit error."""
+        from collections import deque
         import open_brain.server as server_module
 
         # Pre-fill the anonymous bucket with 10 recent timestamps (now - 1 second each)
@@ -368,12 +308,9 @@ class TestSaveMemoryRateLimit:
         result = await server_module.save_memory(
             text="This should be rate-limited",
             is_test=False,
-            provenance={
-                "producer": "test-suite",
-                "source_ref": "test-suite:test_token_budget",
-            },
+            provenance={"producer": "test-suite", "source_ref": "test-suite:test_token_budget"},
         )
-
+        data = json.loads(result)
         # Should contain rate limit error
         result_str = result.lower()
         assert "rate" in result_str or "limit" in result_str, (
@@ -383,6 +320,7 @@ class TestSaveMemoryRateLimit:
     @pytest.mark.asyncio
     async def test_rate_limit_not_triggered_below_threshold(self):
         """9 calls within 60s should not trigger rate limit."""
+        from collections import deque
         import open_brain.server as server_module
 
         # Pre-fill the anonymous bucket with only 9 timestamps
@@ -399,39 +337,20 @@ class TestSaveMemoryRateLimit:
 
         mock_dl = AsyncMock()
         from open_brain.data_layer.interface import SaveMemoryResult
-
-        mock_dl.save_memory.return_value = SaveMemoryResult(
-            id=77, message="Memory saved"
-        )
+        mock_dl.save_memory.return_value = SaveMemoryResult(id=77, message="Memory saved")
         mock_dl.update_memory.return_value = None
 
         with (
-            patch(
-                "open_brain.server.get_pool",
-                new_callable=AsyncMock,
-                return_value=mock_pool,
-            ),
+            patch("open_brain.server.get_pool", new_callable=AsyncMock, return_value=mock_pool),
             patch("open_brain.server.get_dl", return_value=mock_dl),
-            patch(
-                "open_brain.server.classify_and_extract",
-                new_callable=AsyncMock,
-                return_value={},
-            ),
-            patch(
-                "open_brain.server._extract_entities",
-                new_callable=AsyncMock,
-                return_value={},
-            ),
+            patch("open_brain.server.classify_and_extract", new_callable=AsyncMock, return_value={}),
+            patch("open_brain.server._extract_entities", new_callable=AsyncMock, return_value={}),
         ):
             result = await server_module.save_memory(
                 text="This should go through",
                 is_test=False,
-                provenance={
-                    "producer": "test-suite",
-                    "source_ref": "test-suite:test_token_budget",
-                },
+                provenance={"producer": "test-suite", "source_ref": "test-suite:test_token_budget"},
             )
-
         data = json.loads(result)
         assert data.get("id") == 77
 
@@ -441,7 +360,7 @@ class TestSaveMemoryRateLimit:
         import open_brain.server as server_module
 
         # Fill the anonymous bucket with 10 OLD timestamps (61 seconds ago — outside window)
-
+        from collections import deque
         server_module._save_timestamps.clear()
         old_time = time.monotonic() - 61.0
         bucket = deque()
@@ -455,39 +374,20 @@ class TestSaveMemoryRateLimit:
 
         mock_dl = AsyncMock()
         from open_brain.data_layer.interface import SaveMemoryResult
-
-        mock_dl.save_memory.return_value = SaveMemoryResult(
-            id=88, message="Memory saved"
-        )
+        mock_dl.save_memory.return_value = SaveMemoryResult(id=88, message="Memory saved")
         mock_dl.update_memory.return_value = None
 
         with (
-            patch(
-                "open_brain.server.get_pool",
-                new_callable=AsyncMock,
-                return_value=mock_pool,
-            ),
+            patch("open_brain.server.get_pool", new_callable=AsyncMock, return_value=mock_pool),
             patch("open_brain.server.get_dl", return_value=mock_dl),
-            patch(
-                "open_brain.server.classify_and_extract",
-                new_callable=AsyncMock,
-                return_value={},
-            ),
-            patch(
-                "open_brain.server._extract_entities",
-                new_callable=AsyncMock,
-                return_value={},
-            ),
+            patch("open_brain.server.classify_and_extract", new_callable=AsyncMock, return_value={}),
+            patch("open_brain.server._extract_entities", new_callable=AsyncMock, return_value={}),
         ):
             result = await server_module.save_memory(
                 text="Old timestamps expired, should be allowed",
                 is_test=False,
-                provenance={
-                    "producer": "test-suite",
-                    "source_ref": "test-suite:test_token_budget",
-                },
+                provenance={"producer": "test-suite", "source_ref": "test-suite:test_token_budget"},
             )
-
         data = json.loads(result)
         assert data.get("id") == 88
 
@@ -497,7 +397,7 @@ class TestSaveMemoryRateLimit:
         import open_brain.server as server_module
 
         # Even if 10 recent timestamps are present, is_test bypasses everything
-
+        from collections import deque
         server_module._save_timestamps.clear()
         now = time.monotonic()
         bucket = deque(now - 1.0 for _ in range(10))
@@ -515,33 +415,26 @@ class TestSaveMemoryRateLimit:
         """Rate limit error message includes a retry-after hint."""
         import open_brain.server as server_module
 
+        from collections import deque
         server_module._save_timestamps.clear()
         now = time.monotonic()
-        bucket = deque(
-            now - 5.0 for _ in range(10)
-        )  # 5s ago, oldest will expire in 55s
+        bucket = deque(now - 5.0 for _ in range(10))  # 5s ago, oldest will expire in 55s
         server_module._save_timestamps["__anonymous__"] = bucket
 
         result = await server_module.save_memory(
             text="Rate limited — check hint",
             is_test=False,
-            provenance={
-                "producer": "test-suite",
-                "source_ref": "test-suite:test_token_budget",
-            },
+            provenance={"producer": "test-suite", "source_ref": "test-suite:test_token_budget"},
         )
         # Should mention seconds until retry
         result_lower = result.lower()
-        assert (
-            "second" in result_lower
-            or "retry" in result_lower
-            or "try again" in result_lower
-        ), f"Expected retry hint in: {result}"
+        assert "second" in result_lower or "retry" in result_lower or "try again" in result_lower, (
+            f"Expected retry hint in: {result}"
+        )
 
     def test_save_timestamps_dict_exists_at_module_level(self):
         """_save_timestamps dict must exist at module level in server.py."""
         import open_brain.server as server_module
-
         assert hasattr(server_module, "_save_timestamps"), (
             "server.py must have _save_timestamps dict at module level"
         )

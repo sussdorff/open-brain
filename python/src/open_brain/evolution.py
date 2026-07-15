@@ -10,12 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from open_brain.data_layer.interface import (
-    DataLayer,
-    Memory,
-    SaveMemoryParams,
-    SearchParams,
-)
+from open_brain.data_layer.interface import DataLayer, Memory, SaveMemoryParams, SearchParams
 
 
 # ─── Briefing metadata convention ────────────────────────────────────────────
@@ -87,15 +82,13 @@ async def analyze_engagement(
     now = datetime.now(tz=UTC)
     since = now - timedelta(days=days_back)
 
-    result = await dl.search(
-        SearchParams(
-            type="briefing",
-            date_start=since.isoformat(),
-            date_end=now.isoformat(),
-            project=project,
-            limit=500,
-        )
-    )
+    result = await dl.search(SearchParams(
+        type="briefing",
+        date_start=since.isoformat(),
+        date_end=now.isoformat(),
+        project=project,
+        limit=500,
+    ))
 
     briefings = result.results
     total = len(briefings)
@@ -114,14 +107,12 @@ async def analyze_engagement(
     for btype, total_count in counts.items():
         responded_count = responded.get(btype, 0)
         rate = responded_count / total_count if total_count > 0 else 0.0
-        by_type.append(
-            BriefingEngagement(
-                briefing_type=btype,
-                total_count=total_count,
-                responded_count=responded_count,
-                response_rate=rate,
-            )
-        )
+        by_type.append(BriefingEngagement(
+            briefing_type=btype,
+            total_count=total_count,
+            responded_count=responded_count,
+            response_rate=rate,
+        ))
 
     # Sort by briefing_type for deterministic ordering
     by_type.sort(key=lambda x: x.briefing_type)
@@ -166,32 +157,28 @@ async def generate_suggestion(
     now = datetime.now(tz=UTC)
     since = now - timedelta(days=7)
 
-    recent_result = await dl.search(
-        SearchParams(
-            type="evolution",
-            metadata_filter={"evolution_type": "suggestion"},
-            date_start=since.isoformat(),
-            date_end=now.isoformat(),
-            project=project,
-            limit=1,
-        )
-    )
+    recent_result = await dl.search(SearchParams(
+        type="evolution",
+        metadata_filter={"evolution_type": "suggestion"},
+        date_start=since.isoformat(),
+        date_end=now.isoformat(),
+        project=project,
+        limit=1,
+    ))
 
     if recent_result.results:
         return None  # Rate limit: already suggested within 7 days
 
     # Check 30-day rejection suppression: exclude briefing types rejected in the last 30 days
     since_30 = now - timedelta(days=30)
-    rejected_result = await dl.search(
-        SearchParams(
-            type="evolution",
-            metadata_filter={"evolution_type": "approval", "approved": "false"},
-            date_start=since_30.isoformat(),
-            date_end=now.isoformat(),
-            project=project,
-            limit=100,
-        )
-    )
+    rejected_result = await dl.search(SearchParams(
+        type="evolution",
+        metadata_filter={"evolution_type": "approval", "approved": "false"},
+        date_start=since_30.isoformat(),
+        date_end=now.isoformat(),
+        project=project,
+        limit=100,
+    ))
     rejected_types: set[str] = {
         mem.metadata.get("briefing_type", "")
         for mem in rejected_result.results
@@ -236,27 +223,25 @@ async def generate_suggestion(
             response_rate=highest.response_rate,
         )
 
-    save_result = await dl.save_memory(
-        SaveMemoryParams(
-            text=suggestion.reason,
-            type="evolution",
-            project=project,
-            title=f"Evolution suggestion: {suggestion.action} {suggestion.briefing_type}",
-            metadata={
-                "evolution_type": "suggestion",
-                "action": suggestion.action,
-                "briefing_type": suggestion.briefing_type,
-                "response_rate": str(suggestion.response_rate),
-            },
-            provenance={
-                "producer": "evolution",
-                "source_ref": (
-                    f"evolution-suggestion:{project or 'global'}:"
-                    f"{suggestion.briefing_type}:{suggestion.action}"
-                ),
-            },
-        )
-    )
+    save_result = await dl.save_memory(SaveMemoryParams(
+        text=suggestion.reason,
+        type="evolution",
+        project=project,
+        title=f"Evolution suggestion: {suggestion.action} {suggestion.briefing_type}",
+        metadata={
+            "evolution_type": "suggestion",
+            "action": suggestion.action,
+            "briefing_type": suggestion.briefing_type,
+            "response_rate": str(suggestion.response_rate),
+        },
+        provenance={
+            "producer": "evolution",
+            "source_ref": (
+                f"evolution-suggestion:{project or 'global'}:"
+                f"{suggestion.briefing_type}:{suggestion.action}"
+            ),
+        },
+    ))
     suggestion.id = save_result.id
 
     return suggestion
@@ -282,19 +267,17 @@ async def log_evolution_approval(
     }
     if briefing_type is not None:
         metadata["briefing_type"] = briefing_type
-    await dl.save_memory(
-        SaveMemoryParams(
-            text=f"Evolution suggestion #{suggestion_id} was {action_label}.",
-            type="evolution",
-            project=project,
-            title=f"Evolution {action_label}: suggestion #{suggestion_id}",
-            metadata=metadata,
-            provenance={
-                "producer": "evolution",
-                "source_ref": f"evolution-approval:{suggestion_id}",
-            },
-        )
-    )
+    await dl.save_memory(SaveMemoryParams(
+        text=f"Evolution suggestion #{suggestion_id} was {action_label}.",
+        type="evolution",
+        project=project,
+        title=f"Evolution {action_label}: suggestion #{suggestion_id}",
+        metadata=metadata,
+        provenance={
+            "producer": "evolution",
+            "source_ref": f"evolution-approval:{suggestion_id}",
+        },
+    ))
 
 
 async def query_evolution_history(
@@ -306,12 +289,10 @@ async def query_evolution_history(
 
     Returns memories with type='evolution', ordered by most recent first.
     """
-    result = await dl.search(
-        SearchParams(
-            type="evolution",
-            project=project,
-            limit=limit,
-            order_by="newest",
-        )
-    )
+    result = await dl.search(SearchParams(
+        type="evolution",
+        project=project,
+        limit=limit,
+        order_by="newest",
+    ))
     return result.results

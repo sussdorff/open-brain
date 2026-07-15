@@ -123,9 +123,7 @@ class TestResolvePaperlessReferenceTool:
         import open_brain.server as srv
 
         class FakePaperlessClient:
-            async def resolve_reference(
-                self, document_id: int
-            ) -> PaperlessResolveResult:
+            async def resolve_reference(self, document_id: int) -> PaperlessResolveResult:
                 assert document_id == 17
                 return PaperlessResolveResult(
                     status="found",
@@ -146,9 +144,7 @@ class TestResolvePaperlessReferenceTool:
         data = json.loads(raw)
         assert data["status"] == "found"
         assert data["document_id"] == 17
-        assert data["retrieval_targets"]["download"].endswith(
-            "/api/documents/17/download/"
-        )
+        assert data["retrieval_targets"]["download"].endswith("/api/documents/17/download/")
 
     def test_save_memory_description_documents_paperless_reference_schema(self):
         """AC2: save_memory tells agents how to cite a Paperless document."""
@@ -185,9 +181,7 @@ class TestPaperlessBinaryInvariant:
 
         assert result.status == "found"
         assert set(called_urls) == {"https://paperless.example/api/documents/17/"}
-        assert not any(
-            url.endswith(("/download/", "/preview/", "/thumb/")) for url in called_urls
-        )
+        assert not any(url.endswith(("/download/", "/preview/", "/thumb/")) for url in called_urls)
 
     def test_reference_metadata_contains_no_binary_payload_keys(self):
         """AC3: Paperless reference metadata contains identity/provenance only."""
@@ -207,9 +201,7 @@ class TestPaperlessBinaryInvariant:
     @pytest.mark.parametrize(
         "forbidden_key", ["bytes", "base64", "content", "data", "attachment"]
     )
-    async def test_save_memory_rejects_forbidden_binary_payload_key(
-        self, forbidden_key
-    ):
+    async def test_save_memory_rejects_forbidden_binary_payload_key(self, forbidden_key):
         """AC3: save_memory HARD-REJECTS a paperless_reference carrying a binary payload.
 
         A forbidden binary key must abort the write with an explicit error response —
@@ -225,14 +217,7 @@ class TestPaperlessBinaryInvariant:
             }
         }
 
-        raw = await srv.save_memory(
-            text="A memory citing a document",
-            metadata=metadata,
-            provenance={
-                "producer": "test-suite",
-                "source_ref": "test-suite:test_paperless_references",
-            },
-        )
+        raw = await srv.save_memory(text="A memory citing a document", metadata=metadata, provenance={"producer": "test-suite", "source_ref": "test-suite:test_paperless_references"})
         data = json.loads(raw)
 
         assert data.get("error") == "paperless_reference_binary_payload", (
@@ -271,9 +256,7 @@ class TestPaperlessExplicitMissingResults:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("status_code", [401, 403])
-    async def test_unauthorized_returns_explicit_non_destructive_result(
-        self, status_code: int
-    ):
+    async def test_unauthorized_returns_explicit_non_destructive_result(self, status_code: int):
         """AC4: inaccessible Paperless documents return unauthorized without raising."""
         from open_brain.paperless import PaperlessClient
 
@@ -360,9 +343,7 @@ class TestPaperlessTransportAndInputFailures:
             ("", ""),
         ],
     )
-    async def test_not_configured_returns_without_http_call(
-        self, base_url: str, api_token: str
-    ):
+    async def test_not_configured_returns_without_http_call(self, base_url: str, api_token: str):
         """AC4: missing config returns not_configured and never calls HTTP."""
         from open_brain.paperless import PaperlessClient
 
@@ -436,9 +417,7 @@ class TestPaperlessTransportAndInputFailures:
 @pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.skipif(
-    not (
-        os.environ.get("PAPERLESS_BASE_URL") and os.environ.get("PAPERLESS_API_TOKEN")
-    ),
+    not (os.environ.get("PAPERLESS_BASE_URL") and os.environ.get("PAPERLESS_API_TOKEN")),
     reason="PAPERLESS_BASE_URL and PAPERLESS_API_TOKEN are required for live Paperless smoke test",
 )
 async def test_live_paperless_reference_resolution_boundary():

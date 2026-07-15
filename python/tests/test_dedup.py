@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
@@ -82,33 +82,18 @@ class TestDedupSkipUnchanged:
         inserted_row = _make_insert_row(55)
         conn = AsyncMock()
         conn.fetchrow.side_effect = [
-            None,  # content hash dedup check (no project → _resolve_index_id skips DB)
-            inserted_row,  # INSERT RETURNING id
+            None,         # content hash dedup check (no project → _resolve_index_id skips DB)
+            inserted_row, # INSERT RETURNING id
         ]
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
-            patch(
-                "open_brain.data_layer.postgres.embed_query_with_usage"
-            ) as mock_embed,
+            patch("open_brain.data_layer.postgres.embed_query_with_usage") as mock_embed,
         ):
             mock_asyncio.create_task = MagicMock()
-            result = await dl.save_memory(
-                SaveMemoryParams(
-                    text="hello world",
-                    dedup_mode="skip",
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_dedup",
-                    },
-                )
-            )
+            result = await dl.save_memory(SaveMemoryParams(text="hello world", dedup_mode="skip", provenance={"producer": "test-suite", "source_ref": "test-suite:test_dedup"}))
 
         mock_embed.assert_not_called()
         assert result.duplicate_of is None
@@ -131,16 +116,12 @@ class TestDedupMergeHit:
         match_row = _make_match_row(memory_id=42, similarity=0.95)
         conn = AsyncMock()
         conn.fetchrow.side_effect = [
-            match_row,  # semantic dedup SELECT (no project → _resolve_index_id skips DB)
+            match_row, # semantic dedup SELECT (no project → _resolve_index_id skips DB)
         ]
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
             patch(
                 "open_brain.data_layer.postgres.embed_query_with_usage",
@@ -150,14 +131,7 @@ class TestDedupMergeHit:
         ):
             mock_asyncio.create_task = MagicMock()
             result = await dl.save_memory(
-                SaveMemoryParams(
-                    text="very similar content",
-                    dedup_mode="merge",
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_dedup",
-                    },
-                )
+                SaveMemoryParams(text="very similar content", dedup_mode="merge", provenance={"producer": "test-suite", "source_ref": "test-suite:test_dedup"})
             )
 
         assert result.id == 42
@@ -184,18 +158,14 @@ class TestDedupMergeMiss:
         inserted_row = _make_insert_row(77)
         conn = AsyncMock()
         conn.fetchrow.side_effect = [
-            match_row,  # semantic dedup SELECT (low similarity → no match; no project → _resolve_index_id skips DB)
-            None,  # content hash dedup check
+            match_row,     # semantic dedup SELECT (low similarity → no match; no project → _resolve_index_id skips DB)
+            None,          # content hash dedup check
             inserted_row,  # INSERT RETURNING id
         ]
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
             patch(
                 "open_brain.data_layer.postgres.embed_query_with_usage",
@@ -205,14 +175,7 @@ class TestDedupMergeMiss:
         ):
             mock_asyncio.create_task = MagicMock()
             result = await dl.save_memory(
-                SaveMemoryParams(
-                    text="quite different content",
-                    dedup_mode="merge",
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_dedup",
-                    },
-                )
+                SaveMemoryParams(text="quite different content", dedup_mode="merge", provenance={"producer": "test-suite", "source_ref": "test-suite:test_dedup"})
             )
 
         assert result.id == 77
@@ -236,42 +199,24 @@ class TestDuplicateOfPrecedence:
         return PostgresDataLayer()
 
     @pytest.mark.asyncio
-    async def test_duplicate_of_short_circuits_merge(
-        self, dl: PostgresDataLayer
-    ) -> None:
+    async def test_duplicate_of_short_circuits_merge(self, dl: PostgresDataLayer) -> None:
         """duplicate_of=42 with dedup_mode='merge' → embed_query NOT called, result.duplicate_of==42.
 
         Note: _resolve_index_id is still called (it's before the short-circuit), but no
         DB call happens since no project is passed. Then the short-circuit returns immediately.
         """
         conn = AsyncMock()
-        conn.fetchrow.return_value = (
-            None  # should not be called at all after short-circuit
-        )
+        conn.fetchrow.return_value = None  # should not be called at all after short-circuit
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
-            patch(
-                "open_brain.data_layer.postgres.embed_query_with_usage"
-            ) as mock_embed,
+            patch("open_brain.data_layer.postgres.embed_query_with_usage") as mock_embed,
         ):
             mock_asyncio.create_task = MagicMock()
             result = await dl.save_memory(
-                SaveMemoryParams(
-                    text="some text",
-                    duplicate_of=42,
-                    dedup_mode="merge",
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_dedup",
-                    },
-                )
+                SaveMemoryParams(text="some text", duplicate_of=42, dedup_mode="merge", provenance={"producer": "test-suite", "source_ref": "test-suite:test_dedup"})
             )
 
         mock_embed.assert_not_called()
@@ -290,23 +235,17 @@ class TestMergeAccessCountInvariant:
         return PostgresDataLayer()
 
     @pytest.mark.asyncio
-    async def test_merge_update_does_not_touch_access_count(
-        self, dl: PostgresDataLayer
-    ) -> None:
+    async def test_merge_update_does_not_touch_access_count(self, dl: PostgresDataLayer) -> None:
         """The SQL UPDATE on merge path must not contain access_count or last_accessed_at."""
         match_row = _make_match_row(memory_id=42, similarity=0.95)
         conn = AsyncMock()
         conn.fetchrow.side_effect = [
-            match_row,  # semantic dedup SELECT (no project → _resolve_index_id skips DB)
+            match_row, # semantic dedup SELECT (no project → _resolve_index_id skips DB)
         ]
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
             patch(
                 "open_brain.data_layer.postgres.embed_query_with_usage",
@@ -316,14 +255,7 @@ class TestMergeAccessCountInvariant:
         ):
             mock_asyncio.create_task = MagicMock()
             await dl.save_memory(
-                SaveMemoryParams(
-                    text="similar content",
-                    dedup_mode="merge",
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_dedup",
-                    },
-                )
+                SaveMemoryParams(text="similar content", dedup_mode="merge", provenance={"producer": "test-suite", "source_ref": "test-suite:test_dedup"})
             )
 
         # conn.execute should have been called with the UPDATE
@@ -349,16 +281,12 @@ class TestMergeImportanceHigherWins:
         match_row = _make_match_row(memory_id=42, importance="low", similarity=0.95)
         conn = AsyncMock()
         conn.fetchrow.side_effect = [
-            match_row,  # semantic dedup SELECT (no project → _resolve_index_id skips DB)
+            match_row, # semantic dedup SELECT (no project → _resolve_index_id skips DB)
         ]
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
             patch(
                 "open_brain.data_layer.postgres.embed_query_with_usage",
@@ -368,23 +296,13 @@ class TestMergeImportanceHigherWins:
         ):
             mock_asyncio.create_task = MagicMock()
             await dl.save_memory(
-                SaveMemoryParams(
-                    text="important update",
-                    importance="high",
-                    dedup_mode="merge",
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_dedup",
-                    },
-                )
+                SaveMemoryParams(text="important update", importance="high", dedup_mode="merge", provenance={"producer": "test-suite", "source_ref": "test-suite:test_dedup"})
             )
 
         conn.execute.assert_called_once()
         update_args = conn.execute.call_args[0]
         # args[0]=SQL, args[1]=existing_id, args[2]=importance (higher rank wins)
-        assert update_args[2] == "high", (
-            f"Expected importance='high', got: {update_args[2]}"
-        )
+        assert update_args[2] == "high", f"Expected importance='high', got: {update_args[2]}"
 
 
 # ─── Test 7: importance rank preservation (existing wins) ────────────────────
@@ -398,25 +316,17 @@ class TestMergeImportanceExistingWins:
         return PostgresDataLayer()
 
     @pytest.mark.asyncio
-    async def test_existing_higher_importance_preserved(
-        self, dl: PostgresDataLayer
-    ) -> None:
+    async def test_existing_higher_importance_preserved(self, dl: PostgresDataLayer) -> None:
         """existing=critical, incoming=medium → merged importance='critical'."""
-        match_row = _make_match_row(
-            memory_id=42, importance="critical", similarity=0.95
-        )
+        match_row = _make_match_row(memory_id=42, importance="critical", similarity=0.95)
         conn = AsyncMock()
         conn.fetchrow.side_effect = [
-            match_row,  # semantic dedup SELECT (no project → _resolve_index_id skips DB)
+            match_row, # semantic dedup SELECT (no project → _resolve_index_id skips DB)
         ]
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
             patch(
                 "open_brain.data_layer.postgres.embed_query_with_usage",
@@ -426,23 +336,13 @@ class TestMergeImportanceExistingWins:
         ):
             mock_asyncio.create_task = MagicMock()
             await dl.save_memory(
-                SaveMemoryParams(
-                    text="minor update",
-                    importance="medium",
-                    dedup_mode="merge",
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_dedup",
-                    },
-                )
+                SaveMemoryParams(text="minor update", importance="medium", dedup_mode="merge", provenance={"producer": "test-suite", "source_ref": "test-suite:test_dedup"})
             )
 
         conn.execute.assert_called_once()
         update_args = conn.execute.call_args[0]
         # args[0]=SQL, args[1]=existing_id, args[2]=importance (existing wins)
-        assert update_args[2] == "critical", (
-            f"Expected importance='critical', got: {update_args[2]}"
-        )
+        assert update_args[2] == "critical", f"Expected importance='critical', got: {update_args[2]}"
 
 
 # ─── Test 8: updated_at-only constraint ──────────────────────────────────────
@@ -461,16 +361,12 @@ class TestMergeUpdatedAtConstraint:
         match_row = _make_match_row(memory_id=42, similarity=0.95)
         conn = AsyncMock()
         conn.fetchrow.side_effect = [
-            match_row,  # semantic dedup SELECT (no project → _resolve_index_id skips DB)
+            match_row, # semantic dedup SELECT (no project → _resolve_index_id skips DB)
         ]
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
             patch(
                 "open_brain.data_layer.postgres.embed_query_with_usage",
@@ -480,14 +376,7 @@ class TestMergeUpdatedAtConstraint:
         ):
             mock_asyncio.create_task = MagicMock()
             await dl.save_memory(
-                SaveMemoryParams(
-                    text="content",
-                    dedup_mode="merge",
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_dedup",
-                    },
-                )
+                SaveMemoryParams(text="content", dedup_mode="merge", provenance={"producer": "test-suite", "source_ref": "test-suite:test_dedup"})
             )
 
         conn.execute.assert_called_once()
@@ -513,33 +402,21 @@ class TestDedupDefaultValue:
     @pytest.mark.asyncio
     async def test_default_dedup_mode_is_skip(self, dl: PostgresDataLayer) -> None:
         """SaveMemoryParams(text=...) without dedup_mode → no embed call (skip behavior)."""
-        params = SaveMemoryParams(
-            text="default params",
-            provenance={
-                "producer": "test-suite",
-                "source_ref": "test-suite:test_dedup",
-            },
-        )
+        params = SaveMemoryParams(text="default params", provenance={"producer": "test-suite", "source_ref": "test-suite:test_dedup"})
         assert params.dedup_mode == "skip"
 
         inserted_row = _make_insert_row(88)
         conn = AsyncMock()
         conn.fetchrow.side_effect = [
-            None,  # content hash dedup check (no project → _resolve_index_id skips DB)
-            inserted_row,  # INSERT RETURNING id
+            None,         # content hash dedup check (no project → _resolve_index_id skips DB)
+            inserted_row, # INSERT RETURNING id
         ]
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
-            patch(
-                "open_brain.data_layer.postgres.embed_query_with_usage"
-            ) as mock_embed,
+            patch("open_brain.data_layer.postgres.embed_query_with_usage") as mock_embed,
         ):
             mock_asyncio.create_task = MagicMock()
             result = await dl.save_memory(params)

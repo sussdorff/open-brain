@@ -46,19 +46,12 @@ def test_canonical_entity_select_predicate_uses_positive_marker() -> None:
     """The read-side canonical predicate mirrors the existing protection helper."""
     from open_brain.data_layer.postgres import canonical_entity_select_predicate
 
-    assert (
-        canonical_entity_select_predicate("m")
-        == "m.metadata->>'canonical_entity' = 'true'"
-    )
-    assert (
-        canonical_entity_select_predicate() == "metadata->>'canonical_entity' = 'true'"
-    )
+    assert canonical_entity_select_predicate("m") == "m.metadata->>'canonical_entity' = 'true'"
+    assert canonical_entity_select_predicate() == "metadata->>'canonical_entity' = 'true'"
 
 
 @pytest.mark.asyncio
-async def test_weekly_briefing_adds_relevant_canonical_entities_and_inbox_state() -> (
-    None
-):
+async def test_weekly_briefing_adds_relevant_canonical_entities_and_inbox_state() -> None:
     """Weekly briefing includes relevant canonical entities and current inbox state."""
     from open_brain.digest import generate_weekly_briefing
 
@@ -72,22 +65,14 @@ async def test_weekly_briefing_adds_relevant_canonical_entities_and_inbox_state(
         memory_type="project",
         title="Open Brain",
         content="Canonical project entity for Open Brain",
-        metadata={
-            "canonical_entity": True,
-            "canonical_kind": "project",
-            "name": "Open Brain",
-        },
+        metadata={"canonical_entity": True, "canonical_kind": "project", "name": "Open Brain"},
     )
     unrelated_entity = _memory(
         21,
         memory_type="concept",
         title="Unrelated Concept",
         content="Canonical concept outside this weekly window",
-        metadata={
-            "canonical_entity": True,
-            "canonical_kind": "concept",
-            "name": "Unrelated Concept",
-        },
+        metadata={"canonical_entity": True, "canonical_kind": "concept", "name": "Unrelated Concept"},
     )
     inbox_memory = _memory(
         30,
@@ -110,9 +95,7 @@ async def test_weekly_briefing_adds_relevant_canonical_entities_and_inbox_state(
     ]
     assert result.inbox_state == {
         "pending": 1,
-        "sample": [
-            {"id": 30, "title": "Pending weekly capture", "type": "observation"}
-        ],
+        "sample": [{"id": 30, "title": "Pending weekly capture", "type": "observation"}],
     }
 
     canonical_params = dl.search.await_args_list[3].args[0]
@@ -124,9 +107,7 @@ async def test_weekly_briefing_adds_relevant_canonical_entities_and_inbox_state(
 
 
 @pytest.mark.asyncio
-async def test_weekly_briefing_inbox_pending_reflects_search_total_not_capped_results() -> (
-    None
-):
+async def test_weekly_briefing_inbox_pending_reflects_search_total_not_capped_results() -> None:
     """inbox_state.pending reports SearchResult.total, not the capped result length."""
     from open_brain.digest import generate_weekly_briefing
 
@@ -187,9 +168,7 @@ async def test_weekly_briefing_round_trip_uses_real_database(
     try:
         with ingest_run() as current_run_id:
             run_id = current_run_id
-            with patch.object(
-                PostgresDataLayer, "_embed_and_link", new_callable=AsyncMock
-            ):
+            with patch.object(PostgresDataLayer, "_embed_and_link", new_callable=AsyncMock):
                 canonical = await dl.save_memory(
                     SaveMemoryParams(
                         text=f"Canonical Open Brain project {run_id}",
@@ -204,10 +183,7 @@ async def test_weekly_briefing_round_trip_uses_real_database(
                             "entities": {},
                         },
                         capture_status="processed",
-                        provenance={
-                            "producer": "test-suite",
-                            "source_ref": "test-suite:test_weekly_briefing",
-                        },
+                        provenance={"producer": "test-suite", "source_ref": "test-suite:test_weekly_briefing"},
                     )
                 )
                 pending = await dl.save_memory(
@@ -218,10 +194,7 @@ async def test_weekly_briefing_round_trip_uses_real_database(
                         title="Pending weekly capture",
                         metadata={"capture_template": "observation", "entities": {}},
                         capture_status="inbox",
-                        provenance={
-                            "producer": "test-suite",
-                            "source_ref": "test-suite:test_weekly_briefing",
-                        },
+                        provenance={"producer": "test-suite", "source_ref": "test-suite:test_weekly_briefing"},
                     )
                 )
 

@@ -387,26 +387,14 @@ class IMAPEmailIngestor:
             envelope = uid_data.get(b"ENVELOPE")
             if envelope is not None:
                 try:
-                    subject = _decode_header_value(
-                        envelope.subject.decode()
-                        if isinstance(envelope.subject, bytes)
-                        else (envelope.subject or "")
-                    )
+                    subject = _decode_header_value(envelope.subject.decode() if isinstance(envelope.subject, bytes) else (envelope.subject or ""))
                     date_str = str(envelope.date) if envelope.date else None
                     from_list = envelope.from_
                     from_addr = ""
                     if from_list:
                         f = from_list[0]
-                        from_addr = (
-                            f"{f.mailbox.decode()}@{f.host.decode()}"
-                            if isinstance(f.mailbox, bytes)
-                            else f"{f.mailbox}@{f.host}"
-                        )
-                    refs.append(
-                        MessageRef(
-                            uid=uid, subject=subject, date=date_str, from_addr=from_addr
-                        )
-                    )
+                        from_addr = f"{f.mailbox.decode()}@{f.host.decode()}" if isinstance(f.mailbox, bytes) else f"{f.mailbox}@{f.host}"
+                    refs.append(MessageRef(uid=uid, subject=subject, date=date_str, from_addr=from_addr))
                 except Exception:
                     refs.append(MessageRef(uid=uid))
             else:
@@ -423,7 +411,9 @@ class IMAPEmailIngestor:
         Returns:
             Deduplicated list of email address strings.
         """
-        search_result = await self._dl.search(SearchParams(type="person", limit=500))
+        search_result = await self._dl.search(
+            SearchParams(type="person", limit=500)
+        )
         person_memory = None
         for mem in search_result.results:
             if mem.id == person_memory_id:
@@ -473,9 +463,7 @@ class IMAPEmailIngestor:
         email_addresses = await self._get_email_addresses_for_person(person_memory_id)
 
         # Find matching UIDs
-        uids = await self._list_by_addresses(
-            email_addresses=email_addresses, since=since
-        )
+        uids = await self._list_by_addresses(email_addresses=email_addresses, since=since)
 
         if not uids:
             return IngestResult(
@@ -634,9 +622,7 @@ class IMAPEmailIngestor:
             RuntimeError: If this is a sentinel instance (server not configured).
         """
         if IMAPClient is None:  # pragma: no cover
-            raise ImportError(
-                "imapclient is required for email ingestion. Install it with: pip install imapclient"
-            )
+            raise ImportError("imapclient is required for email ingestion. Install it with: pip install imapclient")
         if self._dl is None:
             raise RuntimeError(
                 "Sentinel instance cannot list — provide data_layer and server config"
@@ -679,11 +665,7 @@ class IMAPEmailIngestor:
                             if isinstance(f.mailbox, bytes)
                             else f"{f.mailbox}@{f.host}"
                         )
-                    refs.append(
-                        MessageRef(
-                            uid=uid, subject=subject, date=date_str, from_addr=from_addr
-                        )
-                    )
+                    refs.append(MessageRef(uid=uid, subject=subject, date=date_str, from_addr=from_addr))
                 except (UnicodeDecodeError, AttributeError, TypeError) as exc:
                     logger.warning("Failed to decode envelope for UID %d: %s", uid, exc)
                     refs.append(MessageRef(uid=uid))
@@ -710,15 +692,15 @@ class IMAPEmailIngestor:
             RuntimeError: If this is a sentinel instance (data_layer not provided).
         """
         if self._dl is None:
-            raise RuntimeError("Sentinel instance cannot ingest — provide data_layer")
+            raise RuntimeError(
+                "Sentinel instance cannot ingest — provide data_layer"
+            )
         if isinstance(ref, MessageRef):
             uid = ref.uid
         elif isinstance(ref, int):
             uid = ref
         else:
-            raise TypeError(
-                f"ingest() requires MessageRef or int, got {type(ref).__name__}"
-            )
+            raise TypeError(f"ingest() requires MessageRef or int, got {type(ref).__name__}")
         result = await self.ingest_uids(uids=[uid], run_id=run_id)
         return result
 
@@ -748,9 +730,7 @@ class IMAPEmailIngestor:
             )
         )
         if existing.results:
-            logger.debug(
-                "Skipping UID %d — already ingested as source_ref=%r", uid, source_ref
-            )
+            logger.debug("Skipping UID %d — already ingested as source_ref=%r", uid, source_ref)
             interaction_memory_ids.append(existing.results[0].id)
             return False
 
@@ -839,9 +819,7 @@ class IMAPEmailIngestor:
                 max_tokens=512,
             )
             cleaned = response.strip()
-            fence_match = re.match(
-                r"^```(?:json)?\s*\n(.*?)\n```\s*$", cleaned, re.DOTALL
-            )
+            fence_match = re.match(r"^```(?:json)?\s*\n(.*?)\n```\s*$", cleaned, re.DOTALL)
             if fence_match:
                 cleaned = fence_match.group(1)
             data = json.loads(cleaned)

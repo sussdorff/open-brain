@@ -14,7 +14,6 @@ from open_brain.data_layer.interface import SaveMemoryResult
 
 # ─── AK6: Parallel execution ─────────────────────────────────────────────────
 
-
 @pytest.mark.integration
 class TestParallelExecution:
     @pytest.mark.asyncio
@@ -28,34 +27,17 @@ class TestParallelExecution:
 
         async def slow_llm(*args, **kwargs):
             await asyncio.sleep(delay)
-            return json.dumps(
-                {
-                    "people": ["Alice"],
-                    "orgs": [],
-                    "tech": [],
-                    "locations": [],
-                    "dates": [],
-                }
-            )
+            return json.dumps({"people": ["Alice"], "orgs": [], "tech": [], "locations": [], "dates": []})
 
         mock_dl = AsyncMock()
         mock_dl.save_memory.side_effect = slow_save
         mock_dl.update_memory.return_value = SaveMemoryResult(id=7, message="updated")
 
-        with (
-            patch("open_brain.server.get_dl", return_value=mock_dl),
-            patch("open_brain.server.llm_complete", side_effect=slow_llm),
-        ):
+        with patch("open_brain.server.get_dl", return_value=mock_dl), \
+             patch("open_brain.server.llm_complete", side_effect=slow_llm):
             from open_brain.server import save_memory
-
             start = time.monotonic()
-            await save_memory(
-                text="Alice worked on a project.",
-                provenance={
-                    "producer": "test-suite",
-                    "source_ref": "test-suite:test_entity_extraction_integ",
-                },
-            )
+            await save_memory(text="Alice worked on a project.", provenance={"producer": "test-suite", "source_ref": "test-suite:test_entity_extraction_integ"})
             elapsed = time.monotonic() - start
 
         # If parallel: ~delay (max of the two). If sequential: ~2*delay.

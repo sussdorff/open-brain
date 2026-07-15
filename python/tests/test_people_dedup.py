@@ -43,26 +43,16 @@ def existing_records() -> list[PersonRecord]:
 
 SCENARIOS: list[tuple[str, str | None, str | None, str]] = [
     # (name, org, linkedin, expected_action)
-    ("Jochen Jungbluth", "Dental-Now", None, "auto_merge"),  # 1: exact name
-    ("Cyrus Amadi", "Dental-Now", None, "auto_merge"),  # 2: alias match
-    ("Jochen Jungblut", "Dental-Now", None, "auto_merge"),  # 3: alias (no h)
-    (
-        "Dr. Alamouti",
-        "Dental-Now",
-        None,
-        "llm_confirm",
-    ),  # 4: incoming subset → llm_confirm
-    ("Stephan Weihe", "ICRD", None, "auto_merge"),  # 5: alias match singleton
-    ("Reza Mollaei", "HeyDonto", None, "new"),  # 6: new person
-    ("Siamak", "Dental-Now", None, "llm_confirm"),  # 7: incoming subset → llm_confirm
-    (
-        "J. Jungbluth",
-        None,
-        "jochen-jungbluth-a5a412152",
-        "auto_merge",
-    ),  # 8: linkedin beats name diff
-    ("Philipp", "Sonia", None, "llm_confirm"),  # 9: incoming subset → llm_confirm
-    ("Thomas Müller", None, None, "new"),  # 10: unknown person with diacritic
+    ("Jochen Jungbluth", "Dental-Now", None, "auto_merge"),         # 1: exact name
+    ("Cyrus Amadi", "Dental-Now", None, "auto_merge"),              # 2: alias match
+    ("Jochen Jungblut", "Dental-Now", None, "auto_merge"),          # 3: alias (no h)
+    ("Dr. Alamouti", "Dental-Now", None, "llm_confirm"),             # 4: incoming subset → llm_confirm
+    ("Stephan Weihe", "ICRD", None, "auto_merge"),                  # 5: alias match singleton
+    ("Reza Mollaei", "HeyDonto", None, "new"),                      # 6: new person
+    ("Siamak", "Dental-Now", None, "llm_confirm"),                  # 7: incoming subset → llm_confirm
+    ("J. Jungbluth", None, "jochen-jungbluth-a5a412152", "auto_merge"),  # 8: linkedin beats name diff
+    ("Philipp", "Sonia", None, "llm_confirm"),                       # 9: incoming subset → llm_confirm
+    ("Thomas Müller", None, None, "new"),                           # 10: unknown person with diacritic
 ]
 
 
@@ -107,9 +97,7 @@ def test_directory_members_iterated(existing_records: list[PersonRecord]) -> Non
 # ---------------------------------------------------------------------------
 
 
-def test_incoming_subset_routes_to_llm_confirm(
-    existing_records: list[PersonRecord],
-) -> None:
+def test_incoming_subset_routes_to_llm_confirm(existing_records: list[PersonRecord]) -> None:
     """Incoming partial names must not auto_merge into a longer stored name.
 
     'Siamak' vs 'Siamak Ghasemi' is a strict incoming subset. Even when it is
@@ -140,9 +128,7 @@ def test_llm_confirm_callable_invoked_and_returns_true(
         PersonRecord(
             memory_id=999,
             style="single",
-            members=[
-                {"name": "Stephan Weihe", "org": None, "linkedin": None, "aliases": []}
-            ],
+            members=[{"name": "Stephan Weihe", "org": None, "linkedin": None, "aliases": []}],
         )
     ]
     decision = match_person("Stefan Weihe", None, None, existing, llm_confirm=mock_llm)
@@ -159,9 +145,7 @@ def test_llm_confirm_callable_invoked_and_returns_false(
         PersonRecord(
             memory_id=999,
             style="single",
-            members=[
-                {"name": "Stephan Weihe", "org": None, "linkedin": None, "aliases": []}
-            ],
+            members=[{"name": "Stephan Weihe", "org": None, "linkedin": None, "aliases": []}],
         )
     ]
     decision = match_person("Stefan Weihe", None, None, existing, llm_confirm=mock_llm)
@@ -174,9 +158,7 @@ def test_llm_confirm_not_called_for_auto_merge(
 ) -> None:
     """llm_confirm callable must NOT be invoked for auto_merge decisions."""
     mock_llm = MagicMock(return_value=True)
-    decision = match_person(
-        "Jochen Jungbluth", "Dental-Now", None, existing_records, llm_confirm=mock_llm
-    )
+    decision = match_person("Jochen Jungbluth", "Dental-Now", None, existing_records, llm_confirm=mock_llm)
     assert decision.action == "auto_merge"
     mock_llm.assert_not_called()
 
@@ -186,9 +168,7 @@ def test_llm_confirm_not_called_for_new(
 ) -> None:
     """llm_confirm callable must NOT be invoked for new decisions."""
     mock_llm = MagicMock(return_value=True)
-    decision = match_person(
-        "Reza Mollaei", "HeyDonto", None, existing_records, llm_confirm=mock_llm
-    )
+    decision = match_person("Reza Mollaei", "HeyDonto", None, existing_records, llm_confirm=mock_llm)
     assert decision.action == "new"
     mock_llm.assert_not_called()
 
@@ -204,14 +184,7 @@ def test_regression_incoming_first_name_subset_requires_confirmation() -> None:
         PersonRecord(
             memory_id=100,
             style="single",
-            members=[
-                {
-                    "name": "Malte Sussdorff",
-                    "org": None,
-                    "linkedin": None,
-                    "aliases": [],
-                }
-            ],
+            members=[{"name": "Malte Sussdorff", "org": None, "linkedin": None, "aliases": []}],
         )
     ]
     decision = match_person("Malte", None, None, existing)
@@ -227,9 +200,7 @@ def test_incoming_subset_with_umlauts_requires_confirmation() -> None:
         PersonRecord(
             memory_id=200,
             style="single",
-            members=[
-                {"name": "Andreas Müller", "org": None, "linkedin": None, "aliases": []}
-            ],
+            members=[{"name": "Andreas Müller", "org": None, "linkedin": None, "aliases": []}],
         )
     ]
     decision = match_person("Andreas", None, None, existing)
@@ -244,16 +215,12 @@ def test_ambiguous_first_name_two_records() -> None:
         PersonRecord(
             memory_id=300,
             style="single",
-            members=[
-                {"name": "Anna Schmidt", "org": None, "linkedin": None, "aliases": []}
-            ],
+            members=[{"name": "Anna Schmidt", "org": None, "linkedin": None, "aliases": []}],
         ),
         PersonRecord(
             memory_id=301,
             style="single",
-            members=[
-                {"name": "Anna Meyer", "org": None, "linkedin": None, "aliases": []}
-            ],
+            members=[{"name": "Anna Meyer", "org": None, "linkedin": None, "aliases": []}],
         ),
     ]
     decision = match_person("Anna", None, None, existing)
@@ -266,14 +233,7 @@ def test_conflicting_org_no_containment_merge() -> None:
         PersonRecord(
             memory_id=400,
             style="single",
-            members=[
-                {
-                    "name": "Anna Schmidt",
-                    "org": "Acme Corp",
-                    "linkedin": None,
-                    "aliases": [],
-                }
-            ],
+            members=[{"name": "Anna Schmidt", "org": "Acme Corp", "linkedin": None, "aliases": []}],
         )
     ]
     # "Widget Inc" shares no tokens with "Acme Corp" → org conflict guard fires
@@ -287,9 +247,7 @@ def test_no_overlap_new() -> None:
         PersonRecord(
             memory_id=500,
             style="single",
-            members=[
-                {"name": "Thomas Müller", "org": None, "linkedin": None, "aliases": []}
-            ],
+            members=[{"name": "Thomas Müller", "org": None, "linkedin": None, "aliases": []}],
         )
     ]
     decision = match_person("Anna Schmidt", None, None, existing)
@@ -317,14 +275,7 @@ def test_incoming_subset_alias_hard_signal_auto_merges() -> None:
         PersonRecord(
             memory_id=700,
             style="single",
-            members=[
-                {
-                    "name": "Malte Sussdorff",
-                    "org": None,
-                    "linkedin": None,
-                    "aliases": ["Malte"],
-                }
-            ],
+            members=[{"name": "Malte Sussdorff", "org": None, "linkedin": None, "aliases": ["Malte"]}],
         )
     ]
     decision = match_person("Malte", None, None, existing)
@@ -350,9 +301,7 @@ def test_incoming_subset_linkedin_hard_signal_auto_merges() -> None:
             ],
         )
     ]
-    decision = match_person(
-        "Malte", None, "https://www.linkedin.com/in/malte-sussdorff/", existing
-    )
+    decision = match_person("Malte", None, "https://www.linkedin.com/in/malte-sussdorff/", existing)
     assert decision.action == "auto_merge"
     assert decision.target is not None
     assert decision.target.memory_id == 701
@@ -378,14 +327,7 @@ def test_org_conflict_fuzzy_not_auto_merge() -> None:
         PersonRecord(
             memory_id=1,
             style="single",
-            members=[
-                {
-                    "name": "John Smith Jr",
-                    "org": "Widget",
-                    "linkedin": None,
-                    "aliases": [],
-                }
-            ],
+            members=[{"name": "John Smith Jr", "org": "Widget", "linkedin": None, "aliases": []}],
         )
     ]
     decision = match_person("John Smith", "Acme", None, existing)
@@ -417,14 +359,7 @@ def test_exact_name_auto_merge_with_containment_runner_up() -> None:
         PersonRecord(
             memory_id=2,
             style="single",
-            members=[
-                {
-                    "name": "Malte Sussdorff",
-                    "org": None,
-                    "linkedin": None,
-                    "aliases": [],
-                }
-            ],
+            members=[{"name": "Malte Sussdorff", "org": None, "linkedin": None, "aliases": []}],
         ),
     ]
     decision = match_person("Malte", None, None, existing)
@@ -458,9 +393,7 @@ async def test_incoming_subset_does_not_persist_alias_without_confirmation() -> 
     existing_person_record = PersonRecord(
         memory_id=100,
         style="single",
-        members=[
-            {"name": "Malte Sussdorff", "org": None, "linkedin": None, "aliases": []}
-        ],
+        members=[{"name": "Malte Sussdorff", "org": None, "linkedin": None, "aliases": []}],
     )
 
     mock_dl = AsyncMock()
@@ -507,8 +440,6 @@ async def test_alias_persisted_after_superset_containment_auto_merge() -> None:
 
     assert person_id == 100
     mock_dl.update_memory.assert_called_once()
-    call_kwargs = mock_dl.update_memory.call_args[0][
-        0
-    ]  # UpdateMemoryParams positional arg
+    call_kwargs = mock_dl.update_memory.call_args[0][0]  # UpdateMemoryParams positional arg
     assert call_kwargs.id == 100
     assert call_kwargs.metadata == {"aliases": ["Malte Sussdorff"]}

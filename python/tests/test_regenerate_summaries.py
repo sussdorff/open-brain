@@ -71,35 +71,20 @@ def _make_pool_mock(
 
 # ─── AK7: SaveMemoryParams gets upsert_mode ──────────────────────────────────
 
-
 class TestSaveMemoryParamsUpsertMode:
     def test_default_upsert_mode_is_append(self):
         """AK7: SaveMemoryParams.upsert_mode defaults to 'append'."""
-        params = SaveMemoryParams(
-            text="hello",
-            provenance={
-                "producer": "test-suite",
-                "source_ref": "test-suite:test_regenerate_summaries",
-            },
-        )
+        params = SaveMemoryParams(text="hello", provenance={"producer": "test-suite", "source_ref": "test-suite:test_regenerate_summaries"})
         assert params.upsert_mode == "append"
 
     def test_upsert_mode_replace(self):
         """AK7: SaveMemoryParams.upsert_mode can be set to 'replace'."""
-        params = SaveMemoryParams(
-            text="hello",
-            upsert_mode="replace",
-            provenance={
-                "producer": "test-suite",
-                "source_ref": "test-suite:test_regenerate_summaries",
-            },
-        )
+        params = SaveMemoryParams(text="hello", upsert_mode="replace", provenance={"producer": "test-suite", "source_ref": "test-suite:test_regenerate_summaries"})
         assert params.upsert_mode == "replace"
 
     def test_upsert_mode_type(self):
         """AK7: upsert_mode is Literal['append','replace'] — only those two strings."""
         from typing import get_args, get_type_hints
-
         hints = get_type_hints(SaveMemoryParams)
         assert "upsert_mode" in hints
         args = get_args(hints["upsert_mode"])
@@ -107,7 +92,6 @@ class TestSaveMemoryParamsUpsertMode:
 
 
 # ─── AK10/AK11: save_memory upsert_mode branching ───────────────────────────
-
 
 class TestSaveMemoryUpsertMode:
     @pytest.mark.asyncio
@@ -123,15 +107,11 @@ class TestSaveMemoryUpsertMode:
         #  3. fetchrow for INSERT RETURNING id -> {"id": 99}
         #  (content-hash dedup is skipped in replace mode)
         existing_id_row = MagicMock()
-        existing_id_row.__getitem__ = MagicMock(
-            side_effect=lambda k: 42 if k == "id" else None
-        )
+        existing_id_row.__getitem__ = MagicMock(side_effect=lambda k: 42 if k == "id" else None)
         mock_conn.fetch = AsyncMock(return_value=[existing_id_row])
 
         insert_row = MagicMock()
-        insert_row.__getitem__ = MagicMock(
-            side_effect=lambda k: 99 if k == "id" else None
-        )
+        insert_row.__getitem__ = MagicMock(side_effect=lambda k: 99 if k == "id" else None)
         mock_conn.fetchrow = AsyncMock(return_value=insert_row)  # INSERT RETURNING id
         mock_conn.fetchval = AsyncMock(return_value=None)
 
@@ -141,17 +121,9 @@ class TestSaveMemoryUpsertMode:
             type="session_summary",
             session_ref="session-abc",
             upsert_mode="replace",
-            provenance={
-                "producer": "test-suite",
-                "source_ref": "test-suite:test_regenerate_summaries",
-            },
+            provenance={"producer": "test-suite", "source_ref": "test-suite:test_regenerate_summaries"},
         )
-
-        with patch(
-            "open_brain.data_layer.postgres.get_pool",
-            new_callable=AsyncMock,
-            return_value=mock_pool,
-        ):
+        with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=mock_pool):
             with patch("open_brain.data_layer.postgres.asyncio.create_task"):
                 result = await dl.save_memory(params)
 
@@ -189,17 +161,9 @@ class TestSaveMemoryUpsertMode:
             type="session_summary",
             session_ref="session-def",
             upsert_mode="append",  # default / explicit append
-            provenance={
-                "producer": "test-suite",
-                "source_ref": "test-suite:test_regenerate_summaries",
-            },
-        )
-
-        with patch(
-            "open_brain.data_layer.postgres.get_pool",
-            new_callable=AsyncMock,
-            return_value=mock_pool,
-        ):
+        provenance={"producer": "test-suite", "source_ref": "test-suite:test_regenerate_summaries"},
+    )
+        with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=mock_pool):
             with patch("open_brain.data_layer.postgres.asyncio.create_task"):
                 result = await dl.save_memory(params)
 
@@ -214,12 +178,10 @@ class TestSaveMemoryUpsertMode:
 
 # ─── AK17: _build_turns_text list content ────────────────────────────────────
 
-
 class TestBuildTurnsTextListContent:
     def test_flat_string_content_unchanged(self):
         """AK17: flat {type, content: str} format still works."""
         from open_brain.session_summary import _build_turns_text
-
         turns = [
             {"type": "user", "content": "Hello world", "isMeta": False},
             {"type": "assistant", "content": "Hi there", "isMeta": False},
@@ -231,7 +193,6 @@ class TestBuildTurnsTextListContent:
     def test_list_content_extracts_text_blocks(self):
         """AK17: message.content as list of blocks — text blocks extracted."""
         from open_brain.session_summary import _build_turns_text
-
         turns = [
             {
                 "type": "assistant",
@@ -252,7 +213,6 @@ class TestBuildTurnsTextListContent:
     def test_list_content_user_string_in_message(self):
         """AK17: user turn with message.content as string (raw JSONL format)."""
         from open_brain.session_summary import _build_turns_text
-
         turns = [
             {
                 "type": "user",
@@ -269,7 +229,6 @@ class TestBuildTurnsTextListContent:
     def test_meta_turns_filtered(self):
         """AK17: turns with isMeta=True are excluded."""
         from open_brain.session_summary import _build_turns_text
-
         turns = [
             {"type": "user", "isMeta": True, "content": "system init"},
             {"type": "user", "isMeta": False, "content": "real message"},
@@ -281,7 +240,6 @@ class TestBuildTurnsTextListContent:
     def test_empty_content_block_skipped(self):
         """AK17: blocks with empty text are not included."""
         from open_brain.session_summary import _build_turns_text
-
         turns = [
             {
                 "type": "assistant",
@@ -300,12 +258,10 @@ class TestBuildTurnsTextListContent:
 
 # ─── AK17: _parse_raw_jsonl_turns ────────────────────────────────────────────
 
-
 class TestParseRawJsonlTurns:
     def test_parses_fixture_transcript(self):
         """AK3: _parse_raw_jsonl_turns parses raw JSONL, filters isMeta."""
         from open_brain.regenerate import _parse_raw_jsonl_turns
-
         path = FIXTURES_DIR / "session-abc123.jsonl"
         turns = _parse_raw_jsonl_turns(path)
         # 4 valid turns (2 user + 2 assistant), 1 isMeta=True filtered
@@ -321,7 +277,6 @@ class TestParseRawJsonlTurns:
         """AK3: tool_use blocks in assistant content appear as [tool: name] after _build_turns_text."""
         from open_brain.regenerate import _parse_raw_jsonl_turns
         from open_brain.session_summary import _build_turns_text
-
         path = FIXTURES_DIR / "session-abc123.jsonl"
         turns = _parse_raw_jsonl_turns(path)
         # Verify the full pipeline: _parse_raw_jsonl_turns + _build_turns_text
@@ -331,9 +286,11 @@ class TestParseRawJsonlTurns:
     def test_handles_invalid_json_lines(self, tmp_path):
         """AK3: invalid JSON lines are skipped gracefully."""
         from open_brain.regenerate import _parse_raw_jsonl_turns
-
         path = tmp_path / "test.jsonl"
-        path.write_text('not json\n{"type":"user","message":{"content":"valid"}}\n')
+        path.write_text(
+            'not json\n'
+            '{"type":"user","message":{"content":"valid"}}\n'
+        )
         turns = _parse_raw_jsonl_turns(path)
         assert len(turns) == 1
         assert turns[0]["content"] == "valid"
@@ -365,7 +322,6 @@ class TestParseRawJsonlTurns:
 
 # ─── AK16: dry_run ───────────────────────────────────────────────────────────
 
-
 class TestRegenerateDryRun:
     @pytest.mark.asyncio
     async def test_dry_run_returns_plan_no_db_changes(self, tmp_path):
@@ -390,10 +346,7 @@ class TestRegenerateDryRun:
         mock_memory.type = "session_summary"
 
         from open_brain.data_layer.interface import SearchResult
-
-        mock_dl.search = AsyncMock(
-            return_value=SearchResult(results=[mock_memory], total=1)
-        )
+        mock_dl.search = AsyncMock(return_value=SearchResult(results=[mock_memory], total=1))
 
         params = RegenerateParams(
             transcript_root=str(tmp_path),
@@ -415,7 +368,6 @@ class TestRegenerateDryRun:
 
 
 # ─── AK12: happy path ────────────────────────────────────────────────────────
-
 
 class TestRegenerateHappyPath:
     @pytest.mark.asyncio
@@ -439,24 +391,15 @@ class TestRegenerateHappyPath:
         mock_memory.metadata = {}  # no transcript-backfill source
 
         from open_brain.data_layer.interface import SearchResult
-
-        mock_dl.search = AsyncMock(
-            return_value=SearchResult(results=[mock_memory], total=1)
-        )
-        mock_dl.save_memory = AsyncMock(
-            return_value=SaveMemoryResult(id=99, message="Memory saved")
-        )
+        mock_dl.search = AsyncMock(return_value=SearchResult(results=[mock_memory], total=1))
+        mock_dl.save_memory = AsyncMock(return_value=SaveMemoryResult(id=99, message="Memory saved"))
 
         params = RegenerateParams(
             transcript_root=str(tmp_path),
             dry_run=False,
         )
 
-        with patch(
-            "open_brain.regenerate.summarize_transcript_turns",
-            new_callable=AsyncMock,
-            return_value=99,
-        ):
+        with patch("open_brain.regenerate.summarize_transcript_turns", new_callable=AsyncMock, return_value=99):
             result = await regenerate_summaries(mock_dl, params)
 
         assert result.regenerated_count == 1
@@ -464,7 +407,6 @@ class TestRegenerateHappyPath:
 
 
 # ─── AK13/AK14: orphan handling ──────────────────────────────────────────────
-
 
 class TestRegenerateOrphan:
     @pytest.mark.asyncio
@@ -480,10 +422,7 @@ class TestRegenerateOrphan:
         mock_memory.metadata = {}
 
         from open_brain.data_layer.interface import SearchResult
-
-        mock_dl.search = AsyncMock(
-            return_value=SearchResult(results=[mock_memory], total=1)
-        )
+        mock_dl.search = AsyncMock(return_value=SearchResult(results=[mock_memory], total=1))
 
         params = RegenerateParams(
             transcript_root=str(tmp_path),
@@ -509,10 +448,7 @@ class TestRegenerateOrphan:
         mock_memory.metadata = {}
 
         from open_brain.data_layer.interface import SearchResult
-
-        mock_dl.search = AsyncMock(
-            return_value=SearchResult(results=[mock_memory], total=1)
-        )
+        mock_dl.search = AsyncMock(return_value=SearchResult(results=[mock_memory], total=1))
         mock_dl.delete_memories = AsyncMock(return_value=DeleteResult(deleted=1))
 
         params = RegenerateParams(
@@ -520,7 +456,7 @@ class TestRegenerateOrphan:
             dry_run=False,
             delete_orphans=True,
         )
-        await regenerate_summaries(mock_dl, params)
+        result = await regenerate_summaries(mock_dl, params)
 
         mock_dl.delete_memories.assert_called_once()
         delete_call_params = mock_dl.delete_memories.call_args[0][0]
@@ -528,7 +464,6 @@ class TestRegenerateOrphan:
 
 
 # ─── AK15: already-backfilled skip ───────────────────────────────────────────
-
 
 class TestRegenerateAlreadyBackfilled:
     @pytest.mark.asyncio
@@ -551,10 +486,7 @@ class TestRegenerateAlreadyBackfilled:
         mock_memory.metadata = {"source": "transcript-backfill"}  # already done
 
         from open_brain.data_layer.interface import SearchResult
-
-        mock_dl.search = AsyncMock(
-            return_value=SearchResult(results=[mock_memory], total=1)
-        )
+        mock_dl.search = AsyncMock(return_value=SearchResult(results=[mock_memory], total=1))
 
         params = RegenerateParams(
             transcript_root=str(tmp_path),
@@ -570,18 +502,15 @@ class TestRegenerateAlreadyBackfilled:
 
 # ─── AK1: MCP tool registration ──────────────────────────────────────────────
 
-
 class TestMcpToolRegistration:
     def test_regenerate_tool_registered(self):
         """AK1: regenerate_summaries_from_transcripts is registered as an MCP tool."""
         from open_brain.server import mcp
-
         tool_names = [t.name for t in mcp._tool_manager.list_tools()]
         assert "regenerate_summaries_from_transcripts" in tool_names
 
 
 # ─── AK5: Truncation ─────────────────────────────────────────────────────────
-
 
 class TestTruncation:
     def test_large_transcript_truncated(self, tmp_path):
@@ -591,13 +520,11 @@ class TestTruncation:
         # Create many turns that will exceed _MAX_TURNS_TEXT when joined
         turns = []
         for i in range(200):
-            turns.append(
-                {
-                    "type": "user",
-                    "content": f"Message {i}: " + "X" * 100,
-                    "isMeta": False,
-                }
-            )
+            turns.append({
+                "type": "user",
+                "content": f"Message {i}: " + "X" * 100,
+                "isMeta": False,
+            })
 
         text = _build_turns_text(turns)
         # Truncation is done by caller (summarize_transcript_turns), not _build_turns_text
@@ -612,45 +539,32 @@ class TestTruncation:
         # Build turns that produce text > 8000 chars
         turns = []
         for i in range(100):
-            turns.append(
-                {
-                    "type": "user",
-                    "content": "A" * 100,
-                    "isMeta": False,
-                }
-            )
-            turns.append(
-                {
-                    "type": "assistant",
-                    "content": "B" * 100,
-                    "isMeta": False,
-                }
-            )
+            turns.append({
+                "type": "user",
+                "content": "A" * 100,
+                "isMeta": False,
+            })
+            turns.append({
+                "type": "assistant",
+                "content": "B" * 100,
+                "isMeta": False,
+            })
 
         captured = []
-
         async def mock_llm(messages, **kwargs):
             captured.append(messages[0].content)
             return '{"title": "t", "content": "c", "narrative": null}'
 
         mock_dl = AsyncMock()
-        mock_dl.save_memory = AsyncMock(
-            return_value=SaveMemoryResult(id=1, message="ok")
-        )
+        mock_dl.save_memory = AsyncMock(return_value=SaveMemoryResult(id=1, message="ok"))
 
-        with patch(
-            "open_brain.session_summary.get_pool", new_callable=AsyncMock
-        ) as mock_get_pool:
+        with patch("open_brain.session_summary.get_pool", new_callable=AsyncMock) as mock_get_pool:
             mock_pool, mock_conn = _make_pool_mock(fetchrow_return=None)
             mock_get_pool.return_value = mock_pool
             with patch("open_brain.session_summary.get_dl", return_value=mock_dl):
-                with patch(
-                    "open_brain.session_summary.llm_complete", side_effect=mock_llm
-                ):
-                    with patch(
-                        "open_brain.session_summary.parse_llm_json",
-                        return_value={"title": "t", "content": "c", "narrative": None},
-                    ):
+                with patch("open_brain.session_summary.llm_complete", side_effect=mock_llm):
+                    with patch("open_brain.session_summary.parse_llm_json",
+                               return_value={"title": "t", "content": "c", "narrative": None}):
                         await summarize_transcript_turns(
                             project="test-project",
                             session_id="session-trunc-test",
@@ -664,7 +578,6 @@ class TestTruncation:
 
 
 # ─── AK9: save_memory metadata and upsert_mode in regenerate ─────────────────
-
 
 class TestRegenerateCallsSaveMemoryWithReplaceMode:
     @pytest.mark.asyncio
@@ -685,10 +598,7 @@ class TestRegenerateCallsSaveMemoryWithReplaceMode:
         mock_memory.metadata = {}
 
         from open_brain.data_layer.interface import SearchResult
-
-        mock_dl.search = AsyncMock(
-            return_value=SearchResult(results=[mock_memory], total=1)
-        )
+        mock_dl.search = AsyncMock(return_value=SearchResult(results=[mock_memory], total=1))
 
         captured_kwargs: list[dict] = []
 
@@ -698,11 +608,8 @@ class TestRegenerateCallsSaveMemoryWithReplaceMode:
 
         params = RegenerateParams(transcript_root=str(tmp_path), dry_run=False)
 
-        with patch(
-            "open_brain.regenerate.summarize_transcript_turns",
-            side_effect=fake_summarize,
-        ):
-            await regenerate_summaries(mock_dl, params)
+        with patch("open_brain.regenerate.summarize_transcript_turns", side_effect=fake_summarize):
+            result = await regenerate_summaries(mock_dl, params)
 
         assert len(captured_kwargs) == 1
         assert captured_kwargs[0]["source"] == "transcript-backfill"

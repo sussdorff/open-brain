@@ -32,28 +32,22 @@ class TestSaveMemoryPassesDictToJsonb:
         return PostgresDataLayer()
 
     @pytest.mark.asyncio
-    async def test_save_memory_passes_dict_not_string_to_jsonb(
-        self, dl: PostgresDataLayer
-    ) -> None:
+    async def test_save_memory_passes_dict_not_string_to_jsonb(self, dl: PostgresDataLayer) -> None:
         """save_memory must pass a dict (not a JSON string) as the metadata argument to asyncpg."""
         inserted_row = MagicMock()
         inserted_row.__getitem__ = lambda self, key: 99 if key == "id" else None
 
         conn = AsyncMock()
         conn.fetchrow.side_effect = [
-            None,  # index lookup
-            {"id": 1},  # index insert / resolve
-            None,  # dedup check: no duplicate
+            None,          # index lookup
+            {"id": 1},     # index insert / resolve
+            None,          # dedup check: no duplicate
             inserted_row,  # INSERT INTO memories
         ]
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
@@ -62,10 +56,7 @@ class TestSaveMemoryPassesDictToJsonb:
                     text="test content",
                     project="proj",
                     metadata={"status": "open", "source": "bot"},
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_metadata_storage",
-                    },
+                    provenance={"producer": "test-suite", "source_ref": "test-suite:test_metadata_storage"},
                 )
             )
 
@@ -89,9 +80,7 @@ class TestSaveMemoryPassesDictToJsonb:
         assert "content_hash" in metadata_arg
 
     @pytest.mark.asyncio
-    async def test_save_memory_without_metadata_passes_dict(
-        self, dl: PostgresDataLayer
-    ) -> None:
+    async def test_save_memory_without_metadata_passes_dict(self, dl: PostgresDataLayer) -> None:
         """save_memory without caller metadata still passes a dict (not string) to asyncpg."""
         inserted_row = MagicMock()
         inserted_row.__getitem__ = lambda self, key: 10 if key == "id" else None
@@ -106,24 +95,11 @@ class TestSaveMemoryPassesDictToJsonb:
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
-            await dl.save_memory(
-                SaveMemoryParams(
-                    text="No metadata",
-                    project="proj",
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_metadata_storage",
-                    },
-                )
-            )
+            await dl.save_memory(SaveMemoryParams(text="No metadata", project="proj", provenance={"producer": "test-suite", "source_ref": "test-suite:test_metadata_storage"}))
 
         insert_call = conn.fetchrow.call_args_list[-1]
         insert_args = insert_call[0]
@@ -145,9 +121,7 @@ class TestUpdateMemoryPassesDictToJsonb:
         return PostgresDataLayer()
 
     @pytest.mark.asyncio
-    async def test_update_memory_passes_dict_not_string_to_jsonb(
-        self, dl: PostgresDataLayer
-    ) -> None:
+    async def test_update_memory_passes_dict_not_string_to_jsonb(self, dl: PostgresDataLayer) -> None:
         """update_memory must pass a dict (not a JSON string) as the metadata arg to asyncpg."""
         existing_row = MagicMock()
         existing_row_data = {
@@ -164,11 +138,7 @@ class TestUpdateMemoryPassesDictToJsonb:
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()

@@ -60,19 +60,12 @@ def mock_dl():
     }
     dl.get_context.return_value = {"sessions": []}
     dl.stats.return_value = {
-        "memories": 100,
-        "sessions": 10,
-        "relationships": 50,
-        "db_size_bytes": 1048576,
-        "db_size_mb": 1.0,
+        "memories": 100, "sessions": 10, "relationships": 50,
+        "db_size_bytes": 1048576, "db_size_mb": 1.0,
     }
     dl.refine_memories.return_value = RefineResult(
         analyzed=5,
-        actions=[
-            RefineAction(
-                action="merge", memory_ids=[1, 2], reason="duplicate", executed=True
-            )
-        ],
+        actions=[RefineAction(action="merge", memory_ids=[1, 2], reason="duplicate", executed=True)],
         summary="Analyzed 5 memories, suggested 1 actions",
     )
     return dl
@@ -93,13 +86,11 @@ class _Pool:
 
 # ─── Search tool ──────────────────────────────────────────────────────────────
 
-
 class TestSearchTool:
     @pytest.mark.asyncio
     async def test_search_with_query(self, mock_dl):
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import search
-
             result = await search(query="test query")
             data = json.loads(result)
             assert data["total"] == 1
@@ -111,7 +102,6 @@ class TestSearchTool:
     async def test_search_passes_all_params(self, mock_dl):
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import search
-
             await search(
                 query="q",
                 limit=10,
@@ -134,7 +124,6 @@ class TestSearchTool:
     async def test_search_no_params(self, mock_dl):
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import search
-
             result = await search()
             data = json.loads(result)
             assert "total" in data
@@ -147,21 +136,19 @@ class TestIngestStatusTool:
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import ingest_status
 
-            result = await ingest_status(
-                [
-                    "macwhisper:session:abc123",
-                    "macwhisper:session:abc123",
-                    " ",
-                ]
-            )
+            result = await ingest_status([
+                "macwhisper:session:abc123",
+                "macwhisper:session:abc123",
+                " ",
+            ])
 
         data = json.loads(result)
         assert data["count"] == 1
         assert data["items"][0]["source_ref"] == "macwhisper:session:abc123"
         assert data["items"][0]["ingested"] is True
-        mock_dl.ingest_status_by_source_refs.assert_awaited_once_with(
-            ["macwhisper:session:abc123"]
-        )
+        mock_dl.ingest_status_by_source_refs.assert_awaited_once_with([
+            "macwhisper:session:abc123"
+        ])
 
     @pytest.mark.asyncio
     async def test_ingest_status_rejects_too_many_refs(self, mock_dl):
@@ -174,13 +161,11 @@ class TestIngestStatusTool:
 
 # ─── Timeline tool ────────────────────────────────────────────────────────────
 
-
 class TestTimelineTool:
     @pytest.mark.asyncio
     async def test_timeline_with_anchor(self, mock_dl):
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import timeline
-
             result = await timeline(anchor=42)
             data = json.loads(result)
             assert data["anchor_id"] == 1
@@ -192,7 +177,6 @@ class TestTimelineTool:
     async def test_timeline_with_query(self, mock_dl):
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import timeline
-
             result = await timeline(query="find this")
             data = json.loads(result)
             assert "anchor_id" in data
@@ -203,7 +187,6 @@ class TestTimelineTool:
     async def test_timeline_depth_params(self, mock_dl):
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import timeline
-
             await timeline(anchor=1, depth_before=3, depth_after=7, project="myproject")
             call_args = mock_dl.timeline.call_args[0][0]
             assert call_args.depth_before == 3
@@ -213,13 +196,11 @@ class TestTimelineTool:
 
 # ─── GetObservations tool ─────────────────────────────────────────────────────
 
-
 class TestGetObservationsTool:
     @pytest.mark.asyncio
     async def test_get_observations_returns_memories(self, mock_dl):
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import get_observations
-
             result = await get_observations(ids=[1, 2])
             data = json.loads(result)
             assert len(data) == 2
@@ -230,7 +211,6 @@ class TestGetObservationsTool:
         mock_dl.get_observations.return_value = []
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import get_observations
-
             result = await get_observations(ids=[])
             data = json.loads(result)
             assert data == []
@@ -291,12 +271,9 @@ class TestSessionLearningAnalysisTool:
 
 # ─── SaveMemory tool ──────────────────────────────────────────────────────────
 
-
 class TestSaveMemoryTool:
     @pytest.mark.asyncio
-    async def test_save_memory_requires_typed_origin_before_database_guards(
-        self, mock_dl
-    ):
+    async def test_save_memory_requires_typed_origin_before_database_guards(self, mock_dl):
         with (
             patch("open_brain.server.get_dl", return_value=mock_dl),
             patch("open_brain.server.get_pool", new_callable=AsyncMock) as get_pool,
@@ -333,14 +310,7 @@ class TestSaveMemoryTool:
     async def test_save_memory_returns_id(self, mock_dl):
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import save_memory
-
-            result = await save_memory(
-                text="Important observation",
-                provenance={
-                    "producer": "test-suite",
-                    "source_ref": "test-suite:test_tools",
-                },
-            )
+            result = await save_memory(text="Important observation", provenance={"producer": "test-suite", "source_ref": "test-suite:test_tools"})
             data = json.loads(result)
             assert data["id"] == 42
             assert data["message"] == "Memory saved"
@@ -349,7 +319,6 @@ class TestSaveMemoryTool:
     async def test_save_memory_passes_all_params(self, mock_dl):
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import save_memory
-
             await save_memory(
                 text="content",
                 type="decision",
@@ -357,10 +326,7 @@ class TestSaveMemoryTool:
                 title="My Title",
                 subtitle="My Subtitle",
                 narrative="Context here",
-                provenance={
-                    "producer": "test-suite",
-                    "source_ref": "test-suite:test_tools",
-                },
+                provenance={"producer": "test-suite", "source_ref": "test-suite:test_tools"},
             )
             call_args = mock_dl.save_memory.call_args[0][0]
             assert call_args.text == "content"
@@ -375,16 +341,12 @@ class TestSaveMemoryTool:
         """session_ref param is accepted and forwarded to the data layer."""
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import save_memory
-
             await save_memory(
                 text="Session content",
                 type="session_summary",
                 project="myproj",
                 session_ref="open-brain-193",
-                provenance={
-                    "producer": "test-suite",
-                    "source_ref": "test-suite:test_tools",
-                },
+                provenance={"producer": "test-suite", "source_ref": "test-suite:test_tools"},
             )
             call_args = mock_dl.save_memory.call_args[0][0]
             assert call_args.session_ref == "open-brain-193"
@@ -393,20 +355,14 @@ class TestSaveMemoryTool:
     @pytest.mark.asyncio
     async def test_save_memory_upsert_returns_updated_message(self, mock_dl):
         """When upsert occurs, response message reflects the update."""
-        mock_dl.save_memory.return_value = SaveMemoryResult(
-            id=42, message="Memory updated (upsert)"
-        )
+        mock_dl.save_memory.return_value = SaveMemoryResult(id=42, message="Memory updated (upsert)")
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import save_memory
-
             result = await save_memory(
                 text="Updated summary",
                 type="session_summary",
                 session_ref="open-brain-193",
-                provenance={
-                    "producer": "test-suite",
-                    "source_ref": "test-suite:test_tools",
-                },
+                provenance={"producer": "test-suite", "source_ref": "test-suite:test_tools"},
             )
             data = json.loads(result)
             assert data["id"] == 42
@@ -417,7 +373,6 @@ class TestSaveMemoryTool:
         """When is_test=True, data layer is NOT called and response signals non-persistence."""
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import save_memory
-
             result = await save_memory(
                 text="Integration test memory",
                 title="API test probe",
@@ -436,24 +391,11 @@ class TestSaveMemoryTool:
         )
         with (
             patch("open_brain.server.get_dl", return_value=mock_dl),
-            patch(
-                "open_brain.server.classify_and_extract",
-                return_value={"capture_template": "X"},
-            ) as mock_classify,
-            patch(
-                "open_brain.server._extract_entities",
-                return_value={"people": ["Alice"]},
-            ) as mock_entities,
+            patch("open_brain.server.classify_and_extract", return_value={"capture_template": "X"}) as mock_classify,
+            patch("open_brain.server._extract_entities", return_value={"people": ["Alice"]}) as mock_entities,
         ):
             from open_brain.server import save_memory
-
-            result = await save_memory(
-                text="Duplicate text",
-                provenance={
-                    "producer": "test-suite",
-                    "source_ref": "test-suite:test_tools",
-                },
-            )
+            result = await save_memory(text="Duplicate text", provenance={"producer": "test-suite", "source_ref": "test-suite:test_tools"})
             data = json.loads(result)
             assert data["duplicate_of"] == 7
             mock_dl.update_memory.assert_not_called()
@@ -478,15 +420,7 @@ class TestSaveMemoryTool:
         }
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import save_memory
-
-            result = await save_memory(
-                text="API token begins with redacted.",
-                proposal=proposal,
-                provenance={
-                    "producer": "test-suite",
-                    "source_ref": "test-suite:test_tools",
-                },
-            )
+            result = await save_memory(text="API token begins with redacted.", proposal=proposal, provenance={"producer": "test-suite", "source_ref": "test-suite:test_tools"})
 
         data = json.loads(result)
         assert data["error"] == "memory_write_judge_rejected"
@@ -499,10 +433,7 @@ class TestSaveMemoryTool:
         proposal = {
             "intended_memory_content": "User prefers concise status updates.",
             "category": "preference",
-            "source_citation": {
-                "ref": "conversation://current/preference",
-                "label": "observed",
-            },
+            "source_citation": {"ref": "conversation://current/preference", "label": "observed"},
             "authorization_basis": {
                 "ref": "conversation://current/preference",
                 "label": "observed",
@@ -518,58 +449,44 @@ class TestSaveMemoryTool:
             patch("open_brain.server._extract_entities", return_value={}),
         ):
             from open_brain.server import save_memory
-
             result = await save_memory(
                 text="User prefers concise status updates.",
                 metadata={"existing": True},
                 proposal=proposal,
-                provenance={
-                    "producer": "test-suite",
-                    "source_ref": "test-suite:test_tools",
-                },
+                provenance={"producer": "test-suite", "source_ref": "test-suite:test_tools"},
             )
-
         data = json.loads(result)
         call_args = mock_dl.save_memory.call_args[0][0]
         assert data["id"] == 42
         assert call_args.metadata["existing"] is True
         assert call_args.metadata["memory_write_judge"]["decision"] == "ALLOW"
-        assert (
-            call_args.metadata["memory_write_judge"]["policy_version"]
-            == "memory-write-judge.v1"
-        )
+        assert call_args.metadata["memory_write_judge"]["policy_version"] == "memory-write-judge.v1"
         assert call_args.metadata["provenance"]["source_label"] == "observed"
         assert call_args.metadata["provenance"]["expected_use"] == "instruction"
 
 
 # ─── SearchByConcept tool ─────────────────────────────────────────────────────
 
-
 class TestSearchByConceptTool:
     @pytest.mark.asyncio
     async def test_search_by_concept_returns_results(self, mock_dl):
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import search_by_concept
-
             result = await search_by_concept(query="semantic concept")
             data = json.loads(result)
             assert "results" in data
             assert len(data["results"]) == 1
-            mock_dl.search_by_concept.assert_called_once_with(
-                "semantic concept", None, None
-            )
+            mock_dl.search_by_concept.assert_called_once_with("semantic concept", None, None)
 
     @pytest.mark.asyncio
     async def test_search_by_concept_with_limit_and_project(self, mock_dl):
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import search_by_concept
-
             await search_by_concept(query="test", limit=5, project="proj")
             mock_dl.search_by_concept.assert_called_once_with("test", 5, "proj")
 
 
 # ─── GetContext tool ──────────────────────────────────────────────────────────
-
 
 class TestGetContextTool:
     @pytest.mark.asyncio
@@ -577,7 +494,6 @@ class TestGetContextTool:
         mock_dl.get_context.return_value = {"sessions": [{"id": 1, "project": "proj"}]}
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import get_context
-
             result = await get_context()
             data = json.loads(result)
             assert "sessions" in data
@@ -586,20 +502,17 @@ class TestGetContextTool:
     async def test_get_context_passes_limit_and_project(self, mock_dl):
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import get_context
-
             await get_context(limit=3, project="myproject")
             mock_dl.get_context.assert_called_once_with(3, "myproject")
 
 
 # ─── Stats tool ───────────────────────────────────────────────────────────────
 
-
 class TestStatsTool:
     @pytest.mark.asyncio
     async def test_stats_returns_all_fields(self, mock_dl):
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import stats
-
             result = await stats()
             data = json.loads(result)
             assert "memories" in data
@@ -613,13 +526,11 @@ class TestStatsTool:
 
 # ─── RefineMemories tool ──────────────────────────────────────────────────────
 
-
 class TestRefineMemoriesTool:
     @pytest.mark.asyncio
     async def test_refine_memories_returns_summary(self, mock_dl):
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import refine_memories
-
             result = await refine_memories()
             data = json.loads(result)
             assert "analyzed" in data
@@ -631,7 +542,6 @@ class TestRefineMemoriesTool:
     async def test_refine_memories_dry_run(self, mock_dl):
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import refine_memories
-
             await refine_memories(scope="recent", limit=10, dry_run=True)
             call_args = mock_dl.refine_memories.call_args[0][0]
             assert call_args.dry_run is True
@@ -642,7 +552,6 @@ class TestRefineMemoriesTool:
     async def test_refine_memories_actions_structure(self, mock_dl):
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import refine_memories
-
             result = await refine_memories()
             data = json.loads(result)
             assert len(data["actions"]) == 1
@@ -654,13 +563,11 @@ class TestRefineMemoriesTool:
 
 # ─── IMPORTANT tool ───────────────────────────────────────────────────────────
 
-
 class TestImportantTool:
     @pytest.mark.asyncio
     async def test_important_tool_is_registered(self):
         """Verify __IMPORTANT is registered in the MCP server."""
         import open_brain.server as server_module
-
         # Use getattr to bypass Python's name mangling in class scope
         important_fn = getattr(server_module, "__IMPORTANT")
         result = await important_fn()
@@ -671,7 +578,6 @@ class TestImportantTool:
     async def test_important_tool_via_mcp(self):
         """Verify __IMPORTANT is listed in MCP tools."""
         from open_brain.server import mcp
-
         tools = await mcp.list_tools()
         tool_names = [t.name for t in tools]
         assert "____IMPORTANT" in tool_names or "__IMPORTANT" in tool_names
@@ -679,16 +585,13 @@ class TestImportantTool:
 
 # ─── People operator tools ────────────────────────────────────────────────────
 
-
 class TestPeopleOperatorTools:
     @pytest.mark.asyncio
     async def test_people_list_returns_structured_payload(self):
         payload = {"mode": "list", "total": 1, "persons": [{"id": 10}]}
         with (
             patch("open_brain.server.get_pool", new_callable=AsyncMock) as mock_pool,
-            patch(
-                "open_brain.server.list_persons_payload", new_callable=AsyncMock
-            ) as mock_list,
+            patch("open_brain.server.list_persons_payload", new_callable=AsyncMock) as mock_list,
         ):
             mock_pool.return_value = _Pool()
             mock_list.return_value = payload
@@ -708,9 +611,7 @@ class TestPeopleOperatorTools:
     async def test_people_merge_dry_run_returns_report(self):
         with (
             patch("open_brain.server.get_pool", new_callable=AsyncMock) as mock_pool,
-            patch(
-                "open_brain.server.dry_run_people_merge", new_callable=AsyncMock
-            ) as mock_dry_run,
+            patch("open_brain.server.dry_run_people_merge", new_callable=AsyncMock) as mock_dry_run,
         ):
             mock_pool.return_value = _Pool()
             mock_dry_run.return_value = "would merge"
@@ -738,9 +639,7 @@ class TestPeopleOperatorTools:
         summary = {"status": "merged", "source_id": 10, "target_id": 20}
         with (
             patch("open_brain.server.get_pool", new_callable=AsyncMock) as mock_pool,
-            patch(
-                "open_brain.server.merge_people_records", new_callable=AsyncMock
-            ) as mock_merge,
+            patch("open_brain.server.merge_people_records", new_callable=AsyncMock) as mock_merge,
         ):
             mock_pool.return_value = _Pool()
             mock_merge.return_value = summary
@@ -760,7 +659,6 @@ class TestPeopleOperatorTools:
 
 # ─── User Attribution Tests ───────────────────────────────────────────────────
 
-
 class TestUserAttribution:
     """Tests for user_id tagging and author filtering."""
 
@@ -769,18 +667,10 @@ class TestUserAttribution:
         """save_memory reads user_id from _current_user_id ContextVar."""
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             import open_brain.server as server_module
-
             token = server_module._current_user_id.set("alice")
             try:
                 from open_brain.server import save_memory
-
-                await save_memory(
-                    text="Alice's memory",
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_tools",
-                    },
-                )
+                await save_memory(text="Alice's memory", provenance={"producer": "test-suite", "source_ref": "test-suite:test_tools"})
                 call_args = mock_dl.save_memory.call_args[0][0]
                 assert call_args.user_id == "alice"
             finally:
@@ -791,19 +681,11 @@ class TestUserAttribution:
         """save_memory sets user_id=None when no user in context (e.g., API key auth)."""
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             import open_brain.server as server_module
-
             # Ensure ContextVar is cleared
             token = server_module._current_user_id.set(None)
             try:
                 from open_brain.server import save_memory
-
-                await save_memory(
-                    text="Anonymous memory",
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_tools",
-                    },
-                )
+                await save_memory(text="Anonymous memory", provenance={"producer": "test-suite", "source_ref": "test-suite:test_tools"})
                 call_args = mock_dl.save_memory.call_args[0][0]
                 assert call_args.user_id is None
             finally:
@@ -814,7 +696,6 @@ class TestUserAttribution:
         """search tool forwards author param to SearchParams."""
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import search
-
             await search(query="test", author="alice")
             call_args = mock_dl.search.call_args[0][0]
             assert call_args.author == "alice"
@@ -824,7 +705,6 @@ class TestUserAttribution:
         """search author defaults to None (no filter)."""
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import search
-
             await search(query="test")
             call_args = mock_dl.search.call_args[0][0]
             assert call_args.author is None
@@ -833,17 +713,13 @@ class TestUserAttribution:
     async def test_stats_returns_by_user(self, mock_dl):
         """stats() includes by_user breakdown."""
         mock_dl.stats.return_value = {
-            "memories": 100,
-            "sessions": 10,
-            "relationships": 50,
-            "db_size_bytes": 1048576,
-            "db_size_mb": 1.0,
+            "memories": 100, "sessions": 10, "relationships": 50,
+            "db_size_bytes": 1048576, "db_size_mb": 1.0,
             "types": {"observation": 80, "decision": 20},
             "by_user": {"alice": 60, "bob": 40},
         }
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import stats
-
             result = await stats()
             data = json.loads(result)
             assert "by_user" in data
@@ -853,23 +729,12 @@ class TestUserAttribution:
     def test_memory_has_user_id_field(self):
         """Memory dataclass has user_id field."""
         from open_brain.data_layer.interface import Memory
-
         m = Memory(
-            id=1,
-            index_id=1,
-            session_id=None,
-            type="observation",
-            title=None,
-            subtitle=None,
-            narrative=None,
-            content="test",
-            metadata={},
-            priority=0.5,
-            stability="stable",
-            access_count=0,
-            last_accessed_at=None,
-            created_at="2026-01-01T00:00:00",
-            updated_at="2026-01-01T00:00:00",
+            id=1, index_id=1, session_id=None, type="observation",
+            title=None, subtitle=None, narrative=None,
+            content="test", metadata={}, priority=0.5, stability="stable",
+            access_count=0, last_accessed_at=None,
+            created_at="2026-01-01T00:00:00", updated_at="2026-01-01T00:00:00",
             user_id="alice",
         )
         assert m.user_id == "alice"
@@ -877,50 +742,29 @@ class TestUserAttribution:
     def test_memory_user_id_defaults_to_none(self):
         """Memory user_id defaults to None for backward compat."""
         from open_brain.data_layer.interface import Memory
-
         m = Memory(
-            id=1,
-            index_id=1,
-            session_id=None,
-            type="observation",
-            title=None,
-            subtitle=None,
-            narrative=None,
-            content="test",
-            metadata={},
-            priority=0.5,
-            stability="stable",
-            access_count=0,
-            last_accessed_at=None,
-            created_at="2026-01-01T00:00:00",
-            updated_at="2026-01-01T00:00:00",
+            id=1, index_id=1, session_id=None, type="observation",
+            title=None, subtitle=None, narrative=None,
+            content="test", metadata={}, priority=0.5, stability="stable",
+            access_count=0, last_accessed_at=None,
+            created_at="2026-01-01T00:00:00", updated_at="2026-01-01T00:00:00",
         )
         assert m.user_id is None
 
     def test_save_memory_params_has_user_id_field(self):
         """SaveMemoryParams accepts user_id."""
         from open_brain.data_layer.interface import SaveMemoryParams
-
-        p = SaveMemoryParams(
-            text="test",
-            user_id="bob",
-            provenance={
-                "producer": "test-suite",
-                "source_ref": "test-suite:test_tools",
-            },
-        )
+        p = SaveMemoryParams(text="test", user_id="bob", provenance={"producer": "test-suite", "source_ref": "test-suite:test_tools"})
         assert p.user_id == "bob"
 
     def test_search_params_has_author_field(self):
         """SearchParams accepts author field."""
         from open_brain.data_layer.interface import SearchParams
-
         p = SearchParams(query="test", author="alice")
         assert p.author == "alice"
 
 
 # ─── Integration tests (skipped by default) ───────────────────────────────────
-
 
 @pytest.mark.integration
 class TestToolsIntegration:
@@ -930,17 +774,7 @@ class TestToolsIntegration:
     async def test_save_and_search_memory(self):
         """Save a memory and then find it via search."""
         from open_brain.server import save_memory, search
-
-        save_result = json.loads(
-            await save_memory(
-                text="Integration test memory",
-                type="test",
-                provenance={
-                    "producer": "test-suite",
-                    "source_ref": "test-suite:test_tools",
-                },
-            )
-        )
+        save_result = json.loads(await save_memory(text="Integration test memory", type="test", provenance={"producer": "test-suite", "source_ref": "test-suite:test_tools"}))
         assert save_result["id"] > 0
 
         # Search for it
@@ -951,7 +785,6 @@ class TestToolsIntegration:
     async def test_stats_returns_counts(self):
         """Stats should return non-negative counts."""
         from open_brain.server import stats as stats_tool
-
         result = json.loads(await stats_tool())
         assert result["memories"] >= 0
         assert result["sessions"] >= 0

@@ -18,11 +18,7 @@ from open_brain.data_layer.interface import (
     TimelineParams,
     UpdateMemoryParams,
 )
-from open_brain.data_layer.postgres import (
-    PostgresDataLayer,
-    _execute_refine_action,
-    _row_to_memory,
-)
+from open_brain.data_layer.postgres import PostgresDataLayer, _execute_refine_action, _row_to_memory
 from open_brain.data_layer.interface import RefineAction
 
 
@@ -34,7 +30,6 @@ ORIGIN_PROVENANCE = {
 
 def _make_pool(conn: AsyncMock) -> MagicMock:
     """Build a properly structured asyncpg pool mock."""
-
     @asynccontextmanager
     async def fake_acquire():
         yield conn
@@ -47,22 +42,12 @@ def _make_pool(conn: AsyncMock) -> MagicMock:
 def _make_row(overrides: dict | None = None) -> MagicMock:
     """Create a mock asyncpg Record."""
     data = {
-        "id": 1,
-        "index_id": 1,
-        "session_id": None,
-        "type": "observation",
-        "title": "Test",
-        "subtitle": None,
-        "narrative": None,
-        "content": "test content",
-        "metadata": {},
-        "priority": 0.5,
-        "stability": "stable",
-        "access_count": 0,
-        "last_accessed_at": None,
-        "created_at": "2026-01-01",
-        "updated_at": "2026-01-01",
-        "importance": "medium",
+        "id": 1, "index_id": 1, "session_id": None, "type": "observation",
+        "title": "Test", "subtitle": None, "narrative": None,
+        "content": "test content", "metadata": {}, "priority": 0.5,
+        "stability": "stable", "access_count": 0,
+        "last_accessed_at": None, "created_at": "2026-01-01",
+        "updated_at": "2026-01-01", "importance": "medium",
     }
     if overrides:
         data.update(overrides)
@@ -353,9 +338,7 @@ class TestPostgresPoolMigrations:
                 )
 
                 assert await count_public_overloads(conn, "hybrid_search") == 1
-                assert (
-                    await count_public_overloads(conn, "decay_unused_priorities") == 1
-                )
+                assert await count_public_overloads(conn, "decay_unused_priorities") == 1
             finally:
                 await conn.close()
         finally:
@@ -444,9 +427,7 @@ class TestPostgresSaveMemory:
         }
 
     @pytest.mark.asyncio
-    async def test_missing_provenance_fails_before_duplicate_or_database_access(
-        self, dl
-    ):
+    async def test_missing_provenance_fails_before_duplicate_or_database_access(self, dl):
         with (
             patch(
                 "open_brain.data_layer.postgres.get_pool",
@@ -565,20 +546,16 @@ class TestPostgresSaveMemory:
 
         conn = AsyncMock()
         conn.fetchrow.side_effect = [
-            None,  # _resolve_index_id: no existing index
-            {"id": 1},  # _resolve_index_id: INSERT new index
-            None,  # upsert check: no existing session_summary with this session_ref
-            None,  # dedup check: no duplicate content
+            None,          # _resolve_index_id: no existing index
+            {"id": 1},     # _resolve_index_id: INSERT new index
+            None,          # upsert check: no existing session_summary with this session_ref
+            None,          # dedup check: no duplicate content
             inserted_row,  # INSERT INTO memories ... RETURNING id
         ]
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
@@ -589,10 +566,7 @@ class TestPostgresSaveMemory:
                     project="myproj",
                     title="Summary Title",
                     session_ref="open-brain-193",
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_postgres",
-                    },
+                    provenance={"producer": "test-suite", "source_ref": "test-suite:test_postgres"},
                 )
             )
 
@@ -610,24 +584,18 @@ class TestPostgresSaveMemory:
         """Same-project session_summary rows are updated instead of duplicated."""
         existing_row = MagicMock()
         existing_row.__getitem__ = lambda self, key: {
-            "id": 55,
-            "content": "Original content",
-            "metadata": {},
+            "id": 55, "content": "Original content", "metadata": {}
         }[key]
 
         conn = AsyncMock()
         conn.fetchrow.side_effect = [
-            {"id": 7},  # _resolve_index_id: existing index found
+            {"id": 7},     # _resolve_index_id: existing index found
             existing_row,  # scoped session_summary upsert check
         ]
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
@@ -638,10 +606,7 @@ class TestPostgresSaveMemory:
                     project="myproj",
                     title="Updated Title",
                     session_ref="open-brain-193",
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_postgres",
-                    },
+                    provenance={"producer": "test-suite", "source_ref": "test-suite:test_postgres"},
                 )
             )
 
@@ -698,14 +663,8 @@ class TestPostgresSaveMemory:
         async def fetchrow_side_effect(sql: str, *args: object):
             if "SELECT id FROM memory_indexes" in sql:
                 return {"id": 7}
-            if (
-                "SELECT id, content, metadata FROM memories" in sql
-                and "WHERE session_ref = $1" in sql
-            ):
-                if (
-                    "type = 'session_summary'" in sql
-                    and "index_id IS NOT DISTINCT FROM $2" in sql
-                ):
+            if "SELECT id, content, metadata FROM memories" in sql and "WHERE session_ref = $1" in sql:
+                if "type = 'session_summary'" in sql and "index_id IS NOT DISTINCT FROM $2" in sql:
                     return None
                 return row_from_record(non_summary_records[0])
             if "metadata->>'content_hash'" in sql:
@@ -732,11 +691,7 @@ class TestPostgresSaveMemory:
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
@@ -748,10 +703,7 @@ class TestPostgresSaveMemory:
                     title="Summary title",
                     narrative="Summary narrative",
                     session_ref="shared-session",
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_postgres",
-                    },
+                    provenance={"producer": "test-suite", "source_ref": "test-suite:test_postgres"},
                 )
             )
 
@@ -761,9 +713,7 @@ class TestPostgresSaveMemory:
         conn.execute.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_session_summary_replace_scopes_lookup_and_delete_by_project(
-        self, dl
-    ):
+    async def test_session_summary_replace_scopes_lookup_and_delete_by_project(self, dl):
         """Replace-mode session_summary lookup and delete stay inside the project scope."""
         inserted_row = MagicMock()
         inserted_row.__getitem__ = lambda self, key: 901 if key == "id" else None
@@ -775,18 +725,14 @@ class TestPostgresSaveMemory:
         conn = AsyncMock()
         conn.transaction = fake_transaction
         conn.fetchrow.side_effect = [
-            {"id": 7},  # _resolve_index_id: existing index found
+            {"id": 7},     # _resolve_index_id: existing index found
             inserted_row,  # INSERT INTO memories
         ]
         conn.fetch.return_value = [{"id": 55}]
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
@@ -798,10 +744,7 @@ class TestPostgresSaveMemory:
                     title="Replacement title",
                     session_ref="open-brain-193",
                     upsert_mode="replace",
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_postgres",
-                    },
+                    provenance={"producer": "test-suite", "source_ref": "test-suite:test_postgres"},
                 )
             )
 
@@ -816,8 +759,7 @@ class TestPostgresSaveMemory:
         delete_memories_call = [
             call
             for call in conn.execute.call_args_list
-            if "DELETE FROM memories" in call[0][0]
-            and "WHERE session_ref = $1" in call[0][0]
+            if "DELETE FROM memories" in call[0][0] and "WHERE session_ref = $1" in call[0][0]
         ][0]
         delete_sql, delete_session_ref, delete_index_id = delete_memories_call[0]
         assert "session_ref = $1" in delete_sql
@@ -834,19 +776,15 @@ class TestPostgresSaveMemory:
 
         conn = AsyncMock()
         conn.fetchrow.side_effect = [
-            None,  # _resolve_index_id: no existing index
-            {"id": 1},  # _resolve_index_id: INSERT
-            None,  # dedup check: no duplicate content
+            None,          # _resolve_index_id: no existing index
+            {"id": 1},     # _resolve_index_id: INSERT
+            None,          # dedup check: no duplicate content
             inserted_row,  # INSERT INTO memories
         ]
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
@@ -856,11 +794,8 @@ class TestPostgresSaveMemory:
                     type="discovery",
                     project="myproj",
                     session_ref="open-brain-193",  # session_ref provided but type != session_summary
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_postgres",
-                    },
-                )
+                provenance={"producer": "test-suite", "source_ref": "test-suite:test_postgres"},
+            )
             )
 
         assert result.message == "Memory saved"
@@ -879,11 +814,7 @@ class TestPostgresTimeline:
         conn.fetchrow.return_value = None  # no anchor found
         pool = _make_pool(conn)
 
-        with patch(
-            "open_brain.data_layer.postgres.get_pool",
-            new_callable=AsyncMock,
-            return_value=pool,
-        ):
+        with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
             result = await dl.timeline(TimelineParams())
 
         assert result.results == []
@@ -892,18 +823,11 @@ class TestPostgresTimeline:
     @pytest.mark.asyncio
     async def test_timeline_with_anchor_id_fetches_context(self, dl):
         conn = AsyncMock()
-        conn.fetchrow.return_value = {
-            "created_at": "2026-01-01T12:00:00",
-            "session_id": 1,
-        }
+        conn.fetchrow.return_value = {"created_at": "2026-01-01T12:00:00", "session_id": 1}
         conn.fetch.return_value = [_make_row()]
         pool = _make_pool(conn)
 
-        with patch(
-            "open_brain.data_layer.postgres.get_pool",
-            new_callable=AsyncMock,
-            return_value=pool,
-        ):
+        with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
             result = await dl.timeline(TimelineParams(anchor=42))
 
         assert result.anchor_id == 42
@@ -922,11 +846,7 @@ class TestPostgresTimeline:
         conn.fetch.return_value = []
         pool = _make_pool(conn)
 
-        with patch(
-            "open_brain.data_layer.postgres.get_pool",
-            new_callable=AsyncMock,
-            return_value=pool,
-        ):
+        with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
             result = await dl.timeline(TimelineParams(query="search query"))
 
         assert result.anchor_id == 5
@@ -941,11 +861,7 @@ class TestPostgresTimeline:
         conn.fetch.return_value = []
         pool = _make_pool(conn)
 
-        with patch(
-            "open_brain.data_layer.postgres.get_pool",
-            new_callable=AsyncMock,
-            return_value=pool,
-        ):
+        with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
             result = await dl.timeline(TimelineParams(query="test"))
 
         assert result.results == []
@@ -965,20 +881,9 @@ class TestPostgresSearchByConcept:
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
-            patch(
-                "open_brain.data_layer.postgres.embed_query_with_usage",
-                new_callable=AsyncMock,
-            ) as mock_embed,
-            patch(
-                "open_brain.data_layer.postgres.rerank",
-                new_callable=AsyncMock,
-                return_value=[0],
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch("open_brain.data_layer.postgres.embed_query_with_usage", new_callable=AsyncMock) as mock_embed,
+            patch("open_brain.data_layer.postgres.rerank", new_callable=AsyncMock, return_value=[0]),
             patch("asyncio.create_task"),
         ):
             mock_embed.return_value = ([0.1] * 1024, 10)
@@ -996,16 +901,8 @@ class TestPostgresSearchByConcept:
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
-            patch(
-                "open_brain.data_layer.postgres.embed_query_with_usage",
-                new_callable=AsyncMock,
-                return_value=([0.1] * 1024, 10),
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch("open_brain.data_layer.postgres.embed_query_with_usage", new_callable=AsyncMock, return_value=([0.1] * 1024, 10)),
             patch("asyncio.create_task"),
         ):
             result = await dl.search_by_concept("query", limit=5)
@@ -1014,9 +911,7 @@ class TestPostgresSearchByConcept:
         assert "results" in result
 
     @pytest.mark.asyncio
-    async def test_search_by_concept_disabled_reranker_orders_by_priority_score(
-        self, dl
-    ):
+    async def test_search_by_concept_disabled_reranker_orders_by_priority_score(self, dl):
         import open_brain.config as config_module
 
         conn = AsyncMock()
@@ -1028,17 +923,9 @@ class TestPostgresSearchByConcept:
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.get_config") as mock_config,
-            patch(
-                "open_brain.data_layer.postgres.embed_query_with_usage",
-                new_callable=AsyncMock,
-                return_value=([0.1] * 1024, 10),
-            ),
+            patch("open_brain.data_layer.postgres.embed_query_with_usage", new_callable=AsyncMock, return_value=([0.1] * 1024, 10)),
             patch("asyncio.create_task"),
         ):
             mock_config.return_value.RERANK_ENABLED = False
@@ -1061,17 +948,9 @@ class TestPostgresSearchByConcept:
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.get_config") as mock_config,
-            patch(
-                "open_brain.data_layer.postgres.embed_query_with_usage",
-                new_callable=AsyncMock,
-                return_value=([0.1] * 1024, 10),
-            ),
+            patch("open_brain.data_layer.postgres.embed_query_with_usage", new_callable=AsyncMock, return_value=([0.1] * 1024, 10)),
             patch(
                 "open_brain.data_layer.postgres.rerank",
                 new_callable=AsyncMock,
@@ -1110,18 +989,12 @@ class TestPostgresIngestStatus:
         conn.fetch.return_value = [row]
         pool = _make_pool(conn)
 
-        with patch(
-            "open_brain.data_layer.postgres.get_pool",
-            new_callable=AsyncMock,
-            return_value=pool,
-        ):
-            result = await dl.ingest_status_by_source_refs(
-                [
-                    "macwhisper:session:abc123",
-                    "macwhisper:session:new",
-                    "macwhisper:session:abc123",
-                ]
-            )
+        with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
+            result = await dl.ingest_status_by_source_refs([
+                "macwhisper:session:abc123",
+                "macwhisper:session:new",
+                "macwhisper:session:abc123",
+            ])
 
         conn.fetch.assert_awaited_once()
         assert conn.fetch.call_args[0][1] == [
@@ -1155,14 +1028,12 @@ class TestPostgresIngestStatus:
             new_callable=AsyncMock,
             return_value=pool,
         ):
-            result = await dl.memory_ids_by_content_hashes(
-                [
-                    "a" * 64,
-                    "b" * 64,
-                    "a" * 64,
-                    "",
-                ]
-            )
+            result = await dl.memory_ids_by_content_hashes([
+                "a" * 64,
+                "b" * 64,
+                "a" * 64,
+                "",
+            ])
 
         assert result == {"a" * 64: 42}
         query, hashes, index_id, window_days = conn.fetch.call_args[0]
@@ -1188,13 +1059,9 @@ class TestPostgresGetContext:
     async def test_get_context_returns_sessions(self, dl):
         session_row = MagicMock()
         session_row_data = {
-            "id": 1,
-            "session_id": "abc",
-            "project": "myproject",
-            "started_at": "2026-01-01",
-            "ended_at": None,
-            "metadata": {},
-            "summaries": None,
+            "id": 1, "session_id": "abc", "project": "myproject",
+            "started_at": "2026-01-01", "ended_at": None,
+            "metadata": {}, "summaries": None,
         }
         session_row.__iter__ = lambda self: iter(session_row_data.items())
         session_row.keys = lambda: session_row_data.keys()
@@ -1204,15 +1071,9 @@ class TestPostgresGetContext:
         conn.fetch.return_value = [session_row]
         pool = _make_pool(conn)
 
-        with patch(
-            "open_brain.data_layer.postgres.get_pool",
-            new_callable=AsyncMock,
-            return_value=pool,
-        ):
+        with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
             # Mock the dict() call on the row
-            with patch(
-                "open_brain.data_layer.postgres.dict", side_effect=lambda r: dict(r)
-            ):
+            with patch("open_brain.data_layer.postgres.dict", side_effect=lambda r: dict(r)):
                 result = await dl.get_context(limit=5)
 
         assert "sessions" in result
@@ -1231,15 +1092,8 @@ class TestPostgresRefineMemories:
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
-            patch(
-                "open_brain.data_layer.postgres.analyze_with_llm",
-                new_callable=AsyncMock,
-            ) as mock_llm,
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch("open_brain.data_layer.postgres.analyze_with_llm", new_callable=AsyncMock) as mock_llm,
         ):
             mock_llm.return_value = []
             result = await dl.refine_memories(RefineParams(scope="recent"))
@@ -1253,11 +1107,7 @@ class TestPostgresRefineMemories:
         conn.fetch.return_value = []
         pool = _make_pool(conn)
 
-        with patch(
-            "open_brain.data_layer.postgres.get_pool",
-            new_callable=AsyncMock,
-            return_value=pool,
-        ):
+        with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
             result = await dl.refine_memories(RefineParams())
 
         assert result.analyzed == 0
@@ -1270,21 +1120,11 @@ class TestPostgresRefineMemories:
         conn.fetch.return_value = [memory_row]
         pool = _make_pool(conn)
 
-        merge_action = RefineAction(
-            action="merge", memory_ids=[1, 2], reason="dup", executed=False
-        )
+        merge_action = RefineAction(action="merge", memory_ids=[1, 2], reason="dup", executed=False)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
-            patch(
-                "open_brain.data_layer.postgres.analyze_with_llm",
-                new_callable=AsyncMock,
-                return_value=[merge_action],
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch("open_brain.data_layer.postgres.analyze_with_llm", new_callable=AsyncMock, return_value=[merge_action]),
         ):
             result = await dl.refine_memories(RefineParams(dry_run=True))
 
@@ -1298,16 +1138,8 @@ class TestPostgresRefineMemories:
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
-            patch(
-                "open_brain.data_layer.postgres.analyze_with_llm",
-                new_callable=AsyncMock,
-                return_value=[],
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch("open_brain.data_layer.postgres.analyze_with_llm", new_callable=AsyncMock, return_value=[]),
         ):
             result = await dl.refine_memories(RefineParams(scope="low-priority"))
 
@@ -1319,11 +1151,7 @@ class TestPostgresRefineMemories:
         conn.fetch.return_value = []
         pool = _make_pool(conn)
 
-        with patch(
-            "open_brain.data_layer.postgres.get_pool",
-            new_callable=AsyncMock,
-            return_value=pool,
-        ):
+        with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
             result = await dl.refine_memories(RefineParams(scope="duplicates"))
 
         assert result.analyzed == 0
@@ -1336,11 +1164,7 @@ class TestPostgresRefineMemories:
         conn.fetch.return_value = []
         pool = _make_pool(conn)
 
-        with patch(
-            "open_brain.data_layer.postgres.get_pool",
-            new_callable=AsyncMock,
-            return_value=pool,
-        ):
+        with patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool):
             result = await dl.refine_memories(RefineParams(scope="project:myproject"))
 
         assert result.analyzed == 0
@@ -1373,9 +1197,7 @@ class TestExecuteRefineAction:
     @pytest.mark.asyncio
     async def test_merge_single_id_no_delete(self):
         conn = AsyncMock()
-        action = RefineAction(
-            action="merge", memory_ids=[1], reason="dup", executed=False
-        )
+        action = RefineAction(action="merge", memory_ids=[1], reason="dup", executed=False)
         await _execute_refine_action(conn, action)
         # No delete needed
         conn.execute.assert_not_called()
@@ -1383,9 +1205,7 @@ class TestExecuteRefineAction:
     @pytest.mark.asyncio
     async def test_promote_updates_stability(self):
         conn = AsyncMock()
-        action = RefineAction(
-            action="promote", memory_ids=[5, 6], reason="high quality", executed=False
-        )
+        action = RefineAction(action="promote", memory_ids=[5, 6], reason="high quality", executed=False)
         await _execute_refine_action(conn, action)
         # Called once per ID
         assert conn.execute.call_count == 2
@@ -1393,9 +1213,7 @@ class TestExecuteRefineAction:
     @pytest.mark.asyncio
     async def test_demote_updates_priority(self):
         conn = AsyncMock()
-        action = RefineAction(
-            action="demote", memory_ids=[3, 4], reason="low quality", executed=False
-        )
+        action = RefineAction(action="demote", memory_ids=[3, 4], reason="low quality", executed=False)
         await _execute_refine_action(conn, action)
         conn.execute.assert_called_once()
         call_args = conn.execute.call_args[0]
@@ -1404,9 +1222,7 @@ class TestExecuteRefineAction:
     @pytest.mark.asyncio
     async def test_delete_removes_memories(self):
         conn = AsyncMock()
-        action = RefineAction(
-            action="delete", memory_ids=[7, 8], reason="obsolete", executed=False
-        )
+        action = RefineAction(action="delete", memory_ids=[7, 8], reason="obsolete", executed=False)
         await _execute_refine_action(conn, action)
         conn.execute.assert_called_once()
         call_args = conn.execute.call_args[0]
@@ -1426,19 +1242,15 @@ class TestSaveMemoryWithMetadata:
 
         conn = AsyncMock()
         conn.fetchrow.side_effect = [
-            None,  # _resolve_index_id: no existing index
-            {"id": 1},  # _resolve_index_id: INSERT new index
-            None,  # dedup check: no duplicate content
+            None,          # _resolve_index_id: no existing index
+            {"id": 1},     # _resolve_index_id: INSERT new index
+            None,          # dedup check: no duplicate content
             inserted_row,  # INSERT INTO memories ... RETURNING id
         ]
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
@@ -1448,10 +1260,7 @@ class TestSaveMemoryWithMetadata:
                     type="discovery",
                     project="test-project",
                     metadata={"status": "open", "source": "bot"},
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_postgres",
-                    },
+                    provenance={"producer": "test-suite", "source_ref": "test-suite:test_postgres"},
                 )
             )
 
@@ -1463,9 +1272,7 @@ class TestSaveMemoryWithMetadata:
         assert "metadata" in insert_sql
         # Check the metadata dict was passed as an argument (asyncpg handles JSONB encoding)
         insert_args = insert_call[0]
-        metadata_arg = next(
-            (a for a in insert_args if isinstance(a, dict) and "status" in a), None
-        )
+        metadata_arg = next((a for a in insert_args if isinstance(a, dict) and "status" in a), None)
         assert metadata_arg is not None
 
         assert metadata_arg["status"] == "open"
@@ -1482,30 +1289,17 @@ class TestSaveMemoryWithMetadata:
         conn.fetchrow.side_effect = [
             None,
             {"id": 1},
-            None,  # dedup check: no duplicate content
+            None,          # dedup check: no duplicate content
             inserted_row,
         ]
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
-            result = await dl.save_memory(
-                SaveMemoryParams(
-                    text="No metadata",
-                    project="proj",
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_postgres",
-                    },
-                )
-            )
+            result = await dl.save_memory(SaveMemoryParams(text="No metadata", project="proj", provenance={"producer": "test-suite", "source_ref": "test-suite:test_postgres"}))
 
         assert result.id == 10
         insert_call = conn.fetchrow.call_args_list[-1]
@@ -1513,8 +1307,7 @@ class TestSaveMemoryWithMetadata:
         # Metadata should now always contain content_hash (never bare '{}')
 
         metadata_arg = next(
-            (a for a in insert_args if isinstance(a, dict) and "content_hash" in a),
-            None,
+            (a for a in insert_args if isinstance(a, dict) and "content_hash" in a), None
         )
         assert metadata_arg is not None
         assert "content_hash" in metadata_arg
@@ -1543,11 +1336,7 @@ class TestUpdateMemoryMetadataMerge:
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
@@ -1580,11 +1369,7 @@ class TestUpdateMemoryMetadataMerge:
         """update_memory with only metadata (no text/title/etc.) still triggers an UPDATE."""
         existing_row = MagicMock()
         existing_row_data = {
-            "id": 7,
-            "content": "c",
-            "title": None,
-            "subtitle": None,
-            "narrative": None,
+            "id": 7, "content": "c", "title": None, "subtitle": None, "narrative": None,
         }
         existing_row.__getitem__ = lambda self, key: existing_row_data[key]
 
@@ -1593,17 +1378,11 @@ class TestUpdateMemoryMetadataMerge:
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
-            result = await dl.update_memory(
-                UpdateMemoryParams(id=7, metadata={"key": "value"})
-            )
+            result = await dl.update_memory(UpdateMemoryParams(id=7, metadata={"key": "value"}))
 
         # Should NOT return "No fields to update"
         assert result.message == "Memory updated"
@@ -1622,22 +1401,18 @@ class TestSearchMetadataFilter:
         count_row.__getitem__ = lambda self, key: 1 if key == "total" else None
 
         conn = AsyncMock()
-        conn.fetchrow.return_value = (
-            count_row  # COUNT query (no project, no _resolve_index_id call)
-        )
+        conn.fetchrow.return_value = count_row  # COUNT query (no project, no _resolve_index_id call)
         conn.fetch.return_value = [_make_row()]
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
-            result = await dl.search(SearchParams(metadata_filter={"status": "open"}))
+            result = await dl.search(
+                SearchParams(metadata_filter={"status": "open"})
+            )
 
         assert len(result.results) == 1
         # Verify the fetch call used @> containment (not per-key ->> text equality)
@@ -1647,9 +1422,7 @@ class TestSearchMetadataFilter:
         assert "metadata->>" not in fetch_sql
         # The JSONB value should appear as a single dict arg (asyncpg handles encoding)
         fetch_args = fetch_call[0]
-        assert any(
-            isinstance(a, dict) and a.get("status") == "open" for a in fetch_args
-        )
+        assert any(isinstance(a, dict) and a.get("status") == "open" for a in fetch_args)
 
     @pytest.mark.asyncio
     async def test_search_metadata_filter_multiple_keys(self, dl):
@@ -1663,11 +1436,7 @@ class TestSearchMetadataFilter:
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
@@ -1711,23 +1480,12 @@ class TestContentHashDedup:
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
             result = await dl.save_memory(
-                SaveMemoryParams(
-                    text="Python prefers explicit over implicit",
-                    type="observation",
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_postgres",
-                    },
-                )
+                SaveMemoryParams(text="Python prefers explicit over implicit", type="observation", provenance={"producer": "test-suite", "source_ref": "test-suite:test_postgres"})
             )
 
         assert result.id == 42
@@ -1744,29 +1502,18 @@ class TestContentHashDedup:
 
         conn = AsyncMock()
         conn.fetchrow.side_effect = [
-            None,  # dedup check: no dup
+            None,          # dedup check: no dup
             inserted_row,  # INSERT INTO memories ... RETURNING id
         ]
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
             result = await dl.save_memory(
-                SaveMemoryParams(
-                    text="Python prefers simple over complex",
-                    type="observation",
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_postgres",
-                    },
-                )
+                SaveMemoryParams(text="Python prefers simple over complex", type="observation", provenance={"producer": "test-suite", "source_ref": "test-suite:test_postgres"})
             )
 
         assert result.id == 99
@@ -1781,36 +1528,25 @@ class TestContentHashDedup:
 
         conn = AsyncMock()
         conn.fetchrow.side_effect = [
-            None,  # dedup check: no dup
+            None,          # dedup check: no dup
             inserted_row,  # INSERT
         ]
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
             await dl.save_memory(
-                SaveMemoryParams(
-                    text="Python prefers explicit over implicit",
-                    type="observation",
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_postgres",
-                    },
-                )
+                SaveMemoryParams(text="Python prefers explicit over implicit", type="observation", provenance={"producer": "test-suite", "source_ref": "test-suite:test_postgres"})
             )
+
 
         insert_call = conn.fetchrow.call_args_list[-1]
         insert_args = insert_call[0]
         metadata_arg = next(
-            (a for a in insert_args if isinstance(a, dict) and "content_hash" in a),
-            None,
+            (a for a in insert_args if isinstance(a, dict) and "content_hash" in a), None
         )
         assert metadata_arg is not None
         assert metadata_arg["content_hash"] == HASH_A
@@ -1823,17 +1559,13 @@ class TestContentHashDedup:
 
         conn = AsyncMock()
         conn.fetchrow.side_effect = [
-            None,  # dedup check: no dup
+            None,          # dedup check: no dup
             inserted_row,  # INSERT
         ]
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
@@ -1842,18 +1574,15 @@ class TestContentHashDedup:
                     text="Python prefers explicit over implicit",
                     type="observation",
                     metadata={"source": "test"},
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_postgres",
-                    },
+                    provenance={"producer": "test-suite", "source_ref": "test-suite:test_postgres"},
                 )
             )
+
 
         insert_call = conn.fetchrow.call_args_list[-1]
         insert_args = insert_call[0]
         metadata_arg = next(
-            (a for a in insert_args if isinstance(a, dict) and "content_hash" in a),
-            None,
+            (a for a in insert_args if isinstance(a, dict) and "content_hash" in a), None
         )
         assert metadata_arg is not None
         assert metadata_arg["source"] == "test"
@@ -1867,36 +1596,25 @@ class TestContentHashDedup:
 
         conn = AsyncMock()
         conn.fetchrow.side_effect = [
-            None,  # dedup check: no dup
+            None,          # dedup check: no dup
             inserted_row,  # INSERT
         ]
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
             await dl.save_memory(
-                SaveMemoryParams(
-                    text="Python prefers explicit over implicit",
-                    type="observation",
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_postgres",
-                    },
-                )
+                SaveMemoryParams(text="Python prefers explicit over implicit", type="observation", provenance={"producer": "test-suite", "source_ref": "test-suite:test_postgres"})
             )
+
 
         insert_call = conn.fetchrow.call_args_list[-1]
         insert_args = insert_call[0]
         metadata_arg = next(
-            (a for a in insert_args if isinstance(a, dict) and "content_hash" in a),
-            None,
+            (a for a in insert_args if isinstance(a, dict) and "content_hash" in a), None
         )
         assert metadata_arg is not None
         assert metadata_arg["content_hash"] == HASH_A
@@ -1920,11 +1638,7 @@ class TestContentHashDedup:
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
@@ -1933,10 +1647,7 @@ class TestContentHashDedup:
                     text="New content",
                     type="session_summary",
                     session_ref="open-brain-42",
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_postgres",
-                    },
+                    provenance={"producer": "test-suite", "source_ref": "test-suite:test_postgres"},
                 )
             )
 
@@ -1957,18 +1668,14 @@ class TestContentHashDedup:
         # First save: project "proj-a" → _resolve_index_id → returns index 1
         conn1 = AsyncMock()
         conn1.fetchrow.side_effect = [
-            {"id": 1},  # _resolve_index_id: existing index found
-            None,  # dedup check: no dup for index_id=1
+            {"id": 1},     # _resolve_index_id: existing index found
+            None,          # dedup check: no dup for index_id=1
             inserted_row_1,  # INSERT
         ]
         pool1 = _make_pool(conn1)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool1,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool1),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
@@ -1977,28 +1684,21 @@ class TestContentHashDedup:
                     text="Python prefers explicit over implicit",
                     type="observation",
                     project="proj-a",
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_postgres",
-                    },
+                    provenance={"producer": "test-suite", "source_ref": "test-suite:test_postgres"},
                 )
             )
 
         # Second save: project "proj-b" → _resolve_index_id → returns index 2
         conn2 = AsyncMock()
         conn2.fetchrow.side_effect = [
-            {"id": 2},  # _resolve_index_id: different index
-            None,  # dedup check: no dup for index_id=2
+            {"id": 2},     # _resolve_index_id: different index
+            None,          # dedup check: no dup for index_id=2
             inserted_row_2,  # INSERT
         ]
         pool2 = _make_pool(conn2)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool2,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool2),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
@@ -2007,10 +1707,7 @@ class TestContentHashDedup:
                     text="Python prefers explicit over implicit",
                     type="observation",
                     project="proj-b",
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_postgres",
-                    },
+                    provenance={"producer": "test-suite", "source_ref": "test-suite:test_postgres"},
                 )
             )
 
@@ -2025,38 +1722,25 @@ class TestContentHashDedup:
         text_a = "Python prefers explicit over implicit"
         text_b = "Python prefers explicit over implicit "  # trailing space
         # These should have different hashes (whitespace is significant, no normalization applied)
-        assert (
-            hashlib.sha256(text_a.encode()).hexdigest()
-            != hashlib.sha256(text_b.encode()).hexdigest()
-        )
+        assert hashlib.sha256(text_a.encode()).hexdigest() != hashlib.sha256(text_b.encode()).hexdigest()
 
         inserted_row = MagicMock()
         inserted_row.__getitem__ = lambda self, key: 21 if key == "id" else None
 
         conn = AsyncMock()
         conn.fetchrow.side_effect = [
-            None,  # dedup check: no duplicate found (different hash from text_a)
-            inserted_row,  # INSERT INTO memories
+            None,         # dedup check: no duplicate found (different hash from text_a)
+            inserted_row, # INSERT INTO memories
         ]
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
             result = await dl.save_memory(
-                SaveMemoryParams(
-                    text=text_b,
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_postgres",
-                    },
-                )  # text with trailing space
+                SaveMemoryParams(text=text_b, provenance={"producer": "test-suite", "source_ref": "test-suite:test_postgres"})  # text with trailing space
             )
 
         assert result.duplicate_of is None
@@ -2070,28 +1754,18 @@ class TestContentHashDedup:
 
         conn = AsyncMock()
         conn.fetchrow.side_effect = [
-            None,  # dedup check returns None — simulates 30-day window expired
-            inserted_row,  # INSERT INTO memories
+            None,         # dedup check returns None — simulates 30-day window expired
+            inserted_row, # INSERT INTO memories
         ]
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
             result = await dl.save_memory(
-                SaveMemoryParams(
-                    text="Python prefers explicit over implicit",
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_postgres",
-                    },
-                )
+                SaveMemoryParams(text="Python prefers explicit over implicit", provenance={"producer": "test-suite", "source_ref": "test-suite:test_postgres"})
             )
 
         assert result.duplicate_of is None
@@ -2112,11 +1786,7 @@ class TestContentHashDedup:
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
@@ -2125,11 +1795,8 @@ class TestContentHashDedup:
                     text="Python prefers explicit over implicit",
                     type="observation",
                     metadata={"source": "mcp"},  # different metadata from original save
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_postgres",
-                    },
-                )
+                provenance={"producer": "test-suite", "source_ref": "test-suite:test_postgres"},
+            )
             )
 
         assert result.duplicate_of == 100
@@ -2156,11 +1823,7 @@ class TestContentHashDedup:
         pool = _make_pool(conn)
 
         with (
-            patch(
-                "open_brain.data_layer.postgres.get_pool",
-                new_callable=AsyncMock,
-                return_value=pool,
-            ),
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
@@ -2169,11 +1832,8 @@ class TestContentHashDedup:
                     text="Python prefers explicit over implicit",
                     type="observation",
                     # No session_ref — still deduped by content hash
-                    provenance={
-                        "producer": "test-suite",
-                        "source_ref": "test-suite:test_postgres",
-                    },
-                )
+                provenance={"producer": "test-suite", "source_ref": "test-suite:test_postgres"},
+            )
             )
 
         assert result.duplicate_of == 50
@@ -2195,7 +1855,6 @@ class TestContentHashDedupIndex:
         against a live DB with real data volumes.
         """
         from open_brain.data_layer import postgres as pg_module
-
         source = inspect.getsource(pg_module._run_migrations)
         assert "idx_memories_content_hash" in source, (
             "_run_migrations must create idx_memories_content_hash index for dedup performance"

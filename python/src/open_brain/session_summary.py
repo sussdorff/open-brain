@@ -150,17 +150,14 @@ async def summarize_transcript_turns(
     turns_text = _build_turns_text(turns)
     if not turns_text.strip():
         logger.info(
-            "session-end: no valid turns after filter, skipping (session_id=%s)",
-            session_id,
+            "session-end: no valid turns after filter, skipping (session_id=%s)", session_id
         )
         return None
 
     # Truncate to prevent context overflow (head + tail)
     if len(turns_text) > _MAX_TURNS_TEXT:
         half = _MAX_TURNS_TEXT // 2
-        turns_text = (
-            turns_text[:half] + "\n\n[...truncated...]\n\n" + turns_text[-half:]
-        )
+        turns_text = turns_text[:half] + "\n\n[...truncated...]\n\n" + turns_text[-half:]
 
     if not bypass_dedup:
         # Dedup check: pessimistically skip if ANY session_summary row exists
@@ -172,8 +169,7 @@ async def summarize_transcript_turns(
             )
             if row is not None:
                 logger.info(
-                    "session-end dedup: existing summary found, skipping (session_ref=%s)",
-                    session_id,
+                    "session-end dedup: existing summary found, skipping (session_ref=%s)", session_id
                 )
                 return None
 
@@ -200,9 +196,7 @@ Respond with ONLY valid JSON, no markdown fences."""
         )
         summary = parse_llm_json(response)
     except Exception:
-        logger.exception(
-            "session-end: LLM summarization failed (session_id=%s)", session_id
-        )
+        logger.exception("session-end: LLM summarization failed (session_id=%s)", session_id)
         return None
 
     metadata: dict[str, Any] = {
