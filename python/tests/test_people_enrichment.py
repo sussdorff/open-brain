@@ -520,6 +520,10 @@ class TestApplyEnrichment:
         assert metadata.get("confidence") == 0.9
         assert metadata.get("provenance_url") == "https://www.linkedin.com/in/alice"
         assert metadata.get("provenance_snippet") == "Alice Smith CEO at Acme."
+        assert metadata.get("provenance_summary") == (
+            "https://www.linkedin.com/in/alice: Alice Smith CEO at Acme."
+        )
+        assert "provenance" not in metadata
 
 
 # ---------------------------------------------------------------------------

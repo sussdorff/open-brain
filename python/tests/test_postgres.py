@@ -370,8 +370,9 @@ class TestOriginProvenanceReport:
         conn.execute.assert_not_awaited()
         query = conn.fetch.await_args.args[0]
         assert query.lstrip().startswith("WITH classified AS")
-        assert "metadata->'provenance'->>'producer'" in query
-        assert "metadata->'provenance'->>'source_ref'" in query
+        assert "metadata->'provenance'->'origin'->>'producer'" in query
+        assert "metadata->'provenance'->'origin'->>'source_ref'" in query
+        assert "[:cntrl:]" in query
         assert "session_ref" in query
         assert result == {
             "read_only": True,
@@ -379,7 +380,7 @@ class TestOriginProvenanceReport:
             "cohorts": {
                 "explicit": {
                     "count": 12,
-                    "basis": "valid metadata.provenance producer and namespaced source_ref",
+                    "basis": "valid metadata.provenance.origin producer and namespaced source_ref",
                 },
                 "deterministic_backfill": {
                     "count": 8,
@@ -477,6 +478,7 @@ class TestPostgresSaveMemory:
                     text="Canonical origin",
                     metadata={
                         "provenance": {
+                            "source_ref": "conversation://current/evidence",
                             "source_label": "observed",
                             "expected_use": "evidence",
                         }
@@ -489,9 +491,10 @@ class TestPostgresSaveMemory:
         insert_args = conn.fetchrow.call_args_list[-1][0]
         metadata_arg = next(arg for arg in insert_args if isinstance(arg, dict))
         assert metadata_arg["provenance"] == {
+            "source_ref": "conversation://current/evidence",
             "source_label": "observed",
             "expected_use": "evidence",
-            **ORIGIN_PROVENANCE,
+            "origin": ORIGIN_PROVENANCE,
         }
 
     @pytest.mark.asyncio
@@ -565,7 +568,7 @@ class TestPostgresSaveMemory:
         metadata_arg = next(arg for arg in update_args if isinstance(arg, dict))
         assert metadata_arg == {
             "source": "legacy",
-            "provenance": ORIGIN_PROVENANCE,
+            "provenance": {"origin": ORIGIN_PROVENANCE},
         }
 
     @pytest.mark.asyncio
@@ -578,8 +581,12 @@ class TestPostgresSaveMemory:
                 "content": "Original",
                 "metadata": {
                     "provenance": {
-                        "producer": "session-close",
-                        "source_ref": "agent-session:claude:other-session",
+                        "source_ref": "conversation://current/evidence",
+                        "source_label": "observed",
+                        "origin": {
+                            "producer": "session-close",
+                            "source_ref": "agent-session:claude:other-session",
+                        },
                     }
                 },
             },

@@ -482,6 +482,11 @@ class TestSaveMemoryTool:
         assert call_args.metadata["memory_write_judge"]["policy_version"] == "memory-write-judge.v1"
         assert call_args.metadata["provenance"]["source_label"] == "observed"
         assert call_args.metadata["provenance"]["expected_use"] == "instruction"
+        assert call_args.metadata["provenance"]["source_ref"] == "conversation://current/preference"
+        assert call_args.provenance == {
+            "producer": "test-suite",
+            "source_ref": "test-suite:test_tools",
+        }
 
 
 # ─── SearchByConcept tool ─────────────────────────────────────────────────────
