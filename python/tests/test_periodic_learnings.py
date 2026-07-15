@@ -39,7 +39,10 @@ class TestLearningsState:
 
     def test_load_state_returns_existing_content(self, tmp_path):
         state_file = tmp_path / "state.json"
-        expected = {"version": "1.0", "processed_conversations": {"file.jsonl": "abc123"}}
+        expected = {
+            "version": "1.0",
+            "processed_conversations": {"file.jsonl": "abc123"},
+        }
         state_file.write_text(json.dumps(expected))
         result = load_state(state_file)
         assert result == expected
@@ -69,9 +72,7 @@ class TestLearningsState:
         assert is_extraction_due(state) is True
 
     def test_is_extraction_due_when_last_run_recently(self):
-        one_hour_ago = (
-            datetime.now(timezone.utc) - timedelta(hours=1)
-        ).isoformat()
+        one_hour_ago = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
         state = {"last_learnings_run": one_hour_ago}
         assert is_extraction_due(state) is False
 
@@ -124,19 +125,37 @@ class TestPeriodicLearningsDedup:
         # First call: normal insert; second call: data layer signals dedup via duplicate_of
         mock_dl.save_memory.side_effect = [
             SaveMemoryResult(id=1, message="Memory saved"),
-            SaveMemoryResult(id=1, message="Duplicate content detected", duplicate_of=1),
+            SaveMemoryResult(
+                id=1, message="Duplicate content detected", duplicate_of=1
+            ),
         ]
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import save_memory
 
             # First save — should succeed normally
-            result1 = json.loads(await save_memory(text=learning_text, type="learning"))
+            result1 = json.loads(
+                await save_memory(
+                    text=learning_text,
+                    type="learning",
+                    provenance={
+                        "producer": "test-suite",
+                        "source_ref": "test-suite:test_periodic_learnings",
+                    },
+                )
+            )
             assert result1["id"] == 1
             assert "saved" in result1["message"].lower()
 
             # Second save of identical text — data layer returns duplicate_of signal
             result2 = json.loads(
-                await save_memory(text=learning_text, type="learning")
+                await save_memory(
+                    text=learning_text,
+                    type="learning",
+                    provenance={
+                        "producer": "test-suite",
+                        "source_ref": "test-suite:test_periodic_learnings",
+                    },
+                )
             )
             assert result2["duplicate_of"] == 1
             assert "duplicate" in result2["message"].lower()
@@ -163,11 +182,23 @@ class TestPeriodicLearningsDedup:
             from open_brain.server import save_memory
 
             result_a = json.loads(
-                await save_memory(text="Use pathlib.Path not os.path", type="learning")
+                await save_memory(
+                    text="Use pathlib.Path not os.path",
+                    type="learning",
+                    provenance={
+                        "producer": "test-suite",
+                        "source_ref": "test-suite:test_periodic_learnings",
+                    },
+                )
             )
             result_b = json.loads(
                 await save_memory(
-                    text="Always add type hints to public APIs", type="learning"
+                    text="Always add type hints to public APIs",
+                    type="learning",
+                    provenance={
+                        "producer": "test-suite",
+                        "source_ref": "test-suite:test_periodic_learnings",
+                    },
                 )
             )
 

@@ -21,7 +21,9 @@ from open_brain.data_layer.interface import (
 )
 
 
-def _make_memory(id: int = 1, type: str = "observation", metadata: dict | None = None, **kwargs) -> Memory:
+def _make_memory(
+    id: int = 1, type: str = "observation", metadata: dict | None = None, **kwargs
+) -> Memory:
     """Create a sample Memory for testing."""
     defaults = dict(
         index_id=1,
@@ -55,20 +57,30 @@ def mock_dl():
 
 # ─── AK1: Event type validates `when` field as ISO datetime ───────────────────
 
+
 class TestEventValidation:
     @pytest.mark.asyncio
     async def test_event_with_valid_when_saves_without_warning(self, mock_dl):
         """AK1: type=event with valid ISO datetime in `when` saves cleanly."""
         with (
             patch("open_brain.server.get_dl", return_value=mock_dl),
-            patch("open_brain.server.classify_and_extract", new=AsyncMock(return_value={})),
-            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+            patch(
+                "open_brain.server.classify_and_extract", new=AsyncMock(return_value={})
+            ),
+            patch(
+                "open_brain.server._extract_entities", new=AsyncMock(return_value={})
+            ),
         ):
             from open_brain.server import save_memory
+
             result = await save_memory(
                 text="Team meeting tomorrow",
                 type="event",
                 metadata={"when": "2026-04-15T10:00:00", "who": ["Alice", "Bob"]},
+                provenance={
+                    "producer": "test-suite",
+                    "source_ref": "test-suite:test_domain_schemas",
+                },
             )
             data = json.loads(result)
             assert data["id"] == 42
@@ -80,14 +92,23 @@ class TestEventValidation:
         """AK1: type=event with non-ISO `when` field saves but includes a warning."""
         with (
             patch("open_brain.server.get_dl", return_value=mock_dl),
-            patch("open_brain.server.classify_and_extract", new=AsyncMock(return_value={})),
-            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+            patch(
+                "open_brain.server.classify_and_extract", new=AsyncMock(return_value={})
+            ),
+            patch(
+                "open_brain.server._extract_entities", new=AsyncMock(return_value={})
+            ),
         ):
             from open_brain.server import save_memory
+
             result = await save_memory(
                 text="Team meeting sometime",
                 type="event",
                 metadata={"when": "next Tuesday"},
+                provenance={
+                    "producer": "test-suite",
+                    "source_ref": "test-suite:test_domain_schemas",
+                },
             )
             data = json.loads(result)
             assert data["id"] == 42
@@ -100,14 +121,23 @@ class TestEventValidation:
         """AK1: type=event without `when` field saves but includes a warning."""
         with (
             patch("open_brain.server.get_dl", return_value=mock_dl),
-            patch("open_brain.server.classify_and_extract", new=AsyncMock(return_value={})),
-            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+            patch(
+                "open_brain.server.classify_and_extract", new=AsyncMock(return_value={})
+            ),
+            patch(
+                "open_brain.server._extract_entities", new=AsyncMock(return_value={})
+            ),
         ):
             from open_brain.server import save_memory
+
             result = await save_memory(
                 text="Some event without time",
                 type="event",
                 metadata={"who": ["Charlie"]},
+                provenance={
+                    "producer": "test-suite",
+                    "source_ref": "test-suite:test_domain_schemas",
+                },
             )
             data = json.loads(result)
             assert data["id"] == 42
@@ -119,13 +149,22 @@ class TestEventValidation:
         """AK1: type=event with no metadata at all saves but warns about missing `when`."""
         with (
             patch("open_brain.server.get_dl", return_value=mock_dl),
-            patch("open_brain.server.classify_and_extract", new=AsyncMock(return_value={})),
-            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+            patch(
+                "open_brain.server.classify_and_extract", new=AsyncMock(return_value={})
+            ),
+            patch(
+                "open_brain.server._extract_entities", new=AsyncMock(return_value={})
+            ),
         ):
             from open_brain.server import save_memory
+
             result = await save_memory(
                 text="Birthday party",
                 type="event",
+                provenance={
+                    "producer": "test-suite",
+                    "source_ref": "test-suite:test_domain_schemas",
+                },
             )
             data = json.loads(result)
             assert data["id"] == 42
@@ -134,16 +173,22 @@ class TestEventValidation:
 
 # ─── AK2: Person type stores structured metadata ──────────────────────────────
 
+
 class TestPersonMetadata:
     @pytest.mark.asyncio
     async def test_person_metadata_stored_as_is(self, mock_dl):
         """AK2: type=person with structured metadata is saved without modification."""
         with (
             patch("open_brain.server.get_dl", return_value=mock_dl),
-            patch("open_brain.server.classify_and_extract", new=AsyncMock(return_value={})),
-            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+            patch(
+                "open_brain.server.classify_and_extract", new=AsyncMock(return_value={})
+            ),
+            patch(
+                "open_brain.server._extract_entities", new=AsyncMock(return_value={})
+            ),
         ):
             from open_brain.server import save_memory
+
             person_meta = {
                 "name": "Alice Smith",
                 "org": "Acme Corp",
@@ -155,6 +200,10 @@ class TestPersonMetadata:
                 text="Met with Alice from Acme Corp",
                 type="person",
                 metadata=person_meta,
+                provenance={
+                    "producer": "test-suite",
+                    "source_ref": "test-suite:test_domain_schemas",
+                },
             )
             data = json.loads(result)
             assert data["id"] == 42
@@ -168,14 +217,23 @@ class TestPersonMetadata:
         """AK2: type=person with non-ISO last_contact saves but warns."""
         with (
             patch("open_brain.server.get_dl", return_value=mock_dl),
-            patch("open_brain.server.classify_and_extract", new=AsyncMock(return_value={})),
-            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+            patch(
+                "open_brain.server.classify_and_extract", new=AsyncMock(return_value={})
+            ),
+            patch(
+                "open_brain.server._extract_entities", new=AsyncMock(return_value={})
+            ),
         ):
             from open_brain.server import save_memory
+
             result = await save_memory(
                 text="Called Bob last week",
                 type="person",
                 metadata={"name": "Bob", "last_contact": "last week"},
+                provenance={
+                    "producer": "test-suite",
+                    "source_ref": "test-suite:test_domain_schemas",
+                },
             )
             data = json.loads(result)
             assert data["id"] == 42
@@ -184,15 +242,19 @@ class TestPersonMetadata:
 
 # ─── AK3: Search with type=event returns only event memories ─────────────────
 
+
 class TestSearchTypeFilter:
     @pytest.mark.asyncio
     async def test_search_type_event_passes_filter_to_data_layer(self, mock_dl):
         """AK3: search(type='event') passes the type filter through to the DataLayer."""
-        event_memory = _make_memory(id=10, type="event", metadata={"when": "2026-04-15T10:00:00"})
+        event_memory = _make_memory(
+            id=10, type="event", metadata={"when": "2026-04-15T10:00:00"}
+        )
         mock_dl.search.return_value = SearchResult(results=[event_memory], total=1)
 
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import search
+
             result = await search(query="meeting", type="event")
             data = json.loads(result)
 
@@ -210,6 +272,7 @@ class TestSearchTypeFilter:
 
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import search
+
             result = await search(query="meeting", type="event")
             data = json.loads(result)
 
@@ -220,20 +283,30 @@ class TestSearchTypeFilter:
 
 # ─── AK4: Unknown types work without breaking ─────────────────────────────────
 
+
 class TestUnknownTypes:
     @pytest.mark.asyncio
     async def test_unknown_type_saves_without_validation_error(self, mock_dl):
         """AK4: type='custom_thing' (unknown) passes through without error or warning."""
         with (
             patch("open_brain.server.get_dl", return_value=mock_dl),
-            patch("open_brain.server.classify_and_extract", new=AsyncMock(return_value={})),
-            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+            patch(
+                "open_brain.server.classify_and_extract", new=AsyncMock(return_value={})
+            ),
+            patch(
+                "open_brain.server._extract_entities", new=AsyncMock(return_value={})
+            ),
         ):
             from open_brain.server import save_memory
+
             result = await save_memory(
                 text="Some custom memory",
                 type="custom_thing",
                 metadata={"foo": "bar"},
+                provenance={
+                    "producer": "test-suite",
+                    "source_ref": "test-suite:test_domain_schemas",
+                },
             )
             data = json.loads(result)
             assert data["id"] == 42
@@ -244,13 +317,22 @@ class TestUnknownTypes:
         """AK4: type=None (no type) saves without any warning."""
         with (
             patch("open_brain.server.get_dl", return_value=mock_dl),
-            patch("open_brain.server.classify_and_extract", new=AsyncMock(return_value={})),
-            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+            patch(
+                "open_brain.server.classify_and_extract", new=AsyncMock(return_value={})
+            ),
+            patch(
+                "open_brain.server._extract_entities", new=AsyncMock(return_value={})
+            ),
         ):
             from open_brain.server import save_memory
+
             result = await save_memory(
                 text="A memory with no type",
                 metadata={"some": "data"},
+                provenance={
+                    "producer": "test-suite",
+                    "source_ref": "test-suite:test_domain_schemas",
+                },
             )
             data = json.loads(result)
             assert data["id"] == 42
@@ -259,12 +341,14 @@ class TestUnknownTypes:
 
 # ─── AK5: Schemas documented in MCP tool description ─────────────────────────
 
+
 class TestToolDescriptionDocumentation:
     def test_save_memory_description_mentions_event_schema(self):
         """AK5: save_memory tool description documents the event metadata schema."""
         import open_brain.server as srv
+
         # Get the registered tool function and check its description
-        tool_fn = srv.save_memory
+        assert callable(srv.save_memory)
         # The MCP tool description is stored as a decorator attribute
         # We check the module-level tool registry or the function docstring/description
         description = _get_tool_description(srv, "save_memory")
@@ -275,6 +359,7 @@ class TestToolDescriptionDocumentation:
     def test_save_memory_description_mentions_person_schema(self):
         """AK5: save_memory tool description documents the person metadata schema."""
         import open_brain.server as srv
+
         description = _get_tool_description(srv, "save_memory")
         assert description is not None
         assert "person" in description.lower()
@@ -282,10 +367,13 @@ class TestToolDescriptionDocumentation:
     def test_save_memory_description_mentions_domain_schemas(self):
         """AK5: save_memory tool description mentions the domain schema concept."""
         import open_brain.server as srv
+
         description = _get_tool_description(srv, "save_memory")
         assert description is not None
         # Should mention metadata structure / schemas
-        assert any(term in description.lower() for term in ["schema", "metadata", "structured"])
+        assert any(
+            term in description.lower() for term in ["schema", "metadata", "structured"]
+        )
 
 
 def _get_tool_description(srv_module, tool_name: str) -> str | None:
@@ -304,16 +392,19 @@ def _get_tool_description(srv_module, tool_name: str) -> str | None:
 
 # ─── Interface: validate_domain_metadata function ─────────────────────────────
 
+
 class TestValidateDomainMetadata:
     def test_validate_event_with_valid_when_returns_no_warnings(self):
         """validate_domain_metadata returns [] for valid event with ISO when."""
         from open_brain.data_layer.interface import validate_domain_metadata
+
         warnings = validate_domain_metadata("event", {"when": "2026-04-15T10:00:00"})
         assert warnings == []
 
     def test_validate_event_without_when_returns_warning(self):
         """validate_domain_metadata returns warning for event without `when`."""
         from open_brain.data_layer.interface import validate_domain_metadata
+
         warnings = validate_domain_metadata("event", {})
         assert len(warnings) == 1
         assert "when" in warnings[0].lower()
@@ -321,6 +412,7 @@ class TestValidateDomainMetadata:
     def test_validate_event_with_invalid_when_returns_warning(self):
         """validate_domain_metadata returns warning for event with non-ISO `when`."""
         from open_brain.data_layer.interface import validate_domain_metadata
+
         warnings = validate_domain_metadata("event", {"when": "next Tuesday"})
         assert len(warnings) == 1
         assert "when" in warnings[0].lower()
@@ -328,12 +420,16 @@ class TestValidateDomainMetadata:
     def test_validate_person_with_valid_last_contact_returns_no_warnings(self):
         """validate_domain_metadata returns [] for person with valid last_contact."""
         from open_brain.data_layer.interface import validate_domain_metadata
-        warnings = validate_domain_metadata("person", {"last_contact": "2026-04-01T14:00:00"})
+
+        warnings = validate_domain_metadata(
+            "person", {"last_contact": "2026-04-01T14:00:00"}
+        )
         assert warnings == []
 
     def test_validate_person_with_invalid_last_contact_returns_warning(self):
         """validate_domain_metadata returns warning for person with non-ISO last_contact."""
         from open_brain.data_layer.interface import validate_domain_metadata
+
         warnings = validate_domain_metadata("person", {"last_contact": "last week"})
         assert len(warnings) == 1
         assert "last_contact" in warnings[0].lower()
@@ -341,43 +437,57 @@ class TestValidateDomainMetadata:
     def test_validate_unknown_type_returns_no_warnings(self):
         """validate_domain_metadata returns [] for unknown types."""
         from open_brain.data_layer.interface import validate_domain_metadata
+
         warnings = validate_domain_metadata("custom_thing", {"foo": "bar"})
         assert warnings == []
 
     def test_validate_none_type_returns_no_warnings(self):
         """validate_domain_metadata returns [] when type is None."""
         from open_brain.data_layer.interface import validate_domain_metadata
+
         warnings = validate_domain_metadata(None, {"foo": "bar"})
         assert warnings == []
 
     def test_validate_household_with_valid_warranty_expiry_returns_no_warnings(self):
         """validate_domain_metadata returns [] for household with valid warranty_expiry."""
         from open_brain.data_layer.interface import validate_domain_metadata
-        warnings = validate_domain_metadata("household", {"item": "Washing machine", "warranty_expiry": "2028-06-01T00:00:00"})
+
+        warnings = validate_domain_metadata(
+            "household",
+            {"item": "Washing machine", "warranty_expiry": "2028-06-01T00:00:00"},
+        )
         assert warnings == []
 
     def test_validate_household_with_invalid_warranty_expiry_returns_warning(self):
         """validate_domain_metadata returns warning for household with non-ISO warranty_expiry."""
         from open_brain.data_layer.interface import validate_domain_metadata
-        warnings = validate_domain_metadata("household", {"item": "Dishwasher", "warranty_expiry": "next year"})
+
+        warnings = validate_domain_metadata(
+            "household", {"item": "Dishwasher", "warranty_expiry": "next year"}
+        )
         assert len(warnings) == 1
         assert "warranty_expiry" in warnings[0].lower()
 
     def test_validate_household_without_warranty_expiry_returns_no_warnings(self):
         """validate_domain_metadata returns [] for household with no warranty_expiry (optional field)."""
         from open_brain.data_layer.interface import validate_domain_metadata
+
         warnings = validate_domain_metadata("household", {"item": "Chair"})
         assert warnings == []
 
     def test_validate_meeting_with_valid_date_returns_no_warnings(self):
         """validate_domain_metadata returns [] for meeting with valid ISO date."""
         from open_brain.data_layer.interface import validate_domain_metadata
-        warnings = validate_domain_metadata("meeting", {"date": "2026-04-10T09:00:00", "topic": "Quarterly review"})
+
+        warnings = validate_domain_metadata(
+            "meeting", {"date": "2026-04-10T09:00:00", "topic": "Quarterly review"}
+        )
         assert warnings == []
 
     def test_validate_meeting_with_invalid_date_returns_warning(self):
         """validate_domain_metadata returns warning for meeting with non-ISO date."""
         from open_brain.data_layer.interface import validate_domain_metadata
+
         warnings = validate_domain_metadata("meeting", {"date": "tomorrow morning"})
         assert len(warnings) == 1
         assert "date" in warnings[0].lower()
@@ -391,6 +501,7 @@ class TestValidateDomainMetadata:
             MeetingMetadata,
             PersonMetadata,
         )
+
         # Verify they are TypedDict-like (have __annotations__)
         assert hasattr(EventMetadata, "__annotations__")
         assert "when" in EventMetadata.__annotations__
@@ -403,10 +514,12 @@ class TestValidateDomainMetadata:
 
 # ─── MentionMetadata TypedDict importability ──────────────────────────────────
 
+
 class TestMentionMetadataImportable:
     def test_mention_metadata_importable(self):
         """MentionMetadata is importable from interface."""
         from open_brain.data_layer.interface import MentionMetadata
+
         assert hasattr(MentionMetadata, "__annotations__")
         assert "person_ref" in MentionMetadata.__annotations__
         assert "context" in MentionMetadata.__annotations__
@@ -416,10 +529,12 @@ class TestMentionMetadataImportable:
 
 # ─── InteractionMetadata TypedDict importability ──────────────────────────────
 
+
 class TestInteractionMetadataImportable:
     def test_interaction_metadata_importable(self):
         """InteractionMetadata is importable from interface."""
         from open_brain.data_layer.interface import InteractionMetadata
+
         assert hasattr(InteractionMetadata, "__annotations__")
         assert "person_ref" in InteractionMetadata.__annotations__
         assert "channel" in InteractionMetadata.__annotations__
@@ -431,16 +546,21 @@ class TestInteractionMetadataImportable:
 
 # ─── validate_domain_metadata: mention type ───────────────────────────────────
 
+
 class TestValidateMentionMetadata:
     def test_validate_mention_with_person_ref_returns_no_warnings(self):
         """validate_domain_metadata returns [] for mention with person_ref present."""
         from open_brain.data_layer.interface import validate_domain_metadata
-        warnings = validate_domain_metadata("mention", {"person_ref": "person-42", "context": "said hello"})
+
+        warnings = validate_domain_metadata(
+            "mention", {"person_ref": "person-42", "context": "said hello"}
+        )
         assert warnings == []
 
     def test_validate_mention_without_person_ref_returns_warning(self):
         """validate_domain_metadata returns warning for mention missing person_ref."""
         from open_brain.data_layer.interface import validate_domain_metadata
+
         warnings = validate_domain_metadata("mention", {})
         assert len(warnings) == 1
         assert "person_ref" in warnings[0].lower()
@@ -448,6 +568,7 @@ class TestValidateMentionMetadata:
     def test_validate_mention_with_none_metadata_returns_warning(self):
         """validate_domain_metadata returns warning when mention metadata is None."""
         from open_brain.data_layer.interface import validate_domain_metadata
+
         warnings = validate_domain_metadata("mention", None)
         assert len(warnings) == 1
         assert "person_ref" in warnings[0].lower()
@@ -455,59 +576,85 @@ class TestValidateMentionMetadata:
     def test_validate_mention_with_other_fields_but_no_person_ref_returns_warning(self):
         """validate_domain_metadata returns warning for mention with context but no person_ref."""
         from open_brain.data_layer.interface import validate_domain_metadata
-        warnings = validate_domain_metadata("mention", {"context": "said something", "sentiment_hint": "positive"})
+
+        warnings = validate_domain_metadata(
+            "mention", {"context": "said something", "sentiment_hint": "positive"}
+        )
         assert len(warnings) == 1
         assert "person_ref" in warnings[0].lower()
 
 
 # ─── validate_domain_metadata: interaction type ───────────────────────────────
 
+
 class TestValidateInteractionMetadata:
-    def test_validate_interaction_with_person_ref_and_valid_occurred_at_returns_no_warnings(self):
+    def test_validate_interaction_with_person_ref_and_valid_occurred_at_returns_no_warnings(
+        self,
+    ):
         """validate_domain_metadata returns [] for interaction with all required fields valid."""
         from open_brain.data_layer.interface import validate_domain_metadata
-        warnings = validate_domain_metadata("interaction", {
-            "person_ref": "person-42",
-            "occurred_at": "2026-04-20T14:00:00",
-            "channel": "email",
-        })
+
+        warnings = validate_domain_metadata(
+            "interaction",
+            {
+                "person_ref": "person-42",
+                "occurred_at": "2026-04-20T14:00:00",
+                "channel": "email",
+            },
+        )
         assert warnings == []
 
     def test_validate_interaction_without_person_ref_returns_warning(self):
         """validate_domain_metadata returns warning for interaction missing person_ref."""
         from open_brain.data_layer.interface import validate_domain_metadata
-        warnings = validate_domain_metadata("interaction", {"occurred_at": "2026-04-20T14:00:00"})
+
+        warnings = validate_domain_metadata(
+            "interaction", {"occurred_at": "2026-04-20T14:00:00"}
+        )
         assert len(warnings) >= 1
         assert any("person_ref" in w.lower() for w in warnings)
 
     def test_validate_interaction_with_malformed_occurred_at_returns_warning(self):
         """validate_domain_metadata returns warning for interaction with invalid occurred_at."""
         from open_brain.data_layer.interface import validate_domain_metadata
-        warnings = validate_domain_metadata("interaction", {
-            "person_ref": "person-42",
-            "occurred_at": "last Monday",
-        })
+
+        warnings = validate_domain_metadata(
+            "interaction",
+            {
+                "person_ref": "person-42",
+                "occurred_at": "last Monday",
+            },
+        )
         assert len(warnings) >= 1
         assert any("occurred_at" in w.lower() for w in warnings)
 
-    def test_validate_interaction_without_person_ref_and_malformed_occurred_at_returns_two_warnings(self):
+    def test_validate_interaction_without_person_ref_and_malformed_occurred_at_returns_two_warnings(
+        self,
+    ):
         """validate_domain_metadata returns two warnings when both person_ref and occurred_at are invalid."""
         from open_brain.data_layer.interface import validate_domain_metadata
-        warnings = validate_domain_metadata("interaction", {"occurred_at": "not-a-date"})
+
+        warnings = validate_domain_metadata(
+            "interaction", {"occurred_at": "not-a-date"}
+        )
         assert len(warnings) == 2
         warning_text = " ".join(warnings).lower()
         assert "person_ref" in warning_text
         assert "occurred_at" in warning_text
 
-    def test_validate_interaction_without_occurred_at_returns_no_warning_for_occurred_at(self):
+    def test_validate_interaction_without_occurred_at_returns_no_warning_for_occurred_at(
+        self,
+    ):
         """validate_domain_metadata does not warn when occurred_at is absent (it's optional)."""
         from open_brain.data_layer.interface import validate_domain_metadata
+
         warnings = validate_domain_metadata("interaction", {"person_ref": "person-42"})
         assert warnings == []
 
     def test_validate_interaction_with_none_metadata_returns_warning(self):
         """validate_domain_metadata returns warning when interaction metadata is None."""
         from open_brain.data_layer.interface import validate_domain_metadata
+
         warnings = validate_domain_metadata("interaction", None)
         assert len(warnings) >= 1
         assert any("person_ref" in w.lower() for w in warnings)

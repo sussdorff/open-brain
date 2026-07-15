@@ -7,7 +7,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from open_brain.cli.main import _build_parser
-from open_brain.data_layer.interface import SaveMemoryParams, SaveMemoryResult, SearchResult
+from open_brain.data_layer.interface import (
+    SaveMemoryParams,
+    SaveMemoryResult,
+    SearchResult,
+)
 
 
 def parse(args: list[str]) -> Any:
@@ -28,7 +32,9 @@ class TestCaptureInboxCli:
         from open_brain.cli.main import _cmd_inbox
 
         args = parse(["inbox", "--limit", "5", "--project", "proj"])
-        with patch("open_brain.cli.main.call_tool", new_callable=AsyncMock) as mock_call:
+        with patch(
+            "open_brain.cli.main.call_tool", new_callable=AsyncMock
+        ) as mock_call:
             mock_call.return_value = {"total": 0, "results": []}
             await _cmd_inbox(args)
 
@@ -50,15 +56,19 @@ class TestCaptureInboxCli:
     async def test_capture_set_status_calls_transition_tool(self) -> None:
         from open_brain.cli.main import _cmd_capture
 
-        args = parse([
-            "capture",
-            "set-status",
-            "42",
-            "dismissed",
-            "--lifecycle-status",
-            "discarded",
-        ])
-        with patch("open_brain.cli.main.call_tool", new_callable=AsyncMock) as mock_call:
+        args = parse(
+            [
+                "capture",
+                "set-status",
+                "42",
+                "dismissed",
+                "--lifecycle-status",
+                "discarded",
+            ]
+        )
+        with patch(
+            "open_brain.cli.main.call_tool", new_callable=AsyncMock
+        ) as mock_call:
             mock_call.return_value = {"id": 42, "message": "Capture status updated"}
             await _cmd_capture(args)
 
@@ -135,6 +145,10 @@ class TestCaptureInboxMcpRoundTrip:
                     SaveMemoryParams(
                         text=f"capture mcp round trip {run_id}",
                         capture_status="inbox",
+                        provenance={
+                            "producer": "test-suite",
+                            "source_ref": "test-suite:test_capture_inbox_cli",
+                        },
                     )
                 )
 
@@ -178,7 +192,10 @@ class TestCaptureInboxMcpRoundTrip:
         """
         import os
 
-        from open_brain.data_layer.interface import CaptureTransitionParams, SearchParams
+        from open_brain.data_layer.interface import (
+            CaptureTransitionParams,
+            SearchParams,
+        )
         from open_brain.data_layer.postgres import PostgresDataLayer
         from open_brain.ingest.runs import ingest_run
 
@@ -195,6 +212,10 @@ class TestCaptureInboxMcpRoundTrip:
                     SaveMemoryParams(
                         text=f"capture lifecycle round trip {run_id}",
                         capture_status="inbox",
+                        provenance={
+                            "producer": "test-suite",
+                            "source_ref": "test-suite:test_capture_inbox_cli",
+                        },
                     )
                 )
 

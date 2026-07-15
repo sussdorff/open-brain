@@ -21,6 +21,7 @@ from open_brain.data_layer.postgres import PostgresDataLayer, _row_to_memory
 
 def _make_pool(conn: AsyncMock) -> MagicMock:
     """Build a properly structured asyncpg pool mock."""
+
     @asynccontextmanager
     async def fake_acquire():
         yield conn
@@ -33,12 +34,22 @@ def _make_pool(conn: AsyncMock) -> MagicMock:
 def _make_row(overrides: dict | None = None) -> MagicMock:
     """Create a mock asyncpg Record with importance field."""
     data = {
-        "id": 1, "index_id": 1, "session_id": None, "type": "observation",
-        "title": "Test", "subtitle": None, "narrative": None,
-        "content": "test content", "metadata": {}, "priority": 0.5,
-        "stability": "stable", "access_count": 0,
-        "last_accessed_at": None, "created_at": "2026-01-01",
-        "updated_at": "2026-01-01", "user_id": None,
+        "id": 1,
+        "index_id": 1,
+        "session_id": None,
+        "type": "observation",
+        "title": "Test",
+        "subtitle": None,
+        "narrative": None,
+        "content": "test content",
+        "metadata": {},
+        "priority": 0.5,
+        "stability": "stable",
+        "access_count": 0,
+        "last_accessed_at": None,
+        "created_at": "2026-01-01",
+        "updated_at": "2026-01-01",
+        "user_id": None,
         "importance": "medium",
     }
     if overrides:
@@ -108,18 +119,29 @@ class TestSaveMemoryImportance:
 
         conn = AsyncMock()
         conn.fetchrow.side_effect = [
-            None,          # dedup check
+            None,  # dedup check
             inserted_row,  # INSERT RETURNING id
         ]
         pool = _make_pool(conn)
 
         with (
-            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch(
+                "open_brain.data_layer.postgres.get_pool",
+                new_callable=AsyncMock,
+                return_value=pool,
+            ),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
             result = await dl.save_memory(
-                SaveMemoryParams(text="important memory", importance="high")
+                SaveMemoryParams(
+                    text="important memory",
+                    importance="high",
+                    provenance={
+                        "producer": "test-suite",
+                        "source_ref": "test-suite:test_importance",
+                    },
+                )
             )
 
         assert result.id == 42
@@ -128,7 +150,9 @@ class TestSaveMemoryImportance:
         # Verify importance='high' was passed to the INSERT
         insert_call = conn.fetchrow.call_args_list[-1]
         insert_args = insert_call[0]
-        assert "high" in insert_args, "importance value 'high' must appear in INSERT args"
+        assert "high" in insert_args, (
+            "importance value 'high' must appear in INSERT args"
+        )
 
     @pytest.mark.asyncio
     async def test_importance_default_is_medium(self, dl):
@@ -138,17 +162,29 @@ class TestSaveMemoryImportance:
 
         conn = AsyncMock()
         conn.fetchrow.side_effect = [
-            None,          # dedup check
+            None,  # dedup check
             inserted_row,  # INSERT
         ]
         pool = _make_pool(conn)
 
         with (
-            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch(
+                "open_brain.data_layer.postgres.get_pool",
+                new_callable=AsyncMock,
+                return_value=pool,
+            ),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
-            await dl.save_memory(SaveMemoryParams(text="default importance"))
+            await dl.save_memory(
+                SaveMemoryParams(
+                    text="default importance",
+                    provenance={
+                        "producer": "test-suite",
+                        "source_ref": "test-suite:test_importance",
+                    },
+                )
+            )
 
         insert_call = conn.fetchrow.call_args_list[-1]
         insert_args = insert_call[0]
@@ -164,12 +200,22 @@ class TestSaveMemoryImportance:
         """AK9: _row_to_memory defaults missing importance column to 'medium'."""
         # Row without importance key at all (pre-migration row)
         data = {
-            "id": 1, "index_id": 1, "session_id": None, "type": "observation",
-            "title": "Test", "subtitle": None, "narrative": None,
-            "content": "old row", "metadata": {}, "priority": 0.5,
-            "stability": "stable", "access_count": 0,
-            "last_accessed_at": None, "created_at": "2026-01-01",
-            "updated_at": "2026-01-01", "user_id": None,
+            "id": 1,
+            "index_id": 1,
+            "session_id": None,
+            "type": "observation",
+            "title": "Test",
+            "subtitle": None,
+            "narrative": None,
+            "content": "old row",
+            "metadata": {},
+            "priority": 0.5,
+            "stability": "stable",
+            "access_count": 0,
+            "last_accessed_at": None,
+            "created_at": "2026-01-01",
+            "updated_at": "2026-01-01",
+            "user_id": None,
             # NO "importance" key
         }
         row = MagicMock()
@@ -188,12 +234,22 @@ class TestImportanceMigration:
     def test_row_without_importance_defaults_to_medium(self):
         """Existing DB rows that predate the column return importance='medium'."""
         data = {
-            "id": 99, "index_id": 1, "session_id": None, "type": "decision",
-            "title": "Old decision", "subtitle": None, "narrative": None,
-            "content": "we chose X", "metadata": {}, "priority": 0.7,
-            "stability": "stable", "access_count": 2,
-            "last_accessed_at": None, "created_at": "2025-01-01",
-            "updated_at": "2025-01-01", "user_id": None,
+            "id": 99,
+            "index_id": 1,
+            "session_id": None,
+            "type": "decision",
+            "title": "Old decision",
+            "subtitle": None,
+            "narrative": None,
+            "content": "we chose X",
+            "metadata": {},
+            "priority": 0.7,
+            "stability": "stable",
+            "access_count": 2,
+            "last_accessed_at": None,
+            "created_at": "2025-01-01",
+            "updated_at": "2025-01-01",
+            "user_id": None,
         }
         row = MagicMock()
         row.__getitem__ = lambda self, key: data[key]
@@ -205,17 +261,33 @@ class TestImportanceMigration:
     def test_importance_field_on_memory_dataclass(self):
         """Memory dataclass has importance field defaulting to 'medium'."""
         m = Memory(
-            id=1, index_id=1, session_id=None, type="observation",
-            title=None, subtitle=None, narrative=None,
-            content="x", metadata={}, priority=0.5, stability="stable",
-            access_count=0, last_accessed_at=None,
-            created_at="2026-01-01", updated_at="2026-01-01",
+            id=1,
+            index_id=1,
+            session_id=None,
+            type="observation",
+            title=None,
+            subtitle=None,
+            narrative=None,
+            content="x",
+            metadata={},
+            priority=0.5,
+            stability="stable",
+            access_count=0,
+            last_accessed_at=None,
+            created_at="2026-01-01",
+            updated_at="2026-01-01",
         )
         assert m.importance == "medium"
 
     def test_save_memory_params_importance_field(self):
         """SaveMemoryParams has importance field defaulting to 'medium'."""
-        params = SaveMemoryParams(text="hello")
+        params = SaveMemoryParams(
+            text="hello",
+            provenance={
+                "producer": "test-suite",
+                "source_ref": "test-suite:test_importance",
+            },
+        )
         assert params.importance == "medium"
 
     def test_importance_values_constant(self):
@@ -241,17 +313,30 @@ class TestAccessCountInvariant:
 
         conn = AsyncMock()
         conn.fetchrow.side_effect = [
-            None,          # dedup check
+            None,  # dedup check
             inserted_row,  # INSERT
         ]
         pool = _make_pool(conn)
 
         with (
-            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch(
+                "open_brain.data_layer.postgres.get_pool",
+                new_callable=AsyncMock,
+                return_value=pool,
+            ),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
-            await dl.save_memory(SaveMemoryParams(text="test", importance="low"))
+            await dl.save_memory(
+                SaveMemoryParams(
+                    text="test",
+                    importance="low",
+                    provenance={
+                        "producer": "test-suite",
+                        "source_ref": "test-suite:test_importance",
+                    },
+                )
+            )
 
         # The INSERT SQL must not reference access_count
         insert_call = conn.fetchrow.call_args_list[-1]
@@ -263,7 +348,11 @@ class TestAccessCountInvariant:
         """update_memory UPDATE must NOT include access_count in the SET clause."""
         existing_row = MagicMock()
         existing_row_data = {
-            "id": 1, "content": "c", "title": None, "subtitle": None, "narrative": None
+            "id": 1,
+            "content": "c",
+            "title": None,
+            "subtitle": None,
+            "narrative": None,
         }
         existing_row.__getitem__ = lambda self, key: existing_row_data[key]
 
@@ -272,8 +361,13 @@ class TestAccessCountInvariant:
         pool = _make_pool(conn)
 
         from open_brain.data_layer.interface import UpdateMemoryParams
+
         with (
-            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch(
+                "open_brain.data_layer.postgres.get_pool",
+                new_callable=AsyncMock,
+                return_value=pool,
+            ),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
@@ -301,12 +395,23 @@ class TestSaveMemoryInvalidImportance:
         pool = _make_pool(conn)
 
         with (
-            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch(
+                "open_brain.data_layer.postgres.get_pool",
+                new_callable=AsyncMock,
+                return_value=pool,
+            ),
             patch("open_brain.data_layer.postgres.asyncio"),
         ):
             with pytest.raises(ValueError, match="urgent"):
                 await dl.save_memory(
-                    SaveMemoryParams(text="test", importance="urgent")
+                    SaveMemoryParams(
+                        text="test",
+                        importance="urgent",
+                        provenance={
+                            "producer": "test-suite",
+                            "source_ref": "test-suite:test_importance",
+                        },
+                    )
                 )
 
         # No DB calls should have been made
@@ -320,12 +425,23 @@ class TestSaveMemoryInvalidImportance:
         pool = _make_pool(conn)
 
         with (
-            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch(
+                "open_brain.data_layer.postgres.get_pool",
+                new_callable=AsyncMock,
+                return_value=pool,
+            ),
             patch("open_brain.data_layer.postgres.asyncio"),
         ):
             with pytest.raises(ValueError):
                 await dl.save_memory(
-                    SaveMemoryParams(text="test", importance="")
+                    SaveMemoryParams(
+                        text="test",
+                        importance="",
+                        provenance={
+                            "producer": "test-suite",
+                            "source_ref": "test-suite:test_importance",
+                        },
+                    )
                 )
 
         conn.fetchrow.assert_not_called()
@@ -354,7 +470,11 @@ class TestDedupContractPreserved:
         pool = _make_pool(conn)
 
         with (
-            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch(
+                "open_brain.data_layer.postgres.get_pool",
+                new_callable=AsyncMock,
+                return_value=pool,
+            ),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
@@ -362,6 +482,10 @@ class TestDedupContractPreserved:
                 SaveMemoryParams(
                     text="identical text",
                     importance="critical",  # different importance from first save
+                    provenance={
+                        "producer": "test-suite",
+                        "source_ref": "test-suite:test_importance",
+                    },
                 )
             )
 

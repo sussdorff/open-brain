@@ -43,29 +43,114 @@ IMPORTANCE_VALUES: frozenset[str] = frozenset(["critical", "high", "medium", "lo
 
 CAPTURE_STATUS_VALUES: frozenset[str] = frozenset(["inbox", "processed", "dismissed"])
 
+
+class OriginProvenance(TypedDict):
+    """Minimal lineage required for every newly persisted memory."""
+
+    producer: str
+    source_ref: str
+
+
+class OriginProvenanceValidationError(ValueError):
+    """Raised when a new memory lacks valid canonical origin lineage."""
+
+    code = "invalid_origin_provenance"
+
+
+class OriginProvenanceConflictError(OriginProvenanceValidationError):
+    """Raised when append would combine different canonical origins."""
+
+    code = "origin_provenance_conflict"
+
+
+def validate_origin_provenance(value: Any) -> OriginProvenance:
+    """Return normalized origin lineage or raise a dedicated validation error."""
+    if not isinstance(value, dict):
+        raise OriginProvenanceValidationError(
+            "provenance must be an object with non-blank producer and source_ref"
+        )
+
+    producer = value.get("producer")
+    source_ref = value.get("source_ref")
+    if not isinstance(producer, str) or not producer.strip():
+        raise OriginProvenanceValidationError(
+            "provenance.producer must be a non-blank string"
+        )
+    if not isinstance(source_ref, str) or not source_ref.strip():
+        raise OriginProvenanceValidationError(
+            "provenance.source_ref must be a non-blank string"
+        )
+
+    namespace, separator, reference = source_ref.strip().partition(":")
+    if (
+        not separator
+        or not reference.strip()
+        or not namespace
+        or not namespace[0].isalpha()
+        or any(
+            not (char.islower() or char.isdigit() or char == "-") for char in namespace
+        )
+        or any(ord(char) < 32 for char in reference)
+    ):
+        raise OriginProvenanceValidationError(
+            "provenance.source_ref must be namespaced, for example "
+            "'agent-session:codex:<stable-session-id>'"
+        )
+
+    return {
+        "producer": producer.strip(),
+        "source_ref": source_ref.strip(),
+    }
+
+
+def build_origin_provenance(
+    producer: str,
+    source_ref: str,
+    *,
+    default_namespace: str,
+) -> OriginProvenance:
+    """Build canonical lineage while preserving an already namespaced source ref."""
+    candidate = source_ref.strip()
+    try:
+        return validate_origin_provenance(
+            {"producer": producer, "source_ref": candidate}
+        )
+    except OriginProvenanceValidationError:
+        return validate_origin_provenance(
+            {
+                "producer": producer,
+                "source_ref": f"{default_namespace}:{candidate}",
+            }
+        )
+
+
 # ─── Relationship link-type constants ────────────────────────────────────────
 
-VALID_LINK_TYPES: frozenset[str] = frozenset({
-    "similar_to",       # legacy, auto-written by embedding dedup
-    "attended_by",      # meeting -> person
-    "mentioned_in",     # person -> memory where mentioned
-    "spawned_task",     # meeting/mention -> bd issue
-    "supersedes",       # memory -> older memory it replaces
-    "contradicts",      # memory -> contradicted memory
-    "co_occurs",        # weak co-mention edge
-    "references",       # generic note/link reference
-})
+VALID_LINK_TYPES: frozenset[str] = frozenset(
+    {
+        "similar_to",  # legacy, auto-written by embedding dedup
+        "attended_by",  # meeting -> person
+        "mentioned_in",  # person -> memory where mentioned
+        "spawned_task",  # meeting/mention -> bd issue
+        "supersedes",  # memory -> older memory it replaces
+        "contradicts",  # memory -> contradicted memory
+        "co_occurs",  # weak co-mention edge
+        "references",  # generic note/link reference
+    }
+)
 
 # ─── Canonical entity metadata contract ───────────────────────────────────────
 
 CANONICAL_ENTITY_METADATA_KEY = "canonical_entity"
 CANONICAL_KIND_METADATA_KEY = "canonical_kind"
-CANONICAL_KINDS: frozenset[str] = frozenset({
-    "person",
-    "project",
-    "organization",
-    "concept",
-})
+CANONICAL_KINDS: frozenset[str] = frozenset(
+    {
+        "person",
+        "project",
+        "organization",
+        "concept",
+    }
+)
 
 _IMPORTANCE_RANK: dict[str, int] = {
     "critical": 3,
@@ -125,12 +210,12 @@ class PersonMetadata(TypedDict, total=False):
     relationship: str
     last_contact: str  # ISO datetime
     # Enrichment fields (set by people enrichment pipeline)
-    profile_url: str         # direct profile URL (e.g. LinkedIn/Xing)
-    confidence: float        # enrichment confidence score in [0.0, 1.0]
-    provenance: str          # "url: snippet" summary of enrichment source
-    provenance_url: str      # source URL where enrichment data was found
+    profile_url: str  # direct profile URL (e.g. LinkedIn/Xing)
+    confidence: float  # enrichment confidence score in [0.0, 1.0]
+    provenance: str  # "url: snippet" summary of enrichment source
+    provenance_url: str  # source URL where enrichment data was found
     provenance_snippet: str  # short text snippet from the source
-    enrich_pending: str      # "true" when person needs enrichment; "false" after applied
+    enrich_pending: str  # "true" when person needs enrichment; "false" after applied
 
 
 class HouseholdMetadata(TypedDict, total=False):
@@ -175,20 +260,20 @@ class MeetingMetadata(TypedDict, total=False):
 class MentionMetadata(TypedDict, total=False):
     """Structured metadata for type='mention' memories."""
 
-    person_ref: str          # stable identifier pointing to a person memory
-    context: str             # short snippet from source
-    source_memory_ref: str   # memory id that contains the mention
-    sentiment_hint: str      # positive|neutral|negative|ambiguous|unknown
+    person_ref: str  # stable identifier pointing to a person memory
+    context: str  # short snippet from source
+    source_memory_ref: str  # memory id that contains the mention
+    sentiment_hint: str  # positive|neutral|negative|ambiguous|unknown
 
 
 class InteractionMetadata(TypedDict, total=False):
     """Structured metadata for type='interaction' memories."""
 
     person_ref: str
-    channel: str             # meeting|call|email|chat|unknown
-    direction: str           # inbound|outbound|bidirectional
+    channel: str  # meeting|call|email|chat|unknown
+    direction: str  # inbound|outbound|bidirectional
     summary: str
-    occurred_at: str         # ISO 8601 datetime
+    occurred_at: str  # ISO 8601 datetime
     follow_up_needed: bool
 
 
@@ -288,7 +373,9 @@ PERSONAL_KNOWLEDGE_METADATA_SCHEMAS: dict[str, type] = {
     "person": PersonMetadata,
 }
 
-assert set(PERSONAL_KNOWLEDGE_METADATA_SCHEMAS) == set(CANONICAL_PERSONAL_KNOWLEDGE_TYPES), (
+assert set(PERSONAL_KNOWLEDGE_METADATA_SCHEMAS) == set(
+    CANONICAL_PERSONAL_KNOWLEDGE_TYPES
+), (
     "PERSONAL_KNOWLEDGE_METADATA_SCHEMAS must cover exactly the canonical "
     "personal-knowledge vocabulary in personal_knowledge_vocabulary.py"
 )
@@ -303,7 +390,9 @@ def _is_iso_datetime(value: str) -> bool:
         return False
 
 
-_FORBIDDEN_PAPERLESS_REFERENCE_KEYS = frozenset({"bytes", "base64", "content", "data", "attachment"})
+_FORBIDDEN_PAPERLESS_REFERENCE_KEYS = frozenset(
+    {"bytes", "base64", "content", "data", "attachment"}
+)
 
 
 def _validate_paperless_reference(value: Any) -> list[str]:
@@ -318,20 +407,28 @@ def _validate_paperless_reference(value: Any) -> list[str]:
         or isinstance(document_id, bool)
         or document_id <= 0
     ):
-        warnings.append("paperless_reference metadata field 'document_id' must be a positive integer")
+        warnings.append(
+            "paperless_reference metadata field 'document_id' must be a positive integer"
+        )
 
     for field_name in ("instance", "title", "added"):
         field_value = value.get(field_name)
         if not isinstance(field_value, str) or not field_value.strip():
-            warnings.append(f"paperless_reference metadata missing required field '{field_name}'")
+            warnings.append(
+                f"paperless_reference metadata missing required field '{field_name}'"
+            )
 
     added = value.get("added")
     if isinstance(added, str) and added.strip() and not _is_iso_datetime(added):
-        warnings.append(f"paperless_reference metadata field 'added' is not a valid ISO datetime: {added!r}")
+        warnings.append(
+            f"paperless_reference metadata field 'added' is not a valid ISO datetime: {added!r}"
+        )
 
     for key in value:
         if str(key).lower() in _FORBIDDEN_PAPERLESS_REFERENCE_KEYS:
-            warnings.append(f"paperless_reference metadata must not include document content field {key!r}")
+            warnings.append(
+                f"paperless_reference metadata must not include document content field {key!r}"
+            )
 
     return warnings
 
@@ -350,10 +447,16 @@ def paperless_reference_binary_keys(metadata: dict[str, Any] | None) -> list[str
     ref = md.get("paperless_reference")
     if not isinstance(ref, dict):
         return []
-    return [str(key) for key in ref if str(key).lower() in _FORBIDDEN_PAPERLESS_REFERENCE_KEYS]
+    return [
+        str(key)
+        for key in ref
+        if str(key).lower() in _FORBIDDEN_PAPERLESS_REFERENCE_KEYS
+    ]
 
 
-def validate_domain_metadata(memory_type: str | None, metadata: dict[str, Any] | None) -> list[str]:
+def validate_domain_metadata(
+    memory_type: str | None, metadata: dict[str, Any] | None
+) -> list[str]:
     """Validate domain-specific metadata fields.
 
     Returns a list of human-readable warning strings.
@@ -380,62 +483,88 @@ def validate_domain_metadata(memory_type: str | None, metadata: dict[str, Any] |
     if memory_type == "event":
         when = md.get("when")
         if when is None:
-            warnings.append("event metadata missing required field 'when' (expected ISO datetime, e.g. '2026-04-15T10:00:00')")
+            warnings.append(
+                "event metadata missing required field 'when' (expected ISO datetime, e.g. '2026-04-15T10:00:00')"
+            )
         elif not _is_iso_datetime(str(when)):
-            warnings.append(f"event metadata field 'when' is not a valid ISO datetime: {when!r}")
+            warnings.append(
+                f"event metadata field 'when' is not a valid ISO datetime: {when!r}"
+            )
 
     elif memory_type == "person":
         last_contact = md.get("last_contact")
         if last_contact is not None and not _is_iso_datetime(str(last_contact)):
-            warnings.append(f"person metadata field 'last_contact' is not a valid ISO datetime: {last_contact!r}")
+            warnings.append(
+                f"person metadata field 'last_contact' is not a valid ISO datetime: {last_contact!r}"
+            )
 
     elif memory_type == "meeting":
         date = md.get("date")
         if date is not None and not _is_iso_datetime(str(date)):
-            warnings.append(f"meeting metadata field 'date' is not a valid ISO datetime: {date!r}")
+            warnings.append(
+                f"meeting metadata field 'date' is not a valid ISO datetime: {date!r}"
+            )
 
     elif memory_type == "household":
         warranty_expiry = md.get("warranty_expiry")
         if warranty_expiry is not None and not _is_iso_datetime(str(warranty_expiry)):
-            warnings.append(f"household metadata field 'warranty_expiry' is not a valid ISO datetime: {warranty_expiry!r}")
+            warnings.append(
+                f"household metadata field 'warranty_expiry' is not a valid ISO datetime: {warranty_expiry!r}"
+            )
 
     elif memory_type == "mention":
         person_ref = md.get("person_ref")
         if person_ref is None:
-            warnings.append("mention metadata missing recommended field 'person_ref' (expected stable identifier pointing to a person memory)")
+            warnings.append(
+                "mention metadata missing recommended field 'person_ref' (expected stable identifier pointing to a person memory)"
+            )
 
     elif memory_type == "interaction":
         person_ref = md.get("person_ref")
         if person_ref is None:
-            warnings.append("interaction metadata missing recommended field 'person_ref' (expected stable identifier pointing to a person memory)")
+            warnings.append(
+                "interaction metadata missing recommended field 'person_ref' (expected stable identifier pointing to a person memory)"
+            )
         occurred_at = md.get("occurred_at")
         if occurred_at is not None and not _is_iso_datetime(str(occurred_at)):
-            warnings.append(f"interaction metadata field 'occurred_at' is not a valid ISO datetime: {occurred_at!r}")
+            warnings.append(
+                f"interaction metadata field 'occurred_at' is not a valid ISO datetime: {occurred_at!r}"
+            )
 
     elif memory_type == "project":
         due_date = md.get("due_date")
         if due_date is not None and not _is_iso_datetime(str(due_date)):
-            warnings.append(f"project metadata field 'due_date' is not a valid ISO datetime: {due_date!r}")
+            warnings.append(
+                f"project metadata field 'due_date' is not a valid ISO datetime: {due_date!r}"
+            )
 
     elif memory_type == "resource":
         published_at = md.get("published_at")
         if published_at is not None and not _is_iso_datetime(str(published_at)):
-            warnings.append(f"resource metadata field 'published_at' is not a valid ISO datetime: {published_at!r}")
+            warnings.append(
+                f"resource metadata field 'published_at' is not a valid ISO datetime: {published_at!r}"
+            )
 
     elif memory_type == "journal":
         entry_date = md.get("entry_date")
         if entry_date is not None and not _is_iso_datetime(str(entry_date)):
-            warnings.append(f"journal metadata field 'entry_date' is not a valid ISO datetime: {entry_date!r}")
+            warnings.append(
+                f"journal metadata field 'entry_date' is not a valid ISO datetime: {entry_date!r}"
+            )
 
     elif memory_type == "correspondence":
         occurred_at = md.get("occurred_at")
         if occurred_at is not None and not _is_iso_datetime(str(occurred_at)):
-            warnings.append(f"correspondence metadata field 'occurred_at' is not a valid ISO datetime: {occurred_at!r}")
+            warnings.append(
+                f"correspondence metadata field 'occurred_at' is not a valid ISO datetime: {occurred_at!r}"
+            )
 
     elif memory_type == "prompt":
         last_used_at = md.get("last_used_at")
         if last_used_at is not None and not _is_iso_datetime(str(last_used_at)):
-            warnings.append(f"prompt metadata field 'last_used_at' is not a valid ISO datetime: {last_used_at!r}")
+            warnings.append(
+                f"prompt metadata field 'last_used_at' is not a valid ISO datetime: {last_used_at!r}"
+            )
 
     # All other types pass through without validation
     return warnings
@@ -492,15 +621,20 @@ class SaveMemoryParams:
     project: str | None = None
     title: str | None = None  # short headline
     subtitle: str | None = None  # secondary label / tags
-    narrative: str | None = None  # optional prose context / reasoning (supplements text)
+    narrative: str | None = (
+        None  # optional prose context / reasoning (supplements text)
+    )
     session_ref: str | None = None
     metadata: dict[str, Any] | None = None
+    provenance: OriginProvenance | None = None
     capture_status: str | None = None
     user_id: str | None = None  # authenticated user who created this memory
     upsert_mode: Literal["append", "replace"] = "append"
     importance: str = "medium"  # caller-declared significance: critical|high|medium|low
     dedup_mode: Literal["skip", "merge"] = "skip"  # auto-dedup strategy at store time
-    duplicate_of: int | None = None  # caller-asserted duplicate; short-circuits dedup logic
+    duplicate_of: int | None = (
+        None  # caller-asserted duplicate; short-circuits dedup logic
+    )
 
 
 @dataclass
@@ -512,12 +646,16 @@ class UpdateMemoryParams:
     """
 
     id: int
-    text: str | None = None  # PRIMARY content → stored as `content` column; embedded + FTS-searched
+    text: str | None = (
+        None  # PRIMARY content → stored as `content` column; embedded + FTS-searched
+    )
     type: str | None = None
     project: str | None = None
     title: str | None = None  # short headline
     subtitle: str | None = None  # secondary label / tags
-    narrative: str | None = None  # optional prose context / reasoning (supplements text)
+    narrative: str | None = (
+        None  # optional prose context / reasoning (supplements text)
+    )
     metadata: dict[str, Any] | None = None  # JSONB-merged into existing metadata
 
 
@@ -589,9 +727,13 @@ class Memory:
     last_accessed_at: str | None
     created_at: str
     updated_at: str
-    user_id: str | None = None  # user who created this memory (NULL for pre-feature or API key auth)
+    user_id: str | None = (
+        None  # user who created this memory (NULL for pre-feature or API key auth)
+    )
     importance: str = "medium"  # caller-declared significance: critical|high|medium|low
-    last_decay_at: str | None = None  # timestamp of last decay application (None = never decayed)
+    last_decay_at: str | None = (
+        None  # timestamp of last decay application (None = never decayed)
+    )
     project_name: str | None = None  # populated by get_wake_up_memories JOIN
 
 
@@ -622,7 +764,9 @@ def canonical_entity_identity(memory: Memory) -> dict[str, int | str] | None:
 class RefineParams:
     """Parameters for memory refinement."""
 
-    scope: str | None = None  # "recent" | "project:<name>" | "duplicates" | "low-priority"
+    scope: str | None = (
+        None  # "recent" | "project:<name>" | "duplicates" | "low-priority"
+    )
     limit: int | None = None
     dry_run: bool = False
 
@@ -715,7 +859,9 @@ LIFECYCLE_REVIEW_STATES: frozenset[str] = frozenset(
 class TriageParams:
     """Parameters for memory triage."""
 
-    scope: str | None = None  # "recent" | "project:<name>" | "type:<name>" | "session_ref:<prefix>" | None
+    scope: str | None = (
+        None  # "recent" | "project:<name>" | "type:<name>" | "session_ref:<prefix>" | None
+    )
     limit: int | None = None
     dry_run: bool = False
     policy_version: str = LIFECYCLE_POLICY_VERSION
@@ -825,11 +971,11 @@ class MaterializeResult:
 class DecayParams:
     """Parameters for memory decay/boost operation."""
 
-    stale_days: int = 30          # memories not accessed in N days get decayed
-    boost_days: int = 7           # recent memories (< N days) are protected
-    decay_factor: float = 0.9     # priority *= decay_factor for stale memories
-    boost_threshold: int = 10     # access_count >= N triggers priority boost
-    boost_factor: float = 1.1     # priority *= boost_factor for frequently accessed
+    stale_days: int = 30  # memories not accessed in N days get decayed
+    boost_days: int = 7  # recent memories (< N days) are protected
+    decay_factor: float = 0.9  # priority *= decay_factor for stale memories
+    boost_threshold: int = 10  # access_count >= N triggers priority boost
+    boost_factor: float = 1.1  # priority *= boost_factor for frequently accessed
     dry_run: bool = False
 
     def __post_init__(self) -> None:
@@ -842,15 +988,17 @@ class DecayParams:
         if self.boost_days <= 0:
             raise ValueError(f"boost_days must be > 0, got {self.boost_days}")
         if self.boost_threshold < 1:
-            raise ValueError(f"boost_threshold must be >= 1, got {self.boost_threshold}")
+            raise ValueError(
+                f"boost_threshold must be >= 1, got {self.boost_threshold}"
+            )
 
 
 @dataclass
 class DecayResult:
     """Result of a decay_memories operation."""
 
-    decayed: int         # count of memories whose priority was reduced
-    boosted: int         # count of memories whose priority was boosted
+    decayed: int  # count of memories whose priority was reduced
+    boosted: int  # count of memories whose priority was boosted
     recent_memories: int  # count of recent memories (< boost_days old); protected from decay but may still be boosted
     summary: str
     protected_canonical_entities: int = 0  # stale canonical entities skipped by decay
@@ -861,9 +1009,9 @@ class ClusterPlan:
     """Plan for a single cluster of near-duplicate memories."""
 
     cluster_id: int
-    members: list[int]        # all member IDs
-    canonical_id: int         # the one to keep
-    to_delete: list[int]      # members minus canonical
+    members: list[int]  # all member IDs
+    canonical_id: int  # the one to keep
+    to_delete: list[int]  # members minus canonical
 
 
 _VALID_COMPACT_STRATEGIES = frozenset(
@@ -892,8 +1040,7 @@ class CompactParams:
             )
         if self.scope is not None:
             if not (
-                self.scope.startswith("project:")
-                or self.scope.startswith("type:")
+                self.scope.startswith("project:") or self.scope.startswith("type:")
             ):
                 raise ValueError(
                     f"Unknown scope format: {self.scope!r}. "
@@ -910,7 +1057,9 @@ class CompactResult:
     memories_kept: list[int]
     deleted_ids: list[int]
     strategy_used: str
-    plan: list[ClusterPlan]   # always populated (dry_run=True: plan only; False: executed)
+    plan: list[
+        ClusterPlan
+    ]  # always populated (dry_run=True: plan only; False: executed)
     protected_canonical_entities: int = 0
 
 
@@ -937,7 +1086,9 @@ class DataLayer(Protocol):
 
     async def update_memory(self, params: UpdateMemoryParams) -> SaveMemoryResult: ...
 
-    async def set_capture_status(self, params: CaptureTransitionParams) -> SaveMemoryResult: ...
+    async def set_capture_status(
+        self, params: CaptureTransitionParams
+    ) -> SaveMemoryResult: ...
 
     async def approved_update_canonical_entity(
         self, params: ApprovedCanonicalEntityUpdateParams
@@ -967,13 +1118,17 @@ class DataLayer(Protocol):
         self, params: LifecycleActionStateParams
     ) -> LifecycleActionRecord: ...
 
-    async def materialize_memories(self, params: MaterializeParams) -> MaterializeResult: ...
+    async def materialize_memories(
+        self, params: MaterializeParams
+    ) -> MaterializeResult: ...
 
     async def decay_memories(self, params: DecayParams) -> DecayResult: ...
 
     async def compact_memories(self, params: CompactParams) -> CompactResult: ...
 
-    async def get_wake_up_memories(self, limit: int = 500, project: str | None = None) -> list[Memory]: ...
+    async def get_wake_up_memories(
+        self, limit: int = 500, project: str | None = None
+    ) -> list[Memory]: ...
 
     async def create_relationship(
         self,

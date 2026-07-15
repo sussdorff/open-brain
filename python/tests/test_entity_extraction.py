@@ -13,6 +13,7 @@ from open_brain.server import save_memory
 
 # ─── AK1: People and orgs extraction ─────────────────────────────────────────
 
+
 class TestPeopleAndOrgsExtraction:
     @pytest.mark.asyncio
     async def test_sarah_from_acme_corp_extracts_people_and_orgs(self):
@@ -21,17 +22,27 @@ class TestPeopleAndOrgsExtraction:
         mock_dl.save_memory.return_value = SaveMemoryResult(id=1, message="saved")
         mock_dl.update_memory.return_value = SaveMemoryResult(id=1, message="updated")
 
-        llm_response = json.dumps({
-            "people": ["Sarah"],
-            "orgs": ["Acme Corp"],
-            "tech": [],
-            "locations": [],
-            "dates": [],
-        })
+        llm_response = json.dumps(
+            {
+                "people": ["Sarah"],
+                "orgs": ["Acme Corp"],
+                "tech": [],
+                "locations": [],
+                "dates": [],
+            }
+        )
 
-        with patch("open_brain.server.get_dl", return_value=mock_dl), \
-             patch("open_brain.server.llm_complete", return_value=llm_response):
-            await save_memory(text="Sarah from Acme Corp visited us today.")
+        with (
+            patch("open_brain.server.get_dl", return_value=mock_dl),
+            patch("open_brain.server.llm_complete", return_value=llm_response),
+        ):
+            await save_memory(
+                text="Sarah from Acme Corp visited us today.",
+                provenance={
+                    "producer": "test-suite",
+                    "source_ref": "test-suite:test_entity_extraction",
+                },
+            )
 
         update_call = mock_dl.update_memory.call_args
         assert update_call is not None, "update_memory should have been called"
@@ -43,6 +54,7 @@ class TestPeopleAndOrgsExtraction:
 
 # ─── AK2: Tech extraction ─────────────────────────────────────────────────────
 
+
 class TestTechExtraction:
     @pytest.mark.asyncio
     async def test_python_docker_kubernetes_extracts_tech(self):
@@ -51,17 +63,27 @@ class TestTechExtraction:
         mock_dl.save_memory.return_value = SaveMemoryResult(id=2, message="saved")
         mock_dl.update_memory.return_value = SaveMemoryResult(id=2, message="updated")
 
-        llm_response = json.dumps({
-            "people": [],
-            "orgs": [],
-            "tech": ["Python", "Docker", "Kubernetes"],
-            "locations": [],
-            "dates": [],
-        })
+        llm_response = json.dumps(
+            {
+                "people": [],
+                "orgs": [],
+                "tech": ["Python", "Docker", "Kubernetes"],
+                "locations": [],
+                "dates": [],
+            }
+        )
 
-        with patch("open_brain.server.get_dl", return_value=mock_dl), \
-             patch("open_brain.server.llm_complete", return_value=llm_response):
-            await save_memory(text="We deployed our Python app using Docker and Kubernetes.")
+        with (
+            patch("open_brain.server.get_dl", return_value=mock_dl),
+            patch("open_brain.server.llm_complete", return_value=llm_response),
+        ):
+            await save_memory(
+                text="We deployed our Python app using Docker and Kubernetes.",
+                provenance={
+                    "producer": "test-suite",
+                    "source_ref": "test-suite:test_entity_extraction",
+                },
+            )
 
         update_call = mock_dl.update_memory.call_args
         assert update_call is not None, "update_memory should have been called"
@@ -74,6 +96,7 @@ class TestTechExtraction:
 
 # ─── AK3: Location extraction ─────────────────────────────────────────────────
 
+
 class TestLocationExtraction:
     @pytest.mark.asyncio
     async def test_berlin_office_extracts_location(self):
@@ -82,17 +105,27 @@ class TestLocationExtraction:
         mock_dl.save_memory.return_value = SaveMemoryResult(id=3, message="saved")
         mock_dl.update_memory.return_value = SaveMemoryResult(id=3, message="updated")
 
-        llm_response = json.dumps({
-            "people": [],
-            "orgs": [],
-            "tech": [],
-            "locations": ["Berlin"],
-            "dates": [],
-        })
+        llm_response = json.dumps(
+            {
+                "people": [],
+                "orgs": [],
+                "tech": [],
+                "locations": ["Berlin"],
+                "dates": [],
+            }
+        )
 
-        with patch("open_brain.server.get_dl", return_value=mock_dl), \
-             patch("open_brain.server.llm_complete", return_value=llm_response):
-            await save_memory(text="The meeting is at the Berlin office.")
+        with (
+            patch("open_brain.server.get_dl", return_value=mock_dl),
+            patch("open_brain.server.llm_complete", return_value=llm_response),
+        ):
+            await save_memory(
+                text="The meeting is at the Berlin office.",
+                provenance={
+                    "producer": "test-suite",
+                    "source_ref": "test-suite:test_entity_extraction",
+                },
+            )
 
         update_call = mock_dl.update_memory.call_args
         assert update_call is not None, "update_memory should have been called"
@@ -103,6 +136,7 @@ class TestLocationExtraction:
 
 # ─── AK4: Pre-provided entities not overwritten ───────────────────────────────
 
+
 class TestPreProvidedEntitiesNotOverwritten:
     @pytest.mark.asyncio
     async def test_existing_entities_in_metadata_skips_extraction(self):
@@ -111,17 +145,32 @@ class TestPreProvidedEntitiesNotOverwritten:
         mock_dl.save_memory.return_value = SaveMemoryResult(id=4, message="saved")
         mock_dl.update_memory.return_value = SaveMemoryResult(id=4, message="updated")
 
-        existing_entities = {"people": ["Alice"], "orgs": ["Wonderland Inc"], "tech": [], "locations": [], "dates": []}
+        existing_entities = {
+            "people": ["Alice"],
+            "orgs": ["Wonderland Inc"],
+            "tech": [],
+            "locations": [],
+            "dates": [],
+        }
         pre_set_metadata = {"entities": existing_entities}
 
         # classify_and_extract returns existing_metadata unchanged when capture_template is set
         # or when called with pre-structured metadata — here it should also not update
-        with patch("open_brain.server.get_dl", return_value=mock_dl), \
-             patch("open_brain.server.llm_complete") as mock_llm, \
-             patch("open_brain.server.classify_and_extract", new=AsyncMock(return_value=pre_set_metadata)):
+        with (
+            patch("open_brain.server.get_dl", return_value=mock_dl),
+            patch("open_brain.server.llm_complete") as mock_llm,
+            patch(
+                "open_brain.server.classify_and_extract",
+                new=AsyncMock(return_value=pre_set_metadata),
+            ),
+        ):
             await save_memory(
                 text="Some text with Sarah from Acme Corp.",
                 metadata=pre_set_metadata,
+                provenance={
+                    "producer": "test-suite",
+                    "source_ref": "test-suite:test_entity_extraction",
+                },
             )
 
         # LLM should NOT have been called since entities were pre-provided
@@ -133,6 +182,7 @@ class TestPreProvidedEntitiesNotOverwritten:
 
 # ─── AK5: Empty text produces empty dict ─────────────────────────────────────
 
+
 class TestEmptyTextProducesEmptyDict:
     @pytest.mark.asyncio
     async def test_empty_text_returns_empty_entities_no_error(self):
@@ -141,19 +191,29 @@ class TestEmptyTextProducesEmptyDict:
         mock_dl.save_memory.return_value = SaveMemoryResult(id=5, message="saved")
         mock_dl.update_memory.return_value = SaveMemoryResult(id=5, message="updated")
 
-        llm_response = json.dumps({
-            "people": [],
-            "orgs": [],
-            "tech": [],
-            "locations": [],
-            "dates": [],
-        })
+        llm_response = json.dumps(
+            {
+                "people": [],
+                "orgs": [],
+                "tech": [],
+                "locations": [],
+                "dates": [],
+            }
+        )
 
-        with patch("open_brain.server.get_dl", return_value=mock_dl), \
-             patch("open_brain.server.llm_complete", return_value=llm_response), \
-             patch("open_brain.server.classify_and_extract", return_value={}):
+        with (
+            patch("open_brain.server.get_dl", return_value=mock_dl),
+            patch("open_brain.server.llm_complete", return_value=llm_response),
+            patch("open_brain.server.classify_and_extract", return_value={}),
+        ):
             # Should not raise any error
-            result = await save_memory(text="")
+            result = await save_memory(
+                text="",
+                provenance={
+                    "producer": "test-suite",
+                    "source_ref": "test-suite:test_entity_extraction",
+                },
+            )
 
         # Should still return a valid response
         data = json.loads(result)
@@ -167,23 +227,34 @@ class TestEmptyTextProducesEmptyDict:
         mock_dl = AsyncMock()
         mock_dl.save_memory.return_value = SaveMemoryResult(id=6, message="saved")
 
-        llm_response = json.dumps({
-            "people": [],
-            "orgs": [],
-            "tech": [],
-            "locations": [],
-            "dates": [],
-        })
+        llm_response = json.dumps(
+            {
+                "people": [],
+                "orgs": [],
+                "tech": [],
+                "locations": [],
+                "dates": [],
+            }
+        )
 
-        with patch("open_brain.server.get_dl", return_value=mock_dl), \
-             patch("open_brain.server.llm_complete", return_value=llm_response), \
-             patch("open_brain.server.classify_and_extract", return_value={}):
-            await save_memory(text="Nothing specific here.")
+        with (
+            patch("open_brain.server.get_dl", return_value=mock_dl),
+            patch("open_brain.server.llm_complete", return_value=llm_response),
+            patch("open_brain.server.classify_and_extract", return_value={}),
+        ):
+            await save_memory(
+                text="Nothing specific here.",
+                provenance={
+                    "producer": "test-suite",
+                    "source_ref": "test-suite:test_entity_extraction",
+                },
+            )
 
         mock_dl.update_memory.assert_not_called()
 
 
 # ─── LLM failure graceful degradation (extra) ────────────────────────────────
+
 
 class TestLlmFailureGracefulDegradation:
     @pytest.mark.asyncio
@@ -195,10 +266,18 @@ class TestLlmFailureGracefulDegradation:
         async def failing_llm(*args, **kwargs):
             raise RuntimeError("LLM API error")
 
-        with patch("open_brain.server.get_dl", return_value=mock_dl), \
-             patch("open_brain.server.llm_complete", side_effect=failing_llm), \
-             patch("open_brain.server.classify_and_extract", return_value={}):
-            result = await save_memory(text="Sarah from Acme Corp visited Berlin.")
+        with (
+            patch("open_brain.server.get_dl", return_value=mock_dl),
+            patch("open_brain.server.llm_complete", side_effect=failing_llm),
+            patch("open_brain.server.classify_and_extract", return_value={}),
+        ):
+            result = await save_memory(
+                text="Sarah from Acme Corp visited Berlin.",
+                provenance={
+                    "producer": "test-suite",
+                    "source_ref": "test-suite:test_entity_extraction",
+                },
+            )
 
         # Memory should still be saved despite LLM failure
         data = json.loads(result)

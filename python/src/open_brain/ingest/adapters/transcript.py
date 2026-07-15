@@ -22,6 +22,7 @@ import uuid
 
 from open_brain.config import get_config
 from open_brain.data_layer.interface import (
+    build_origin_provenance,
     DataLayer,
     SaveMemoryParams,
     SearchParams,
@@ -120,10 +121,17 @@ class TranscriptIngestor:
 
         run_id = run_id or str(uuid.uuid4())
         idempotency_key = _compute_idempotency_key(source_ref, text)
+        provenance = build_origin_provenance(
+            "transcript-ingest",
+            source_ref,
+            default_namespace="transcript",
+        )
 
         logger.info(
             "ingest_start source_ref=%r text_len=%d idempotency_key=%.16s...",
-            source_ref, len(text), idempotency_key,
+            source_ref,
+            len(text),
+            idempotency_key,
         )
 
         # --- Idempotency check ---
@@ -132,7 +140,8 @@ class TranscriptIngestor:
             idempotency_duration_ms = int((time.monotonic() - ingest_start) * 1000)
             logger.info(
                 "ingest_end source_ref=%r duration_ms=%d idempotent=true",
-                source_ref, idempotency_duration_ms,
+                source_ref,
+                idempotency_duration_ms,
             )
             return prior
 
@@ -178,13 +187,12 @@ class TranscriptIngestor:
         if llm_extract_ms > 5000:
             logger.warning(
                 "slow_llm_extract source_ref=%r duration_ms=%d",
-                source_ref, llm_extract_ms,
+                source_ref,
+                llm_extract_ms,
             )
 
         # Build follow_up_candidates list (never auto-created as bd issues)
-        follow_up_candidates: list[dict] = [
-            {"task": task} for task in follow_up_tasks
-        ]
+        follow_up_candidates: list[dict] = [{"task": task} for task in follow_up_tasks]
 
         # --- Load existing person memories for dedup ---
         existing_records = await self._load_existing_persons()
@@ -204,6 +212,7 @@ class TranscriptIngestor:
                     "medium_hint": medium_hint,
                     "raw_content_chars": len(text),
                 },
+                provenance=provenance,
             )
         )
         metrics.record_memory_written("meeting")
@@ -222,6 +231,7 @@ class TranscriptIngestor:
                 name=name,
                 existing_records=existing_records,
                 run_id=run_id,
+                source_ref=source_ref,
             )
             if person_id in pre_loop_ids:
                 persons_reused += 1
@@ -243,6 +253,7 @@ class TranscriptIngestor:
                         "summary": f"{name} attended this meeting",
                         "run_id": run_id,
                     },
+                    provenance=provenance,
                 )
             )
             metrics.record_memory_written("interaction")
@@ -264,6 +275,7 @@ class TranscriptIngestor:
                 name=name,
                 existing_records=existing_records,
                 run_id=run_id,
+                source_ref=source_ref,
             )
             mentioned_person_ids.append(person_id)
 
@@ -280,6 +292,7 @@ class TranscriptIngestor:
                         "context": f"Mentioned in {source_ref}",
                         "run_id": run_id,
                     },
+                    provenance=provenance,
                 )
             )
             metrics.record_memory_written("mention")
@@ -375,7 +388,9 @@ class TranscriptIngestor:
                 )
             )
         except Exception as exc:
-            logger.warning("Idempotency check failed: %s — proceeding with fresh ingest", exc)
+            logger.warning(
+                "Idempotency check failed: %s — proceeding with fresh ingest", exc
+            )
             return None
 
         if not search_result.results:
@@ -385,10 +400,14 @@ class TranscriptIngestor:
         meeting_memory = search_result.results[0]
         stored = meeting_memory.metadata.get("ingest_result")
         if not stored:
-            logger.debug("idempotency_miss source_ref=%r (no stored result)", source_ref)
+            logger.debug(
+                "idempotency_miss source_ref=%r (no stored result)", source_ref
+            )
             return None
 
-        logger.info("Idempotency hit for source_ref=%r — returning prior run", source_ref)
+        logger.info(
+            "Idempotency hit for source_ref=%r — returning prior run", source_ref
+        )
         return IngestResult(
             meeting_memory_id=stored.get("meeting_memory_id", meeting_memory.id),
             person_memory_ids=stored.get("person_memory_ids", []),
@@ -399,7 +418,9 @@ class TranscriptIngestor:
             run_id=stored.get("run_id", ""),
         )
 
-    async def _find_prior_run_by_source_ref(self, source_ref: str) -> IngestResult | None:
+    async def _find_prior_run_by_source_ref(
+        self, source_ref: str
+    ) -> IngestResult | None:
         """Find a prior meeting by source_ref, even if transcript text changed."""
         try:
             search_result = await self._dl.search(
@@ -418,7 +439,9 @@ class TranscriptIngestor:
 
         meeting_memory = search_result.results[0]
         stored = (meeting_memory.metadata or {}).get("ingest_result") or {}
-        logger.info("Source-ref hit for source_ref=%r — refreshing prior run", source_ref)
+        logger.info(
+            "Source-ref hit for source_ref=%r — refreshing prior run", source_ref
+        )
         return IngestResult(
             meeting_memory_id=stored.get("meeting_memory_id", meeting_memory.id),
             person_memory_ids=stored.get("person_memory_ids", []),
@@ -426,7 +449,9 @@ class TranscriptIngestor:
             interaction_memory_ids=stored.get("interaction_memory_ids", []),
             relationship_ids=stored.get("relationship_ids", []),
             follow_up_candidates=stored.get("follow_up_candidates", []),
-            run_id=stored.get("run_id", (meeting_memory.metadata or {}).get("run_id", "")),
+            run_id=stored.get(
+                "run_id", (meeting_memory.metadata or {}).get("run_id", "")
+            ),
         )
 
     async def _refresh_prior_meeting_content(
@@ -499,11 +524,11 @@ class TranscriptIngestor:
 
         metrics.record_llm_call("dedup_confirm")
         target_name = target.member_name
-        target_org_str = f' [{target.member_org}]' if target.member_org else ''
+        target_org_str = f" [{target.member_org}]" if target.member_org else ""
         target_aliases_str = (
-            f' (already known as: {", ".join(target.aliases)})'
+            f" (already known as: {', '.join(target.aliases)})"
             if target.aliases
-            else ''
+            else ""
         )
         runners_up_names = (
             ", ".join(r.member_name for r in preliminary.runners_up)
@@ -519,20 +544,20 @@ class TranscriptIngestor:
         # asking about. The model just needs to judge whether the partial
         # incoming name plausibly refers to that record.
         prompt = (
-            'You are deduplicating people in a personal knowledge graph built '
-            'from meeting transcripts. Transcripts often mention people informally '
-            'by first-name only when their full name was recorded earlier in the '
-            'graph. Your task: decide whether an incoming partial name refers to '
-            'an existing record.\n\n'
+            "You are deduplicating people in a personal knowledge graph built "
+            "from meeting transcripts. Transcripts often mention people informally "
+            "by first-name only when their full name was recorded earlier in the "
+            "graph. Your task: decide whether an incoming partial name refers to "
+            "an existing record.\n\n"
             f'Incoming name from transcript: "{incoming_name}"\n'
             f'Existing record: "{target_name}"{target_org_str}{target_aliases_str}\n'
-            f'Other candidates with overlapping name in graph: {runners_up_names}\n\n'
-            'Context: this question is only asked when exactly one existing '
-            'record plausibly matches the partial name (no ambiguous matches). '
-            'If the existing record is consistent with the partial name (e.g. '
-            'first-name matches and no contradicting signal exists), confirm. '
-            'Decline only if the names refer to clearly different people '
-            '(e.g. wrong language family, contradicting context).\n\n'
+            f"Other candidates with overlapping name in graph: {runners_up_names}\n\n"
+            "Context: this question is only asked when exactly one existing "
+            "record plausibly matches the partial name (no ambiguous matches). "
+            "If the existing record is consistent with the partial name (e.g. "
+            "first-name matches and no contradicting signal exists), confirm. "
+            "Decline only if the names refer to clearly different people "
+            "(e.g. wrong language family, contradicting context).\n\n"
             'Respond with JSON only: {"confirmed": true} or {"confirmed": false}'
         )
 
@@ -543,12 +568,16 @@ class TranscriptIngestor:
                 max_tokens=64,
             )
             cleaned = response.strip()
-            fence_match = re.match(r"^```(?:json)?\s*\n(.*?)\n```\s*$", cleaned, re.DOTALL)
+            fence_match = re.match(
+                r"^```(?:json)?\s*\n(.*?)\n```\s*$", cleaned, re.DOTALL
+            )
             if fence_match:
                 cleaned = fence_match.group(1)
             data = json.loads(cleaned)
             raw = data.get("confirmed", False)
-            confirmed: bool = raw is True  # only accept JSON boolean true, not string "true" or "false"
+            confirmed: bool = (
+                raw is True
+            )  # only accept JSON boolean true, not string "true" or "false"
         except Exception as e:
             logger.warning("llm_dedup_confirm_error name=%r error=%r", incoming_name, e)
             confirmed = False
@@ -561,6 +590,7 @@ class TranscriptIngestor:
         name: str,
         existing_records: list[PersonRecord],
         run_id: str,
+        source_ref: str,
     ) -> int:
         """Resolve a person name to a memory ID, deduplicating against existing records.
 
@@ -607,8 +637,10 @@ class TranscriptIngestor:
                 name_norm = name.strip()
                 member_norm = decision.target.member_name.strip()
                 # Only add alias if different (case-insensitive) AND not already in list
-                if (name_norm.lower() != member_norm.lower() and
-                        name_norm.lower() not in {a.lower() for a in existing_aliases}):
+                if (
+                    name_norm.lower() != member_norm.lower()
+                    and name_norm.lower() not in {a.lower() for a in existing_aliases}
+                ):
                     existing_aliases.append(name_norm)
                     await self._dl.update_memory(
                         UpdateMemoryParams(
@@ -640,6 +672,11 @@ class TranscriptIngestor:
                     "run_id": run_id,
                     "enrich_pending": "true",
                 },
+                provenance=build_origin_provenance(
+                    "transcript-ingest",
+                    source_ref,
+                    default_namespace="transcript",
+                ),
             )
         )
         metrics.record_memory_written("person")

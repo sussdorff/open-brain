@@ -46,6 +46,7 @@ from open_brain.data_layer.interface import (
     LifecycleActionStateParams,
     MaterializeParams,
     Memory,
+    OriginProvenanceValidationError,
     RefineParams,
     SaveMemoryParams,
     SearchParams,
@@ -56,6 +57,7 @@ from open_brain.data_layer.interface import (
     canonical_entity_identity,
     paperless_reference_binary_keys,
     validate_domain_metadata,
+    validate_origin_provenance,
 )
 from open_brain.capture_router import (
     canonical_type_for_capture_template,
@@ -115,6 +117,7 @@ def _memory_payload(memory: Memory) -> dict[str, Any]:
         payload["canonical_entity"] = identity
     return payload
 
+
 # ContextVar to track the OAuth scopes for the current request (Bearer token auth only)
 _current_scopes: ContextVar[tuple[str, ...]] = ContextVar("current_scopes", default=())
 
@@ -143,6 +146,7 @@ def logged_tool(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[An
     ScopedFastMCP.call_tool(), which emits a tool_error log at that level so that
     AK3 coverage is complete.
     """
+
     @wraps(fn)
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
         rid = str(uuid.uuid4())
@@ -153,7 +157,11 @@ def logged_tool(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[An
         args_text_chars = sum(len(v) for v in kwargs.values() if isinstance(v, str))
         logger.info(
             "tool_start tool=%s args_keys=%s args_text_chars=%d user_id=%s request_id=%s",
-            tool_name, args_keys, args_text_chars, user_id, rid,
+            tool_name,
+            args_keys,
+            args_text_chars,
+            user_id,
+            rid,
         )
         t0 = time.monotonic()
         try:
@@ -161,30 +169,38 @@ def logged_tool(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[An
             duration_ms = int((time.monotonic() - t0) * 1000)
             logger.info(
                 "tool_end tool=%s duration_ms=%d status=ok request_id=%s",
-                tool_name, duration_ms, rid,
+                tool_name,
+                duration_ms,
+                rid,
             )
             return result
         except Exception:
             duration_ms = int((time.monotonic() - t0) * 1000)
             logger.exception(
                 "tool_error tool=%s duration_ms=%d status=error request_id=%s",
-                tool_name, duration_ms, rid,
+                tool_name,
+                duration_ms,
+                rid,
             )
             raise
         finally:
             _request_id.reset(token)
+
     return wrapper
 
+
 # Evolution tools require the `evolution` OAuth scope
-_EVOLUTION_TOOLS: frozenset[str] = frozenset({
-    "analyze_session_learnings",
-    "review_session_learning",
-    "weekly_briefing",
-    "analyze_briefing_engagement",
-    "generate_evolution_suggestion",
-    "log_evolution_approval",
-    "query_evolution_history_tool",
-})
+_EVOLUTION_TOOLS: frozenset[str] = frozenset(
+    {
+        "analyze_session_learnings",
+        "review_session_learning",
+        "weekly_briefing",
+        "analyze_briefing_engagement",
+        "generate_evolution_suggestion",
+        "log_evolution_approval",
+        "query_evolution_history_tool",
+    }
+)
 
 # Admin tools require the `admin` OAuth scope (none defined yet)
 _ADMIN_TOOLS: frozenset[str] = frozenset()
@@ -246,7 +262,9 @@ async def _extract_entities(text: str) -> dict:
         return {}
     try:
         response = await llm_complete(
-            messages=[LlmMessage(role="user", content=_ENTITY_EXTRACTION_PROMPT + text)],
+            messages=[
+                LlmMessage(role="user", content=_ENTITY_EXTRACTION_PROMPT + text)
+            ],
             response_format=_ENTITY_RESPONSE_FORMAT,
             disable_reasoning=True,
         )
@@ -260,7 +278,9 @@ async def _extract_entities(text: str) -> dict:
                     entities[k] = filtered
         return entities
     except Exception:
-        logger.warning("Entity extraction failed — continuing without entities", exc_info=True)
+        logger.warning(
+            "Entity extraction failed — continuing without entities", exc_info=True
+        )
         return {}
 
 
@@ -282,9 +302,7 @@ def _require_scope(scope: str) -> None:
         ScopeDeniedError: If the required scope is not in the current request's scopes.
     """
     if scope not in _current_scopes.get():
-        raise ScopeDeniedError(
-            f"Scope '{scope}' required"
-        )
+        raise ScopeDeniedError(f"Scope '{scope}' required")
 
 
 class ScopedFastMCP(FastMCP):
@@ -328,14 +346,19 @@ class ScopedFastMCP(FastMCP):
             logger.exception(
                 "tool_error tool=%s duration_ms=%d status=error request_id=%s user_id=%s"
                 " (pre-invocation: argument validation or dispatch failure)",
-                name, duration_ms, rid, user_id,
+                name,
+                duration_ms,
+                rid,
+                user_id,
             )
             raise
 
 
 # MCP server (ScopedFastMCP for scope-gated tool listing)
 _config = get_config()
-_host = _config.MCP_SERVER_URL.replace("https://", "").replace("http://", "").rstrip("/")
+_host = (
+    _config.MCP_SERVER_URL.replace("https://", "").replace("http://", "").rstrip("/")
+)
 mcp = ScopedFastMCP(
     "open-brain",
     transport_security=TransportSecuritySettings(
@@ -360,6 +383,7 @@ def get_dl() -> PostgresDataLayer:
 
 
 # ─── MCP Tools ───────────────────────────────────────────────────────────────
+
 
 @mcp.tool(
     description=(
@@ -417,7 +441,10 @@ async def search(
         )
     )
     return json.dumps(
-        {"total": result.total, "results": [_memory_payload(m) for m in result.results]},
+        {
+            "total": result.total,
+            "results": [_memory_payload(m) for m in result.results],
+        },
         default=str,
     )
 
@@ -511,7 +538,8 @@ async def resolve_paperless_reference(document_id: int) -> str:
     "paperless_reference: {document_id: int, instance: str, title: str, added: ISO datetime}. "
     "ISO datetime format: 'YYYY-MM-DDTHH:MM:SS' (e.g. '2026-04-15T10:00:00'). "
     "Invalid or missing required datetime fields produce a warning in the response but still save the memory. "
-    "Params: text (required), type, project, title, subtitle, narrative, session_ref, is_test, metadata, importance, dedup_mode, proposal. "
+    "provenance: required origin object {producer, source_ref}; source_ref must be namespaced. "
+    "Params: text (required), type, project, title, subtitle, narrative, session_ref, is_test, metadata, provenance, importance, dedup_mode, proposal. "
     "importance: optional retention class (critical|high|medium|low, default medium). "
     "dedup_mode: 'skip' (default) or 'merge' — if 'merge', returns existing id when vector similarity >= DEDUP_THRESHOLD instead of inserting. "
     "proposal: optional seven-field memory-write proposal; when supplied, the Memory-Write Judge must ALLOW it before persistence."
@@ -527,6 +555,7 @@ async def save_memory(
     session_ref: str | None = None,
     is_test: bool = False,
     metadata: dict | None = None,
+    provenance: dict | None = None,
     importance: str = "medium",
     dedup_mode: str = "skip",
     proposal: dict | None = None,
@@ -535,17 +564,29 @@ async def save_memory(
     if is_test:
         return json.dumps({"id": -1, "message": "Test artifact — not persisted"})
 
+    try:
+        canonical_provenance = validate_origin_provenance(provenance)
+    except OriginProvenanceValidationError as exc:
+        return json.dumps({"error": exc.code, "message": str(exc)})
+
     if dedup_mode not in ("skip", "merge"):
-        return json.dumps({"error": "invalid_dedup_mode", "message": f"dedup_mode must be 'skip' or 'merge', got: {dedup_mode!r}"})
+        return json.dumps(
+            {
+                "error": "invalid_dedup_mode",
+                "message": f"dedup_mode must be 'skip' or 'merge', got: {dedup_mode!r}",
+            }
+        )
 
     if proposal is not None:
         judge_outcome = judge_memory_write_proposal(proposal)
         if judge_outcome.decision != "ALLOW":
-            return json.dumps({
-                "error": "memory_write_judge_rejected",
-                "message": judge_outcome.reason,
-                "judge": judge_outcome.to_payload(),
-            })
+            return json.dumps(
+                {
+                    "error": "memory_write_judge_rejected",
+                    "message": judge_outcome.reason,
+                    "judge": judge_outcome.to_payload(),
+                }
+            )
         metadata = {
             **(metadata or {}),
             **memory_metadata_from_judged_proposal(proposal, judge_outcome),
@@ -557,14 +598,16 @@ async def save_memory(
     # not merely warned — so document bytes can never enter memory tables or exports.
     forbidden_reference_keys = paperless_reference_binary_keys(metadata)
     if forbidden_reference_keys:
-        return json.dumps({
-            "error": "paperless_reference_binary_payload",
-            "message": (
-                "paperless_reference must not include document content fields "
-                f"{sorted(forbidden_reference_keys)}; store an identity reference only, "
-                "not the document binary."
-            ),
-        })
+        return json.dumps(
+            {
+                "error": "paperless_reference_binary_payload",
+                "message": (
+                    "paperless_reference must not include document content fields "
+                    f"{sorted(forbidden_reference_keys)}; store an identity reference only, "
+                    "not the document binary."
+                ),
+            }
+        )
 
     # ── Rate limit check (per-user sliding window, 10/60s) ─────────────────────
     # Note: not atomic — concurrent coroutines may slightly exceed the limit. Acceptable for soft guardrail.
@@ -579,10 +622,12 @@ async def save_memory(
     if len(user_timestamps) >= _RATE_LIMIT_MAX:
         oldest = user_timestamps[0]
         retry_in = int(_RATE_LIMIT_WINDOW - (now - oldest)) + 1
-        return json.dumps({
-            "error": "rate_limit_exceeded",
-            "message": f"Rate limit exceeded: {_RATE_LIMIT_MAX} saves/{_RATE_LIMIT_WINDOW}s. Try again in {retry_in} seconds.",
-        })
+        return json.dumps(
+            {
+                "error": "rate_limit_exceeded",
+                "message": f"Rate limit exceeded: {_RATE_LIMIT_MAX} saves/{_RATE_LIMIT_WINDOW}s. Try again in {retry_in} seconds.",
+            }
+        )
 
     # ── Daily guard check ──────────────────────────────────────────────────────
     config = get_config()
@@ -590,14 +635,19 @@ async def save_memory(
         pool = await get_pool()
         async with pool.acquire() as conn:
             # DB query for accuracy across restarts and multi-instance deployments
-            today_count = await conn.fetchval(
-                "SELECT COUNT(*)::int FROM memories WHERE created_at >= CURRENT_DATE"
-            ) or 0
+            today_count = (
+                await conn.fetchval(
+                    "SELECT COUNT(*)::int FROM memories WHERE created_at >= CURRENT_DATE"
+                )
+                or 0
+            )
         if today_count >= config.MAX_MEMORIES_PER_DAY:
-            return json.dumps({
-                "error": "daily_limit_exceeded",
-                "message": f"Daily memory limit of {config.MAX_MEMORIES_PER_DAY} exceeded. {today_count} memories saved today.",
-            })
+            return json.dumps(
+                {
+                    "error": "daily_limit_exceeded",
+                    "message": f"Daily memory limit of {config.MAX_MEMORIES_PER_DAY} exceeded. {today_count} memories saved today.",
+                }
+            )
 
     # Rate-limit slot claimed only after all guards pass
     user_timestamps.append(now)
@@ -623,21 +673,29 @@ async def save_memory(
         narrative=narrative,
         session_ref=session_ref,
         metadata=metadata,
+        provenance=canonical_provenance,
         user_id=user_id,
         importance=importance,
         dedup_mode=dedup_mode,  # type: ignore[arg-type]
     )
 
     # Save first — must know if duplicate before firing expensive LLM calls.
-    result = await dl.save_memory(save_params)
+    try:
+        result = await dl.save_memory(save_params)
+    except OriginProvenanceValidationError as exc:
+        return json.dumps({"error": exc.code, "message": str(exc)})
 
     # Skip LLM enrichment entirely for duplicates — no wasted API calls, no update_memory.
     if result.duplicate_of is None:
         # Run classification and entity extraction concurrently (non-duplicate path only).
-        classify_coro = classify_and_extract(text, existing_metadata=metadata, memory_type=normalized_type)
+        classify_coro = classify_and_extract(
+            text, existing_metadata=metadata, memory_type=normalized_type
+        )
         if not has_entities:
             entities_coro = _extract_entities(text)
-            entities_result, classification = await asyncio.gather(entities_coro, classify_coro)
+            entities_result, classification = await asyncio.gather(
+                entities_coro, classify_coro
+            )
         else:
             classification = await classify_coro
             entities_result = {}
@@ -647,7 +705,9 @@ async def save_memory(
         # Add classification metadata (guard: skip if bypass returned metadata unchanged,
         # and only send keys that differ from the original metadata to avoid redundant writes)
         if classification != (metadata or {}):
-            post_save_metadata = {k: v for k, v in classification.items() if (metadata or {}).get(k) != v}
+            post_save_metadata = {
+                k: v for k, v in classification.items() if (metadata or {}).get(k) != v
+            }
 
         # Add entity extraction results
         if entities_result:
@@ -692,7 +752,9 @@ async def save_memory(
                     )
                 )
             except Exception:
-                logger.exception("save_memory: post-save metadata update failed (classification/entities)")
+                logger.exception(
+                    "save_memory: post-save metadata update failed (classification/entities)"
+                )
 
     payload: dict = {"id": result.id, "message": result.message}
     if result.duplicate_of is not None:
@@ -719,7 +781,9 @@ async def save_memory(
         if classified_template:
             classified_type = canonical_type_for_capture_template(classified_template)
             classified_metadata = {**(metadata or {}), **classification}
-            for warning in validate_domain_metadata(classified_type, classified_metadata):
+            for warning in validate_domain_metadata(
+                classified_type, classified_metadata
+            ):
                 if warning not in domain_warnings:
                     domain_warnings.append(warning)
 
@@ -867,12 +931,15 @@ async def get_context(limit: int | None = None, project: str | None = None) -> s
 async def get_wake_up_pack(token_budget: int = 500, project: str | None = None) -> str:
     """Get categorized memory context optimized for session start injection."""
     from open_brain.wake_up import build_wake_up_pack
+
     dl = get_dl()
     memories = await dl.get_wake_up_memories(project=project)
     return build_wake_up_pack(memories, token_budget)
 
 
-@mcp.tool(description="Get database statistics (memory count, sessions, DB size, type taxonomy with counts)")
+@mcp.tool(
+    description="Get database statistics (memory count, sessions, DB size, type taxonomy with counts)"
+)
 @logged_tool
 async def stats() -> str:
     """Get DB statistics."""
@@ -881,7 +948,9 @@ async def stats() -> str:
     return json.dumps(result, default=str)
 
 
-@mcp.tool(description="Get ingest observability stats: counters for ingests, LLM calls, dedup decisions, relationships, memories written, and ingest durations.")
+@mcp.tool(
+    description="Get ingest observability stats: counters for ingests, LLM calls, dedup decisions, relationships, memories written, and ingest durations."
+)
 @logged_tool
 async def people_ingest_stats() -> str:
     """Return in-process ingest metrics for all six metric families.
@@ -913,7 +982,9 @@ async def people_discussed_with(
 ) -> str:
     """Return meetings + mentions + interactions linking to person_id."""
     dl = get_dl()
-    result = await dl.people_discussed_with(person_id=person_id, since=since, limit=limit)
+    result = await dl.people_discussed_with(
+        person_id=person_id, since=since, limit=limit
+    )
     return json.dumps(result, default=str)
 
 
@@ -1029,6 +1100,7 @@ async def people_merge(
 
 # ── Shared health-check helpers ───────────────────────────────────────────────
 
+
 async def _check_db_status() -> dict:
     """Check DB connectivity and return status dict.
 
@@ -1046,8 +1118,12 @@ async def _check_db_status() -> dict:
             await conn.fetchval("SELECT 1")
             db_latency_ms = round((time.monotonic() - t0) * 1000, 2)
             db_status = "ok"
-            memory_count = await conn.fetchval("SELECT COUNT(*)::int FROM memories") or 0
-            last_row = await conn.fetchrow("SELECT MAX(created_at) AS max FROM memories")
+            memory_count = (
+                await conn.fetchval("SELECT COUNT(*)::int FROM memories") or 0
+            )
+            last_row = await conn.fetchrow(
+                "SELECT MAX(created_at) AS max FROM memories"
+            )
             if last_row and last_row["max"] is not None:
                 last_ingestion_at = last_row["max"].isoformat()
     except Exception:
@@ -1080,7 +1156,9 @@ async def _check_voyage_api_status() -> str:
         return "unreachable"
 
 
-@mcp.tool(description="Run diagnostic health check: DB latency, Voyage API status, memory stats, uptime")
+@mcp.tool(
+    description="Run diagnostic health check: DB latency, Voyage API status, memory stats, uptime"
+)
 @logged_tool
 async def doctor() -> str:
     """Return a structured diagnostic report for operational health monitoring.
@@ -1098,7 +1176,11 @@ async def doctor() -> str:
     except importlib.metadata.PackageNotFoundError:
         server_version = "unknown"
 
-    uptime_seconds = (datetime.now(UTC) - _server_start_time).total_seconds() if _server_start_time else None
+    uptime_seconds = (
+        (datetime.now(UTC) - _server_start_time).total_seconds()
+        if _server_start_time
+        else None
+    )
 
     return json.dumps(
         {
@@ -1108,7 +1190,9 @@ async def doctor() -> str:
             "memory_count": db_info["memory_count"],
             "last_ingestion_at": db_info["last_ingestion_at"],
             "server_version": server_version,
-            "uptime_seconds": round(uptime_seconds, 3) if uptime_seconds is not None else None,
+            "uptime_seconds": round(uptime_seconds, 3)
+            if uptime_seconds is not None
+            else None,
         }
     )
 
@@ -1337,9 +1421,7 @@ async def run_lifecycle_pipeline(
     dl = get_dl()
 
     decay_result = await dl.decay_memories(DecayParams(dry_run=dry_run))
-    triage_result = await dl.triage_memories(
-        TriageParams(scope=scope, dry_run=dry_run)
-    )
+    triage_result = await dl.triage_memories(TriageParams(scope=scope, dry_run=dry_run))
 
     action_counts: dict[str, int] = {}
     for a in triage_result.actions:
@@ -1381,7 +1463,9 @@ async def compact_memories(
     """Cluster near-duplicate memories and optionally hard-delete them."""
     dl = get_dl()
     result = await dl.compact_memories(
-        CompactParams(scope=scope, threshold=threshold, strategy=strategy, dry_run=dry_run)
+        CompactParams(
+            scope=scope, threshold=threshold, strategy=strategy, dry_run=dry_run
+        )
     )
     return json.dumps(
         {
@@ -1417,15 +1501,20 @@ async def compact_memories(
     )
 )
 @logged_tool
-async def ingest_transcript(text: str, source_ref: str, medium_hint: str | None = None) -> str:
+async def ingest_transcript(
+    text: str, source_ref: str, medium_hint: str | None = None
+) -> str:
     """Ingest a transcript and return IngestResult as JSON."""
     if not text or not text.strip():
         raise ValueError("text must not be empty or whitespace-only")
     from open_brain.ingest.adapters.transcript import TranscriptIngestor
     import dataclasses
+
     dl = get_dl()
     ingestor = TranscriptIngestor(data_layer=dl)
-    result = await ingestor.ingest(text=text, source_ref=source_ref, medium_hint=medium_hint)
+    result = await ingestor.ingest(
+        text=text, source_ref=source_ref, medium_hint=medium_hint
+    )
     return json.dumps(dataclasses.asdict(result))
 
 
@@ -1478,11 +1567,13 @@ async def ingest_rollback(run_id: str) -> str:
         raise ValueError("run_id must be a non-empty string")
     dl = get_dl()
     result = await dl.delete_by_run_id(run_id)
-    return json.dumps({
-        "memories_deleted": result.memories,
-        "relationships_deleted": result.relationships,
-        "run_id": run_id,
-    })
+    return json.dumps(
+        {
+            "memories_deleted": result.memories,
+            "relationships_deleted": result.relationships,
+            "run_id": run_id,
+        }
+    )
 
 
 @mcp.tool(
@@ -1534,8 +1625,14 @@ _mcp_app = mcp.streamable_http_app()
 
 # OAuth paths that must remain unauthenticated
 _PUBLIC_PATHS = {
-    "/authorize", "/authorize/submit", "/token", "/register", "/revoke",
-    "/.well-known/oauth-authorization-server", "/.well-known/oauth-protected-resource", "/health",
+    "/authorize",
+    "/authorize/submit",
+    "/token",
+    "/register",
+    "/revoke",
+    "/.well-known/oauth-authorization-server",
+    "/.well-known/oauth-protected-resource",
+    "/health",
 }
 
 
@@ -1596,13 +1693,19 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
             except Exception:
                 logger.exception("URL token DB lookup failed")
                 return JSONResponse(
-                    {"error": "service_unavailable", "error_description": "Token verification temporarily unavailable"},
+                    {
+                        "error": "service_unavailable",
+                        "error_description": "Token verification temporarily unavailable",
+                    },
                     status_code=503,
                 )
 
             if row is None:
                 return JSONResponse(
-                    {"error": "unauthorized", "error_description": "Invalid, expired, or revoked URL token"},
+                    {
+                        "error": "unauthorized",
+                        "error_description": "Invalid, expired, or revoked URL token",
+                    },
                     status_code=401,
                     headers={"WWW-Authenticate": "Bearer"},
                 )
@@ -1625,7 +1728,10 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
         auth_header = request.headers.get("authorization", "")
         if not auth_header.startswith("Bearer "):
             return JSONResponse(
-                {"error": "unauthorized", "error_description": "Missing Bearer token or API key"},
+                {
+                    "error": "unauthorized",
+                    "error_description": "Missing Bearer token or API key",
+                },
                 status_code=401,
                 headers={"WWW-Authenticate": "Bearer"},
             )
@@ -1640,7 +1746,10 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
             scopes_token = _current_scopes.set(tuple(verified.scopes))
         except Exception:
             return JSONResponse(
-                {"error": "unauthorized", "error_description": "Invalid or expired token"},
+                {
+                    "error": "unauthorized",
+                    "error_description": "Invalid or expired token",
+                },
                 status_code=401,
                 headers={"WWW-Authenticate": "Bearer"},
             )
@@ -1685,6 +1794,7 @@ async def scope_denied_handler(request: Request, exc: ScopeDeniedError) -> JSONR
 
 
 # ─── OAuth 2.1 Routes ─────────────────────────────────────────────────────────
+
 
 @app.get("/authorize")
 async def authorize(
@@ -1746,12 +1856,14 @@ async def token_endpoint(request: Request) -> JSONResponse:
         client_id = body.get("client_id", "")
         try:
             tokens = provider.exchange_authorization_code(str(client_id), str(code))
-            return JSONResponse({
-                "access_token": tokens.access_token,
-                "token_type": tokens.token_type,
-                "expires_in": tokens.expires_in,
-                "refresh_token": tokens.refresh_token,
-            })
+            return JSONResponse(
+                {
+                    "access_token": tokens.access_token,
+                    "token_type": tokens.token_type,
+                    "expires_in": tokens.expires_in,
+                    "refresh_token": tokens.refresh_token,
+                }
+            )
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -1760,12 +1872,14 @@ async def token_endpoint(request: Request) -> JSONResponse:
         client_id = body.get("client_id", "")
         try:
             tokens = provider.exchange_refresh_token(str(client_id), str(refresh_token))
-            return JSONResponse({
-                "access_token": tokens.access_token,
-                "token_type": tokens.token_type,
-                "expires_in": tokens.expires_in,
-                "refresh_token": tokens.refresh_token,
-            })
+            return JSONResponse(
+                {
+                    "access_token": tokens.access_token,
+                    "token_type": tokens.token_type,
+                    "expires_in": tokens.expires_in,
+                    "refresh_token": tokens.refresh_token,
+                }
+            )
         except (ValueError, Exception) as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -1810,6 +1924,7 @@ async def register_client(request: Request) -> JSONResponse:
 
 # ─── URL Token Endpoints ──────────────────────────────────────────────────────
 
+
 @app.post("/token/url")
 async def issue_url_token(request: Request) -> JSONResponse:
     """Issue a URL-based opaque token (requires admin scope).
@@ -1831,11 +1946,16 @@ async def issue_url_token(request: Request) -> JSONResponse:
             status_code=400,
         )
 
-    requested_scopes: list[str] = [s for s in body.get("scopes", []) if isinstance(s, str)]
+    requested_scopes: list[str] = [
+        s for s in body.get("scopes", []) if isinstance(s, str)
+    ]
     # Reject if admin scope is explicitly requested — never grantable to URL tokens (AK6)
     if "admin" in requested_scopes:
         return JSONResponse(
-            {"error": "invalid_scope", "error_description": "admin scope cannot be granted to URL tokens"},
+            {
+                "error": "invalid_scope",
+                "error_description": "admin scope cannot be granted to URL tokens",
+            },
             status_code=422,
         )
     # no-op after 422 guard above; retained as belt-and-suspenders
@@ -1845,7 +1965,10 @@ async def issue_url_token(request: Request) -> JSONResponse:
     for scope in safe_scopes:
         if scope not in _VALID_URL_TOKEN_SCOPES:
             return JSONResponse(
-                {"error": "invalid_request", "error_description": f"Unknown scope: {scope}"},
+                {
+                    "error": "invalid_request",
+                    "error_description": f"Unknown scope: {scope}",
+                },
                 status_code=422,
             )
 
@@ -1853,17 +1976,26 @@ async def issue_url_token(request: Request) -> JSONResponse:
         expires_in_days = int(body.get("expires_in_days", 365))
     except (ValueError, TypeError):
         return JSONResponse(
-            {"error": "invalid_request", "error_description": "expires_in_days must be a positive integer"},
+            {
+                "error": "invalid_request",
+                "error_description": "expires_in_days must be a positive integer",
+            },
             status_code=400,
         )
     if expires_in_days <= 0:
         return JSONResponse(
-            {"error": "invalid_request", "error_description": "expires_in_days must be positive"},
+            {
+                "error": "invalid_request",
+                "error_description": "expires_in_days must be positive",
+            },
             status_code=400,
         )
     if expires_in_days > 3650:
         return JSONResponse(
-            {"error": "invalid_request", "error_description": "expires_in_days cannot exceed 3650 (10 years)"},
+            {
+                "error": "invalid_request",
+                "error_description": "expires_in_days cannot exceed 3650 (10 years)",
+            },
             status_code=400,
         )
 
@@ -1885,7 +2017,10 @@ async def issue_url_token(request: Request) -> JSONResponse:
         )
     except asyncpg.exceptions.UniqueViolationError:
         return JSONResponse(
-            {"error": "conflict", "error_description": "A URL token with this name already exists"},
+            {
+                "error": "conflict",
+                "error_description": "A URL token with this name already exists",
+            },
             status_code=409,
         )
 
@@ -1928,16 +2063,18 @@ async def oauth_metadata() -> JSONResponse:
     """OAuth 2.1 server metadata."""
     config = get_config()
     base = config.MCP_SERVER_URL.rstrip("/")
-    return JSONResponse({
-        "issuer": base,
-        "authorization_endpoint": f"{base}/authorize",
-        "token_endpoint": f"{base}/token",
-        "registration_endpoint": f"{base}/register",
-        "revocation_endpoint": f"{base}/revoke",
-        "response_types_supported": ["code"],
-        "grant_types_supported": ["authorization_code", "refresh_token"],
-        "code_challenge_methods_supported": ["S256"],
-    })
+    return JSONResponse(
+        {
+            "issuer": base,
+            "authorization_endpoint": f"{base}/authorize",
+            "token_endpoint": f"{base}/token",
+            "registration_endpoint": f"{base}/register",
+            "revocation_endpoint": f"{base}/revoke",
+            "response_types_supported": ["code"],
+            "grant_types_supported": ["authorization_code", "refresh_token"],
+            "code_challenge_methods_supported": ["S256"],
+        }
+    )
 
 
 def _load_client_name(client_id: str) -> str:
@@ -1966,11 +2103,13 @@ async def oauth_protected_resource() -> JSONResponse:
     """OAuth 2.0 Protected Resource Metadata (RFC 9728)."""
     config = get_config()
     base = config.MCP_SERVER_URL.rstrip("/")
-    return JSONResponse({
-        "resource": base,
-        "authorization_servers": [base],
-        "bearer_methods_supported": ["header"],
-    })
+    return JSONResponse(
+        {
+            "resource": base,
+            "authorization_servers": [base],
+            "bearer_methods_supported": ["header"],
+        }
+    )
 
 
 @app.get("/health")
@@ -2010,11 +2149,27 @@ async def health() -> JSONResponse:
 
 # Skip list for observation capture — tools with no learning value
 _INGEST_SKIP_TOOLS = {
-    "Read", "Glob", "Grep", "Skill", "ToolSearch", "AskUserQuestion",
-    "TaskCreate", "TaskUpdate", "TaskGet", "TaskList", "TaskOutput", "TaskStop",
-    "CronCreate", "CronDelete", "CronList", "SendMessage",
-    "ListMcpResourcesTool", "ReadMcpResourceTool",
-    "EnterPlanMode", "ExitPlanMode", "EnterWorktree",
+    "Read",
+    "Glob",
+    "Grep",
+    "Skill",
+    "ToolSearch",
+    "AskUserQuestion",
+    "TaskCreate",
+    "TaskUpdate",
+    "TaskGet",
+    "TaskList",
+    "TaskOutput",
+    "TaskStop",
+    "CronCreate",
+    "CronDelete",
+    "CronList",
+    "SendMessage",
+    "ListMcpResourcesTool",
+    "ReadMcpResourceTool",
+    "EnterPlanMode",
+    "ExitPlanMode",
+    "EnterWorktree",
     "NotebookEdit",
 }
 
@@ -2044,11 +2199,20 @@ async def _process_ingest(body: dict) -> None:
         session_id = body.get("session_id", "")
         cwd = body.get("cwd", "")
 
-        extraction = await _extract_observation(tool_name, tool_input, tool_response, cwd)
+        extraction = await _extract_observation(
+            tool_name, tool_input, tool_response, cwd
+        )
         if not extraction:
             return
 
         dl = get_dl()
+        if session_id:
+            source_ref = f"agent-session:claude:{session_id}"
+        else:
+            event_fingerprint = hashlib.sha256(
+                json.dumps(body, sort_keys=True, default=str).encode()
+            ).hexdigest()
+            source_ref = f"hook-event:{event_fingerprint}"
         await dl.save_memory(
             SaveMemoryParams(
                 text=extraction["content"],
@@ -2058,9 +2222,15 @@ async def _process_ingest(body: dict) -> None:
                 subtitle=extraction.get("subtitle"),
                 narrative=extraction.get("narrative"),
                 session_ref=session_id if session_id else None,
+                provenance={
+                    "producer": "post-tool-use",
+                    "source_ref": source_ref,
+                },
             )
         )
-        logger.info("Ingested observation: %s [%s]", extraction.get("title", ""), tool_name)
+        logger.info(
+            "Ingested observation: %s [%s]", extraction.get("title", ""), tool_name
+        )
     except Exception:
         logger.exception("Failed to process ingest")
 
@@ -2180,7 +2350,9 @@ async def api_worktree_session_summary(request: Request) -> JSONResponse:
 
     turns = body.get("turns")
     if not isinstance(turns, list) or not turns:
-        return JSONResponse({"error": "turns must be a non-empty array"}, status_code=400)
+        return JSONResponse(
+            {"error": "turns must be a non-empty array"}, status_code=400
+        )
 
     asyncio.create_task(_process_worktree_session_summary(body))
 
@@ -2198,7 +2370,9 @@ async def _process_worktree_session_summary(body: dict) -> None:
         # Filter to valid dicts only — skip any malformed entries
         valid_turns = [t for t in turns if isinstance(t, dict)]
         if not valid_turns:
-            logger.warning("worktree_session_summary: no valid turn dicts in payload, skipping")
+            logger.warning(
+                "worktree_session_summary: no valid turn dicts in payload, skipping"
+            )
             return
 
         # Build prompt from valid_turns
@@ -2232,7 +2406,9 @@ async def _process_worktree_session_summary(body: dict) -> None:
         # matching the /api/session-capture truncation idiom.
         if len(turns_text) > _MAX_TURNS_TEXT:
             half = _MAX_TURNS_TEXT // 2
-            turns_text = turns_text[:half] + "\n\n[...truncated...]\n\n" + turns_text[-half:]
+            turns_text = (
+                turns_text[:half] + "\n\n[...truncated...]\n\n" + turns_text[-half:]
+            )
 
         summary_prompt = f"""Summarize this worktree coding session based on the turn log below.
 
@@ -2256,7 +2432,9 @@ Respond with ONLY valid JSON, no markdown fences."""
         summary = parse_llm_json(response)
 
         # Build session_ref from sorted unique session_ids
-        session_ids = sorted({t["session_id"] for t in valid_turns if t.get("session_id")})
+        session_ids = sorted(
+            {t["session_id"] for t in valid_turns if t.get("session_id")}
+        )
         session_ref = ",".join(session_ids)
 
         # Metadata fields
@@ -2273,19 +2451,35 @@ Respond with ONLY valid JSON, no markdown fences."""
             metadata["bead_id"] = bead_id
 
         dl = get_dl()
+        if session_ref:
+            session_source_ref = (
+                f"agent-session:{agent.lower() or 'worktree'}:{session_ref}"
+            )
+        else:
+            session_source_ref = (
+                f"worktree-session:{project}:{worktree}:{last_ts or 'unknown'}"
+            )
         await dl.save_memory(
             SaveMemoryParams(
-                text=summary.get("content", f"Worktree session summary for {worktree}."),
+                text=summary.get(
+                    "content", f"Worktree session summary for {worktree}."
+                ),
                 type="session_summary",
                 project=project,
                 title=summary.get("title", f"Worktree session: {worktree}"),
                 narrative=summary.get("narrative"),
                 session_ref=session_ref if session_ref else None,
                 metadata=metadata,
+                provenance={
+                    "producer": "worktree-session-summary",
+                    "source_ref": session_source_ref,
+                },
             )
         )
         logger.info(
-            "Worktree session summary saved for %s [%s turns]", worktree, len(valid_turns)
+            "Worktree session summary saved for %s [%s turns]",
+            worktree,
+            len(valid_turns),
         )
     except Exception:
         logger.exception("Failed to process worktree session summary")
@@ -2309,7 +2503,9 @@ async def api_session_capture(request: Request) -> JSONResponse:
     message_count = body.get("message_count", 0)
 
     if message_count < 3:
-        return JSONResponse({"status": "skipped", "reason": "too_few_messages"}, status_code=202)
+        return JSONResponse(
+            {"status": "skipped", "reason": "too_few_messages"}, status_code=202
+        )
 
     asyncio.create_task(_process_session_capture(body))
     return JSONResponse({"status": "accepted"}, status_code=202)
@@ -2328,7 +2524,9 @@ async def _process_session_capture(body: dict) -> None:
 
         # Truncate to ~8k chars to stay within Haiku context
         if len(conversation) > 8000:
-            conversation = conversation[:4000] + "\n\n[...truncated...]\n\n" + conversation[-4000:]
+            conversation = (
+                conversation[:4000] + "\n\n[...truncated...]\n\n" + conversation[-4000:]
+            )
 
         extraction_prompt = f"""Analyze this coding conversation and extract the most important observations.
 
@@ -2374,6 +2572,7 @@ If nothing worth remembering happened, return: {{"observations": [], "session_su
         result = parse_llm_json(response)
 
         dl = get_dl()
+        source_ref = f"agent-session:claude:{session_id}"
 
         # Save individual observations
         for obs in result.get("observations", []):
@@ -2385,6 +2584,10 @@ If nothing worth remembering happened, return: {{"observations": [], "session_su
                     title=obs.get("title"),
                     narrative=obs.get("narrative"),
                     session_ref=session_id,
+                    provenance={
+                        "producer": "session-capture",
+                        "source_ref": source_ref,
+                    },
                 )
             )
 
@@ -2399,13 +2602,19 @@ If nothing worth remembering happened, return: {{"observations": [], "session_su
                     title=summary.get("title", "Session summary"),
                     narrative=summary.get("narrative"),
                     session_ref=session_id,
+                    provenance={
+                        "producer": "session-capture",
+                        "source_ref": source_ref,
+                    },
                 )
             )
 
         obs_count = len(result.get("observations", []))
         logger.info(
             "Session capture: %d observations + summary for %s [%s]",
-            obs_count, session_id, project,
+            obs_count,
+            session_id,
+            project,
         )
     except Exception:
         logger.exception("Failed to process session capture")
@@ -2446,14 +2655,18 @@ async def weekly_briefing(
     _require_scope("evolution")
     try:
         dl = get_dl()
-        result = await generate_weekly_briefing(dl, weeks_back=weeks_back, project=project)
+        result = await generate_weekly_briefing(
+            dl, weeks_back=weeks_back, project=project
+        )
         return json.dumps(asdict(result), default=str)
     except Exception:
         logger.exception("weekly_briefing failed")
         raise
 
 
-@mcp.tool(description="Analyze briefing engagement: response rates by type over last N days. Returns EngagementReport.")
+@mcp.tool(
+    description="Analyze briefing engagement: response rates by type over last N days. Returns EngagementReport."
+)
 @logged_tool
 async def analyze_briefing_engagement(
     days_back: int = 7,
@@ -2464,26 +2677,30 @@ async def analyze_briefing_engagement(
     dl = get_dl()
     try:
         report = await analyze_engagement(dl, days_back=days_back, project=project)
-        return json.dumps({
-            "period_days": report.period_days,
-            "total_briefings": report.total_briefings,
-            "has_sufficient_data": report.has_sufficient_data,
-            "by_type": [
-                {
-                    "briefing_type": e.briefing_type,
-                    "total_count": e.total_count,
-                    "responded_count": e.responded_count,
-                    "response_rate": e.response_rate,
-                }
-                for e in report.by_type
-            ],
-        })
+        return json.dumps(
+            {
+                "period_days": report.period_days,
+                "total_briefings": report.total_briefings,
+                "has_sufficient_data": report.has_sufficient_data,
+                "by_type": [
+                    {
+                        "briefing_type": e.briefing_type,
+                        "total_count": e.total_count,
+                        "responded_count": e.responded_count,
+                        "response_rate": e.response_rate,
+                    }
+                    for e in report.by_type
+                ],
+            }
+        )
     except Exception:
         logger.exception("analyze_briefing_engagement failed")
         raise
 
 
-@mcp.tool(description="Generate ONE self-improvement suggestion based on engagement (rate-limited to 1 per 7 days). Returns suggestion or null.")
+@mcp.tool(
+    description="Generate ONE self-improvement suggestion based on engagement (rate-limited to 1 per 7 days). Returns suggestion or null."
+)
 @logged_tool
 async def generate_evolution_suggestion(
     days_back: int = 7,
@@ -2497,21 +2714,25 @@ async def generate_evolution_suggestion(
         suggestion = await generate_suggestion(report, dl, project=project)
         if suggestion is None:
             return json.dumps({"suggestion": None})
-        return json.dumps({
-            "suggestion": {
-                "id": suggestion.id,
-                "action": suggestion.action,
-                "briefing_type": suggestion.briefing_type,
-                "reason": suggestion.reason,
-                "response_rate": suggestion.response_rate,
+        return json.dumps(
+            {
+                "suggestion": {
+                    "id": suggestion.id,
+                    "action": suggestion.action,
+                    "briefing_type": suggestion.briefing_type,
+                    "reason": suggestion.reason,
+                    "response_rate": suggestion.response_rate,
+                }
             }
-        })
+        )
     except Exception:
         logger.exception("generate_evolution_suggestion failed")
         raise
 
 
-@mcp.tool(description="Log approval/rejection of an evolution suggestion. Approved changes saved as type=evolution. briefing_type, if provided, enables 30-day rejection suppression so the same briefing type is not re-proposed within 30 days.")
+@mcp.tool(
+    description="Log approval/rejection of an evolution suggestion. Approved changes saved as type=evolution. briefing_type, if provided, enables 30-day rejection suppression so the same briefing type is not re-proposed within 30 days."
+)
 @logged_tool
 async def log_evolution_approval(
     suggestion_id: int,
@@ -2523,9 +2744,17 @@ async def log_evolution_approval(
     _require_scope("evolution")
     dl = get_dl()
     try:
-        await _log_evolution_approval(dl, suggestion_id=suggestion_id, approved=approved, project=project, briefing_type=briefing_type)
+        await _log_evolution_approval(
+            dl,
+            suggestion_id=suggestion_id,
+            approved=approved,
+            project=project,
+            briefing_type=briefing_type,
+        )
         action_label = "approved" if approved else "rejected"
-        return json.dumps({"status": "logged", "suggestion_id": suggestion_id, "action": action_label})
+        return json.dumps(
+            {"status": "logged", "suggestion_id": suggestion_id, "action": action_label}
+        )
     except Exception:
         logger.exception("log_evolution_approval failed")
         raise
@@ -2542,18 +2771,20 @@ async def query_evolution_history_tool(
     dl = get_dl()
     try:
         memories = await query_evolution_history(dl, limit=limit, project=project)
-        return json.dumps({
-            "count": len(memories),
-            "history": [
-                {
-                    "id": m.id,
-                    "title": m.title,
-                    "metadata": m.metadata,
-                    "created_at": m.created_at,
-                }
-                for m in memories
-            ],
-        })
+        return json.dumps(
+            {
+                "count": len(memories),
+                "history": [
+                    {
+                        "id": m.id,
+                        "title": m.title,
+                        "metadata": m.metadata,
+                        "created_at": m.created_at,
+                    }
+                    for m in memories
+                ],
+            }
+        )
     except Exception:
         logger.exception("query_evolution_history_tool failed")
         raise
@@ -2592,25 +2823,27 @@ async def regenerate_summaries_from_transcripts(
         logger.exception("regenerate_summaries_from_transcripts failed")
         raise
 
-    return json.dumps({
-        "regenerated_count": result.regenerated_count,
-        "orphan_count": result.orphan_count,
-        "transcript_missing_list": result.transcript_missing_list,
-        "new_summary_ids": result.new_summary_ids,
-        "failures": result.failures,
-        "plan": [
-            {
-                "session_ref": p.session_ref,
-                "existing_memory_ids": p.existing_memory_ids,
-                "transcript_found": p.transcript_found,
-                "transcript_path": p.transcript_path,
-                "transcript_turn_count": p.transcript_turn_count,
-                "action": p.action,
-            }
-            for p in result.plan
-        ],
-        "dry_run": dry_run,
-    })
+    return json.dumps(
+        {
+            "regenerated_count": result.regenerated_count,
+            "orphan_count": result.orphan_count,
+            "transcript_missing_list": result.transcript_missing_list,
+            "new_summary_ids": result.new_summary_ids,
+            "failures": result.failures,
+            "plan": [
+                {
+                    "session_ref": p.session_ref,
+                    "existing_memory_ids": p.existing_memory_ids,
+                    "transcript_found": p.transcript_found,
+                    "transcript_path": p.transcript_path,
+                    "transcript_turn_count": p.transcript_turn_count,
+                    "action": p.action,
+                }
+                for p in result.plan
+            ],
+            "dry_run": dry_run,
+        }
+    )
 
 
 @mcp.tool(
@@ -2636,7 +2869,14 @@ async def create_relationship(
         link_type=link_type,
         metadata=metadata,
     )
-    return json.dumps({"id": rel_id, "source_id": source_id, "target_id": target_id, "link_type": link_type})
+    return json.dumps(
+        {
+            "id": rel_id,
+            "source_id": source_id,
+            "target_id": target_id,
+            "link_type": link_type,
+        }
+    )
 
 
 @mcp.tool(
@@ -2683,7 +2923,12 @@ async def api_delete_memories(request: Request) -> JSONResponse:
         before=body.get("before"),
     )
 
-    if params.ids is None and not params.project and not params.type and not params.before:
+    if (
+        params.ids is None
+        and not params.project
+        and not params.type
+        and not params.before
+    ):
         return JSONResponse(
             {"error": "At least one filter (ids, project, type, before) is required"},
             status_code=400,
@@ -2718,7 +2963,10 @@ async def api_context(
             # If it looks like a Unix epoch (all digits), convert to ISO
             if since.strip().isdigit():
                 from datetime import datetime, timezone
-                date_start = datetime.fromtimestamp(int(since), tz=timezone.utc).isoformat()
+
+                date_start = datetime.fromtimestamp(
+                    int(since), tz=timezone.utc
+                ).isoformat()
             else:
                 date_start = since
         except Exception:
@@ -2726,7 +2974,13 @@ async def api_context(
 
     # Fetch session summaries (stored as memories with obs_type=session_summary)
     sessions_result = await dl.search(
-        SearchParams(obs_type="session_summary", project=project, limit=3, order_by=None, date_start=date_start)
+        SearchParams(
+            obs_type="session_summary",
+            project=project,
+            limit=3,
+            order_by=None,
+            date_start=date_start,
+        )
     )
 
     # Fetch recent non-session observations
@@ -2736,26 +2990,28 @@ async def api_context(
     non_session = [m for m in result.results if m.type != "session_summary"]
 
     if format == "json":
-        return JSONResponse({
-            "sessions": [
-                {
-                    "title": m.title,
-                    "narrative": m.narrative,
-                    "content": m.content,
-                    "created_at": str(m.created_at) if m.created_at else None,
-                }
-                for m in sessions_result.results
-            ],
-            "observations": [
-                {
-                    "type": m.type,
-                    "title": m.title,
-                    "narrative": m.narrative,
-                    "created_at": str(m.created_at) if m.created_at else None,
-                }
-                for m in non_session[:20]
-            ],
-        })
+        return JSONResponse(
+            {
+                "sessions": [
+                    {
+                        "title": m.title,
+                        "narrative": m.narrative,
+                        "content": m.content,
+                        "created_at": str(m.created_at) if m.created_at else None,
+                    }
+                    for m in sessions_result.results
+                ],
+                "observations": [
+                    {
+                        "type": m.type,
+                        "title": m.title,
+                        "narrative": m.narrative,
+                        "created_at": str(m.created_at) if m.created_at else None,
+                    }
+                    for m in non_session[:20]
+                ],
+            }
+        )
 
     # Legacy markdown format
     lines = []
@@ -2796,6 +3052,7 @@ async def api_wake_up_pack(
     Optional project filter: only return memories for this project (filtered at DB level).
     """
     from open_brain.wake_up import build_wake_up_pack
+
     dl = get_dl()
     memories = await dl.get_wake_up_memories(project=project)
     result = build_wake_up_pack(memories, token_budget)

@@ -46,7 +46,9 @@ def _memory(
 
 
 @pytest.mark.asyncio
-async def test_generate_daily_review_date_bounds_entries_unresolved_and_sources() -> None:
+async def test_generate_daily_review_date_bounds_entries_unresolved_and_sources() -> (
+    None
+):
     """Daily review composes date-bounded entries, unresolved inbox captures, and provenance."""
     from open_brain.digest import generate_daily_review
 
@@ -61,7 +63,10 @@ async def test_generate_daily_review_date_bounds_entries_unresolved_and_sources(
             2,
             memory_type="meeting",
             title="Transcript import",
-            metadata={"source_ref": "macwhisper:session:abc123", "capture_status": "inbox"},
+            metadata={
+                "source_ref": "macwhisper:session:abc123",
+                "capture_status": "inbox",
+            },
         ),
         _memory(
             3,
@@ -96,7 +101,12 @@ async def test_generate_daily_review_date_bounds_entries_unresolved_and_sources(
     assert review.counts == {
         "entries": 4,
         "unresolved": 2,
-        "by_type": {"resource": 1, "meeting": 1, "paperless_reference": 1, "journal": 1},
+        "by_type": {
+            "resource": 1,
+            "meeting": 1,
+            "paperless_reference": 1,
+            "journal": 1,
+        },
     }
     assert review.entries[0] == {
         "id": 1,
@@ -117,8 +127,18 @@ async def test_generate_daily_review_date_bounds_entries_unresolved_and_sources(
     }
     assert review.entries[3]["source"] is None
     assert review.unresolved_captures == [
-        {"id": 2, "title": "Transcript import", "type": "meeting", "capture_status": "inbox"},
-        {"id": 3, "title": "Paperless contract", "type": "paperless_reference", "capture_status": "inbox"},
+        {
+            "id": 2,
+            "title": "Transcript import",
+            "type": "meeting",
+            "capture_status": "inbox",
+        },
+        {
+            "id": 3,
+            "title": "Paperless contract",
+            "type": "paperless_reference",
+            "capture_status": "inbox",
+        },
     ]
 
     first_params = dl.search.await_args_list[0].args[0]
@@ -139,7 +159,10 @@ async def test_daily_review_tool_is_base_memory_scope_and_serializes_result() ->
 
     dl = AsyncMock()
     dl.search.side_effect = [
-        SearchResult(results=[_memory(10, metadata={"session_ref": "session-2026-07-12"})], total=1),
+        SearchResult(
+            results=[_memory(10, metadata={"session_ref": "session-2026-07-12"})],
+            total=1,
+        ),
         SearchResult(results=[], total=0),
     ]
 
@@ -159,7 +182,9 @@ async def test_daily_review_tool_is_base_memory_scope_and_serializes_result() ->
 
 def test_daily_cli_parser_accepts_optional_date_and_project() -> None:
     """The ob CLI exposes a thin daily_review wrapper."""
-    args = _build_parser().parse_args(["daily", "2026-07-12", "--project", "open-brain"])
+    args = _build_parser().parse_args(
+        ["daily", "2026-07-12", "--project", "open-brain"]
+    )
 
     assert args.command == "daily"
     assert args.date == "2026-07-12"
@@ -171,7 +196,9 @@ async def test_daily_cli_calls_daily_review_tool() -> None:
     """The daily command forwards date and project to the MCP tool."""
     from open_brain.cli.main import _cmd_daily
 
-    args = _build_parser().parse_args(["daily", "2026-07-12", "--project", "open-brain"])
+    args = _build_parser().parse_args(
+        ["daily", "2026-07-12", "--project", "open-brain"]
+    )
     with patch("open_brain.cli.main.call_tool", new_callable=AsyncMock) as mock_call:
         mock_call.return_value = {"date": "2026-07-12"}
         await _cmd_daily(args)
@@ -243,15 +270,25 @@ async def test_daily_review_round_trip_uses_real_database(
     try:
         with ingest_run() as current_run_id:
             run_id = current_run_id
-            with patch.object(PostgresDataLayer, "_embed_and_link", new_callable=AsyncMock):
+            with patch.object(
+                PostgresDataLayer, "_embed_and_link", new_callable=AsyncMock
+            ):
                 resource = await dl.save_memory(
                     SaveMemoryParams(
                         text=f"Daily resource {run_id}",
                         type="resource",
                         project=project,
                         title="FHIR community resource",
-                        metadata={"url": RESOURCE_URL, "capture_template": "resource", "entities": {}},
+                        metadata={
+                            "url": RESOURCE_URL,
+                            "capture_template": "resource",
+                            "entities": {},
+                        },
                         capture_status="processed",
+                        provenance={
+                            "producer": "test-suite",
+                            "source_ref": "test-suite:test_daily_review",
+                        },
                     )
                 )
                 unresolved = await dl.save_memory(
@@ -262,6 +299,10 @@ async def test_daily_review_round_trip_uses_real_database(
                         title="Unresolved journal",
                         metadata={"capture_template": "journal", "entities": {}},
                         capture_status="inbox",
+                        provenance={
+                            "producer": "test-suite",
+                            "source_ref": "test-suite:test_daily_review",
+                        },
                     )
                 )
                 outside = await dl.save_memory(
@@ -272,6 +313,10 @@ async def test_daily_review_round_trip_uses_real_database(
                         title="Outside journal",
                         metadata={"capture_template": "journal", "entities": {}},
                         capture_status="inbox",
+                        provenance={
+                            "producer": "test-suite",
+                            "source_ref": "test-suite:test_daily_review",
+                        },
                     )
                 )
 
@@ -286,7 +331,9 @@ async def test_daily_review_round_trip_uses_real_database(
         assert {resource.id, unresolved.id}.issubset(entry_ids)
         assert outside.id not in entry_ids
         assert unresolved_ids == {unresolved.id}
-        resource_entry = next(entry for entry in review.entries if entry["id"] == resource.id)
+        resource_entry = next(
+            entry for entry in review.entries if entry["id"] == resource.id
+        )
         assert resource_entry["source"] == {"kind": "url", "url": RESOURCE_URL}
     finally:
         if run_id is not None:
@@ -296,7 +343,12 @@ async def test_daily_review_round_trip_uses_real_database(
 
 def test_daily_review_documentation_mentions_agent_operation() -> None:
     """The agent workflow documentation covers daily review."""
-    doc = Path(__file__).resolve().parents[2] / "docs" / "features" / "agent-knowledge-workflows.md"
+    doc = (
+        Path(__file__).resolve().parents[2]
+        / "docs"
+        / "features"
+        / "agent-knowledge-workflows.md"
+    )
 
     assert doc.exists()
     text = doc.read_text(encoding="utf-8")

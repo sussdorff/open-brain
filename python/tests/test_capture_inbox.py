@@ -12,6 +12,7 @@ from open_brain.data_layer.postgres import PostgresDataLayer
 
 def _make_pool(conn: AsyncMock) -> MagicMock:
     """Build a mock asyncpg pool."""
+
     @asynccontextmanager
     async def fake_acquire():
         yield conn
@@ -64,7 +65,9 @@ class TestCaptureInboxSearch:
         return PostgresDataLayer()
 
     @pytest.mark.asyncio
-    async def test_save_memory_writes_capture_status_on_normal_insert(self, dl: PostgresDataLayer) -> None:
+    async def test_save_memory_writes_capture_status_on_normal_insert(
+        self, dl: PostgresDataLayer
+    ) -> None:
         inserted_row = MagicMock()
         inserted_row.__getitem__ = lambda self, key: 42 if key == "id" else None
 
@@ -76,7 +79,11 @@ class TestCaptureInboxSearch:
         pool = _make_pool(conn)
 
         with (
-            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch(
+                "open_brain.data_layer.postgres.get_pool",
+                new_callable=AsyncMock,
+                return_value=pool,
+            ),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
@@ -85,19 +92,27 @@ class TestCaptureInboxSearch:
                     text="new capture",
                     metadata={"status": "archived"},
                     capture_status="inbox",
+                    provenance={
+                        "producer": "test-suite",
+                        "source_ref": "test-suite:test_capture_inbox",
+                    },
                 )
             )
 
         assert result.id == 42
         insert_args = conn.fetchrow.call_args_list[-1][0]
         metadata_arg = next(
-            arg for arg in insert_args if isinstance(arg, dict) and "content_hash" in arg
+            arg
+            for arg in insert_args
+            if isinstance(arg, dict) and "content_hash" in arg
         )
         assert metadata_arg["capture_status"] == "inbox"
         assert metadata_arg["status"] == "archived"
 
     @pytest.mark.asyncio
-    async def test_save_memory_defaults_normal_capture_to_inbox(self, dl: PostgresDataLayer) -> None:
+    async def test_save_memory_defaults_normal_capture_to_inbox(
+        self, dl: PostgresDataLayer
+    ) -> None:
         inserted_row = MagicMock()
         inserted_row.__getitem__ = lambda self, key: 43 if key == "id" else None
 
@@ -109,15 +124,29 @@ class TestCaptureInboxSearch:
         pool = _make_pool(conn)
 
         with (
-            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch(
+                "open_brain.data_layer.postgres.get_pool",
+                new_callable=AsyncMock,
+                return_value=pool,
+            ),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
-            await dl.save_memory(SaveMemoryParams(text="default inbox capture"))
+            await dl.save_memory(
+                SaveMemoryParams(
+                    text="default inbox capture",
+                    provenance={
+                        "producer": "test-suite",
+                        "source_ref": "test-suite:test_capture_inbox",
+                    },
+                )
+            )
 
         insert_args = conn.fetchrow.call_args_list[-1][0]
         metadata_arg = next(
-            arg for arg in insert_args if isinstance(arg, dict) and "content_hash" in arg
+            arg
+            for arg in insert_args
+            if isinstance(arg, dict) and "content_hash" in arg
         )
         assert metadata_arg["capture_status"] == "inbox"
 
@@ -134,7 +163,11 @@ class TestCaptureInboxSearch:
         pool = _make_pool(conn)
 
         with (
-            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch(
+                "open_brain.data_layer.postgres.get_pool",
+                new_callable=AsyncMock,
+                return_value=pool,
+            ),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
@@ -207,7 +240,11 @@ class TestCaptureInboxSearch:
         pool = _make_pool(conn)
 
         with (
-            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=pool),
+            patch(
+                "open_brain.data_layer.postgres.get_pool",
+                new_callable=AsyncMock,
+                return_value=pool,
+            ),
             patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
         ):
             mock_asyncio.create_task = MagicMock()
@@ -219,17 +256,28 @@ class TestCaptureInboxSearch:
         assert "capture_status" not in fetch_sql
 
     @pytest.mark.asyncio
-    async def test_save_memory_rejects_unknown_capture_status(self, dl: PostgresDataLayer) -> None:
+    async def test_save_memory_rejects_unknown_capture_status(
+        self, dl: PostgresDataLayer
+    ) -> None:
         with pytest.raises(ValueError, match="Invalid capture_status"):
             await dl.save_memory(
-                SaveMemoryParams(text="bad capture", capture_status="pending")
+                SaveMemoryParams(
+                    text="bad capture",
+                    capture_status="pending",
+                    provenance={
+                        "producer": "test-suite",
+                        "source_ref": "test-suite:test_capture_inbox",
+                    },
+                )
             )
 
 
 @pytest.mark.integration
 class TestCaptureInboxSearchRoundTrip:
     @pytest.mark.asyncio
-    async def test_inbox_query_returns_archived_lifecycle_capture_from_real_db(self) -> None:
+    async def test_inbox_query_returns_archived_lifecycle_capture_from_real_db(
+        self,
+    ) -> None:
         import os
 
         from open_brain.ingest.runs import ingest_run
@@ -248,6 +296,10 @@ class TestCaptureInboxSearchRoundTrip:
                         text=f"capture inbox archived round trip {run_id}",
                         metadata={"status": "archived"},
                         capture_status="inbox",
+                        provenance={
+                            "producer": "test-suite",
+                            "source_ref": "test-suite:test_capture_inbox",
+                        },
                     )
                 )
                 processed = await dl.save_memory(
@@ -255,6 +307,10 @@ class TestCaptureInboxSearchRoundTrip:
                         text=f"capture processed archived round trip {run_id}",
                         metadata={"status": "archived"},
                         capture_status="processed",
+                        provenance={
+                            "producer": "test-suite",
+                            "source_ref": "test-suite:test_capture_inbox",
+                        },
                     )
                 )
 
@@ -270,7 +326,9 @@ class TestCaptureInboxSearchRoundTrip:
             assert inbox.id in result_ids
             assert processed.id not in result_ids
 
-            inbox_memory = next(memory for memory in result.results if memory.id == inbox.id)
+            inbox_memory = next(
+                memory for memory in result.results if memory.id == inbox.id
+            )
             assert inbox_memory.metadata["capture_status"] == "inbox"
             assert inbox_memory.metadata["status"] == "archived"
             assert all(
@@ -393,7 +451,9 @@ class TestCaptureStatusTransition:
         mock_get_pool.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_set_capture_status_rejects_missing_memory(self, dl: PostgresDataLayer) -> None:
+    async def test_set_capture_status_rejects_missing_memory(
+        self, dl: PostgresDataLayer
+    ) -> None:
         from open_brain.data_layer.interface import CaptureTransitionParams
 
         conn = AsyncMock()

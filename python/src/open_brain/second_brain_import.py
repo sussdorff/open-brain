@@ -40,23 +40,25 @@ _MARKDOWN_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 _EXTERNAL_HTTP_REFERENCE_RE = re.compile(r"^https?:/{1,2}", re.IGNORECASE)
 _DATE_STEM_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _TEMPLATE_DIR_RE = re.compile(r"^(?:\d+-)?templates$", re.IGNORECASE)
-_ATTACHMENT_SUFFIXES = frozenset({
-    ".pdf",
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".gif",
-    ".webp",
-    ".tif",
-    ".tiff",
-    ".heic",
-    ".doc",
-    ".docx",
-    ".xls",
-    ".xlsx",
-    ".ppt",
-    ".pptx",
-})
+_ATTACHMENT_SUFFIXES = frozenset(
+    {
+        ".pdf",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".webp",
+        ".tif",
+        ".tiff",
+        ".heic",
+        ".doc",
+        ".docx",
+        ".xls",
+        ".xlsx",
+        ".ppt",
+        ".pptx",
+    }
+)
 
 
 @dataclass(slots=True)
@@ -390,7 +392,9 @@ def _build_metadata(
         "source_created_at": _iso_from_timestamp(created_at),
         "frontmatter": frontmatter,
     }
-    metadata.update(_type_specific_metadata(memory_type, source_ref, frontmatter, title))
+    metadata.update(
+        _type_specific_metadata(memory_type, source_ref, frontmatter, title)
+    )
     return metadata
 
 
@@ -542,7 +546,11 @@ async def _verify_attachment(
         }
 
     document_id = mapped.get("document_id")
-    if not isinstance(document_id, int) or isinstance(document_id, bool) or document_id <= 0:
+    if (
+        not isinstance(document_id, int)
+        or isinstance(document_id, bool)
+        or document_id <= 0
+    ):
         return None, {
             "source_ref": note.source_ref,
             "attachment": attachment,
@@ -747,7 +755,10 @@ async def _import_vault_reconcile(
         if mode == "dry_run":
             content_hash = content_hashes_by_source_ref[note.source_ref]
             content_memory_id = memory_ids_by_content_hash.get(content_hash)
-            if content_memory_id is not None or content_hash in importable_content_hashes:
+            if (
+                content_memory_id is not None
+                or content_hash in importable_content_hashes
+            ):
                 if content_memory_id is not None:
                     memory_ids_by_source_ref[note.source_ref] = content_memory_id
                 items_by_source_ref[note.source_ref] = _item(
@@ -771,11 +782,13 @@ async def _import_vault_reconcile(
         for link in note.wikilinks:
             resolution = _resolve_note_target(link.target, by_path, by_basename)
             if resolution.reason is not None:
-                unresolved_links.append({
-                    "source_ref": note.source_ref,
-                    "wikilink": link.raw,
-                    "reason": resolution.reason,
-                })
+                unresolved_links.append(
+                    {
+                        "source_ref": note.source_ref,
+                        "wikilink": link.raw,
+                        "reason": resolution.reason,
+                    }
+                )
 
     unresolved_attachments = await _verify_attachments(
         importable_notes,
@@ -788,7 +801,9 @@ async def _import_vault_reconcile(
         for note in importable_notes:
             metadata = dict(note.metadata)
             if note.paperless_references:
-                references = [dict(reference) for reference in note.paperless_references]
+                references = [
+                    dict(reference) for reference in note.paperless_references
+                ]
                 metadata["paperless_references"] = references
                 metadata["paperless_reference"] = references[0]
             binary_keys = paperless_reference_binary_keys(metadata)
@@ -803,6 +818,10 @@ async def _import_vault_reconcile(
                     type=note.memory_type,
                     title=note.title,
                     metadata=metadata,
+                    provenance={
+                        "producer": "second-brain-import",
+                        "source_ref": f"second-brain:{note.source_ref}",
+                    },
                     dedup_mode="skip",
                 )
             )
@@ -843,7 +862,9 @@ async def _import_vault_reconcile(
                     },
                 )
 
-    items = [items_by_source_ref[source_ref] for source_ref in sorted(items_by_source_ref)]
+    items = [
+        items_by_source_ref[source_ref] for source_ref in sorted(items_by_source_ref)
+    ]
     unresolved_links.sort(key=lambda row: (row["source_ref"], row["wikilink"]))
     unresolved_attachments.sort(key=lambda row: (row["source_ref"], row["attachment"]))
 
@@ -862,7 +883,9 @@ async def _main_async(argv: list[str] | None = None) -> int:
     """CLI entry point for one-shot vault imports."""
     from open_brain.data_layer.postgres import suppress_migrations
 
-    parser = argparse.ArgumentParser(description="Import a Second Brain Markdown vault.")
+    parser = argparse.ArgumentParser(
+        description="Import a Second Brain Markdown vault."
+    )
     parser.add_argument("vault_path", help="Path to the vault root.")
     parser.add_argument(
         "--paperless-map",

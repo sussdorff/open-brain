@@ -25,6 +25,7 @@ from open_brain.capture_router import (
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
+
 def _mock_llm(response_dict: dict):
     """Return a patch that makes llm_complete return a JSON-encoded response_dict."""
     return patch(
@@ -34,6 +35,7 @@ def _mock_llm(response_dict: dict):
 
 
 # ─── AK1: Decision classification ─────────────────────────────────────────────
+
 
 class TestCanonicalVocabularyClassification:
     @pytest.mark.asyncio
@@ -232,6 +234,7 @@ class TestDecisionClassification:
 
 # ─── AK2: Meeting classification ──────────────────────────────────────────────
 
+
 class TestMeetingClassification:
     @pytest.mark.asyncio
     async def test_meeting_text_returns_meeting_template(self):
@@ -272,6 +275,7 @@ class TestMeetingClassification:
 
 # ─── AK3: Person context classification ───────────────────────────────────────
 
+
 class TestPersonContextClassification:
     @pytest.mark.asyncio
     async def test_person_context_returns_person_context_template(self):
@@ -309,6 +313,7 @@ class TestPersonContextClassification:
 
 # ─── AK4: Pre-structured metadata bypass ──────────────────────────────────────
 
+
 class TestBypassConditions:
     @pytest.mark.asyncio
     async def test_bypass_when_capture_template_already_set(self):
@@ -321,7 +326,9 @@ class TestBypassConditions:
         # llm_complete should NEVER be called
         with patch(
             "open_brain.capture_router.llm_complete",
-            new=AsyncMock(side_effect=AssertionError("llm_complete must not be called")),
+            new=AsyncMock(
+                side_effect=AssertionError("llm_complete must not be called")
+            ),
         ):
             result = await classify_and_extract(
                 "Some text about a decision",
@@ -379,7 +386,9 @@ class TestBypassConditions:
         assert result == existing
 
     @pytest.mark.asyncio
-    async def test_empty_metadata_without_capture_template_triggers_classification(self):
+    async def test_empty_metadata_without_capture_template_triggers_classification(
+        self,
+    ):
         """Empty metadata (no capture_template) should trigger LLM classification."""
         llm_response = {"capture_template": "observation"}
         call_count = {"n": 0}
@@ -395,6 +404,7 @@ class TestBypassConditions:
 
 
 # ─── AC3: Explicit caller type aliases and pre-structured bypass ──────────────
+
 
 class TestTypeAliasNormalization:
     @pytest.mark.parametrize(
@@ -435,6 +445,7 @@ class TestTypeAliasNormalization:
 
 # ─── AK6: Unclassifiable → observation ────────────────────────────────────────
 
+
 class TestObservationFallback:
     @pytest.mark.asyncio
     async def test_unclassifiable_returns_observation(self):
@@ -471,7 +482,9 @@ class TestObservationFallback:
         for minimal in ("", " ", "ok"):
             with _mock_llm(llm_response):
                 result = await classify_and_extract(minimal)
-            assert result["capture_template"] == "observation", f"failed for input: {minimal!r}"
+            assert result["capture_template"] == "observation", (
+                f"failed for input: {minimal!r}"
+            )
 
     @pytest.mark.asyncio
     async def test_mixed_signals_returns_valid_template(self):
@@ -497,6 +510,7 @@ class TestObservationFallback:
 
 
 # ─── AK5: Concurrency integration test ────────────────────────────────────────
+
 
 class TestServerIntegration:
     """Tests that save_memory integrates with classify_and_extract correctly."""
@@ -527,9 +541,14 @@ class TestServerIntegration:
             ),
         ):
             from open_brain.server import save_memory
+
             result_json = await save_memory(
                 text="We decided to use async for performance",
                 type="decision",
+                provenance={
+                    "producer": "test-suite",
+                    "source_ref": "test-suite:test_capture_router",
+                },
             )
 
         result = json.loads(result_json)
@@ -559,9 +578,14 @@ class TestServerIntegration:
             ),
         ):
             from open_brain.server import save_memory
+
             result_json = await save_memory(
                 text="A decision was made",
                 metadata=existing_metadata,
+                provenance={
+                    "producer": "test-suite",
+                    "source_ref": "test-suite:test_capture_router",
+                },
             )
 
         result = json.loads(result_json)
@@ -586,9 +610,14 @@ class TestServerIntegration:
             ),
         ):
             from open_brain.server import save_memory
+
             await save_memory(
                 text="Today I worked on X and Y...",
                 type="session_summary",
+                provenance={
+                    "producer": "test-suite",
+                    "source_ref": "test-suite:test_capture_router",
+                },
             )
 
         # Guard skips update_memory: classification ({}) == (metadata or {}) ({})
@@ -606,12 +635,19 @@ class TestServerIntegration:
         with (
             patch("open_brain.server.get_dl", return_value=mock_dl),
             patch("open_brain.server.classify_and_extract", new=classifier),
-            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+            patch(
+                "open_brain.server._extract_entities", new=AsyncMock(return_value={})
+            ),
         ):
             from open_brain.server import save_memory
+
             await save_memory(
                 text="Diary note about simplifying the capture workflow",
                 type="note",
+                provenance={
+                    "producer": "test-suite",
+                    "source_ref": "test-suite:test_capture_router",
+                },
             )
 
         save_params = mock_dl.save_memory.call_args[0][0]
@@ -623,7 +659,9 @@ class TestServerIntegration:
         )
 
     @pytest.mark.asyncio
-    async def test_save_memory_preserves_prestructured_capture_template_type_and_metadata(self):
+    async def test_save_memory_preserves_prestructured_capture_template_type_and_metadata(
+        self,
+    ):
         """save_memory preserves caller type and metadata when capture_template is already set."""
         from open_brain.data_layer.interface import SaveMemoryResult
 
@@ -637,17 +675,26 @@ class TestServerIntegration:
 
         with (
             patch("open_brain.server.get_dl", return_value=mock_dl),
-            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+            patch(
+                "open_brain.server._extract_entities", new=AsyncMock(return_value={})
+            ),
             patch(
                 "open_brain.capture_router.llm_complete",
-                new=AsyncMock(side_effect=AssertionError("llm_complete must not be called")),
+                new=AsyncMock(
+                    side_effect=AssertionError("llm_complete must not be called")
+                ),
             ),
         ):
             from open_brain.server import save_memory
+
             await save_memory(
                 text="Pre-structured journal entry",
                 type="note",
                 metadata=existing_metadata,
+                provenance={
+                    "producer": "test-suite",
+                    "source_ref": "test-suite:test_capture_router",
+                },
             )
 
         save_params = mock_dl.save_memory.call_args[0][0]
@@ -676,10 +723,19 @@ class TestServerIntegration:
                 "open_brain.server.classify_and_extract",
                 new=AsyncMock(return_value=classification),
             ),
-            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+            patch(
+                "open_brain.server._extract_entities", new=AsyncMock(return_value={})
+            ),
         ):
             from open_brain.server import save_memory
-            result_json = await save_memory(text="Project Atlas is due soon")
+
+            result_json = await save_memory(
+                text="Project Atlas is due soon",
+                provenance={
+                    "producer": "test-suite",
+                    "source_ref": "test-suite:test_capture_router",
+                },
+            )
 
         data = json.loads(result_json)
         assert data["id"] == 101
@@ -707,10 +763,19 @@ class TestServerIntegration:
                 "open_brain.server.classify_and_extract",
                 new=AsyncMock(return_value=classification),
             ),
-            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+            patch(
+                "open_brain.server._extract_entities", new=AsyncMock(return_value={})
+            ),
         ):
             from open_brain.server import save_memory
-            result_json = await save_memory(text="Alice is a colleague I spoke to last week")
+
+            result_json = await save_memory(
+                text="Alice is a colleague I spoke to last week",
+                provenance={
+                    "producer": "test-suite",
+                    "source_ref": "test-suite:test_capture_router",
+                },
+            )
 
         data = json.loads(result_json)
         assert "warning" in data
@@ -737,10 +802,19 @@ class TestServerIntegration:
                 "open_brain.server.classify_and_extract",
                 new=AsyncMock(return_value=classification),
             ),
-            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+            patch(
+                "open_brain.server._extract_entities", new=AsyncMock(return_value={})
+            ),
         ):
             from open_brain.server import save_memory
-            result_json = await save_memory(text="Project Atlas launches on schedule")
+
+            result_json = await save_memory(
+                text="Project Atlas launches on schedule",
+                provenance={
+                    "producer": "test-suite",
+                    "source_ref": "test-suite:test_capture_router",
+                },
+            )
 
         data = json.loads(result_json)
         assert "warning" not in data
@@ -757,17 +831,26 @@ class TestServerIntegration:
 
         with (
             patch("open_brain.server.get_dl", return_value=mock_dl),
-            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+            patch(
+                "open_brain.server._extract_entities", new=AsyncMock(return_value={})
+            ),
             patch(
                 "open_brain.capture_router.llm_complete",
-                new=AsyncMock(side_effect=AssertionError("llm_complete must not be called")),
+                new=AsyncMock(
+                    side_effect=AssertionError("llm_complete must not be called")
+                ),
             ),
         ):
             from open_brain.server import save_memory
+
             result_json = await save_memory(
                 text="Pre-structured project payload",
                 type="project",
                 metadata=existing,
+                provenance={
+                    "producer": "test-suite",
+                    "source_ref": "test-suite:test_capture_router",
+                },
             )
 
         data = json.loads(result_json)
@@ -784,7 +867,6 @@ class TestServerIntegration:
         import asyncio
         import time
         from open_brain.data_layer.interface import SaveMemoryResult
-        from open_brain.capture_router import classify_and_extract
 
         save_duration_ms = 300  # simulate slow save (embedding call)
         classify_duration_ms = 200  # simulate classification
@@ -809,8 +891,15 @@ class TestServerIntegration:
             patch("open_brain.server.classify_and_extract", new=mock_classify),
         ):
             from open_brain.server import save_memory
+
             start = time.monotonic()
-            await save_memory(text="We decided to go async")
+            await save_memory(
+                text="We decided to go async",
+                provenance={
+                    "producer": "test-suite",
+                    "source_ref": "test-suite:test_capture_router",
+                },
+            )
             elapsed_ms = (time.monotonic() - start) * 1000
 
         # If concurrent: max(300, 200) + overhead ≈ 300-350ms
@@ -823,6 +912,7 @@ class TestServerIntegration:
 
 
 # ─── Finding 1: capture_template → canonical type alias ───────────────────────
+
 
 class TestCanonicalTypeForCaptureTemplate:
     def test_person_context_template_maps_to_canonical_person_type(self):
@@ -857,6 +947,7 @@ class TestCanonicalTypeForCaptureTemplate:
 
 
 # ─── Finding 2: classifier prompt advertises canonical schema fields ──────────
+
 
 class TestClassifierPromptCanonicalFields:
     @pytest.mark.asyncio
@@ -923,10 +1014,19 @@ class TestRawCaptureTypeColumnPersistence:
                 "open_brain.server.classify_and_extract",
                 new=AsyncMock(return_value=classification),
             ),
-            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+            patch(
+                "open_brain.server._extract_entities", new=AsyncMock(return_value={})
+            ),
         ):
             from open_brain.server import save_memory
-            await save_memory(text=f"A raw {template} capture")
+
+            await save_memory(
+                text=f"A raw {template} capture",
+                provenance={
+                    "producer": "test-suite",
+                    "source_ref": "test-suite:test_capture_router",
+                },
+            )
 
         mock_dl.update_memory.assert_called_once()
         update_params = mock_dl.update_memory.call_args[0][0]
@@ -956,10 +1056,19 @@ class TestRawCaptureTypeColumnPersistence:
                 "open_brain.server.classify_and_extract",
                 new=AsyncMock(return_value=classification),
             ),
-            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+            patch(
+                "open_brain.server._extract_entities", new=AsyncMock(return_value={})
+            ),
         ):
             from open_brain.server import save_memory
-            await save_memory(text="Alice is a colleague I spoke to")
+
+            await save_memory(
+                text="Alice is a colleague I spoke to",
+                provenance={
+                    "producer": "test-suite",
+                    "source_ref": "test-suite:test_capture_router",
+                },
+            )
 
         mock_dl.update_memory.assert_called_once()
         update_params = mock_dl.update_memory.call_args[0][0]
@@ -986,10 +1095,20 @@ class TestRawCaptureTypeColumnPersistence:
                 "open_brain.server.classify_and_extract",
                 new=AsyncMock(return_value=classification),
             ),
-            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+            patch(
+                "open_brain.server._extract_entities", new=AsyncMock(return_value={})
+            ),
         ):
             from open_brain.server import save_memory
-            await save_memory(text="Bob is my manager", type="person")
+
+            await save_memory(
+                text="Bob is my manager",
+                type="person",
+                provenance={
+                    "producer": "test-suite",
+                    "source_ref": "test-suite:test_capture_router",
+                },
+            )
 
         # Saved with the explicit caller type.
         save_params = mock_dl.save_memory.call_args[0][0]
@@ -1001,7 +1120,9 @@ class TestRawCaptureTypeColumnPersistence:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("caller_type", ["person", "decision"])
-    async def test_explicit_type_not_overwritten_by_divergent_classifier(self, caller_type):
+    async def test_explicit_type_not_overwritten_by_divergent_classifier(
+        self, caller_type
+    ):
         """An explicit caller ``type`` (no caller-supplied capture_template) whose
         classifier result DIVERGES to a different canonical template must NOT have its
         ``type`` column overwritten. Before this bead, classification never touched the
@@ -1029,10 +1150,20 @@ class TestRawCaptureTypeColumnPersistence:
                 "open_brain.server.classify_and_extract",
                 new=AsyncMock(return_value=classification),
             ),
-            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+            patch(
+                "open_brain.server._extract_entities", new=AsyncMock(return_value={})
+            ),
         ):
             from open_brain.server import save_memory
-            await save_memory(text="Some explicit capture", type=caller_type)
+
+            await save_memory(
+                text="Some explicit capture",
+                type=caller_type,
+                provenance={
+                    "producer": "test-suite",
+                    "source_ref": "test-suite:test_capture_router",
+                },
+            )
 
         # Saved with the explicit caller type.
         save_params = mock_dl.save_memory.call_args[0][0]
@@ -1060,17 +1191,26 @@ class TestRawCaptureTypeColumnPersistence:
 
         with (
             patch("open_brain.server.get_dl", return_value=mock_dl),
-            patch("open_brain.server._extract_entities", new=AsyncMock(return_value={})),
+            patch(
+                "open_brain.server._extract_entities", new=AsyncMock(return_value={})
+            ),
             patch(
                 "open_brain.capture_router.llm_complete",
-                new=AsyncMock(side_effect=AssertionError("llm_complete must not be called")),
+                new=AsyncMock(
+                    side_effect=AssertionError("llm_complete must not be called")
+                ),
             ),
         ):
             from open_brain.server import save_memory
+
             await save_memory(
                 text="Carol pre-structured person payload",
                 type="person",
                 metadata=existing_metadata,
+                provenance={
+                    "producer": "test-suite",
+                    "source_ref": "test-suite:test_capture_router",
+                },
             )
 
         save_params = mock_dl.save_memory.call_args[0][0]
@@ -1091,7 +1231,10 @@ class TestVocabularyConsolidation:
         )
 
         assert capture_router._MEMORY_TYPE_ALIASES is MEMORY_TYPE_ALIASES
-        assert capture_router._CAPTURE_TEMPLATE_TYPE_ALIASES is CAPTURE_TEMPLATE_TYPE_ALIASES
+        assert (
+            capture_router._CAPTURE_TEMPLATE_TYPE_ALIASES
+            is CAPTURE_TEMPLATE_TYPE_ALIASES
+        )
 
     def test_capture_template_type_aliases_values_are_canonical(self):
         """Every alias target in CAPTURE_TEMPLATE_TYPE_ALIASES must itself be a

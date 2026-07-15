@@ -230,7 +230,9 @@ class TestDeleteByRunIdIsTransactional:
         with patch("open_brain.data_layer.postgres.get_pool", return_value=pool):
             await dl.delete_by_run_id("test-run-id")
 
-        assert transaction_entered, "delete_by_run_id must use conn.transaction() when memories exist"
+        assert transaction_entered, (
+            "delete_by_run_id must use conn.transaction() when memories exist"
+        )
 
 
 # ─── 10. ingest_rollback MCP tool returns JSON ───────────────────────────────
@@ -258,6 +260,7 @@ class TestIngestRollbackToolReturnsJson:
 
                 # Call the tool function directly
                 from open_brain import server as server_module
+
                 result_str = await server_module.ingest_rollback(run_id="abc-123")
         finally:
             _current_scopes.reset(token)
@@ -307,12 +310,22 @@ class TestSaveMemoryInjectsRunId:
                 with ingest_run() as run_id:
                     with warnings.catch_warnings():
                         warnings.simplefilter("ignore", RuntimeWarning)
-                        await dl.save_memory(SaveMemoryParams(text="test memory content"))
+                        await dl.save_memory(
+                            SaveMemoryParams(
+                                text="test memory content",
+                                provenance={
+                                    "producer": "test-suite",
+                                    "source_ref": "test-suite:test_ingest_runs",
+                                },
+                            )
+                        )
 
         # Verify run_id appears in the captured metadata
         assert len(captured_metadata) >= 1, "No INSERT metadata was captured"
         for meta in captured_metadata:
-            assert isinstance(meta, dict), f"Expected dict metadata, got {type(meta)}: {meta}"
+            assert isinstance(meta, dict), (
+                f"Expected dict metadata, got {type(meta)}: {meta}"
+            )
             assert "run_id" in meta, f"run_id not found in metadata: {meta}"
             assert meta["run_id"] == run_id
 
@@ -335,8 +348,6 @@ class TestIngestRunRoundTrip:
     async def test_ingest_run_round_trip(self):
         import os
 
-        import asyncpg
-
         from open_brain.data_layer.postgres import PostgresDataLayer, get_pool
         from open_brain.data_layer.interface import SaveMemoryParams
 
@@ -348,8 +359,24 @@ class TestIngestRunRoundTrip:
 
         # ── Ingest two memories inside an ingest_run context ─────────────────
         with ingest_run() as run_id:
-            r1 = await dl.save_memory(SaveMemoryParams(text="ingest round-trip memory A"))
-            r2 = await dl.save_memory(SaveMemoryParams(text="ingest round-trip memory B"))
+            r1 = await dl.save_memory(
+                SaveMemoryParams(
+                    text="ingest round-trip memory A",
+                    provenance={
+                        "producer": "test-suite",
+                        "source_ref": "test-suite:test_ingest_runs",
+                    },
+                )
+            )
+            r2 = await dl.save_memory(
+                SaveMemoryParams(
+                    text="ingest round-trip memory B",
+                    provenance={
+                        "producer": "test-suite",
+                        "source_ref": "test-suite:test_ingest_runs",
+                    },
+                )
+            )
 
         assert r1 is not None, "save_memory returned None for memory A"
         assert r2 is not None, "save_memory returned None for memory B"
