@@ -76,19 +76,36 @@ class TestConceptCommand:
 
 
 class TestSaveCommand:
-    def test_text_only(self):
-        args = parse(["save", "some text to save"])
+    def test_source_ref_is_required(self):
+        with pytest.raises(SystemExit):
+            parse(["save", "some text to save"])
+
+    def test_minimal_canonical_origin(self):
+        args = parse([
+            "save",
+            "some text to save",
+            "--source-ref",
+            "agent-session:codex:session-123",
+        ])
         assert args.command == "save"
         assert args.text == "some text to save"
         assert args.project is None
         assert args.type is None
         assert args.title is None
+        assert args.producer == "ob-cli"
+        assert args.source_ref == "agent-session:codex:session-123"
 
     def test_with_optional_fields(self):
-        args = parse(["save", "text", "--project", "proj", "--type", "observation", "--title", "My Title"])
+        args = parse([
+            "save", "text", "--project", "proj", "--type", "observation",
+            "--title", "My Title", "--producer", "session-close",
+            "--source-ref", "agent-session:claude:session-456",
+        ])
         assert args.project == "proj"
         assert args.type == "observation"
         assert args.title == "My Title"
+        assert args.producer == "session-close"
+        assert args.source_ref == "agent-session:claude:session-456"
 
 
 class TestGetCommand:
@@ -966,14 +983,25 @@ class TestCommandHandlers:
 
     @pytest.mark.asyncio
     async def test_save_calls_correct_tool(self):
-        args = parse(["save", "my text", "--project", "p", "--type", "observation"])
+        args = parse([
+            "save", "my text", "--project", "p", "--type", "observation",
+            "--source-ref", "agent-session:codex:session-123",
+        ])
         with patch("open_brain.cli.main.call_tool", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = {"id": 99}
             from open_brain.cli.main import _cmd_save
             await _cmd_save(args)
             mock_call.assert_called_once_with(
                 "save_memory",
-                {"text": "my text", "project": "p", "type": "observation"},
+                {
+                    "text": "my text",
+                    "project": "p",
+                    "type": "observation",
+                    "provenance": {
+                        "producer": "ob-cli",
+                        "source_ref": "agent-session:codex:session-123",
+                    },
+                },
             )
 
     @pytest.mark.asyncio
