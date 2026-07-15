@@ -75,6 +75,17 @@ def _is_session_summary_save_memory_params(call: ast.Call) -> bool:
     return _literal_value(type_arg) == "session_summary"
 
 
+def _is_save_memory_params(call: ast.Call) -> bool:
+    """Detect every SaveMemoryParams constructor, independent of memory type."""
+    func = call.func
+    return (
+        isinstance(func, ast.Name)
+        and func.id == "SaveMemoryParams"
+        or isinstance(func, ast.Attribute)
+        and func.attr == "SaveMemoryParams"
+    )
+
+
 def _is_summarize_transcript_turns(call: ast.Call) -> bool:
     """Detect calls to summarize_transcript_turns(...)."""
     func = call.func
@@ -197,4 +208,25 @@ def test_known_writers_detected():
         "Expected to find source='transcript-backfill' literal in src — did "
         "regenerate.py stop calling summarize_transcript_turns with an "
         "explicit source kwarg?"
+    )
+
+
+def test_every_runtime_memory_writer_supplies_canonical_origin_provenance():
+    """Every repository-owned writer must cross the typed provenance boundary."""
+    constructors: list[tuple[Path, ast.Call]] = []
+    violations: list[str] = []
+
+    for path in _iter_python_files(SRC_ROOT):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not _is_save_memory_params(node):
+                continue
+            constructors.append((path, node))
+            if _find_kwarg(node, "provenance") is None:
+                violations.append(f"{_rel(path)}:{node.lineno}")
+
+    assert constructors, "AST scan found zero SaveMemoryParams constructors"
+    assert not violations, (
+        "Runtime memory writers missing explicit provenance= argument:\n  "
+        + "\n  ".join(violations)
     )
