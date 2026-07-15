@@ -228,8 +228,16 @@ the decision, reason, canonical-learning snapshot, source IDs, timestamp, and th
 authenticated OAuth reviewer. API-key and URL-token requests have no human OAuth
 identity and are rejected for this write. Later analysis uses the latest row for
 the key and moves the cluster from `reviewable_learning_clusters` to
-`reviewed_learning_clusters` only when the normalized canonical-learning snapshot
-also matches.
+`reviewed_learning_clusters` only when the canonical-learning snapshot is unchanged
+or differs by bounded lexical paraphrasing. Changes in explicit or contracted
+negation, paired `un`/`non`/`dis` prefix polarity, comparison operators, incompatible
+quantity-token sets (including units and version-like tokens), short ambiguous text,
+and low-overlap rewrites continue to fail open. A shorter paraphrase may omit
+quantities when its remaining quantity tokens are a subset of the approved snapshot;
+the production case deliberately permits `42%` to stand in for `10/24, 42%`.
+Accepted wording variation is explicit: `review_canonical_paraphrased=true`
+accompanies the reviewed cluster, and the terminal renderer shows both the current
+wording and the approved snapshot.
 
 The v1 key deliberately treats the complete source set as the review identity. If
 one run produces more than one reviewable cluster with the same source set, those
@@ -239,8 +247,10 @@ identity collision from silently hiding a different claim.
 When a prior row exists for the ambiguous key, the report retains it as
 `conflicting_review` for re-adjudication context.
 
-LLM wording or clustering can also change across runs. If the current canonical
-learning differs from the stored snapshot, the cluster remains active with
+LLM wording can change across runs without changing the learning. A conservative
+lexical comparison accepts high-overlap paraphrases while requiring compatible
+guarded polarity, comparison, and quantity evidence. If the current canonical
+learning changes materially or the comparison is ambiguous, the cluster remains active with
 `review_canonical_drift=true` and exposes the prior row as `stale_review`.
 
 ## Read-Only Boundary

@@ -243,6 +243,116 @@ def test_cross_run_canonical_drift_fails_open_with_stale_review_context() -> Non
     assert report["queues"]["reviewed_learning_clusters"] == []
 
 
+def test_cross_run_canonical_paraphrase_preserves_review() -> None:
+    candidates, clusters = _clusters()
+    key = "session-learning:v1:21617,26870"
+    clusters[0] = analysis.replace(
+        clusters[0],
+        canonical_learning=(
+            "Closed bead != landed code (~42% of closed-bead worktrees examined "
+            "had real unmerged diffs)."
+        ),
+    )
+    prior_review = _record(
+        canonical_learning=(
+            "Closed bead != landed code: a meaningful fraction (10/24, ~42%) of "
+            "closed-bead worktrees in this repo had real unmerged diffs against main."
+        )
+    )
+
+    report = analysis.build_analysis_report(
+        [], candidates, clusters, {key: prior_review}
+    )
+
+    assert report["queues"]["reviewable_learning_clusters"] == []
+    reviewed = report["queues"]["reviewed_learning_clusters"]
+    assert len(reviewed) == 1
+    assert reviewed[0]["review_canonical_drift"] is False
+    assert reviewed[0]["review_canonical_paraphrased"] is True
+    rendered = cli_main._render_learning_analysis(report)
+    assert "Review match: bounded canonical paraphrase" in rendered
+    assert "Approved snapshot: Closed bead != landed code:" in rendered
+
+
+@pytest.mark.parametrize(
+    "current_learning",
+    [
+        "Closed bead proves landed code (~42% of worktrees were clean).",
+        "Closed bead != landed code (~5% had real unmerged diffs).",
+    ],
+)
+def test_material_canonical_change_still_fails_open(
+    current_learning: str,
+) -> None:
+    candidates, clusters = _clusters()
+    key = "session-learning:v1:21617,26870"
+    clusters[0] = analysis.replace(
+        clusters[0], canonical_learning=current_learning
+    )
+    prior_review = _record(
+        canonical_learning=(
+            "Closed bead != landed code (~42% of closed-bead worktrees had real "
+            "unmerged diffs)."
+        )
+    )
+
+    report = analysis.build_analysis_report(
+        [], candidates, clusters, {key: prior_review}
+    )
+
+    active = report["queues"]["reviewable_learning_clusters"]
+    assert len(active) == 1
+    assert active[0]["review_canonical_drift"] is True
+
+
+@pytest.mark.parametrize(
+    ("stored", "current"),
+    [
+        (
+            "Closed tracker state doesn't prove landed code, so verify git before close.",
+            "Closed tracker state does prove landed code, so verify git before close.",
+        ),
+        (
+            "Closed tracker state did not prove landed code, so do not close before git verification.",
+            "Closed tracker state did prove landed code, so do not close before git verification.",
+        ),
+        (
+            "Closed bead != landed code because worktrees had real unmerged diffs.",
+            "Closed bead != landed code because worktrees had real merged diffs.",
+        ),
+        (
+            "Reject noncompliant payloads before materialization starts.",
+            "Reject compliant payloads before materialization starts.",
+        ),
+        (
+            "Closed bead != landed code: 10 of 24 worktrees had unmerged diffs.",
+            "Closed bead != landed code: 20 of 24 worktrees had unmerged diffs.",
+        ),
+        (
+            "Retry after 30s when the remote queue remains unavailable.",
+            "Retry after 60s when the remote queue remains unavailable.",
+        ),
+        (
+            "Keep p95 latency < 200 ms or the queue backs up.",
+            "Keep p95 latency > 200 ms or the queue backs up.",
+        ),
+        (
+            "Apply offset -1 when replaying the prior cursor position.",
+            "Apply offset 1 when replaying the prior cursor position.",
+        ),
+        (
+            "Use pg17 for the migration compatibility baseline.",
+            "Use pg18 for the migration compatibility baseline.",
+        ),
+    ],
+)
+def test_adversarial_material_canonical_changes_fail_open(
+    stored: str,
+    current: str,
+) -> None:
+    assert analysis._canonical_learnings_equivalent(stored, current) is False
+
+
 @pytest.mark.asyncio
 async def test_analyzer_reads_latest_reviews_for_emitted_clusters() -> None:
     candidates, clusters = _clusters()

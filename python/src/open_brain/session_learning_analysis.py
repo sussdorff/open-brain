@@ -13,6 +13,7 @@ import re
 from collections import Counter
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 from enum import Enum
 from typing import Any
 
@@ -32,6 +33,26 @@ EXTRACTION_BATCH_SIZE = 10
 MAX_SUMMARY_CHARS = 6000
 RECONCILIATION_SIMILARITY_THRESHOLD = 0.78
 MAX_RECONCILIATION_PAIRS = 100
+CANONICAL_PARAPHRASE_CONTAINMENT_THRESHOLD = 0.80
+CANONICAL_PARAPHRASE_SEQUENCE_THRESHOLD = 0.72
+
+_CANONICAL_TOKEN_RE = re.compile(
+    r"<=|>=|!=|==|<|>|[-+]?\d+(?:\.\d+)?[a-z%]*|"
+    r"[a-z]+(?:'[a-z]+)?[a-z0-9]*",
+    re.IGNORECASE,
+)
+_CANONICAL_POLARITY_TOKENS = {
+    "not",
+    "no",
+    "never",
+    "neither",
+    "nor",
+    "cannot",
+    "can't",
+    "without",
+}
+_CANONICAL_COMPARISON_TOKENS = {"<=", ">=", "!=", "==", "<", ">"}
+_CANONICAL_NEGATING_PREFIXES = ("un", "non", "dis")
 
 logger = logging.getLogger(__name__)
 
@@ -1817,6 +1838,109 @@ async def _cluster_candidates(
         return conservative_clusters
 
 
+def _canonical_tokens(value: str) -> list[str]:
+    """Tokenize canonical text while preserving semantic operators and quantities."""
+    return _CANONICAL_TOKEN_RE.findall(
+        value.casefold().replace("’", "'").replace("‘", "'")
+    )
+
+
+def _context_signatures(
+    tokens: list[str],
+    markers: set[str],
+    *,
+    include_contractions: bool = False,
+) -> tuple[tuple[str, str, str], ...]:
+    """Return marker plus immediate lexical context for clause-sensitive guards."""
+    signatures: list[tuple[str, str, str]] = []
+    for index, token in enumerate(tokens):
+        is_marker = token in markers or (
+            include_contractions and token.endswith("n't")
+        )
+        if not is_marker:
+            continue
+        previous = tokens[index - 1] if index > 0 else ""
+        following = tokens[index + 1] if index + 1 < len(tokens) else ""
+        signatures.append((previous, token, following))
+    return tuple(signatures)
+
+
+def _has_affixal_polarity_conflict(
+    stored_tokens: set[str], current_tokens: set[str]
+) -> bool:
+    """Detect common negating-prefix flips such as unmerged versus merged."""
+    for prefixed_tokens, plain_tokens in (
+        (stored_tokens, current_tokens),
+        (current_tokens, stored_tokens),
+    ):
+        for token in prefixed_tokens:
+            for prefix in _CANONICAL_NEGATING_PREFIXES:
+                if token.startswith(prefix):
+                    stem = token.removeprefix(prefix)
+                    if len(stem) >= 4 and stem in plain_tokens:
+                        return True
+    return False
+
+
+def _canonical_learnings_equivalent(stored: str, current: str) -> bool:
+    """Accept bounded wording variation while failing open on material drift."""
+    stored_tokens = _canonical_tokens(stored)
+    current_tokens = _canonical_tokens(current)
+    if stored_tokens == current_tokens:
+        return True
+    if min(len(stored_tokens), len(current_tokens)) < 6:
+        return False
+
+    stored_token_set = set(stored_tokens)
+    current_token_set = set(current_tokens)
+    stored_polarity = _context_signatures(
+        stored_tokens, _CANONICAL_POLARITY_TOKENS, include_contractions=True
+    )
+    current_polarity = _context_signatures(
+        current_tokens, _CANONICAL_POLARITY_TOKENS, include_contractions=True
+    )
+    if stored_polarity != current_polarity:
+        return False
+    if _has_affixal_polarity_conflict(stored_token_set, current_token_set):
+        return False
+
+    stored_comparisons = _context_signatures(
+        stored_tokens, _CANONICAL_COMPARISON_TOKENS
+    )
+    current_comparisons = _context_signatures(
+        current_tokens, _CANONICAL_COMPARISON_TOKENS
+    )
+    if stored_comparisons != current_comparisons:
+        return False
+
+    stored_quantities = {
+        token for token in stored_token_set if any(char.isdigit() for char in token)
+    }
+    current_quantities = {
+        token for token in current_token_set if any(char.isdigit() for char in token)
+    }
+    if stored_quantities and current_quantities and not (
+        stored_quantities <= current_quantities
+        or current_quantities <= stored_quantities
+    ):
+        return False
+
+    shared_tokens = stored_token_set & current_token_set
+    containment = len(shared_tokens) / min(
+        len(stored_token_set), len(current_token_set)
+    )
+    sequence_similarity = SequenceMatcher(
+        None,
+        " ".join(stored_tokens),
+        " ".join(current_tokens),
+        autojunk=False,
+    ).ratio()
+    return (
+        containment >= CANONICAL_PARAPHRASE_CONTAINMENT_THRESHOLD
+        and sequence_similarity >= CANONICAL_PARAPHRASE_SEQUENCE_THRESHOLD
+    )
+
+
 def build_analysis_report(
     summaries: list[SessionSummary],
     candidates: list[LearningCandidate],
@@ -1842,9 +1966,6 @@ def build_analysis_report(
         "noise": [],
     }
 
-    def normalize_learning(value: str) -> str:
-        return " ".join(value.split()).casefold()
-
     for cluster in clusters:
         if not cluster.review_eligible:
             continue
@@ -1852,9 +1973,21 @@ def build_analysis_report(
         identity_conflict = reviewable_key_counts[cluster.review_key] > 1
         payload["review_identity_conflict"] = identity_conflict
         review = reviews.get(cluster.review_key)
-        canonical_drift = review is not None and normalize_learning(
-            review.canonical_learning
-        ) != normalize_learning(cluster.canonical_learning)
+        if review is None:
+            canonical_equivalent = False
+            canonical_paraphrased = False
+        else:
+            canonical_equivalent = _canonical_learnings_equivalent(
+                review.canonical_learning,
+                cluster.canonical_learning,
+            )
+            canonical_paraphrased = canonical_equivalent and _canonical_tokens(
+                review.canonical_learning
+            ) != _canonical_tokens(
+                cluster.canonical_learning
+            )
+        canonical_drift = review is not None and not canonical_equivalent
+        payload["review_canonical_paraphrased"] = canonical_paraphrased
         payload["review_canonical_drift"] = canonical_drift
         if review is not None and not identity_conflict and not canonical_drift:
             payload["review"] = review.to_dict()

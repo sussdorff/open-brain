@@ -163,6 +163,11 @@ def _render_learning_analysis(data: dict[str, Any]) -> str:
             lines.append(f"  Reason: {review.get('reason', '-')}")
             lines.append(f"  Reviewed by: {review.get('reviewed_by', '-')}")
             lines.append(f"  Reviewed at: {review.get('created_at', '-')}")
+            if cluster.get("review_canonical_paraphrased"):
+                lines.append("  Review match: bounded canonical paraphrase")
+                lines.append(
+                    f"  Approved snapshot: {review.get('canonical_learning', '-')}"
+                )
 
     held = queues.get("held_learning_clusters") or []
     if held:
