@@ -22,6 +22,12 @@ from open_brain.data_layer.postgres import PostgresDataLayer, _execute_refine_ac
 from open_brain.data_layer.interface import RefineAction
 
 
+ORIGIN_PROVENANCE = {
+    "producer": "session-close",
+    "source_ref": "agent-session:codex:session-123",
+}
+
+
 def _make_pool(conn: AsyncMock) -> MagicMock:
     """Build a properly structured asyncpg pool mock."""
     @asynccontextmanager
@@ -378,6 +384,159 @@ class TestPostgresSaveMemory:
     @pytest.fixture
     def dl(self):
         return PostgresDataLayer()
+
+    @pytest.mark.asyncio
+    async def test_save_memory_persists_canonical_origin_provenance(self, dl):
+        inserted_row = {"id": 99}
+        conn = AsyncMock()
+        conn.fetchrow.side_effect = [
+            None,
+            inserted_row,
+        ]
+        pool = _make_pool(conn)
+
+        with (
+            patch(
+                "open_brain.data_layer.postgres.get_pool",
+                new_callable=AsyncMock,
+                return_value=pool,
+            ),
+            patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
+        ):
+            mock_asyncio.create_task = MagicMock()
+            result = await dl.save_memory(
+                SaveMemoryParams(
+                    text="Canonical origin",
+                    metadata={
+                        "provenance": {
+                            "source_label": "observed",
+                            "expected_use": "evidence",
+                        }
+                    },
+                    provenance=ORIGIN_PROVENANCE,
+                )
+            )
+
+        assert result.id == 99
+        insert_args = conn.fetchrow.call_args_list[-1][0]
+        metadata_arg = next(arg for arg in insert_args if isinstance(arg, dict))
+        assert metadata_arg["provenance"] == {
+            "source_label": "observed",
+            "expected_use": "evidence",
+            **ORIGIN_PROVENANCE,
+        }
+
+    @pytest.mark.asyncio
+    async def test_missing_provenance_fails_before_duplicate_or_database_access(self, dl):
+        with (
+            patch(
+                "open_brain.data_layer.postgres.get_pool",
+                new_callable=AsyncMock,
+            ) as get_pool,
+            pytest.raises(ValueError, match="provenance"),
+        ):
+            await dl.save_memory(
+                SaveMemoryParams(
+                    text="Invalid origin",
+                    duplicate_of=42,
+                )
+            )
+
+        get_pool.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_invalid_source_ref_fails_before_database_access(self, dl):
+        with (
+            patch(
+                "open_brain.data_layer.postgres.get_pool",
+                new_callable=AsyncMock,
+            ) as get_pool,
+            pytest.raises(ValueError, match="source_ref"),
+        ):
+            await dl.save_memory(
+                SaveMemoryParams(
+                    text="Invalid origin",
+                    provenance={
+                        "producer": "session-close",
+                        "source_ref": "not-namespaced",
+                    },
+                )
+            )
+
+        get_pool.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_session_summary_append_backfills_legacy_origin_provenance(self, dl):
+        conn = AsyncMock()
+        conn.fetchrow.side_effect = [
+            {"id": 7},
+            {"id": 55, "content": "Original", "metadata": {"source": "legacy"}},
+        ]
+        pool = _make_pool(conn)
+
+        with (
+            patch(
+                "open_brain.data_layer.postgres.get_pool",
+                new_callable=AsyncMock,
+                return_value=pool,
+            ),
+            patch("open_brain.data_layer.postgres.asyncio") as mock_asyncio,
+        ):
+            mock_asyncio.create_task = MagicMock()
+            await dl.save_memory(
+                SaveMemoryParams(
+                    text="Appended",
+                    type="session_summary",
+                    project="open-brain",
+                    session_ref="logical-session-123",
+                    provenance=ORIGIN_PROVENANCE,
+                )
+            )
+
+        update_args = conn.execute.call_args[0]
+        metadata_arg = next(arg for arg in update_args if isinstance(arg, dict))
+        assert metadata_arg == {
+            "source": "legacy",
+            "provenance": ORIGIN_PROVENANCE,
+        }
+
+    @pytest.mark.asyncio
+    async def test_session_summary_append_rejects_origin_provenance_conflict(self, dl):
+        conn = AsyncMock()
+        conn.fetchrow.side_effect = [
+            {"id": 7},
+            {
+                "id": 55,
+                "content": "Original",
+                "metadata": {
+                    "provenance": {
+                        "producer": "session-close",
+                        "source_ref": "agent-session:claude:other-session",
+                    }
+                },
+            },
+        ]
+        pool = _make_pool(conn)
+
+        with (
+            patch(
+                "open_brain.data_layer.postgres.get_pool",
+                new_callable=AsyncMock,
+                return_value=pool,
+            ),
+            pytest.raises(ValueError, match="conflict"),
+        ):
+            await dl.save_memory(
+                SaveMemoryParams(
+                    text="Appended",
+                    type="session_summary",
+                    project="open-brain",
+                    session_ref="logical-session-123",
+                    provenance=ORIGIN_PROVENANCE,
+                )
+            )
+
+        conn.execute.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_save_memory_inserts_with_session_ref(self, dl):

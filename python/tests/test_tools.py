@@ -273,6 +273,40 @@ class TestSessionLearningAnalysisTool:
 
 class TestSaveMemoryTool:
     @pytest.mark.asyncio
+    async def test_save_memory_requires_typed_origin_before_database_guards(self, mock_dl):
+        with (
+            patch("open_brain.server.get_dl", return_value=mock_dl),
+            patch("open_brain.server.get_pool", new_callable=AsyncMock) as get_pool,
+        ):
+            from open_brain.server import save_memory
+
+            result = await save_memory(text="Missing origin")
+
+        assert json.loads(result)["error"] == "invalid_origin_provenance"
+        get_pool.assert_not_awaited()
+        mock_dl.save_memory.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_save_memory_forwards_typed_origin_provenance(self, mock_dl):
+        with patch("open_brain.server.get_dl", return_value=mock_dl):
+            from open_brain.server import save_memory
+
+            result = await save_memory(
+                text="Canonical origin",
+                provenance={
+                    "producer": "agent",
+                    "source_ref": "agent-session:codex:session-123",
+                },
+            )
+
+        assert json.loads(result)["id"] == 42
+        call_args = mock_dl.save_memory.call_args[0][0]
+        assert call_args.provenance == {
+            "producer": "agent",
+            "source_ref": "agent-session:codex:session-123",
+        }
+
+    @pytest.mark.asyncio
     async def test_save_memory_returns_id(self, mock_dl):
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import save_memory
