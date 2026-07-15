@@ -72,6 +72,26 @@ class TestCaptureInboxCli:
         )
 
 
+class TestOriginProvenanceReportCli:
+    def test_parser_exposes_manual_report_command(self) -> None:
+        args = parse(["provenance", "report"])
+
+        assert args.command == "provenance"
+        assert args.provenance_command == "report"
+
+    @pytest.mark.asyncio
+    async def test_report_calls_read_only_mcp_tool(self) -> None:
+        from open_brain.cli.main import _cmd_provenance
+
+        args = parse(["provenance", "report"])
+        with patch("open_brain.cli.main.call_tool", new_callable=AsyncMock) as mock_call:
+            mock_call.return_value = {"read_only": True, "total": 0, "cohorts": {}}
+            result = await _cmd_provenance(args)
+
+        assert result["read_only"] is True
+        mock_call.assert_called_once_with("origin_provenance_report", {})
+
+
 class TestCaptureInboxMcp:
     @pytest.mark.asyncio
     async def test_search_tool_forwards_capture_status(self) -> None:

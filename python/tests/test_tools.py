@@ -269,6 +269,25 @@ class TestSessionLearningAnalysisTool:
         )
 
 
+class TestOriginProvenanceReportTool:
+    @pytest.mark.asyncio
+    async def test_tool_delegates_to_read_only_data_layer_report(self, mock_dl):
+        expected = {
+            "read_only": True,
+            "total": 25,
+            "cohorts": {"explicit": {"count": 12}},
+        }
+        mock_dl.origin_provenance_report.return_value = expected
+
+        with patch("open_brain.server.get_dl", return_value=mock_dl):
+            from open_brain.server import origin_provenance_report
+
+            result = json.loads(await origin_provenance_report())
+
+        assert result == expected
+        mock_dl.origin_provenance_report.assert_awaited_once_with()
+
+
 # ─── SaveMemory tool ──────────────────────────────────────────────────────────
 
 class TestSaveMemoryTool:

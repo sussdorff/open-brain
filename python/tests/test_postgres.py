@@ -81,7 +81,6 @@ class TestPostgresPoolMigrations:
             conn.execute.assert_not_called()
         finally:
             pg_module._pool = original_pool
-
     @pytest.mark.asyncio
     async def test_get_pool_default_runs_migrations_once(self):
         """Default server path applies migrations on first need and skips the second call."""
@@ -343,6 +342,75 @@ class TestPostgresPoolMigrations:
                 await conn.close()
         finally:
             await pg_module.close_pool()
+
+
+class TestOriginProvenanceReport:
+    @pytest.mark.asyncio
+    async def test_report_is_a_single_read_without_migrations_or_side_effects(self):
+        conn = AsyncMock()
+        conn.fetch.return_value = [
+            {"cohort": "explicit", "count": 12},
+            {"cohort": "deterministic_backfill", "count": 8},
+            {"cohort": "inferred", "count": 3},
+            {"cohort": "unresolved", "count": 2},
+        ]
+        pool = _make_pool(conn)
+        dl = PostgresDataLayer()
+
+        with patch(
+            "open_brain.data_layer.postgres.get_pool",
+            new_callable=AsyncMock,
+            return_value=pool,
+        ) as get_pool:
+            result = await dl.origin_provenance_report()
+
+        get_pool.assert_awaited_once_with(run_migrations=False)
+        conn.fetch.assert_awaited_once()
+        conn.fetchrow.assert_not_awaited()
+        conn.execute.assert_not_awaited()
+        query = conn.fetch.await_args.args[0]
+        assert query.lstrip().startswith("WITH classified AS")
+        assert "metadata->'provenance'->>'producer'" in query
+        assert "metadata->'provenance'->>'source_ref'" in query
+        assert "session_ref" in query
+        assert result == {
+            "read_only": True,
+            "total": 25,
+            "cohorts": {
+                "explicit": {
+                    "count": 12,
+                    "basis": "valid metadata.provenance producer and namespaced source_ref",
+                },
+                "deterministic_backfill": {
+                    "count": 8,
+                    "basis": "stable legacy session or source reference",
+                },
+                "inferred": {
+                    "count": 3,
+                    "basis": "recognizable producer, source, or memory-type marker without a stable reference",
+                },
+                "unresolved": {
+                    "count": 2,
+                    "basis": "no trustworthy origin marker",
+                },
+            },
+        }
+
+    @pytest.mark.asyncio
+    async def test_report_zero_fills_cohorts_missing_from_query_result(self):
+        conn = AsyncMock()
+        conn.fetch.return_value = [{"cohort": "explicit", "count": 4}]
+        pool = _make_pool(conn)
+
+        with patch(
+            "open_brain.data_layer.postgres.get_pool",
+            new_callable=AsyncMock,
+            return_value=pool,
+        ):
+            result = await PostgresDataLayer().origin_provenance_report()
+
+        assert result["total"] == 4
+        assert result["cohorts"]["unresolved"]["count"] == 0
 
 
 class TestRowToMemory:
