@@ -371,6 +371,7 @@ async def test_analyzer_reads_latest_reviews_for_emitted_clusters() -> None:
         patch.object(analysis, "_extract_candidates", new_callable=AsyncMock, return_value=candidates),
         patch.object(analysis, "_cluster_candidates", new_callable=AsyncMock, return_value=clusters),
         patch.object(analysis, "list_latest_session_learning_reviews", new_callable=AsyncMock, return_value={}) as list_reviews,
+        patch.object(analysis, "find_existing_learning_matches", new_callable=AsyncMock, return_value={}),
     ):
         await analysis.analyze_session_learnings(limit=50)
 

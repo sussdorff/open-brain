@@ -231,11 +231,13 @@ open-brain extracts learnings (structured feedback patterns) from conversation h
 
 ### Manual Session-Summary Analysis
 
-The recommended backlog-cleanup entrypoint is the read-only
+The recommended backlog-cleanup entrypoint is the source-memory-neutral
 `ob learnings analyze` command. It classifies claims as durable learnings,
 concrete work, decisions, standard or skill candidates, duplicate doctrine, or
-noise before clustering. Only causally complete learnings enter clustering, and
-no result is persisted automatically. An explicit `ob learnings review` command
+noise before clustering. Only causally complete learnings enter clustering. Each
+bounded run is persisted as operational provenance and can advance through older
+summaries with an exclusive composite cursor; source memories remain unchanged.
+An explicit `ob learnings review` command
 can append one of four cluster-level classifications to a dedicated audit ledger.
 That write is keyed to the exact supporting source-memory set and does not mutate
 the source memories, retrieval priority, lifecycle state, or governance artifacts.

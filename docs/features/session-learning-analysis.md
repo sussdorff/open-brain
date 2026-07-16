@@ -2,7 +2,9 @@
 
 `ob learnings analyze` separates durable learnings from concrete work before any
 clustering or promotion decision. It is intended for interactive review of
-session-close backlogs, normally in batches of 50 summaries.
+session-close backlogs, normally in cursor-addressed batches of 25 to 50 summaries.
+Each invocation creates a durable analysis-run record before the long LLM work
+starts, so a transport disconnect cannot discard a completed report.
 
 ## Why the Classification Happens First
 
@@ -157,11 +159,26 @@ human can audit equivalence without reopening each session summary.
 
 ## Usage
 
-Analyze the newest 50 summaries:
+Analyze the newest 50 summaries and wait for the durable run to finish:
 
 ```bash
 ob learnings analyze
 ```
+
+The initial MCP call returns a run ID quickly. The CLI then polls short retrieval
+calls until the run reaches `completed` or `failed`. Use `--detach` to return the
+run ID immediately, or retrieve any run later:
+
+```bash
+ob learnings analyze --limit 50 --detach
+ob learnings show 3ea86d12-a68f-4138-b6e7-1a75ca527f15
+```
+
+If the CLI loses its connection, the error includes the client-generated run ID.
+Re-running with `--run-id <uuid>` is idempotent and does not start duplicate work.
+After a server restart, repeat the original command with that run ID to resume a
+run that still reports `running`. Detached execution is available only through
+the MCP transport; direct mode stays attached to the local process.
 
 The installed CLI uses the authenticated Open Brain MCP endpoint by default, so
 database and LLM credentials remain on the server. The caller needs the
@@ -175,6 +192,14 @@ ob learnings analyze \
   --limit 50 \
   --project open-brain \
   --source session-close
+```
+
+Every completed report includes an opaque `next_cursor`. Pass it to the next
+window; the cursor is exclusive and internally binds both `created_at` and memory
+ID, so tied timestamps cannot duplicate or skip summaries:
+
+```bash
+ob learnings analyze --limit 50 --cursor '<next_cursor>'
 ```
 
 Machine-readable output uses the global JSON flag:
@@ -194,9 +219,21 @@ ob learnings analyze --direct
 ```
 
 `OB_DIRECT=1` provides the same explicit opt-in. Direct mode is not the default.
-Because direct analysis suppresses migrations, an older database without the
-review-ledger table is treated as having no review decisions. Run the server once
-to apply migrations before relying on reviewed-cluster suppression in direct mode.
+Direct mode also persists the run ledger and therefore applies the normal
+idempotent schema migrations before analysis.
+
+## Durable Run Ledger
+
+`session_learning_analysis_runs` is operational provenance, not curated memory.
+It stores the run UUID, terminal status, exact parameters, source memory IDs,
+next cursor, completed report, bounded failure context, and timestamps. The report
+retains each cluster's source summary IDs. A read-only lexical lookup also surfaces
+up to three existing `learning` memories with shared terms; it bypasses public
+search methods so it does not increment access counters or trigger recall decay.
+
+Only the run ledger is written automatically. It never becomes a second review
+ledger: `accept`, `covered_obsolete`, `project_only`, and `dismiss` remain explicit
+`ob learnings review` operations.
 
 ## Manual Review Ledger
 
@@ -253,11 +290,12 @@ guarded polarity, comparison, and quantity evidence. If the current canonical
 learning changes materially or the comparison is ambiguous, the cluster remains active with
 `review_canonical_drift=true` and exposes the prior row as `stale_review`.
 
-## Read-Only Boundary
+## Source-Memory Boundary
 
-The database query runs in a read-only, repeatable-read transaction. The
-command does not use retrieval search, so it does not increment access counts
-or apply recall-triggered priority changes. It does not:
+The session-summary and existing-learning queries run in read-only,
+repeatable-read transactions. The command does not use public retrieval search,
+so it does not increment access counts or apply recall-triggered priority changes.
+Apart from its dedicated analysis-run ledger, it does not:
 
 - change memory or lifecycle status;
 - change priority;
@@ -267,7 +305,8 @@ or apply recall-triggered priority changes. It does not:
 - activate a scheduler.
 
 Reading review-ledger rows does not change this boundary. The separate
-`learnings review` command writes only the review ledger.
+`learnings review` command writes only the review ledger. Analysis-run records do
+not classify or mutate any source memory.
 
 The operator reviews the separated queues and decides what, if anything, should
 be persisted or promoted in a later explicit workflow.

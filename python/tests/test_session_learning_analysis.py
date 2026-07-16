@@ -91,7 +91,7 @@ async def test_fetch_session_summaries_is_bounded_filtered_and_read_only() -> No
     query, *params = conn.fetch.call_args.args
     normalized_query = " ".join(query.lower().split())
     assert "m.type = 'session_summary'" in normalized_query
-    assert "order by m.created_at desc" in normalized_query
+    assert "order by m.created_at desc, m.id desc" in normalized_query
     assert "limit $3" in normalized_query
     assert "update " not in normalized_query
     assert "insert " not in normalized_query
@@ -1178,6 +1178,12 @@ async def test_analysis_extracts_all_kinds_but_clusters_only_valid_learnings() -
             "embed_batch",
             new_callable=AsyncMock,
             return_value=[[1.0, 0.0], [0.95, 0.05]],
+        ),
+        patch.object(
+            analysis,
+            "find_existing_learning_matches",
+            new_callable=AsyncMock,
+            return_value={},
         ),
     ):
         report = await analysis.analyze_session_learnings(limit=50)

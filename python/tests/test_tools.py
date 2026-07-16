@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -229,43 +229,46 @@ class TestSessionLearningAnalysisTool:
             server._current_scopes.reset(token)
 
     @pytest.mark.asyncio
-    async def test_regression_session_learning_analysis_tool_is_read_only(self):
-        """The scoped server tool delegates to the shared observational analyzer."""
+    async def test_analysis_tool_starts_durable_run_without_waiting(self):
+        """The scoped server tool delegates to the durable run starter."""
         import open_brain.server as server
 
         tool = getattr(server, "analyze_session_learnings", None)
         assert tool is not None
-        expected = {
-            "read_only": True,
-            "write_side_effects": False,
-            "counts": {"source_summaries": 5},
-            "queues": {},
-        }
+        run_id = "3ea86d12-a68f-4138-b6e7-1a75ca527f15"
+        run = MagicMock()
+        run.to_dict.return_value = {"run_id": run_id, "status": "running"}
         with patch.object(
             server,
-            "_analyze_session_learnings",
+            "_start_session_learning_run",
             new_callable=AsyncMock,
-            return_value=expected,
-        ) as analyze:
+            return_value=run,
+        ) as start_run:
             token = server._current_scopes.set(("memory", "evolution"))
             try:
                 result = json.loads(
                     await tool(
+                        run_id=run_id,
                         limit=5,
                         project="open-brain",
                         source="session-close",
                         model=None,
+                        cursor=None,
                     )
                 )
             finally:
                 server._current_scopes.reset(token)
 
-        assert result == expected
-        analyze.assert_awaited_once_with(
-            limit=5,
-            project="open-brain",
-            source="session-close",
-            model=None,
+        assert result == {"run_id": run_id, "status": "running"}
+        start_run.assert_awaited_once_with(
+            run_id=run_id,
+            parameters={
+                "limit": 5,
+                "project": "open-brain",
+                "source": "session-close",
+                "model": None,
+                "cursor": None,
+            },
         )
 
 

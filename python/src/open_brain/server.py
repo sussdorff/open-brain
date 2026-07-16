@@ -75,8 +75,9 @@ from open_brain.people.merge import (
     list_persons_payload,
     run_dry_run as dry_run_people_merge,
 )
-from open_brain.session_learning_analysis import (
-    analyze_session_learnings as _analyze_session_learnings,
+from open_brain.session_learning_runs import (
+    get_session_learning_run as _get_session_learning_run,
+    start_session_learning_run as _start_session_learning_run,
 )
 from open_brain.session_learning_reviews import (
     LearningReviewParams,
@@ -180,6 +181,7 @@ def logged_tool(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[An
 # Evolution tools require the `evolution` OAuth scope
 _EVOLUTION_TOOLS: frozenset[str] = frozenset({
     "analyze_session_learnings",
+    "get_session_learning_analysis_run",
     "review_session_learning",
     "weekly_briefing",
     "analyze_briefing_engagement",
@@ -1141,28 +1143,53 @@ async def doctor() -> str:
 
 @mcp.tool(
     description=(
-        "Analyze a bounded batch of session summaries into learning, work, decision, "
-        "promotion, duplicate-doctrine, and noise queues. Read-only: does not change "
-        "memories, lifecycle state, priority, access counts, or work items. "
-        "Requires evolution scope. Params: limit, project, source, model"
+        "Start a durable bounded analysis of session summaries into learning, work, "
+        "decision, promotion, duplicate-doctrine, and noise queues. Returns quickly "
+        "with a run ID; poll get_session_learning_analysis_run for the result. Writes "
+        "only the analysis-run ledger and does not change memories, lifecycle state, "
+        "priority, access counts, reviews, or work items. Requires evolution scope. "
+        "Params: run_id, limit, project, source, model, cursor"
     )
 )
 @logged_tool
 async def analyze_session_learnings(
+    run_id: str | None = None,
     limit: int = 50,
     project: str | None = None,
     source: str | None = None,
     model: str | None = None,
+    cursor: str | None = None,
 ) -> str:
-    """Run the shared manual analyzer behind authenticated MCP transport."""
+    """Start the shared analyzer behind authenticated MCP transport."""
     _require_scope("evolution")
-    report = await _analyze_session_learnings(
-        limit=limit,
-        project=project,
-        source=source,
-        model=model,
+    run = await _start_session_learning_run(
+        run_id=run_id,
+        parameters={
+            "limit": limit,
+            "project": project,
+            "source": source,
+            "model": model,
+            "cursor": cursor,
+        },
     )
-    return json.dumps(report)
+    return json.dumps(run.to_dict())
+
+
+@mcp.tool(
+    description=(
+        "Retrieve a durable session-learning analysis run by ID. Returns running, "
+        "completed, or failed state and the terminal report when available. Read-only "
+        "and requires evolution scope. Params: run_id"
+    )
+)
+@logged_tool
+async def get_session_learning_analysis_run(run_id: str) -> str:
+    """Retrieve a durable analyzer result after disconnect or detached execution."""
+    _require_scope("evolution")
+    run = await _get_session_learning_run(run_id)
+    if run is None:
+        raise ValueError(f"Session-learning analysis run not found: {run_id}")
+    return json.dumps(run.to_dict())
 
 
 @mcp.tool(

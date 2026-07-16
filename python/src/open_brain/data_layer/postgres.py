@@ -619,6 +619,30 @@ async def _run_migrations(conn: asyncpg.Connection) -> None:
         ON session_learning_reviews (review_key, created_at DESC, id DESC);
     """)
     await conn.execute("""
+        CREATE TABLE IF NOT EXISTS session_learning_analysis_runs (
+            run_id UUID PRIMARY KEY,
+            status TEXT NOT NULL
+                CHECK (status IN ('running', 'completed', 'failed')),
+            parameters JSONB NOT NULL,
+            source_memory_ids BIGINT[] NOT NULL DEFAULT '{}',
+            next_cursor TEXT,
+            report JSONB,
+            error TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            completed_at TIMESTAMPTZ,
+            CHECK (
+                (status = 'running' AND report IS NULL AND error IS NULL AND completed_at IS NULL)
+                OR (status = 'completed' AND report IS NOT NULL AND error IS NULL AND completed_at IS NOT NULL)
+                OR (status = 'failed' AND report IS NULL AND error IS NOT NULL AND completed_at IS NOT NULL)
+            )
+        );
+    """)
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_session_learning_analysis_runs_status_created
+        ON session_learning_analysis_runs (status, created_at DESC);
+    """)
+    await conn.execute("""
         CREATE TABLE IF NOT EXISTS url_tokens (
             id SERIAL PRIMARY KEY,
             name TEXT NOT NULL UNIQUE,

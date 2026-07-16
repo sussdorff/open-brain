@@ -5,6 +5,7 @@ import asyncio
 import json
 import os
 import sys
+import uuid
 from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import datetime
@@ -15,7 +16,6 @@ from open_brain.cli.client import MCPError, call_tool
 from open_brain.data_layer.postgres import PostgresDataLayer, suppress_migrations
 from open_brain.portable_backup import export_bundle, restore_bundle, verify_round_trip
 from open_brain.runtime import run_server
-from open_brain.session_learning_analysis import analyze_session_learnings
 
 
 def _output(data: Any, pretty: bool) -> None:
@@ -59,7 +59,7 @@ def _should_render_learning_analysis(args: argparse.Namespace) -> bool:
     """Return True when learning analysis should use terminal output."""
     return (
         args.command == "learnings"
-        and args.learnings_command == "analyze"
+        and args.learnings_command in {"analyze", "show"}
         and not _wants_json(args)
     )
 
@@ -92,6 +92,18 @@ def _render_macwhisper_payload(data: dict[str, Any], args: argparse.Namespace) -
 
 def _render_learning_analysis(data: dict[str, Any]) -> str:
     """Render the manual analysis queues for terminal review."""
+    if data.get("status") in {"running", "failed"} and "counts" not in data:
+        lines = [
+            "Session learning analysis run",
+            f"Run ID: {data.get('run_id', '-')}",
+            f"Status: {data.get('status', '-')}",
+        ]
+        if data.get("error"):
+            lines.append(f"Error: {data['error']}")
+        if data.get("status") == "running":
+            lines.append(f"Retrieve later: ob learnings show {data.get('run_id', '')}")
+        return "\n".join(lines) + "\n"
+
     def append_review_details(item: dict[str, Any]) -> None:
         confidence = item.get("confidence")
         if isinstance(confidence, (int, float)):
@@ -119,6 +131,11 @@ def _render_learning_analysis(data: dict[str, Any]) -> str:
         f"Duplicate doctrine: {counts.get('duplicate_doctrine', 0)}",
         f"Noise: {counts.get('noise', 0)}",
     ]
+    run = data.get("run") or {}
+    if run:
+        lines.insert(1, f"Run ID: {run.get('run_id', '-')}")
+        lines.insert(2, f"Next cursor: {data.get('next_cursor') or '-'}")
+        lines.insert(3, "Operational write: session_learning_analysis_runs only")
 
     reviewable = queues.get("reviewable_learning_clusters") or []
     if reviewable:
@@ -130,6 +147,12 @@ def _render_learning_analysis(data: dict[str, Any]) -> str:
             lines.append(f"- {cluster.get('canonical_learning', '')}")
             lines.append(f"  Sources: {source_ids or '-'}")
             lines.append(f"  Review key: {cluster.get('review_key', '-')}")
+            existing_matches = cluster.get("existing_learning_matches") or []
+            for match in existing_matches:
+                lines.append(
+                    "  Existing learning match: "
+                    f"[{match.get('memory_id', '-')}] {match.get('content', '')}"
+                )
             if cluster.get("review_identity_conflict"):
                 lines.append(
                     "  Review identity conflict: multiple active clusters share this key"
@@ -492,15 +515,25 @@ async def _cmd_learnings(args: argparse.Namespace) -> Any:
                 "canonical_learning": args.canonical_learning,
             },
         )
+    if args.learnings_command == "show":
+        run = await call_tool(
+            "get_session_learning_analysis_run",
+            {"run_id": args.run_id},
+        )
+        return _analysis_run_output(run)
     if args.learnings_command != "analyze":
         raise ValueError(f"Unknown learnings command: {args.learnings_command}")
+    run_id = args.run_id or str(uuid.uuid4())
     parameters = {
         "limit": args.limit,
         "project": args.project,
         "source": args.source,
         "model": args.model,
+        "cursor": args.cursor,
     }
     if args.direct or os.environ.get("OB_DIRECT") == "1":
+        if args.detach:
+            _error("--detach is only available with MCP transport")
         import open_brain.cli.direct as _direct
 
         database_url = _direct.load_database_url()
@@ -509,12 +542,49 @@ async def _cmd_learnings(args: argparse.Namespace) -> Any:
                 "--direct requires DATABASE_URL env var or DATABASE_URL in .env file"
             )
         _direct.prepare_direct_env(database_url)
-        suppress_migrations()
-        return await analyze_session_learnings(
-            **parameters,
-            allow_missing_review_ledger=True,
+        from open_brain.session_learning_runs import (
+            create_session_learning_run,
+            execute_session_learning_run,
         )
-    return await call_tool("analyze_session_learnings", parameters)
+
+        run, created = await create_session_learning_run(
+            run_id=run_id,
+            parameters=parameters,
+        )
+        if created:
+            run = await execute_session_learning_run(run.run_id, parameters)
+        return _analysis_run_output(run.to_dict())
+
+    try:
+        run = await call_tool(
+            "analyze_session_learnings",
+            {"run_id": run_id, **parameters},
+        )
+        if args.detach:
+            return run
+        while run.get("status") == "running":
+            await asyncio.sleep(1)
+            run = await call_tool(
+                "get_session_learning_analysis_run",
+                {"run_id": run_id},
+            )
+        return _analysis_run_output(run)
+    except MCPError as exc:
+        raise MCPError(
+            f"{exc} Analysis run ID: {run_id}. "
+            f"Retrieve it with: ob learnings show {run_id}"
+        ) from exc
+
+
+def _analysis_run_output(run: dict[str, Any]) -> dict[str, Any]:
+    """Expose completed reports compatibly while retaining durable run metadata."""
+    report = run.get("report")
+    if run.get("status") != "completed" or not isinstance(report, dict):
+        return run
+    output = dict(report)
+    output["run"] = {key: value for key, value in run.items() if key != "report"}
+    output["operational_writes"] = ["session_learning_analysis_runs"]
+    return output
 
 
 async def _cmd_stats(_args: argparse.Namespace) -> Any:
@@ -1177,7 +1247,7 @@ def _build_parser() -> argparse.ArgumentParser:
     learnings_sub.required = True
     p_learnings_analyze = learnings_sub.add_parser(
         "analyze",
-        help="Analyze recent session summaries without writing results",
+        help="Start a durable bounded analysis of recent session summaries",
     )
     p_learnings_analyze.add_argument(
         "--limit",
@@ -1199,6 +1269,25 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Bypass MCP transport and use a local DATABASE_URL",
     )
+    p_learnings_analyze.add_argument(
+        "--cursor",
+        help="Exclusive opaque cursor returned by the previous analysis window",
+    )
+    p_learnings_analyze.add_argument(
+        "--run-id",
+        dest="run_id",
+        help="UUID for idempotent retry; generated automatically when omitted",
+    )
+    p_learnings_analyze.add_argument(
+        "--detach",
+        action="store_true",
+        help="Return the run ID immediately instead of polling for completion",
+    )
+    p_learnings_show = learnings_sub.add_parser(
+        "show",
+        help="Retrieve a durable learning-analysis run by ID",
+    )
+    p_learnings_show.add_argument("run_id", help="Analysis run UUID")
     p_learnings_review = learnings_sub.add_parser(
         "review",
         help="Record an explicit manual review decision for one learning cluster",

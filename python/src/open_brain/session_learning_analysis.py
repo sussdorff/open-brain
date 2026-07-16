@@ -6,6 +6,7 @@ work items, change lifecycle state, or adjust recall priority.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import math
@@ -31,6 +32,7 @@ DEFAULT_SUMMARY_LIMIT = 50
 MAX_SUMMARY_LIMIT = 200
 EXTRACTION_BATCH_SIZE = 10
 MAX_SUMMARY_CHARS = 6000
+MAX_EXISTING_LEARNING_MATCHES = 3
 RECONCILIATION_SIMILARITY_THRESHOLD = 0.78
 MAX_RECONCILIATION_PAIRS = 100
 CANONICAL_PARAPHRASE_CONTAINMENT_THRESHOLD = 0.80
@@ -321,6 +323,42 @@ class SessionSummary:
         }
 
 
+@dataclass(frozen=True)
+class SessionSummaryCursor:
+    """Opaque position in the deterministic newest-first summary order."""
+
+    created_at: datetime
+    memory_id: int
+
+
+def encode_summary_cursor(summary: SessionSummary) -> str:
+    """Encode a stable composite cursor without exposing SQL ordering details."""
+    payload = json.dumps(
+        {"created_at": summary.created_at, "memory_id": summary.id},
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def decode_summary_cursor(value: str) -> SessionSummaryCursor:
+    """Decode and validate an opaque session-summary cursor."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("cursor must be a non-empty string")
+    encoded = value.strip()
+    encoded += "=" * (-len(encoded) % 4)
+    try:
+        raw = json.loads(base64.urlsafe_b64decode(encoded).decode("utf-8"))
+        created_at = str(raw["created_at"])
+        memory_id = int(raw["memory_id"])
+        parsed_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+    except (ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
+        raise ValueError("cursor is not a valid session-summary cursor") from exc
+    if parsed_at.tzinfo is None or memory_id <= 0:
+        raise ValueError("cursor is not a valid session-summary cursor")
+    return SessionSummaryCursor(created_at=parsed_at, memory_id=memory_id)
+
+
 def _requires_focused_extraction(summary: SessionSummary) -> bool:
     """Return whether a summary explicitly advertises causal learning content."""
     return bool(
@@ -443,6 +481,7 @@ async def fetch_session_summaries(
     limit: int = DEFAULT_SUMMARY_LIMIT,
     project: str | None = None,
     source: str | None = None,
+    cursor: str | None = None,
 ) -> list[SessionSummary]:
     """Read a newest-first session-summary batch without database side effects."""
     if not 1 <= limit <= MAX_SUMMARY_LIMIT:
@@ -457,6 +496,15 @@ async def fetch_session_summaries(
     if source:
         params.append(source)
         conditions.append(f"m.metadata->>'source' = ${len(params)}")
+    if cursor:
+        decoded_cursor = decode_summary_cursor(cursor)
+        params.extend([decoded_cursor.created_at, decoded_cursor.memory_id])
+        timestamp_parameter = len(params) - 1
+        memory_id_parameter = len(params)
+        conditions.append(
+            f"(m.created_at, m.id) < "
+            f"(${timestamp_parameter}::timestamptz, ${memory_id_parameter}::bigint)"
+        )
     params.append(limit)
     limit_parameter = len(params)
     query = f"""
@@ -471,7 +519,7 @@ async def fetch_session_summaries(
           FROM memories m
           LEFT JOIN memory_indexes i ON i.id = m.index_id
          WHERE {' AND '.join(conditions)}
-         ORDER BY m.created_at DESC
+         ORDER BY m.created_at DESC, m.id DESC
          LIMIT ${limit_parameter}
     """
 
@@ -498,6 +546,82 @@ async def fetch_session_summaries(
             )
         )
     return summaries
+
+
+def _existing_learning_tokens(value: str) -> set[str]:
+    """Return bounded lexical tokens for read-only existing-learning matching."""
+    return {
+        token[:-1] if token.endswith("s") else token
+        for token in _CLUSTER_TOKEN_RE.findall(value.lower())
+        if token not in _CLUSTER_TOKEN_STOPWORDS
+    }
+
+
+async def find_existing_learning_matches(
+    clusters: list[LearningCluster],
+) -> dict[str, list[dict[str, Any]]]:
+    """Surface lexical matches without triggering search recall side effects."""
+    if not clusters:
+        return {}
+
+    suppress_migrations()
+    pool = await get_pool()
+    matches_by_key: dict[str, list[dict[str, Any]]] = {}
+    async with pool.acquire() as conn:
+        async with conn.transaction(isolation="repeatable_read", readonly=True):
+            for cluster in clusters:
+                tokens = sorted(_existing_learning_tokens(cluster.canonical_learning))
+                if not tokens:
+                    matches_by_key[cluster.review_key] = []
+                    continue
+                fts_tokens = [
+                    re.sub(r"[^a-z0-9]", "", token)
+                    for token in tokens[:12]
+                ]
+                query = " | ".join(token for token in fts_tokens if token)
+                if not query:
+                    matches_by_key[cluster.review_key] = []
+                    continue
+                rows = await conn.fetch(
+                    """
+                    SELECT id,
+                           type,
+                           title,
+                           LEFT(COALESCE(narrative, '') || ' ' || content, 1200) AS text,
+                           ts_rank_cd(search_vector, to_tsquery('english', $1)) AS rank
+                      FROM memories
+                     WHERE type = 'learning'
+                       AND search_vector @@ to_tsquery('english', $1)
+                     ORDER BY rank DESC, id DESC
+                     LIMIT 20
+                    """,
+                    query,
+                )
+                minimum_overlap = min(3, max(2, len(tokens)))
+                cluster_tokens = set(tokens)
+                ranked: list[dict[str, Any]] = []
+                for row in rows:
+                    text = " ".join(
+                        part for part in (row["title"], row["text"]) if part
+                    )
+                    shared_terms = sorted(
+                        cluster_tokens & _existing_learning_tokens(text)
+                    )
+                    if len(shared_terms) < minimum_overlap:
+                        continue
+                    ranked.append(
+                        {
+                            "memory_id": int(row["id"]),
+                            "type": str(row["type"]),
+                            "title": _optional_text(row["title"]),
+                            "rank": round(float(row["rank"] or 0.0), 4),
+                            "shared_terms": shared_terms,
+                        }
+                    )
+                    if len(ranked) == MAX_EXISTING_LEARNING_MATCHES:
+                        break
+                matches_by_key[cluster.review_key] = ranked
+    return matches_by_key
 
 
 def parse_extraction_response(
@@ -1946,18 +2070,18 @@ def build_analysis_report(
     candidates: list[LearningCandidate],
     clusters: list[LearningCluster],
     reviews: dict[str, LearningReviewRecord] | None = None,
+    existing_learning_matches: dict[str, list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     """Partition analysis results into explicit operator review queues."""
     reviews = reviews or {}
+    existing_learning_matches = existing_learning_matches or {}
     reviewable_key_counts = Counter(
         cluster.review_key for cluster in clusters if cluster.review_eligible
     )
     queues: dict[str, list[dict[str, Any]]] = {
         "reviewable_learning_clusters": [],
         "reviewed_learning_clusters": [],
-        "held_learning_clusters": [
-            cluster.to_dict() for cluster in clusters if not cluster.review_eligible
-        ],
+        "held_learning_clusters": [],
         "todos": [],
         "decisions": [],
         "standard_candidates": [],
@@ -1967,9 +2091,21 @@ def build_analysis_report(
     }
 
     for cluster in clusters:
+        if cluster.review_eligible:
+            continue
+        payload = cluster.to_dict()
+        payload["existing_learning_matches"] = existing_learning_matches.get(
+            cluster.review_key, []
+        )
+        queues["held_learning_clusters"].append(payload)
+
+    for cluster in clusters:
         if not cluster.review_eligible:
             continue
         payload = cluster.to_dict()
+        payload["existing_learning_matches"] = existing_learning_matches.get(
+            cluster.review_key, []
+        )
         identity_conflict = reviewable_key_counts[cluster.review_key] > 1
         payload["review_identity_conflict"] = identity_conflict
         review = reviews.get(cluster.review_key)
@@ -2045,6 +2181,7 @@ async def analyze_session_learnings(
     project: str | None = None,
     source: str | None = None,
     model: str | None = None,
+    cursor: str | None = None,
     allow_missing_review_ledger: bool = False,
 ) -> dict[str, Any]:
     """Run the manual read-only extraction and learning-clustering workflow."""
@@ -2052,6 +2189,7 @@ async def analyze_session_learnings(
         limit=limit,
         project=project,
         source=source,
+        cursor=cursor,
     )
     if not summaries:
         report = build_analysis_report([], [], [])
@@ -2067,11 +2205,23 @@ async def analyze_session_learnings(
             )
         else:
             reviews = await list_latest_session_learning_reviews(review_keys)
-        report = build_analysis_report(summaries, candidates, clusters, reviews)
+        existing_matches = await find_existing_learning_matches(clusters)
+        report = build_analysis_report(
+            summaries,
+            candidates,
+            clusters,
+            reviews,
+            existing_matches,
+        )
+    report["cursor"] = cursor
+    report["next_cursor"] = (
+        encode_summary_cursor(summaries[-1]) if summaries else None
+    )
     report["parameters"] = {
         "limit": limit,
         "project": project,
         "source": source,
         "model": model,
+        "cursor": cursor,
     }
     return report

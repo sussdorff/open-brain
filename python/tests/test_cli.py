@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -176,6 +177,9 @@ class TestLearningsCommand:
         assert args.source is None
         assert args.model is None
         assert args.direct is False
+        assert args.cursor is None
+        assert args.run_id is None
+        assert args.detach is False
 
     def test_analyze_filters(self):
         args = parse(
@@ -199,38 +203,118 @@ class TestLearningsCommand:
 
     @pytest.mark.asyncio
     async def test_regression_analyze_uses_remote_tool_by_default(self):
-        args = parse(["learnings", "analyze", "--limit", "10"])
+        run_id = "3ea86d12-a68f-4138-b6e7-1a75ca527f15"
+        args = parse([
+            "learnings", "analyze", "--limit", "10", "--run-id", run_id
+        ])
         expected = {"counts": {"source_summaries": 10}, "queues": {}}
+        running = {"run_id": run_id, "status": "running", "report": None}
+        completed = {"run_id": run_id, "status": "completed", "report": expected}
 
         with (
             patch(
                 "open_brain.cli.main.call_tool",
                 new_callable=AsyncMock,
-                return_value=expected,
+                side_effect=[running, completed],
             ) as call,
             patch(
-                "open_brain.cli.main.analyze_session_learnings",
+                "open_brain.cli.main.asyncio.sleep",
                 new_callable=AsyncMock,
-            ) as analyze,
+            ),
         ):
             result = await cli_main._cmd_learnings(args)
 
-        assert result == expected
-        call.assert_awaited_once_with(
+        assert result["counts"] == expected["counts"]
+        assert result["run"]["run_id"] == run_id
+        assert call.await_args_list[0].args == (
             "analyze_session_learnings",
             {
+                "run_id": run_id,
                 "limit": 10,
                 "project": None,
                 "source": None,
                 "model": None,
+                "cursor": None,
             },
         )
-        analyze.assert_not_awaited()
+        assert call.await_args_list[1].args == (
+            "get_session_learning_analysis_run",
+            {"run_id": run_id},
+        )
+
+    @pytest.mark.asyncio
+    async def test_detached_analysis_returns_retrievable_run_immediately(self):
+        run_id = "3ea86d12-a68f-4138-b6e7-1a75ca527f15"
+        args = parse([
+            "learnings", "analyze", "--detach", "--run-id", run_id
+        ])
+        running = {"run_id": run_id, "status": "running", "report": None}
+        with patch(
+            "open_brain.cli.main.call_tool",
+            new_callable=AsyncMock,
+            return_value=running,
+        ) as call:
+            result = await cli_main._cmd_learnings(args)
+
+        assert result == running
+        assert call.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_transport_error_preserves_client_generated_run_id(self):
+        run_id = "3ea86d12-a68f-4138-b6e7-1a75ca527f15"
+        args = parse(["learnings", "analyze", "--run-id", run_id])
+        with (
+            patch(
+                "open_brain.cli.main.call_tool",
+                new_callable=AsyncMock,
+                side_effect=MCPError("transport lost"),
+            ),
+            pytest.raises(MCPError, match=run_id) as raised,
+        ):
+            await cli_main._cmd_learnings(args)
+
+        assert f"ob learnings show {run_id}" in str(raised.value)
+
+    @pytest.mark.asyncio
+    async def test_show_returns_saved_completed_report(self):
+        run_id = "3ea86d12-a68f-4138-b6e7-1a75ca527f15"
+        args = parse(["learnings", "show", run_id])
+        run = {
+            "run_id": run_id,
+            "status": "completed",
+            "report": {"counts": {"source_summaries": 50}, "queues": {}},
+        }
+        with patch(
+            "open_brain.cli.main.call_tool",
+            new_callable=AsyncMock,
+            return_value=run,
+        ) as call:
+            result = await cli_main._cmd_learnings(args)
+
+        assert result["counts"]["source_summaries"] == 50
+        assert result["run"]["run_id"] == run_id
+        call.assert_awaited_once_with(
+            "get_session_learning_analysis_run",
+            {"run_id": run_id},
+        )
 
     @pytest.mark.asyncio
     async def test_explicit_direct_mode_prepares_local_database_analysis(self):
-        args = parse(["learnings", "analyze", "--limit", "10", "--direct"])
+        run_id = "3ea86d12-a68f-4138-b6e7-1a75ca527f15"
+        args = parse([
+            "learnings", "analyze", "--limit", "10", "--direct",
+            "--run-id", run_id,
+        ])
         expected = {"counts": {"source_summaries": 10}, "queues": {}}
+        running = SimpleNamespace(run_id=run_id)
+        completed = SimpleNamespace(
+            run_id=run_id,
+            to_dict=lambda: {
+                "run_id": run_id,
+                "status": "completed",
+                "report": expected,
+            },
+        )
 
         with (
             patch(
@@ -239,24 +323,33 @@ class TestLearningsCommand:
             ) as load_database_url,
             patch("open_brain.cli.direct.prepare_direct_env") as prepare_direct_env,
             patch(
-                "open_brain.cli.main.analyze_session_learnings",
+                "open_brain.session_learning_runs.create_session_learning_run",
                 new_callable=AsyncMock,
-                return_value=expected,
-            ) as analyze,
+                return_value=(running, True),
+            ) as create_run,
+            patch(
+                "open_brain.session_learning_runs.execute_session_learning_run",
+                new_callable=AsyncMock,
+                return_value=completed,
+            ) as execute_run,
             patch("open_brain.cli.main.call_tool", new_callable=AsyncMock) as call,
         ):
             result = await cli_main._cmd_learnings(args)
 
-        assert result == expected
+        assert result["counts"] == expected["counts"]
         load_database_url.assert_called_once_with()
         prepare_direct_env.assert_called_once_with("postgresql://local/open_brain")
-        analyze.assert_awaited_once_with(
-            limit=10,
-            project=None,
-            source=None,
-            model=None,
-            allow_missing_review_ledger=True,
+        create_run.assert_awaited_once_with(
+            run_id=run_id,
+            parameters={
+                "limit": 10,
+                "project": None,
+                "source": None,
+                "model": None,
+                "cursor": None,
+            },
         )
+        execute_run.assert_awaited_once()
         call.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -265,17 +358,31 @@ class TestLearningsCommand:
 
         with (
             patch("open_brain.cli.direct.load_database_url", return_value=""),
-            patch(
-                "open_brain.cli.main.analyze_session_learnings",
-                new_callable=AsyncMock,
-            ) as analyze,
             patch("open_brain.cli.main.call_tool", new_callable=AsyncMock) as call,
             pytest.raises(SystemExit),
         ):
             await cli_main._cmd_learnings(args)
 
-        analyze.assert_not_awaited()
         call.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_direct_mode_rejects_detach(self):
+        args = parse(["learnings", "analyze", "--direct", "--detach"])
+
+        with (
+            patch("open_brain.cli.direct.load_database_url") as load_database_url,
+            pytest.raises(SystemExit),
+        ):
+            await cli_main._cmd_learnings(args)
+
+        load_database_url.assert_not_called()
+
+    def test_show_parses_run_id(self):
+        args = parse([
+            "learnings", "show", "3ea86d12-a68f-4138-b6e7-1a75ca527f15"
+        ])
+        assert args.learnings_command == "show"
+        assert args.run_id == "3ea86d12-a68f-4138-b6e7-1a75ca527f15"
 
 
 class TestPortableBackupCommands:
@@ -442,6 +549,12 @@ class TestOutput:
                         {
                             "canonical_learning": "Installers must reconcile target state.",
                             "source_memory_ids": [101, 102],
+                            "existing_learning_matches": [
+                                {
+                                    "memory_id": 77,
+                                    "content": "Installers converge on target state.",
+                                }
+                            ],
                             "evidence": ["Two installer runs created duplicate hooks."],
                             "confidence": 0.9,
                             "severity": "high",
@@ -466,8 +579,21 @@ class TestOutput:
         assert "Installers must reconcile target state." in captured.out
         assert "Confidence: 0.90" in captured.out
         assert "Evidence: Two installer runs created duplicate hooks." in captured.out
+        assert "Existing learning match: [77] Installers converge on target state." in captured.out
         assert "No memories, priorities, lifecycle states, or work items were changed." in captured.out
         assert '"queues"' not in captured.out
+
+    def test_completed_run_reports_ledger_as_operational_write(self):
+        run_id = "3ea86d12-a68f-4138-b6e7-1a75ca527f15"
+        result = cli_main._analysis_run_output(
+            {
+                "run_id": run_id,
+                "status": "completed",
+                "report": {"counts": {}, "queues": {}, "write_side_effects": False},
+            }
+        )
+
+        assert result["operational_writes"] == ["session_learning_analysis_runs"]
 
     def test_learning_analysis_json_flag_keeps_json_output(self, capsys):
         args = parse(["--json", "learnings", "analyze"])
