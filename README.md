@@ -274,7 +274,7 @@ AI assistants interact with memory through MCP tools. The recommended workflow i
 ```
 search(query)          →  compact index with IDs (~50-100 tokens/result)
   timeline(anchor=ID)  →  context around interesting results
-    get_observations([IDs])  →  full details ONLY for what you need
+    get_observations([IDs])  →  full details ONLY for what you need; tracks recall by default
 ```
 
 ### Memory Access
@@ -283,7 +283,7 @@ search(query)          →  compact index with IDs (~50-100 tokens/result)
 |---|---|
 | `search` | Hybrid search (vector + FTS). Filter by `project`, `type`, date range, `file_path`. Omit query for browse mode. |
 | `timeline` | Context around a result (anchor mode by ID) or date window. |
-| `get_observations` | Fetch full details for a list of IDs. |
+| `get_observations` | Fetch full details for a list of IDs. Records retrieval and updates recall priority by default; pass `track_retrieval=false` for side-effect-free inspection. |
 | `search_by_concept` | Pure vector search — good for "what did I learn about X?" |
 | `get_context` | Recent session summaries — useful at conversation start. |
 | `daily_review` | Date-bounded review for one calendar day: entries, source references, unresolved inbox captures, and counts by type. Base memory scope — no evolution gate. |
@@ -478,6 +478,7 @@ The `ob` command is the main human-facing CLI. It intentionally covers normal se
 ob server
 ob --json doctor
 ob search "what did I decide about X?"
+ob get 123 456 --inspect
 ob save "Decided to use asyncpg for lower overhead" --type decision \
   --source-ref agent-session:codex:<session-id>
 ob provenance report
@@ -498,7 +499,7 @@ Current `ob` commands:
 | `ob search` | Hybrid vector + full-text search |
 | `ob concept` | Semantic-only vector search |
 | `ob timeline` | Show context around an anchor memory or query |
-| `ob get` | Fetch full observations by ID |
+| `ob get` | Fetch full observations by ID and track retrieval; add `--inspect` to avoid usage-log and priority changes |
 | `ob context` | Fetch recent session context |
 | `ob save` | Save a memory |
 | `ob provenance report` | Inspect origin-provenance coverage without modifying memories |

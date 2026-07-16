@@ -204,7 +204,20 @@ class TestGetObservationsTool:
             result = await get_observations(ids=[1, 2])
             data = json.loads(result)
             assert len(data) == 2
-            mock_dl.get_observations.assert_called_once_with([1, 2])
+            mock_dl.get_observations.assert_called_once_with(
+                [1, 2], track_retrieval=True
+            )
+
+    @pytest.mark.asyncio
+    async def test_get_observations_exposes_inspection_mode(self, mock_dl):
+        with patch("open_brain.server.get_dl", return_value=mock_dl):
+            from open_brain.server import get_observations
+
+            await get_observations(ids=[1, 2], track_retrieval=False)
+
+        mock_dl.get_observations.assert_called_once_with(
+            [1, 2], track_retrieval=False
+        )
 
     @pytest.mark.asyncio
     async def test_get_observations_empty_ids(self, mock_dl):

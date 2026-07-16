@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import asyncpg
 import pytest
 
 from open_brain.data_layer.embedding import to_pg_vector
-from open_brain.data_layer.interface import Memory, SearchParams, TimelineParams
+from open_brain.data_layer.interface import Memory, SearchParams
 from open_brain.data_layer.refine import find_obvious_duplicates
 
 
@@ -29,6 +31,30 @@ def _memory(memory_id: int, priority: float, content: str = "content") -> Memory
         created_at="2026-01-01",
         updated_at="2026-01-01",
     )
+
+
+def _memory_row() -> MagicMock:
+    data = {
+        "id": 1,
+        "index_id": 1,
+        "session_id": None,
+        "type": "observation",
+        "title": "Test",
+        "subtitle": None,
+        "narrative": None,
+        "content": "test content",
+        "metadata": {},
+        "priority": 0.5,
+        "stability": "stable",
+        "access_count": 0,
+        "last_accessed_at": None,
+        "created_at": "2026-01-01",
+        "updated_at": "2026-01-01",
+    }
+    row = MagicMock()
+    row.__getitem__ = lambda self, key: data[key]
+    row.get = lambda key, default=None: data.get(key, default)
+    return row
 
 
 # ─── pgvector format tests ─────────────────────────────────────────────────────
@@ -340,14 +366,140 @@ class TestPostgresDataLayerGetObservations:
         mock_conn.fetch.return_value = [mock_row]
         mock_pool = _make_mock_pool(mock_conn)
 
+        def close_scheduled_coroutine(coroutine):
+            coroutine.close()
+
         with (
             patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=mock_pool),
-            patch("asyncio.create_task"),
+            patch("asyncio.create_task", side_effect=close_scheduled_coroutine),
         ):
             result = await dl.get_observations([1])
 
         assert len(result) == 1
         mock_conn.fetch.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_default_retrieval_schedules_usage_tracking(self, dl):
+        mock_conn = AsyncMock()
+        mock_conn.fetch.return_value = [_memory_row()]
+        mock_pool = _make_mock_pool(mock_conn)
+        scheduled = []
+
+        def capture_task(coroutine):
+            scheduled.append(coroutine)
+            coroutine.close()
+
+        with (
+            patch(
+                "open_brain.data_layer.postgres.get_pool",
+                new_callable=AsyncMock,
+                return_value=mock_pool,
+            ),
+            patch("asyncio.create_task", side_effect=capture_task),
+        ):
+            await dl.get_observations([1])
+
+        assert len(scheduled) == 1
+
+    @pytest.mark.asyncio
+    async def test_regression_inspection_does_not_schedule_retrieval_tracking(self, dl):
+        """Inspection must not enqueue a late priority or usage-log mutation."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch.return_value = [_memory_row()]
+        mock_pool = _make_mock_pool(mock_conn)
+
+        with (
+            patch(
+                "open_brain.data_layer.postgres.get_pool",
+                new_callable=AsyncMock,
+                return_value=mock_pool,
+            ),
+            patch("asyncio.create_task") as create_task,
+        ):
+            result = await dl.get_observations([1], track_retrieval=False)
+
+        assert len(result) == 1
+        create_task.assert_not_called()
+
+    @pytest.mark.integration
+    @pytest.mark.asyncio
+    async def test_regression_inspection_preserves_real_database_state(
+        self,
+        dl,
+        bootstrapped_database_url: str,
+    ):
+        """Inspection must leave the complete memory and usage rows unchanged."""
+        from open_brain.config import get_config
+        from open_brain.data_layer import postgres as pg_module
+
+        config = get_config()
+        original_url = config.DATABASE_URL
+        config.DATABASE_URL = bootstrapped_database_url
+        await pg_module.close_pool()
+        await pg_module.get_pool()
+        conn = await asyncpg.connect(bootstrapped_database_url)
+        memory_id = await conn.fetchval(
+            """
+            INSERT INTO memories (
+                type, title, content, metadata, priority, stability,
+                access_count, last_accessed_at, last_decay_at, updated_at
+            )
+            VALUES (
+                'observation', 'Inspection regression', 'unchanged',
+                '{"capture_status":"inbox"}'::jsonb, 0.42, 'stable',
+                3, NOW() - INTERVAL '2 days', NOW() - INTERVAL '1 day',
+                NOW() - INTERVAL '1 day'
+            )
+            RETURNING id
+            """
+        )
+        try:
+            before_memory = await conn.fetchval(
+                "SELECT to_jsonb(m)::text FROM memories m WHERE id = $1",
+                memory_id,
+            )
+            before_usage = await conn.fetchval(
+                """
+                SELECT COALESCE(
+                    jsonb_agg(to_jsonb(u) ORDER BY u.id), '[]'::jsonb
+                )::text
+                FROM memory_usage_log u
+                WHERE u.memory_id = $1
+                """,
+                memory_id,
+            )
+
+            tasks_before = asyncio.all_tasks()
+            memories = await dl.get_observations(
+                [memory_id], track_retrieval=False
+            )
+            request_tasks = asyncio.all_tasks() - tasks_before
+            if request_tasks:
+                await asyncio.gather(*request_tasks)
+
+            after_memory = await conn.fetchval(
+                "SELECT to_jsonb(m)::text FROM memories m WHERE id = $1",
+                memory_id,
+            )
+            after_usage = await conn.fetchval(
+                """
+                SELECT COALESCE(
+                    jsonb_agg(to_jsonb(u) ORDER BY u.id), '[]'::jsonb
+                )::text
+                FROM memory_usage_log u
+                WHERE u.memory_id = $1
+                """,
+                memory_id,
+            )
+
+            assert [memory.id for memory in memories] == [memory_id]
+            assert after_memory == before_memory
+            assert after_usage == before_usage
+        finally:
+            await conn.execute("DELETE FROM memories WHERE id = $1", memory_id)
+            await conn.close()
+            await pg_module.close_pool()
+            config.DATABASE_URL = original_url
 
 
 # ─── Search param mapping tests ────────────────────────────────────────────────

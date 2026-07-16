@@ -1010,7 +1010,12 @@ class DataLayer(Protocol):
 
     async def timeline(self, params: TimelineParams) -> TimelineResult: ...
 
-    async def get_observations(self, ids: list[int]) -> list[Memory]: ...
+    async def get_observations(
+        self,
+        ids: list[int],
+        *,
+        track_retrieval: bool = True,
+    ) -> list[Memory]: ...
 
     async def save_memory(self, params: SaveMemoryParams) -> SaveMemoryResult: ...
 

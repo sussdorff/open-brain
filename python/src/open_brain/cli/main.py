@@ -483,7 +483,7 @@ async def _cmd_save(args: argparse.Namespace) -> Any:
 
 
 async def _cmd_get(args: argparse.Namespace) -> Any:
-    """Fetch full observations by ID.
+    """Fetch full observations by ID with explicit recall tracking.
 
     Args:
         args: Parsed CLI arguments.
@@ -492,7 +492,10 @@ async def _cmd_get(args: argparse.Namespace) -> Any:
         Observation data from MCP tool.
     """
     ids = [int(i) for i in args.ids]
-    return await call_tool("get_observations", {"ids": ids})
+    return await call_tool(
+        "get_observations",
+        {"ids": ids, "track_retrieval": not args.inspect},
+    )
 
 
 async def _cmd_timeline(args: argparse.Namespace) -> Any:
@@ -1270,9 +1273,14 @@ def _build_parser() -> argparse.ArgumentParser:
     # get
     p_get = subparsers.add_parser(
         "get",
-        help="Fetch full observations by ID",
+        help="Fetch full observations by ID and track retrieval",
     )
     p_get.add_argument("ids", nargs="+", metavar="ID", help="Observation IDs to fetch")
+    p_get.add_argument(
+        "--inspect",
+        action="store_true",
+        help="Fetch without logging retrieval or changing recall priority",
+    )
 
     # timeline
     p_timeline = subparsers.add_parser(
