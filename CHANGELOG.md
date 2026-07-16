@@ -16,6 +16,17 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- *(open-brain-rup9)* **OAuth login for the `ob` CLI** — New `ob auth login`,
+  `status`, and `logout` commands provide OAuth discovery, dynamic public-client
+  registration, browser authorization with loopback callback, state validation,
+  and PKCE-S256. OAuth sessions are atomically persisted in the XDG config
+  directory with mode `0600`, refreshed before expiry, and retried once after an
+  authentication `401`. Stored OAuth identity takes precedence over legacy API
+  key and URL-token configuration, is never sent to a different server origin,
+  and status output never contains token material. The server now enforces exact
+  registered redirect URIs, validates the PKCE verifier during code exchange,
+  binds refresh tokens to the registered client, and rotates refresh tokens.
+
 - *(open-brain-m9e)* **Second Brain cutover verifier** — `scripts/verify_second_brain_cutover.py` is a pre-archival gate that operators and agents run before archiving the legacy Second Brain vault. It checks four independent gates, each of which fails closed:
   - `open_brain_capabilities` — verifies all seven prerequisite Open Brain capabilities are live (canonical entities, vocabulary, capture inbox, daily/weekly review, Paperless resolution, vault import, portable backup).
   - `paperless_references` — resolves a caller-supplied list of Paperless document IDs against the live Paperless-ngx instance.

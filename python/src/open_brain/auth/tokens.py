@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 from dataclasses import dataclass
+import secrets
 
 import jwt
 
@@ -58,6 +59,7 @@ def issue_refresh_token(claims: TokenClaims) -> str:
         "clientId": claims.client_id,
         "scopes": claims.scopes,
         "type": "refresh",
+        "jti": secrets.token_urlsafe(24),
         "iat": now,
         "exp": now + timedelta(days=30),
         "iss": config.MCP_SERVER_URL,

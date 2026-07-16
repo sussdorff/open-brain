@@ -12,7 +12,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterator, NoReturn
 
-from open_brain.cli.client import MCPError, call_tool
+from open_brain.cli.client import MCPError, _get_server_url, call_tool
+from open_brain.cli.oauth import OAuthError, login, logout, oauth_status
 from open_brain.data_layer.postgres import PostgresDataLayer, suppress_migrations
 from open_brain.portable_backup import export_bundle, restore_bundle, verify_round_trip
 from open_brain.runtime import run_server
@@ -64,6 +65,11 @@ def _should_render_learning_analysis(args: argparse.Namespace) -> bool:
     )
 
 
+def _should_render_auth(args: argparse.Namespace) -> bool:
+    """Return True when auth output should use the redacted terminal display."""
+    return args.command == "auth" and not _wants_json(args)
+
+
 def _output_result(data: Any, args: argparse.Namespace) -> None:
     """Print command result using the command's default presentation."""
     if _should_render_people_list(args) and isinstance(data, dict):
@@ -80,7 +86,43 @@ def _output_result(data: Any, args: argparse.Namespace) -> None:
         print(_render_learning_analysis(data), end="")
         return
 
+    if _should_render_auth(args) and isinstance(data, dict):
+        print(_render_auth(data), end="")
+        return
+
     _output(data, pretty=args.pretty)
+
+
+def _render_auth(data: dict[str, Any]) -> str:
+    """Render OAuth status without token material."""
+    if not data.get("authenticated"):
+        lines = [str(data.get("message", "Not authenticated with OAuth."))]
+    else:
+        lines = [
+            "OAuth login is active.",
+            f"Reviewer: {data.get('reviewer') or 'unknown'}",
+            f"Issuer: {data.get('issuer') or '-'}",
+            f"Scopes: {data.get('scope') or '-'}",
+            f"Expires at: {data.get('expires_at') or '-'}",
+        ]
+    for warning in data.get("warnings") or []:
+        lines.append(f"Warning: {warning}")
+    return "\n".join(lines) + "\n"
+
+
+async def _cmd_auth(args: argparse.Namespace) -> Any:
+    """Dispatch OAuth login, status, and logout commands."""
+    if args.auth_command == "login":
+        return await login(
+            _get_server_url(),
+            open_browser=not args.no_browser,
+            timeout=args.timeout,
+        )
+    if args.auth_command == "status":
+        return oauth_status()
+    if args.auth_command == "logout":
+        return await logout()
+    raise ValueError(f"Unknown auth command: {args.auth_command}")
 
 
 def _render_macwhisper_payload(data: dict[str, Any], args: argparse.Namespace) -> str:
@@ -256,9 +298,7 @@ def _render_macwhisper_list(data: dict[str, Any]) -> str:
         status = _format_ingest_status(item)
         preview = _single_line_preview(item.get("text_preview", ""))
         lines.append(f"{created_at}  {entry_id}")
-        details = "  ".join(
-            part for part in [title, source_app, duration] if part
-        )
+        details = "  ".join(part for part in [title, source_app, duration] if part)
         if details:
             lines.append(f"  {details}")
         if status:
@@ -268,7 +308,9 @@ def _render_macwhisper_list(data: dict[str, Any]) -> str:
         if preview:
             lines.append(f"  {preview}")
 
-    lines.extend(["", "Ingest one entry with:", "  ob ingest macwhisper entry <entry-id>"])
+    lines.extend(
+        ["", "Ingest one entry with:", "  ob ingest macwhisper entry <entry-id>"]
+    )
     return "\n".join(lines) + "\n"
 
 
@@ -834,9 +876,7 @@ async def _attach_ingest_status(items: list[dict[str, Any]]) -> list[dict[str, A
         for item in items
     ]
     source_refs = _dedupe_preserve_order(
-        ref
-        for candidates in source_ref_candidates
-        for ref in candidates
+        ref for candidates in source_ref_candidates for ref in candidates
     )
     statuses = await _fetch_ingest_statuses(source_refs)
 
@@ -851,14 +891,18 @@ async def _attach_ingest_status(items: list[dict[str, Any]]) -> list[dict[str, A
             None,
         )
         primary_ref = candidates[0] if candidates else ""
-        status = status or statuses.get(primary_ref) or {
-            "source_ref": primary_ref,
-            "ingested": False,
-            "memory_id": None,
-            "run_id": None,
-            "ingested_at": None,
-            "title": None,
-        }
+        status = (
+            status
+            or statuses.get(primary_ref)
+            or {
+                "source_ref": primary_ref,
+                "ingested": False,
+                "memory_id": None,
+                "run_id": None,
+                "ingested_at": None,
+                "title": None,
+            }
+        )
         status = dict(status)
         ingested_title = status.pop("title", None)
         updated = dict(item)
@@ -874,7 +918,7 @@ async def _fetch_ingest_statuses(source_refs: list[str]) -> dict[str, dict[str, 
     statuses: dict[str, dict[str, Any]] = {}
     chunk_size = 500
     for start in range(0, len(source_refs), chunk_size):
-        chunk = source_refs[start: start + chunk_size]
+        chunk = source_refs[start : start + chunk_size]
         payload = await call_tool("ingest_status", {"source_refs": chunk})
         for item in payload.get("items") or []:
             if not isinstance(item, dict):
@@ -999,7 +1043,9 @@ async def _cmd_people_enrichment(args: argparse.Namespace) -> Any:
 
     database_url = _direct.load_database_url()
     if not database_url:
-        _error("people enrichment requires DATABASE_URL env var or DATABASE_URL in .env file")
+        _error(
+            "people enrichment requires DATABASE_URL env var or DATABASE_URL in .env file"
+        )
 
     _direct.prepare_direct_env(database_url)
 
@@ -1026,7 +1072,7 @@ async def _cmd_people_enrichment(args: argparse.Namespace) -> Any:
     if not searxng_url:
         _error(
             "SEARXNG_URL is not configured. Options:\n"
-            "  1. Add to ~/.config/open-brain/config.json: {\"searxng_url\": \"http://...\"}\n"
+            '  1. Add to ~/.config/open-brain/config.json: {"searxng_url": "http://..."}\n'
             "  2. Set OB_SEARXNG_URL env var\n"
             "  3. Set SEARXNG_URL in the server .env\n"
             "  4. Pass --searxng-url <URL>"
@@ -1087,7 +1133,11 @@ async def _cmd_people_enrichment(args: argparse.Namespace) -> Any:
             else:
                 # Interactive prompt
                 try:
-                    answer = input(f"Apply enrichment for {candidate.name}? [y/N] ").strip().lower()
+                    answer = (
+                        input(f"Apply enrichment for {candidate.name}? [y/N] ")
+                        .strip()
+                        .lower()
+                    )
                 except (EOFError, KeyboardInterrupt):
                     print("\nAborted.")
                     break
@@ -1142,6 +1192,32 @@ def _build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")
     subparsers.required = True
+
+    # auth
+    p_auth = subparsers.add_parser(
+        "auth",
+        help="Manage the CLI OAuth login",
+    )
+    auth_sub = p_auth.add_subparsers(dest="auth_command", metavar="ACTION")
+    auth_sub.required = True
+    p_auth_login = auth_sub.add_parser(
+        "login",
+        help="Log in through the browser with OAuth 2.1 and PKCE",
+    )
+    p_auth_login.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Print the authorization URL instead of opening it",
+    )
+    p_auth_login.add_argument(
+        "--timeout",
+        type=float,
+        default=300.0,
+        metavar="SECONDS",
+        help="Maximum time to wait for the browser callback (default: 300)",
+    )
+    auth_sub.add_parser("status", help="Show redacted OAuth login status")
+    auth_sub.add_parser("logout", help="Revoke and remove the OAuth login")
 
     # search
     p_search = subparsers.add_parser(
@@ -1224,7 +1300,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "daily",
         help="Generate a daily memory review",
     )
-    p_daily.add_argument("date", nargs="?", help="Date to review (YYYY-MM-DD; default: today)")
+    p_daily.add_argument(
+        "date", nargs="?", help="Date to review (YYYY-MM-DD; default: today)"
+    )
     p_daily.add_argument("--project", help="Filter by project")
 
     # context
@@ -1693,6 +1771,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 _COMMAND_MAP = {
+    "auth": _cmd_auth,
     "search": _cmd_search,
     "inbox": _cmd_inbox,
     "concept": _cmd_concept,
@@ -1738,6 +1817,8 @@ def main() -> None:
         if result is not None:
             _output_result(result, args)
     except MCPError as e:
+        _error(str(e))
+    except OAuthError as e:
         _error(str(e))
     except KeyboardInterrupt:
         sys.exit(1)

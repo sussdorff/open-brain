@@ -1744,12 +1744,20 @@ async def authorize(
     client_id: str,
     redirect_uri: str,
     code_challenge: str,
+    code_challenge_method: str = "",
     response_type: str = "code",
     state: str = "",
     scope: str = "",
 ) -> HTMLResponse:
     """Render the OAuth login form."""
     provider = get_provider()
+    _validate_authorization_request(
+        client_id=client_id,
+        redirect_uri=redirect_uri,
+        response_type=response_type,
+        code_challenge=code_challenge,
+        code_challenge_method=code_challenge_method,
+    )
     # Load client name from clients file if available
     client_name = _load_client_name(client_id)
     html = provider.build_login_form(
@@ -1757,6 +1765,7 @@ async def authorize(
         client_id=client_id,
         redirect_uri=redirect_uri,
         code_challenge=code_challenge,
+        code_challenge_method=code_challenge_method,
         state=state,
         scopes=scope.split() if scope else [],
     )
@@ -1770,17 +1779,26 @@ async def authorize_submit(
     client_id: str = Form(...),
     redirect_uri: str = Form(...),
     code_challenge: str = Form(...),
+    code_challenge_method: str = Form(...),
     state: str = Form(default=""),
     scopes: str = Form(default=""),
 ) -> RedirectResponse:
     """Handle login form submission."""
     provider = get_provider()
+    _validate_authorization_request(
+        client_id=client_id,
+        redirect_uri=redirect_uri,
+        response_type="code",
+        code_challenge=code_challenge,
+        code_challenge_method=code_challenge_method,
+    )
     _success, redirect_url = provider.handle_login_submit(
         username=username,
         password=password,
         client_id=client_id,
         redirect_uri=redirect_uri,
         code_challenge=code_challenge,
+        code_challenge_method=code_challenge_method,
         state=state,
         scopes_str=scopes,
     )
@@ -1797,8 +1815,15 @@ async def token_endpoint(request: Request) -> JSONResponse:
     if grant_type == "authorization_code":
         code = body.get("code", "")
         client_id = body.get("client_id", "")
+        code_verifier = body.get("code_verifier", "")
+        redirect_uri = body.get("redirect_uri", "")
         try:
-            tokens = provider.exchange_authorization_code(str(client_id), str(code))
+            tokens = provider.exchange_authorization_code(
+                str(client_id),
+                str(code),
+                str(code_verifier),
+                str(redirect_uri),
+            )
             return JSONResponse({
                 "access_token": tokens.access_token,
                 "token_type": tokens.token_type,
@@ -1819,7 +1844,7 @@ async def token_endpoint(request: Request) -> JSONResponse:
                 "expires_in": tokens.expires_in,
                 "refresh_token": tokens.refresh_token,
             })
-        except (ValueError, Exception) as e:
+        except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
 
     raise HTTPException(status_code=400, detail="Unsupported grant_type")
@@ -2012,6 +2037,56 @@ def _load_client_name(client_id: str) -> str:
     except Exception:
         pass
     return "MCP Client"
+
+
+def _load_static_client(client_id: str) -> dict[str, Any] | None:
+    """Return one statically registered OAuth client, if configured."""
+    try:
+        clients_path = Path(get_config().CLIENTS_FILE)
+        if not clients_path.exists():
+            return None
+        clients = json.loads(clients_path.read_text(encoding="utf-8"))
+        if not isinstance(clients, list):
+            return None
+        return next(
+            (
+                client
+                for client in clients
+                if isinstance(client, dict) and client.get("client_id") == client_id
+            ),
+            None,
+        )
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _validate_authorization_request(
+    *,
+    client_id: str,
+    redirect_uri: str,
+    response_type: str,
+    code_challenge: str,
+    code_challenge_method: str,
+) -> None:
+    """Validate OAuth authorization parameters before rendering or login."""
+    if response_type != "code":
+        raise HTTPException(status_code=400, detail="Unsupported response_type")
+    if code_challenge_method != "S256":
+        raise HTTPException(status_code=400, detail="code_challenge_method must be S256")
+    if len(code_challenge) != 43 or any(
+        character not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+        for character in code_challenge
+    ):
+        raise HTTPException(status_code=400, detail="Invalid S256 code_challenge")
+
+    registered = get_provider().get_client(client_id)
+    if registered is not None:
+        redirect_uris = registered.redirect_uris
+    else:
+        static_client = _load_static_client(client_id)
+        redirect_uris = static_client.get("redirect_uris", []) if static_client else []
+    if redirect_uri not in redirect_uris:
+        raise HTTPException(status_code=400, detail="Unregistered redirect_uri")
 
 
 @app.get("/.well-known/oauth-protected-resource")
