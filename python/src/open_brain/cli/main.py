@@ -335,6 +335,17 @@ def _error(msg: str) -> NoReturn:
     sys.exit(1)
 
 
+def _parse_json_object(value: str) -> dict[str, Any]:
+    """Parse a CLI argument as a JSON object."""
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise argparse.ArgumentTypeError("metadata must be valid JSON") from exc
+    if not isinstance(parsed, dict):
+        raise argparse.ArgumentTypeError("metadata must be a JSON object")
+    return parsed
+
+
 async def _cmd_search(args: argparse.Namespace) -> Any:
     """Execute hybrid search.
 
@@ -607,6 +618,12 @@ async def _cmd_update(args: argparse.Namespace) -> Any:
         kwargs["project"] = args.project
     if args.title:
         kwargs["title"] = args.title
+    if args.subtitle:
+        kwargs["subtitle"] = args.subtitle
+    if args.narrative:
+        kwargs["narrative"] = args.narrative
+    if args.metadata is not None:
+        kwargs["metadata"] = args.metadata
     return await call_tool("update_memory", kwargs)
 
 
@@ -1294,6 +1311,13 @@ def _build_parser() -> argparse.ArgumentParser:
     p_update.add_argument("--type", help="New memory type")
     p_update.add_argument("--project", help="New project")
     p_update.add_argument("--title", help="New title")
+    p_update.add_argument("--subtitle", help="New subtitle")
+    p_update.add_argument("--narrative", help="New narrative")
+    p_update.add_argument(
+        "--metadata",
+        type=_parse_json_object,
+        help="Metadata fields to merge, as a JSON object",
+    )
 
     # capture
     p_capture = subparsers.add_parser(

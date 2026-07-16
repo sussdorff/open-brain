@@ -321,10 +321,32 @@ class TestUpdateCommand:
         assert args.text == "new content"
 
     def test_all_fields(self):
-        args = parse(["update", "7", "--text", "t", "--type", "decision", "--project", "p", "--title", "T"])
+        args = parse(
+            [
+                "update",
+                "7",
+                "--text",
+                "t",
+                "--type",
+                "decision",
+                "--project",
+                "p",
+                "--title",
+                "T",
+                "--subtitle",
+                "S",
+                "--narrative",
+                "N",
+                "--metadata",
+                '{"status":"discarded"}',
+            ]
+        )
         assert args.type == "decision"
         assert args.project == "p"
         assert args.title == "T"
+        assert args.subtitle == "S"
+        assert args.narrative == "N"
+        assert args.metadata == {"status": "discarded"}
 
 
 class TestPeopleCommand:
@@ -1238,6 +1260,52 @@ class TestCommandHandlers:
                 "update_memory",
                 {"id": 7, "text": "new content", "type": "decision"},
             )
+
+    # Guards the bug where ob update exposed fewer fields than update_memory.
+    @pytest.mark.asyncio
+    async def test_regression_ob_update_forwards_full_mcp_field_set(self):
+        args = parse(
+            [
+                "update",
+                "7",
+                "--subtitle",
+                "New subtitle",
+                "--narrative",
+                "New narrative",
+                "--metadata",
+                '{"status":"discarded","discard_reason":"merged into #8"}',
+            ]
+        )
+        with patch("open_brain.cli.main.call_tool", new_callable=AsyncMock) as mock_call:
+            mock_call.return_value = {"id": 7}
+            from open_brain.cli.main import _cmd_update
+
+            await _cmd_update(args)
+
+        mock_call.assert_called_once_with(
+            "update_memory",
+            {
+                "id": 7,
+                "subtitle": "New subtitle",
+                "narrative": "New narrative",
+                "metadata": {
+                    "status": "discarded",
+                    "discard_reason": "merged into #8",
+                },
+            },
+        )
+
+    # Guards against malformed lifecycle metadata reaching the MCP transport.
+    def test_regression_ob_update_rejects_invalid_metadata(self, capsys):
+        with pytest.raises(SystemExit):
+            parse(["update", "7", "--metadata", "{not-json}"])
+        assert "metadata must be valid JSON" in capsys.readouterr().err
+
+    # Guards against valid JSON values that are not metadata objects.
+    def test_regression_ob_update_rejects_non_object_metadata(self, capsys):
+        with pytest.raises(SystemExit):
+            parse(["update", "7", "--metadata", '["discarded"]'])
+        assert "metadata must be a JSON object" in capsys.readouterr().err
 
     @pytest.mark.asyncio
     async def test_timeline_with_anchor(self):
