@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import time
 
 import jwt
@@ -18,7 +20,16 @@ from open_brain.auth.tokens import (
 from open_brain.auth.provider import OAuthProvider
 
 
+PKCE_VERIFIER = "test-verifier-with-enough-entropy-0123456789-ABCDEFG"
+PKCE_CHALLENGE = (
+    base64.urlsafe_b64encode(hashlib.sha256(PKCE_VERIFIER.encode("ascii")).digest())
+    .rstrip(b"=")
+    .decode("ascii")
+)
+
+
 # ─── Token Generation Tests ────────────────────────────────────────────────────
+
 
 class TestIssueAccessToken:
     def test_returns_string(self):
@@ -34,7 +45,9 @@ class TestIssueAccessToken:
         assert header["alg"] == "HS256"
 
     def test_contains_correct_claims(self):
-        claims = TokenClaims(sub="testuser", client_id="my-client", scopes=["read", "write"])
+        claims = TokenClaims(
+            sub="testuser", client_id="my-client", scopes=["read", "write"]
+        )
         token = issue_access_token(claims)
         # Decode without verification for payload inspection
         payload = jwt.decode(token, options={"verify_signature": False})
@@ -88,6 +101,7 @@ class TestIssueRefreshToken:
 
 # ─── Token Verification Tests ──────────────────────────────────────────────────
 
+
 class TestVerifyToken:
     def test_verifies_access_token(self):
         claims = TokenClaims(sub="testuser", client_id="client1", scopes=["read"])
@@ -111,14 +125,22 @@ class TestVerifyToken:
 
     def test_raises_for_wrong_secret(self, config):
         import jwt as pyjwt
+
         # Sign with a different secret
-        payload = {"sub": "u", "iss": config.MCP_SERVER_URL, "exp": int(time.time()) + 3600}
-        bad_token = pyjwt.encode(payload, "wrong-secret-that-is-long-enough-32chars", algorithm="HS256")
+        payload = {
+            "sub": "u",
+            "iss": config.MCP_SERVER_URL,
+            "exp": int(time.time()) + 3600,
+        }
+        bad_token = pyjwt.encode(
+            payload, "wrong-secret-that-is-long-enough-32chars", algorithm="HS256"
+        )
         with pytest.raises(Exception):
             verify_token(bad_token)
 
     def test_raises_for_expired_token(self, config):
         import jwt as pyjwt
+
         payload = {
             "sub": "u",
             "clientId": "c",
@@ -133,6 +155,7 @@ class TestVerifyToken:
 
     def test_raises_for_wrong_issuer(self, config):
         import jwt as pyjwt
+
         payload = {
             "sub": "u",
             "clientId": "c",
@@ -146,6 +169,7 @@ class TestVerifyToken:
 
 
 # ─── OAuth Provider Flow Tests ─────────────────────────────────────────────────
+
 
 class TestOAuthProvider:
     def test_build_login_form_contains_client_name(self, oauth_provider):
@@ -167,7 +191,7 @@ class TestOAuthProvider:
             password="testpassword123",
             client_id="client1",
             redirect_uri="http://localhost/callback",
-            code_challenge="challenge",
+            code_challenge=PKCE_CHALLENGE,
             state="state1",
             scopes_str="read write",
         )
@@ -181,7 +205,7 @@ class TestOAuthProvider:
             password="wrongpassword",
             client_id="client1",
             redirect_uri="http://localhost/callback",
-            code_challenge="challenge",
+            code_challenge=PKCE_CHALLENGE,
             state="",
             scopes_str="",
         )
@@ -194,7 +218,7 @@ class TestOAuthProvider:
             password="testpassword123",
             client_id="client1",
             redirect_uri="http://localhost/callback",
-            code_challenge="challenge",
+            code_challenge=PKCE_CHALLENGE,
             state="",
             scopes_str="",
         )
@@ -227,13 +251,15 @@ class TestOAuthProvider:
             password="testpassword123",
             client_id="client1",
             redirect_uri="http://localhost/callback",
-            code_challenge="challenge",
+            code_challenge=PKCE_CHALLENGE,
             state="",
             scopes_str="read",
         )
         assert success is True
         code = redirect_url.split("code=")[1].split("&")[0]
-        tokens = oauth_provider.exchange_authorization_code("client1", code)
+        tokens = oauth_provider.exchange_authorization_code(
+            "client1", code, PKCE_VERIFIER, "http://localhost/callback"
+        )
         assert tokens.token_type == "Bearer"
         assert tokens.expires_in == 3600
         assert tokens.access_token
@@ -246,14 +272,18 @@ class TestOAuthProvider:
             password="testpassword123",
             client_id="client1",
             redirect_uri="http://localhost/callback",
-            code_challenge="challenge",
+            code_challenge=PKCE_CHALLENGE,
             state="",
             scopes_str="",
         )
         code = redirect_url.split("code=")[1]
-        oauth_provider.exchange_authorization_code("client1", code)
+        oauth_provider.exchange_authorization_code(
+            "client1", code, PKCE_VERIFIER, "http://localhost/callback"
+        )
         with pytest.raises(ValueError):
-            oauth_provider.exchange_authorization_code("client1", code)
+            oauth_provider.exchange_authorization_code(
+                "client1", code, PKCE_VERIFIER, "http://localhost/callback"
+            )
 
     def test_exchange_authorization_code_client_mismatch(self, oauth_provider):
         success, redirect_url = oauth_provider.handle_login_submit(
@@ -261,13 +291,49 @@ class TestOAuthProvider:
             password="testpassword123",
             client_id="client1",
             redirect_uri="http://localhost/callback",
-            code_challenge="challenge",
+            code_challenge=PKCE_CHALLENGE,
             state="",
             scopes_str="",
         )
         code = redirect_url.split("code=")[1]
         with pytest.raises(ValueError, match="mismatch"):
-            oauth_provider.exchange_authorization_code("other-client", code)
+            oauth_provider.exchange_authorization_code(
+                "other-client", code, PKCE_VERIFIER, "http://localhost/callback"
+            )
+
+    def test_exchange_authorization_code_rejects_missing_verifier(self, oauth_provider):
+        success, redirect_url = oauth_provider.handle_login_submit(
+            username="testuser",
+            password="testpassword123",
+            client_id="client1",
+            redirect_uri="http://localhost/callback",
+            code_challenge=PKCE_CHALLENGE,
+            state="",
+            scopes_str="",
+        )
+        assert success is True
+        code = redirect_url.split("code=")[1]
+        with pytest.raises(ValueError, match="required"):
+            oauth_provider.exchange_authorization_code(
+                "client1", code, "", "http://localhost/callback"
+            )
+
+    def test_exchange_authorization_code_rejects_wrong_verifier(self, oauth_provider):
+        success, redirect_url = oauth_provider.handle_login_submit(
+            username="testuser",
+            password="testpassword123",
+            client_id="client1",
+            redirect_uri="http://localhost/callback",
+            code_challenge=PKCE_CHALLENGE,
+            state="",
+            scopes_str="",
+        )
+        assert success is True
+        code = redirect_url.split("code=")[1]
+        with pytest.raises(ValueError, match="Invalid code_verifier"):
+            oauth_provider.exchange_authorization_code(
+                "client1", code, "wrong-verifier", "http://localhost/callback"
+            )
 
     def test_exchange_refresh_token_success(self, oauth_provider):
         claims = TokenClaims(sub="testuser", client_id="client1", scopes=["read"])
@@ -281,6 +347,21 @@ class TestOAuthProvider:
         access_token = issue_access_token(claims)
         with pytest.raises(ValueError, match="Not a refresh token"):
             oauth_provider.exchange_refresh_token("client1", access_token)
+
+    def test_exchange_refresh_token_rejects_client_mismatch(self, oauth_provider):
+        claims = TokenClaims(sub="testuser", client_id="client1", scopes=[])
+        refresh_token = issue_refresh_token(claims)
+        with pytest.raises(ValueError, match="Client ID mismatch"):
+            oauth_provider.exchange_refresh_token("other-client", refresh_token)
+
+    def test_exchange_refresh_token_rotates_refresh_token(self, oauth_provider):
+        claims = TokenClaims(sub="testuser", client_id="client1", scopes=[])
+        refresh_token = issue_refresh_token(claims)
+        rotated = oauth_provider.exchange_refresh_token("client1", refresh_token)
+        assert rotated.refresh_token != refresh_token
+        oauth_provider.exchange_refresh_token("client1", rotated.refresh_token)
+        with pytest.raises(ValueError, match="revoked"):
+            oauth_provider.exchange_refresh_token("client1", refresh_token)
 
     def test_verify_access_token_success(self, oauth_provider):
         claims = TokenClaims(sub="testuser", client_id="client1", scopes=["read"])
@@ -312,6 +393,7 @@ class TestOAuthProvider:
 
 # ─── Dynamic Client Registration Tests ───────────────────────────────────────
 
+
 class TestDynamicClientRegistration:
     def test_register_and_get_client(self, oauth_provider):
         client = oauth_provider.register_client(client_name="Test App")
@@ -325,12 +407,97 @@ class TestDynamicClientRegistration:
         assert oauth_provider.get_client("nonexistent") is None
 
 
+class TestOAuthRoutes:
+    @pytest.mark.asyncio
+    async def test_authorize_rejects_unregistered_redirect(self, auth_client):
+        registration = await auth_client.post(
+            "/register",
+            json={
+                "client_name": "ob CLI",
+                "redirect_uris": ["http://127.0.0.1:1234/callback"],
+            },
+        )
+        client_id = registration.json()["client_id"]
+        response = await auth_client.get(
+            "/authorize",
+            params={
+                "client_id": client_id,
+                "redirect_uri": "http://127.0.0.1:9999/callback",
+                "response_type": "code",
+                "code_challenge": PKCE_CHALLENGE,
+                "code_challenge_method": "S256",
+            },
+        )
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Unregistered redirect_uri"
+
+    @pytest.mark.asyncio
+    async def test_authorize_rejects_non_s256_challenge(self, auth_client):
+        registration = await auth_client.post(
+            "/register",
+            json={
+                "client_name": "ob CLI",
+                "redirect_uris": ["http://127.0.0.1:1234/callback"],
+            },
+        )
+        client_id = registration.json()["client_id"]
+        response = await auth_client.get(
+            "/authorize",
+            params={
+                "client_id": client_id,
+                "redirect_uri": "http://127.0.0.1:1234/callback",
+                "response_type": "code",
+                "code_challenge": PKCE_CHALLENGE,
+                "code_challenge_method": "plain",
+            },
+        )
+        assert response.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_token_endpoint_rejects_missing_code_verifier(self, auth_client):
+        redirect_uri = "http://127.0.0.1:1234/callback"
+        registration = await auth_client.post(
+            "/register",
+            json={"client_name": "ob CLI", "redirect_uris": [redirect_uri]},
+        )
+        client_id = registration.json()["client_id"]
+        provider = OAuthProvider()
+        from open_brain.auth import provider as provider_module
+
+        provider_module._provider = provider
+        success, redirect_url = provider.handle_login_submit(
+            username="testuser",
+            password="testpassword123",
+            client_id=client_id,
+            redirect_uri=redirect_uri,
+            code_challenge=PKCE_CHALLENGE,
+            code_challenge_method="S256",
+            state="",
+            scopes_str="memory evolution",
+        )
+        assert success is True
+        code = redirect_url.split("code=")[1]
+        response = await auth_client.post(
+            "/token",
+            data={
+                "grant_type": "authorization_code",
+                "client_id": client_id,
+                "code": code,
+                "redirect_uri": redirect_uri,
+            },
+        )
+        assert response.status_code == 400
+        assert "code_verifier is required" in response.text
+
+
 # ─── Bearer Auth Middleware Tests (HTTP-level) ────────────────────────────────
+
 
 @pytest.fixture
 def auth_client():
     """AsyncClient for testing the FastAPI app with Bearer auth middleware."""
     from open_brain.server import app
+
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     return AsyncClient(transport=transport, base_url="http://testserver")
 
@@ -387,12 +554,14 @@ class TestBearerAuthMiddleware:
 
 # ─── Multi-user Auth Tests ────────────────────────────────────────────────────
 
+
 class TestMultiUserAuth:
     """Tests for users.json file-based multi-user authentication."""
 
     def test_get_users_map_fallback_to_single_user(self):
         """When USERS_FILE does not exist, falls back to AUTH_USER/AUTH_PASSWORD."""
         from open_brain.config import get_users_map
+
         users_map = get_users_map()
         assert "testuser" in users_map
         assert users_map["testuser"] == "testpassword123"
@@ -402,16 +571,22 @@ class TestMultiUserAuth:
         import json
         import bcrypt
         import open_brain.config as config_module
+
         alice_hash = bcrypt.hashpw(b"alicepass", bcrypt.gensalt()).decode()
         bob_hash = bcrypt.hashpw(b"bobpass", bcrypt.gensalt()).decode()
         users_file = tmp_path / "users.json"
-        users_file.write_text(json.dumps([
-            {"username": "alice", "password": alice_hash},
-            {"username": "bob", "password": bob_hash},
-        ]))
+        users_file.write_text(
+            json.dumps(
+                [
+                    {"username": "alice", "password": alice_hash},
+                    {"username": "bob", "password": bob_hash},
+                ]
+            )
+        )
         config_module._config = None
         monkeypatch.setenv("USERS_FILE", str(users_file))
         from open_brain.config import get_users_map
+
         users_map = get_users_map()
         assert "alice" in users_map
         assert users_map["alice"] == alice_hash
@@ -423,35 +598,58 @@ class TestMultiUserAuth:
         import json
         import bcrypt
         import open_brain.config as config_module
+
         charlie_hash = bcrypt.hashpw(b"charliepass", bcrypt.gensalt()).decode()
         users_file = tmp_path / "users.json"
-        users_file.write_text(json.dumps([{"username": "charlie", "password": charlie_hash}]))
+        users_file.write_text(
+            json.dumps([{"username": "charlie", "password": charlie_hash}])
+        )
         config_module._config = None
         monkeypatch.setenv("USERS_FILE", str(users_file))
         from open_brain.config import get_users_map
+
         users_map = get_users_map()
         assert users_map == {"charlie": charlie_hash}
 
     def test_get_users_map_fallback_when_file_missing(self, monkeypatch):
         """When USERS_FILE path doesn't exist, falls back to AUTH_USER/AUTH_PASSWORD."""
         import open_brain.config as config_module
+
         config_module._config = None
         monkeypatch.setenv("USERS_FILE", "/nonexistent/path/users.json")
         from open_brain.config import get_users_map
+
         users_map = get_users_map()
         assert "testuser" in users_map
         assert users_map["testuser"] == "testpassword123"
 
-    def test_handle_login_submit_multi_user_success(self, oauth_provider, monkeypatch, tmp_path):
+    def test_handle_login_submit_multi_user_success(
+        self, oauth_provider, monkeypatch, tmp_path
+    ):
         """Multi-user: second user can log in when users.json is present."""
         import json
         import bcrypt
         import open_brain.config as config_module
+
         users_file = tmp_path / "users.json"
-        users_file.write_text(json.dumps([
-            {"username": "alice", "password": bcrypt.hashpw(b"alicepass", bcrypt.gensalt()).decode()},
-            {"username": "bob", "password": bcrypt.hashpw(b"bobpass", bcrypt.gensalt()).decode()},
-        ]))
+        users_file.write_text(
+            json.dumps(
+                [
+                    {
+                        "username": "alice",
+                        "password": bcrypt.hashpw(
+                            b"alicepass", bcrypt.gensalt()
+                        ).decode(),
+                    },
+                    {
+                        "username": "bob",
+                        "password": bcrypt.hashpw(
+                            b"bobpass", bcrypt.gensalt()
+                        ).decode(),
+                    },
+                ]
+            )
+        )
         config_module._config = None
         monkeypatch.setenv("USERS_FILE", str(users_file))
         success, redirect_url = oauth_provider.handle_login_submit(
@@ -459,23 +657,40 @@ class TestMultiUserAuth:
             password="bobpass",
             client_id="client1",
             redirect_uri="http://localhost/callback",
-            code_challenge="challenge",
+            code_challenge=PKCE_CHALLENGE,
             state="",
             scopes_str="",
         )
         assert success is True
         assert "code=" in redirect_url
 
-    def test_handle_login_submit_multi_user_wrong_password(self, oauth_provider, monkeypatch, tmp_path):
+    def test_handle_login_submit_multi_user_wrong_password(
+        self, oauth_provider, monkeypatch, tmp_path
+    ):
         """Multi-user: wrong password for a valid username is rejected."""
         import json
         import bcrypt
         import open_brain.config as config_module
+
         users_file = tmp_path / "users.json"
-        users_file.write_text(json.dumps([
-            {"username": "alice", "password": bcrypt.hashpw(b"alicepass", bcrypt.gensalt()).decode()},
-            {"username": "bob", "password": bcrypt.hashpw(b"bobpass", bcrypt.gensalt()).decode()},
-        ]))
+        users_file.write_text(
+            json.dumps(
+                [
+                    {
+                        "username": "alice",
+                        "password": bcrypt.hashpw(
+                            b"alicepass", bcrypt.gensalt()
+                        ).decode(),
+                    },
+                    {
+                        "username": "bob",
+                        "password": bcrypt.hashpw(
+                            b"bobpass", bcrypt.gensalt()
+                        ).decode(),
+                    },
+                ]
+            )
+        )
         config_module._config = None
         monkeypatch.setenv("USERS_FILE", str(users_file))
         success, redirect_url = oauth_provider.handle_login_submit(
@@ -483,20 +698,34 @@ class TestMultiUserAuth:
             password="wrongpass",
             client_id="client1",
             redirect_uri="http://localhost/callback",
-            code_challenge="challenge",
+            code_challenge=PKCE_CHALLENGE,
             state="",
             scopes_str="",
         )
         assert success is False
         assert "error=access_denied" in redirect_url
 
-    def test_handle_login_submit_multi_user_unknown_user(self, oauth_provider, monkeypatch, tmp_path):
+    def test_handle_login_submit_multi_user_unknown_user(
+        self, oauth_provider, monkeypatch, tmp_path
+    ):
         """Multi-user: unknown username is rejected."""
         import json
         import bcrypt
         import open_brain.config as config_module
+
         users_file = tmp_path / "users.json"
-        users_file.write_text(json.dumps([{"username": "alice", "password": bcrypt.hashpw(b"alicepass", bcrypt.gensalt()).decode()}]))
+        users_file.write_text(
+            json.dumps(
+                [
+                    {
+                        "username": "alice",
+                        "password": bcrypt.hashpw(
+                            b"alicepass", bcrypt.gensalt()
+                        ).decode(),
+                    }
+                ]
+            )
+        )
         config_module._config = None
         monkeypatch.setenv("USERS_FILE", str(users_file))
         success, redirect_url = oauth_provider.handle_login_submit(
@@ -504,7 +733,7 @@ class TestMultiUserAuth:
             password="alicepass",
             client_id="client1",
             redirect_uri="http://localhost/callback",
-            code_challenge="challenge",
+            code_challenge=PKCE_CHALLENGE,
             state="",
             scopes_str="",
         )
@@ -518,27 +747,47 @@ class TestMultiUserAuth:
             password="testpassword123",
             client_id="client1",
             redirect_uri="http://localhost/callback",
-            code_challenge="challenge",
+            code_challenge=PKCE_CHALLENGE,
             state="",
             scopes_str="read",
         )
         assert success is True
         code = redirect_url.split("code=")[1].split("&")[0]
-        tokens = oauth_provider.exchange_authorization_code("client1", code)
+        tokens = oauth_provider.exchange_authorization_code(
+            "client1", code, PKCE_VERIFIER, "http://localhost/callback"
+        )
         import jwt as pyjwt
+
         payload = pyjwt.decode(tokens.access_token, options={"verify_signature": False})
         assert payload["sub"] == "testuser"
 
-    def test_exchange_authorization_code_encodes_second_user_sub(self, oauth_provider, monkeypatch, tmp_path):
+    def test_exchange_authorization_code_encodes_second_user_sub(
+        self, oauth_provider, monkeypatch, tmp_path
+    ):
         """JWT sub claim correctly reflects the second user's username."""
         import json
         import bcrypt
         import open_brain.config as config_module
+
         users_file = tmp_path / "users.json"
-        users_file.write_text(json.dumps([
-            {"username": "alice", "password": bcrypt.hashpw(b"alicepass", bcrypt.gensalt()).decode()},
-            {"username": "bob", "password": bcrypt.hashpw(b"bobpass", bcrypt.gensalt()).decode()},
-        ]))
+        users_file.write_text(
+            json.dumps(
+                [
+                    {
+                        "username": "alice",
+                        "password": bcrypt.hashpw(
+                            b"alicepass", bcrypt.gensalt()
+                        ).decode(),
+                    },
+                    {
+                        "username": "bob",
+                        "password": bcrypt.hashpw(
+                            b"bobpass", bcrypt.gensalt()
+                        ).decode(),
+                    },
+                ]
+            )
+        )
         config_module._config = None
         monkeypatch.setenv("USERS_FILE", str(users_file))
         success, redirect_url = oauth_provider.handle_login_submit(
@@ -546,14 +795,17 @@ class TestMultiUserAuth:
             password="alicepass",
             client_id="client1",
             redirect_uri="http://localhost/callback",
-            code_challenge="challenge",
+            code_challenge=PKCE_CHALLENGE,
             state="",
             scopes_str="read",
         )
         assert success is True
         code = redirect_url.split("code=")[1].split("&")[0]
-        tokens = oauth_provider.exchange_authorization_code("client1", code)
+        tokens = oauth_provider.exchange_authorization_code(
+            "client1", code, PKCE_VERIFIER, "http://localhost/callback"
+        )
         import jwt as pyjwt
+
         payload = pyjwt.decode(tokens.access_token, options={"verify_signature": False})
         assert payload["sub"] == "alice"
 
@@ -564,7 +816,7 @@ class TestMultiUserAuth:
             password="testpassword123",
             client_id="client1",
             redirect_uri="http://localhost/callback",
-            code_challenge="challenge",
+            code_challenge=PKCE_CHALLENGE,
             state="",
             scopes_str="",
         )

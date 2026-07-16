@@ -115,7 +115,11 @@ For a local checkout, install from the Python package directory:
 uv tool install --python 3.14 ./python
 ```
 
-### 2. Issue an access token
+### 2. Optional: issue a URL token for clients without OAuth
+
+Skip this step for the `ob` CLI and coding harnesses; they use OAuth in the
+following sections. URL tokens remain available for integrations that cannot
+open a browser or maintain an OAuth refresh session.
 
 Use your API key (from `API_KEYS` in `.env`) to issue a URL token for each client:
 
@@ -137,21 +141,31 @@ Run this on every machine where you want to use the CLI. If you did not already 
 uv tool install --python 3.14 "git+https://github.com/sussdorff/open-brain.git#subdirectory=python"
 ```
 
-Point the CLI at your MCP endpoint and provide the URL token from step 2:
+Point the CLI at your MCP endpoint:
 
 ```bash
 mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/open-brain"
 cat > "${XDG_CONFIG_HOME:-$HOME/.config}/open-brain/config.json" <<'JSON'
 {
-  "server_url": "https://your-server.example.com",
-  "url_token": "TOKEN_FROM_STEP_2"
+  "server_url": "https://your-server.example.com"
 }
 JSON
 chmod 600 "${XDG_CONFIG_HOME:-$HOME/.config}/open-brain/config.json"
 
+ob auth login
+ob auth status
 ob --json doctor
 ob search "what did I decide about X?"
 ```
+
+`ob auth login` discovers the server OAuth metadata, registers a public CLI
+client, opens the browser, and completes an authorization-code flow using a
+loopback callback, state validation, and PKCE-S256. The resulting access and
+refresh tokens are atomically stored at
+`$XDG_CONFIG_HOME/open-brain/oauth.json` (or
+`~/.config/open-brain/oauth.json`) with owner-only permissions. The CLI
+refreshes an expiring access token automatically. `ob auth status` is redacted;
+`ob auth logout` revokes the token pair and removes only this OAuth state.
 
 The CLI follows XDG config conventions. The primary config file is:
 
@@ -178,7 +192,13 @@ export OB_URL_TOKEN="TOKEN_FROM_STEP_2"
 export OB_API_KEY="YOUR_API_KEY"
 ```
 
-OAuth bearer tokens are also supported via `OB_TOKEN` or `"token"` in the config file. URL tokens use `OB_URL_TOKEN`, `"url_token"` in the config file, or an explicit `?token=...` in `OB_URL`. API keys use `OB_API_KEY` or `"api_key"` in the config file. Legacy `~/.open-brain/config.json`, `~/.open-brain/token`, and `~/.open-brain/url-token` files still work as fallback.
+The stored OAuth login is preferred over legacy file-based bearer tokens, URL
+tokens, and API keys, while an explicit `OB_TOKEN` remains the highest-priority
+override. URL tokens use `OB_URL_TOKEN`, `"url_token"` in the config file, or an
+explicit `?token=...` in `OB_URL`. API keys use `OB_API_KEY` or `"api_key"` in
+the config file. Legacy `~/.open-brain/config.json`, `~/.open-brain/token`, and
+`~/.open-brain/url-token` files still work as fallback. A stored OAuth token is
+never sent when the configured server origin differs from its issuer.
 
 ### 4. Connect coding harnesses with OAuth
 
@@ -471,6 +491,7 @@ Current `ob` commands:
 
 | Command | Purpose |
 |---|---|
+| `ob auth login/status/logout` | Create, inspect, or remove the CLI OAuth login |
 | `ob server` | Start the FastAPI/MCP server from the installed Python package |
 | `ob doctor` | Run server diagnostics through the MCP `doctor` tool |
 | `ob stats` | Show memory/database statistics |

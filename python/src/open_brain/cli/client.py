@@ -8,6 +8,13 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 
+from open_brain.cli.oauth import (
+    OAuthError,
+    load_oauth_session,
+    server_origin,
+    usable_oauth_session,
+)
+
 
 DEFAULT_URL = "https://open-brain.sussdorff.org/mcp/mcp"
 TOKEN_FILE = Path.home() / ".open-brain" / "token"
@@ -64,13 +71,15 @@ def _normalize_mcp_url(url: str) -> str:
     url = url.strip().rstrip("/")
     parts = urlsplit(url)
     if parts.path in ("", "/"):
-        return urlunsplit((
-            parts.scheme,
-            parts.netloc,
-            "/mcp",
-            parts.query,
-            parts.fragment,
-        ))
+        return urlunsplit(
+            (
+                parts.scheme,
+                parts.netloc,
+                "/mcp",
+                parts.query,
+                parts.fragment,
+            )
+        )
     return url
 
 
@@ -83,6 +92,9 @@ def _load_token() -> str | None:
     token = os.environ.get("OB_TOKEN")
     if token:
         return token
+    oauth_session = load_oauth_session()
+    if oauth_session:
+        return oauth_session.access_token
     config_token = _config_str(_load_client_config(), "token", "bearer_token")
     if config_token:
         return config_token
@@ -167,13 +179,15 @@ def _with_url_token(url: str, token: str) -> str:
     if any(key == "token" for key, _value in query):
         return url
     query.append(("token", token))
-    return urlunsplit((
-        parts.scheme,
-        parts.netloc,
-        parts.path,
-        urlencode(query),
-        parts.fragment,
-    ))
+    return urlunsplit(
+        (
+            parts.scheme,
+            parts.netloc,
+            parts.path,
+            urlencode(query),
+            parts.fragment,
+        )
+    )
 
 
 async def call_tool(tool_name: str, arguments: dict[str, Any]) -> Any:
@@ -193,6 +207,29 @@ async def call_tool(tool_name: str, arguments: dict[str, Any]) -> Any:
     """
     url = _get_server_url()
     token = _load_token()
+    oauth_session = load_oauth_session()
+    refreshable_oauth = bool(
+        oauth_session
+        and not os.environ.get("OB_TOKEN")
+        and token == oauth_session.access_token
+    )
+    if refreshable_oauth and oauth_session is not None:
+        try:
+            oauth_origin = server_origin(oauth_session.issuer)
+            configured_origin = server_origin(url)
+        except OAuthError as exc:
+            raise MCPError(str(exc)) from exc
+        if oauth_origin != configured_origin:
+            raise MCPError(
+                "Stored OAuth login belongs to a different server; "
+                "run 'ob auth logout' or restore the matching OB_URL"
+            )
+        try:
+            oauth_session = await usable_oauth_session()
+        except OAuthError as exc:
+            raise MCPError(str(exc)) from exc
+        if oauth_session:
+            token = oauth_session.access_token
     api_key = None
     if not token:
         api_key = _load_api_key()
@@ -217,53 +254,31 @@ async def call_tool(tool_name: str, arguments: dict[str, Any]) -> Any:
             else DEFAULT_REQUEST_TIMEOUT_SECONDS
         )
         async with httpx.AsyncClient(timeout=timeout) as client:
-            # Step 1: Initialize session
-            init_payload = {
-                "jsonrpc": "2.0",
-                "id": 0,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {},
-                    "clientInfo": {"name": "ob-cli", "version": "1.0.0"},
-                },
-            }
-            init_resp = await client.post(url, json=init_payload, headers=headers)
-            init_resp.raise_for_status()
+            for attempt in range(2):
+                try:
+                    return await _call_tool_once(
+                        client,
+                        url=url,
+                        headers=headers,
+                        tool_name=tool_name,
+                        arguments=arguments,
+                    )
+                except httpx.HTTPStatusError as exc:
+                    if not (
+                        attempt == 0
+                        and exc.response.status_code == 401
+                        and refreshable_oauth
+                    ):
+                        raise
+                    try:
+                        oauth_session = await usable_oauth_session(force_refresh=True)
+                    except OAuthError as refresh_exc:
+                        raise MCPError(str(refresh_exc)) from refresh_exc
+                    if oauth_session is None:
+                        raise
+                    headers["Authorization"] = f"Bearer {oauth_session.access_token}"
 
-            # Extract session ID from response headers
-            session_id = init_resp.headers.get("mcp-session-id")
-            if session_id:
-                headers["mcp-session-id"] = session_id
-
-            # Step 2: Send initialized notification
-            notif_payload = {
-                "jsonrpc": "2.0",
-                "method": "notifications/initialized",
-            }
-            await client.post(url, json=notif_payload, headers=headers)
-
-            # Step 3: Call the tool
-            call_payload = {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "tools/call",
-                "params": {
-                    "name": tool_name,
-                    "arguments": arguments,
-                },
-            }
-            call_resp = await client.post(url, json=call_payload, headers=headers)
-            call_resp.raise_for_status()
-
-            # Parse SSE or JSON response
-            content_type = call_resp.headers.get("content-type", "")
-            if "text/event-stream" in content_type:
-                result = _parse_sse_response(call_resp.text)
-            else:
-                result = call_resp.json()
-
-            return _extract_result(result)
+            raise MCPError("OAuth retry limit reached")
 
     except httpx.ConnectError as e:
         raise MCPError(f"Cannot connect to server at {url}: {e}") from e
@@ -273,6 +288,60 @@ async def call_tool(tool_name: str, arguments: dict[str, Any]) -> Any:
         raise MCPError(
             f"Server returned HTTP {e.response.status_code}: {e.response.text[:200]}"
         ) from e
+
+
+async def _call_tool_once(
+    client: httpx.AsyncClient,
+    *,
+    url: str,
+    headers: dict[str, str],
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> Any:
+    """Initialize one MCP session and invoke one tool."""
+    init_payload = {
+        "jsonrpc": "2.0",
+        "id": 0,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "ob-cli", "version": "1.0.0"},
+        },
+    }
+    init_resp = await client.post(url, json=init_payload, headers=headers)
+    init_resp.raise_for_status()
+
+    request_headers = dict(headers)
+    session_id = init_resp.headers.get("mcp-session-id")
+    if session_id:
+        request_headers["mcp-session-id"] = session_id
+
+    notif_payload = {
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized",
+    }
+    await client.post(url, json=notif_payload, headers=request_headers)
+
+    call_payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": tool_name,
+            "arguments": arguments,
+        },
+    }
+    call_resp = await client.post(url, json=call_payload, headers=request_headers)
+    call_resp.raise_for_status()
+
+    content_type = call_resp.headers.get("content-type", "")
+    if "text/event-stream" in content_type:
+        result = _parse_sse_response(call_resp.text)
+    else:
+        result = call_resp.json()
+
+    return _extract_result(result)
 
 
 def _parse_sse_response(text: str) -> dict[str, Any]:

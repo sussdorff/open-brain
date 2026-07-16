@@ -1,11 +1,20 @@
 """OAuth 2.1 provider: authorization code flow with PKCE."""
 
+import base64
+import hashlib
+import hmac
+import html
 import secrets
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-from open_brain.auth.tokens import TokenClaims, issue_access_token, issue_refresh_token, verify_token
-from open_brain.config import get_config, get_users_map
+from open_brain.auth.tokens import (
+    TokenClaims,
+    issue_access_token,
+    issue_refresh_token,
+    verify_token,
+)
+from open_brain.config import get_users_map
 
 
 LOGIN_FORM_TEMPLATE = """<!DOCTYPE html>
@@ -26,6 +35,7 @@ LOGIN_FORM_TEMPLATE = """<!DOCTYPE html>
     <input type="hidden" name="client_id" value="{client_id}">
     <input type="hidden" name="redirect_uri" value="{redirect_uri}">
     <input type="hidden" name="code_challenge" value="{code_challenge}">
+    <input type="hidden" name="code_challenge_method" value="{code_challenge_method}">
     <input type="hidden" name="state" value="{state}">
     <input type="hidden" name="scopes" value="{scopes}">
     <input type="text" name="username" placeholder="Username" required autofocus>
@@ -41,6 +51,7 @@ class AuthCodeEntry:
 
     client_id: str
     code_challenge: str
+    code_challenge_method: str
     redirect_uri: str
     scopes: list[str]
     expires_at: float  # Unix timestamp
@@ -122,15 +133,17 @@ class OAuthProvider:
         code_challenge: str,
         state: str,
         scopes: list[str],
+        code_challenge_method: str = "S256",
     ) -> str:
         """Render the HTML login form."""
         return LOGIN_FORM_TEMPLATE.format(
-            client_name=client_name,
-            client_id=client_id,
-            redirect_uri=redirect_uri,
-            code_challenge=code_challenge,
-            state=state,
-            scopes=" ".join(scopes),
+            client_name=html.escape(client_name, quote=True),
+            client_id=html.escape(client_id, quote=True),
+            redirect_uri=html.escape(redirect_uri, quote=True),
+            code_challenge=html.escape(code_challenge, quote=True),
+            code_challenge_method=html.escape(code_challenge_method, quote=True),
+            state=html.escape(state, quote=True),
+            scopes=html.escape(" ".join(scopes), quote=True),
         )
 
     def handle_login_submit(
@@ -142,6 +155,7 @@ class OAuthProvider:
         code_challenge: str,
         state: str,
         scopes_str: str,
+        code_challenge_method: str = "S256",
     ) -> tuple[bool, str]:
         """Handle login form submission.
 
@@ -152,12 +166,16 @@ class OAuthProvider:
         """
         import bcrypt
         import hmac
+
         users_map = get_users_map()
         stored = users_map.get(username)
-        error_url = _build_url(redirect_uri, {
-            "error": "access_denied",
-            "error_description": "Invalid credentials",
-        })
+        error_url = _build_url(
+            redirect_uri,
+            {
+                "error": "access_denied",
+                "error_description": "Invalid credentials",
+            },
+        )
         if state:
             error_url = _append_param(error_url, "state", state)
         if stored is None:
@@ -179,6 +197,7 @@ class OAuthProvider:
         self._auth_codes[code] = AuthCodeEntry(
             client_id=client_id,
             code_challenge=code_challenge,
+            code_challenge_method=code_challenge_method,
             redirect_uri=redirect_uri,
             scopes=scopes,
             expires_at=time.time() + 5 * 60,  # 5 minutes
@@ -202,18 +221,33 @@ class OAuthProvider:
         return entry.code_challenge
 
     def exchange_authorization_code(
-        self, client_id: str, authorization_code: str
+        self,
+        client_id: str,
+        authorization_code: str,
+        code_verifier: str,
+        redirect_uri: str,
     ) -> OAuthTokens:
         """Exchange an authorization code for tokens.
 
         Raises:
-            ValueError: if code is invalid/expired or client_id mismatches
+            ValueError: if code is invalid/expired, client_id mismatches, or
+                the PKCE verifier is missing or invalid
         """
         entry = self._auth_codes.get(authorization_code)
         if not entry or entry.expires_at < time.time():
             raise ValueError("Invalid or expired authorization code")
         if entry.client_id != client_id:
             raise ValueError("Client ID mismatch")
+        if entry.redirect_uri != redirect_uri:
+            raise ValueError("Redirect URI mismatch")
+        if not code_verifier:
+            raise ValueError("code_verifier is required")
+        if entry.code_challenge_method != "S256":
+            raise ValueError("Unsupported PKCE code challenge method")
+        digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
+        actual_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+        if not hmac.compare_digest(actual_challenge, entry.code_challenge):
+            raise ValueError("Invalid code_verifier")
 
         # Consume the code
         del self._auth_codes[authorization_code]
@@ -250,6 +284,8 @@ class OAuthProvider:
         verified = verify_token(refresh_token)
         if verified.token_type != "refresh":
             raise ValueError("Not a refresh token")
+        if verified.client_id != client_id:
+            raise ValueError("Client ID mismatch")
 
         claims = TokenClaims(
             sub=verified.sub,
@@ -258,6 +294,7 @@ class OAuthProvider:
         )
         new_access_token = issue_access_token(claims)
         new_refresh_token = issue_refresh_token(claims)
+        self._revoked_tokens.add(refresh_token)
 
         return OAuthTokens(
             access_token=new_access_token,

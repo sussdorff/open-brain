@@ -206,6 +206,17 @@ open-brain implements OAuth 2.1 with PKCE for secure client authentication:
 └──────────┘                           └──────────────┘
 ```
 
+The token endpoint validates the PKCE-S256 verifier and requires the redirect
+URI to exactly match the client registration. Refresh tokens are bound to their
+client and rotated when used.
+
+The `ob` CLI performs discovery and dynamic client registration through
+`ob auth login`, receives the authorization response on an ephemeral
+`127.0.0.1` callback, and stores its OAuth session under the XDG configuration
+directory with mode `0600`. It refreshes tokens automatically and retries a
+request after `401` at most once. Redacted state is available through
+`ob auth status`; `ob auth logout` revokes and deletes only the OAuth session.
+
 Clients can also authenticate via API key (`x-api-key` header) for hook/automation use cases.
 
 Dynamic client registration is supported via the `/register` endpoint (RFC 7591).
