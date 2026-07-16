@@ -1365,8 +1365,13 @@ class PostgresDataLayer:
 
             return TimelineResult(results=[_row_to_memory(r) for r in rows], anchor_id=anchor_id)
 
-    async def get_observations(self, ids: list[int]) -> list[Memory]:
-        """Bulk fetch memories by IDs."""
+    async def get_observations(
+        self,
+        ids: list[int],
+        *,
+        track_retrieval: bool = True,
+    ) -> list[Memory]:
+        """Bulk fetch memories by IDs, optionally without recall side effects."""
         if not ids:
             return []
         pool = await get_pool()
@@ -1377,9 +1382,12 @@ class PostgresDataLayer:
                 *ids,
             )
             memories = [_row_to_memory(r) for r in rows]
-            asyncio.create_task(
-                self._log_usage_background([m.id for m in memories], "retrieved")
-            )
+            if track_retrieval and memories:
+                asyncio.create_task(
+                    self._log_usage_background(
+                        [memory.id for memory in memories], "retrieved"
+                    )
+                )
             return memories
 
     async def save_memory(self, params: SaveMemoryParams) -> SaveMemoryResult:

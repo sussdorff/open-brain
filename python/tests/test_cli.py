@@ -1159,7 +1159,24 @@ class TestCommandHandlers:
             mock_call.return_value = []
             from open_brain.cli.main import _cmd_get
             await _cmd_get(args)
-            mock_call.assert_called_once_with("get_observations", {"ids": [1, 2, 3]})
+            mock_call.assert_called_once_with(
+                "get_observations",
+                {"ids": [1, 2, 3], "track_retrieval": True},
+            )
+
+    @pytest.mark.asyncio
+    async def test_get_inspect_disables_retrieval_tracking(self):
+        args = parse(["get", "1", "2", "--inspect"])
+        with patch("open_brain.cli.main.call_tool", new_callable=AsyncMock) as mock_call:
+            mock_call.return_value = []
+            from open_brain.cli.main import _cmd_get
+
+            await _cmd_get(args)
+
+        mock_call.assert_called_once_with(
+            "get_observations",
+            {"ids": [1, 2], "track_retrieval": False},
+        )
 
     @pytest.mark.asyncio
     async def test_stats_calls_correct_tool(self):

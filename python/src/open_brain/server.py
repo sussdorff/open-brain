@@ -465,14 +465,22 @@ async def timeline(
 
 
 @mcp.tool(
-    description="Step 3: Fetch full details for filtered IDs. "
-    "Params: ids (array of observation IDs, required)"
+    description="Step 3: Fetch full details for filtered IDs. By default this "
+    "records a retrieval and updates recall priority. Set track_retrieval=false "
+    "for side-effect-free inspection. Params: ids (array of observation IDs, "
+    "required), track_retrieval (boolean, default true)"
 )
 @logged_tool
-async def get_observations(ids: list[int]) -> str:
-    """Step 3: Bulk fetch memories by IDs."""
+async def get_observations(
+    ids: list[int],
+    track_retrieval: bool = True,
+) -> str:
+    """Step 3: Bulk fetch memories, optionally without recall side effects."""
     dl = get_dl()
-    memories = await dl.get_observations(ids)
+    memories = await dl.get_observations(
+        ids,
+        track_retrieval=track_retrieval,
+    )
     return json.dumps([_memory_payload(m) for m in memories], default=str)
 
 
