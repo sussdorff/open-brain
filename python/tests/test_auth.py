@@ -354,14 +354,20 @@ class TestOAuthProvider:
         with pytest.raises(ValueError, match="Client ID mismatch"):
             oauth_provider.exchange_refresh_token("other-client", refresh_token)
 
-    def test_exchange_refresh_token_rotates_refresh_token(self, oauth_provider):
+    def test_regression_concurrent_sessions_can_reuse_refresh_token(
+        self, oauth_provider
+    ):
+        # Multiple Codex sessions cache the same refresh token. Rotating it on
+        # first use strands every session that still holds the earlier value.
         claims = TokenClaims(sub="testuser", client_id="client1", scopes=[])
         refresh_token = issue_refresh_token(claims)
-        rotated = oauth_provider.exchange_refresh_token("client1", refresh_token)
-        assert rotated.refresh_token != refresh_token
-        oauth_provider.exchange_refresh_token("client1", rotated.refresh_token)
-        with pytest.raises(ValueError, match="revoked"):
-            oauth_provider.exchange_refresh_token("client1", refresh_token)
+        first_session = oauth_provider.exchange_refresh_token("client1", refresh_token)
+        second_session = oauth_provider.exchange_refresh_token("client1", refresh_token)
+
+        assert first_session.refresh_token == refresh_token
+        assert second_session.refresh_token == refresh_token
+        oauth_provider.verify_access_token(first_session.access_token)
+        oauth_provider.verify_access_token(second_session.access_token)
 
     def test_verify_access_token_success(self, oauth_provider):
         claims = TokenClaims(sub="testuser", client_id="client1", scopes=["read"])
@@ -383,7 +389,9 @@ class TestOAuthProvider:
         with pytest.raises(ValueError, match="revoked"):
             oauth_provider.verify_access_token(token)
 
-    def test_revoke_refresh_token_prevents_exchange(self, oauth_provider):
+    def test_regression_explicitly_revoked_refresh_token_is_rejected(
+        self, oauth_provider
+    ):
         claims = TokenClaims(sub="u", client_id="c", scopes=[])
         refresh_token = issue_refresh_token(claims)
         oauth_provider.revoke_token(refresh_token)

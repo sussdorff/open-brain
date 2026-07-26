@@ -273,7 +273,11 @@ class OAuthProvider:
         refresh_token: str,
         scopes: list[str] | None = None,
     ) -> OAuthTokens:
-        """Exchange a refresh token for new tokens.
+        """Exchange a refresh token for a new access token.
+
+        Refresh tokens remain stable until expiry or explicit revocation. MCP
+        clients such as Codex can run several sessions that cache the same
+        credential; rotating on first use would strand every older session.
 
         Raises:
             ValueError: if token is invalid, wrong type, or revoked
@@ -293,14 +297,12 @@ class OAuthProvider:
             scopes=scopes if scopes is not None else verified.scopes,
         )
         new_access_token = issue_access_token(claims)
-        new_refresh_token = issue_refresh_token(claims)
-        self._revoked_tokens.add(refresh_token)
 
         return OAuthTokens(
             access_token=new_access_token,
             token_type="Bearer",
             expires_in=3600,
-            refresh_token=new_refresh_token,
+            refresh_token=refresh_token,
         )
 
     def verify_access_token(self, token: str) -> AuthInfo:
