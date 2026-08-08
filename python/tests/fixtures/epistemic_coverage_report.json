@@ -1,0 +1,22 @@
+{
+  "read_only": true,
+  "total": 18,
+  "cohorts": {
+    "labeled": {
+      "count": 10,
+      "basis": "valid metadata.provenance source_label, expected_use, and epistemic_version"
+    },
+    "unlabeled": {
+      "count": 5,
+      "basis": "no epistemic source_label or expected_use"
+    },
+    "partial": {
+      "count": 2,
+      "basis": "valid source_label present without expected_use; completable as evidence"
+    },
+    "ambiguous": {
+      "count": 1,
+      "basis": "use-only, invalid-label, illegal, or conflicting epistemic fields; not promoted"
+    }
+  }
+}

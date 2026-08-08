@@ -6,19 +6,22 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from typing import Any, Literal, TypeAlias
 
+from open_brain.epistemic_provenance import (
+    EPISTEMIC_LABELS,
+    EVIDENCE_ONLY_LABELS as SHARED_EVIDENCE_ONLY_LABELS,
+    EXPECTED_USES as SHARED_EXPECTED_USES,
+    FAILED_EVIDENCE_LABELS as SHARED_FAILED_EVIDENCE_LABELS,
+    INSTRUCTION_GRADE_LABELS as SHARED_INSTRUCTION_GRADE_LABELS,
+    EpistemicLabel,
+    ExpectedUse,
+    merge_epistemic_into_judged_provenance,
+)
+
 MEMORY_WRITE_JUDGE_POLICY_VERSION = "memory-write-judge.v1"
 
 MemoryCategory: TypeAlias = Literal["preference", "fact", "policy", "lesson", "observation"]
-ExpectedUse: TypeAlias = Literal["evidence", "instruction"]
 RetentionScope: TypeAlias = Literal["session", "project", "personal", "team"]
-ProvenanceLabel: TypeAlias = Literal[
-    "observed",
-    "inferred",
-    "generated",
-    "confirmed",
-    "disputed",
-    "superseded",
-]
+ProvenanceLabel: TypeAlias = EpistemicLabel
 RiskFlag: TypeAlias = Literal[
     "pii",
     "secret",
@@ -38,16 +41,9 @@ ReasonCategory: TypeAlias = Literal[
 ]
 
 MEMORY_CATEGORIES: set[str] = {"preference", "fact", "policy", "lesson", "observation"}
-EXPECTED_USES: set[str] = {"evidence", "instruction"}
+EXPECTED_USES: set[str] = set(SHARED_EXPECTED_USES)
 RETENTION_SCOPES: set[str] = {"session", "project", "personal", "team"}
-PROVENANCE_LABELS: set[str] = {
-    "observed",
-    "inferred",
-    "generated",
-    "confirmed",
-    "disputed",
-    "superseded",
-}
+PROVENANCE_LABELS: set[str] = set(EPISTEMIC_LABELS)
 RISK_FLAGS: set[str] = {
     "pii",
     "secret",
@@ -55,9 +51,9 @@ RISK_FLAGS: set[str] = {
     "policy-sensitive",
     "external-confidential",
 }
-INSTRUCTION_GRADE_LABELS = {"observed", "confirmed"}
-EVIDENCE_ONLY_LABELS = {"inferred", "generated"}
-FAILED_EVIDENCE_LABELS = {"disputed", "superseded"}
+INSTRUCTION_GRADE_LABELS = set(SHARED_INSTRUCTION_GRADE_LABELS)
+EVIDENCE_ONLY_LABELS = set(SHARED_EVIDENCE_ONLY_LABELS)
+FAILED_EVIDENCE_LABELS = set(SHARED_FAILED_EVIDENCE_LABELS)
 REQUIRED_PROPOSAL_FIELDS = {
     "intended_memory_content",
     "category",
@@ -341,13 +337,8 @@ def memory_metadata_from_judged_proposal(
     if errors or proposal is None:
         return {}
 
-    return {
-        "memory_write_judge": {
-            "decision": outcome.decision,
-            "policy_version": outcome.policy_version,
-            "reason_category": outcome.reason_category,
-        },
-        "provenance": {
+    provenance = merge_epistemic_into_judged_provenance(
+        {
             "source_ref": proposal.source_citation.ref,
             "source_label": proposal.source_citation.label,
             "authorization_ref": (
@@ -362,7 +353,15 @@ def memory_metadata_from_judged_proposal(
             ),
             "expected_use": proposal.expected_use,
             "retention_scope": proposal.retention_scope,
+        }
+    )
+    return {
+        "memory_write_judge": {
+            "decision": outcome.decision,
+            "policy_version": outcome.policy_version,
+            "reason_category": outcome.reason_category,
         },
+        "provenance": provenance,
         "risk_flags": list(proposal.risk_flags),
     }
 

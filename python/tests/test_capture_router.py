@@ -616,9 +616,16 @@ class TestServerIntegration:
             )
         save_params = mock_dl.save_memory.call_args[0][0]
         assert save_params.type == "journal"
+        # Unstructured captures still receive conservative default epistemic provenance.
+        assert save_params.metadata["provenance"]["source_label"] == "inferred"
+        assert save_params.metadata["provenance"]["expected_use"] == "evidence"
+        assert (
+            save_params.metadata["provenance"]["epistemic_version"]
+            == "epistemic-provenance.v1"
+        )
         classifier.assert_awaited_once_with(
             "Diary note about simplifying the capture workflow",
-            existing_metadata=None,
+            existing_metadata=save_params.metadata,
             memory_type="journal",
         )
 
@@ -652,7 +659,19 @@ class TestServerIntegration:
             )
         save_params = mock_dl.save_memory.call_args[0][0]
         assert save_params.type == "note"
-        assert save_params.metadata == existing_metadata
+        # Domain/template fields remain caller-authored; defaults are additive only.
+        assert save_params.metadata["capture_template"] == "journal"
+        assert save_params.metadata["entry_date"] == "2026-07-11"
+        assert (
+            save_params.metadata["reflection"]
+            == "Caller already structured this payload."
+        )
+        assert save_params.metadata["provenance"]["source_label"] == "inferred"
+        assert save_params.metadata["provenance"]["expected_use"] == "evidence"
+        assert (
+            save_params.metadata["provenance"]["epistemic_version"]
+            == "epistemic-provenance.v1"
+        )
         mock_dl.update_memory.assert_not_called()
 
     @pytest.mark.asyncio

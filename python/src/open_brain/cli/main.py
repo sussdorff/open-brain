@@ -650,9 +650,18 @@ async def _cmd_doctor(_args: argparse.Namespace) -> Any:
 
 
 async def _cmd_provenance(args: argparse.Namespace) -> Any:
-    """Run a manual, read-only provenance report."""
+    """Run provenance inspection or conservative epistemic backfill."""
     if args.provenance_command == "report":
         return await call_tool("origin_provenance_report", {})
+    if args.provenance_command == "epistemic-report":
+        return await call_tool("epistemic_provenance_report", {})
+    if args.provenance_command == "epistemic-backfill":
+        payload: dict[str, Any] = {"apply": bool(getattr(args, "apply", False))}
+        if getattr(args, "limit", None) is not None:
+            payload["limit"] = args.limit
+        if getattr(args, "after_id", None) is not None:
+            payload["after_id"] = args.after_id
+        return await call_tool("backfill_epistemic_provenance", payload)
     raise ValueError(f"Unknown provenance command: {args.provenance_command}")
 
 
@@ -1415,7 +1424,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # provenance
     p_provenance = subparsers.add_parser(
         "provenance",
-        help="Inspect canonical origin-provenance coverage",
+        help="Inspect origin or epistemic provenance coverage",
     )
     provenance_sub = p_provenance.add_subparsers(
         dest="provenance_command",
@@ -1424,7 +1433,36 @@ def _build_parser() -> argparse.ArgumentParser:
     provenance_sub.required = True
     provenance_sub.add_parser(
         "report",
-        help="Classify coverage without modifying memories",
+        help="Classify origin-provenance coverage without modifying memories",
+    )
+    provenance_sub.add_parser(
+        "epistemic-report",
+        help="Classify epistemic provenance coverage without modifying memories",
+    )
+    p_epistemic_backfill = provenance_sub.add_parser(
+        "epistemic-backfill",
+        help=(
+            "Conservatively backfill unlabeled epistemic fields "
+            "(dry-run by default; apply is batch-bounded)"
+        ),
+    )
+    p_epistemic_backfill.add_argument(
+        "--apply",
+        action="store_true",
+        help="Apply one bounded batch (default is dry-run)",
+    )
+    p_epistemic_backfill.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Apply/dry-run batch size (apply default 500, max 1000)",
+    )
+    p_epistemic_backfill.add_argument(
+        "--after-id",
+        type=int,
+        default=None,
+        dest="after_id",
+        help="Keyset cursor: only consider memory ids greater than this value",
     )
 
     # export

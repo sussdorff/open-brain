@@ -59,6 +59,10 @@ from open_brain.data_layer.interface import (
     validate_domain_metadata,
     validate_origin_provenance,
 )
+from open_brain.epistemic_provenance import (
+    EpistemicProvenanceValidationError,
+    ensure_epistemic_provenance,
+)
 from open_brain.capture_router import (
     canonical_type_for_capture_template,
     classify_and_extract,
@@ -557,6 +561,7 @@ async def save_memory(
     if dedup_mode not in ("skip", "merge"):
         return json.dumps({"error": "invalid_dedup_mode", "message": f"dedup_mode must be 'skip' or 'merge', got: {dedup_mode!r}"})
 
+    allow_instruction = False
     if proposal is not None:
         judge_outcome = judge_memory_write_proposal(proposal)
         if judge_outcome.decision != "ALLOW":
@@ -569,6 +574,15 @@ async def save_memory(
             **(metadata or {}),
             **memory_metadata_from_judged_proposal(proposal, judge_outcome),
         }
+        allow_instruction = True
+
+    try:
+        metadata = ensure_epistemic_provenance(
+            metadata,
+            allow_instruction=allow_instruction,
+        )
+    except EpistemicProvenanceValidationError as exc:
+        return json.dumps({"error": exc.code, "message": str(exc)})
 
     # ── AC3 hard invariant: never persist referenced document binaries ─────────
     # paperless_reference metadata may only carry identity/provenance. A binary
@@ -646,12 +660,16 @@ async def save_memory(
         user_id=user_id,
         importance=importance,
         dedup_mode=dedup_mode,  # type: ignore[arg-type]
+        # Internal signal only — never derived from caller-authored metadata.
+        instruction_authorized=allow_instruction,
     )
 
     # Save first — must know if duplicate before firing expensive LLM calls.
     try:
         result = await dl.save_memory(save_params)
     except OriginProvenanceValidationError as exc:
+        return json.dumps({"error": exc.code, "message": str(exc)})
+    except EpistemicProvenanceValidationError as exc:
         return json.dumps({"error": exc.code, "message": str(exc)})
 
     # Skip LLM enrichment entirely for duplicates — no wasted API calls, no update_memory.
@@ -773,18 +791,23 @@ async def update_memory(
 ) -> str:
     """Update an existing memory entry."""
     dl = get_dl()
-    result = await dl.update_memory(
-        UpdateMemoryParams(
-            id=id,
-            text=text,
-            type=type,
-            project=project,
-            title=title,
-            subtitle=subtitle,
-            narrative=narrative,
-            metadata=metadata,
+    try:
+        result = await dl.update_memory(
+            UpdateMemoryParams(
+                id=id,
+                text=text,
+                type=type,
+                project=project,
+                title=title,
+                subtitle=subtitle,
+                narrative=narrative,
+                metadata=metadata,
+            )
         )
-    )
+    except EpistemicProvenanceValidationError as exc:
+        return json.dumps({"error": exc.code, "message": str(exc)})
+    except OriginProvenanceValidationError as exc:
+        return json.dumps({"error": exc.code, "message": str(exc)})
     return json.dumps({"id": result.id, "message": result.message})
 
 
@@ -834,21 +857,26 @@ async def approved_canonical_entity_update(
 ) -> str:
     """Apply an explicitly approved canonical entity update or soft archive."""
     dl = get_dl()
-    result = await dl.approved_update_canonical_entity(
-        ApprovedCanonicalEntityUpdateParams(
-            id=id,
-            actor=actor,
-            note=note,
-            operation=operation,
-            text=text,
-            type=type,
-            project=project,
-            title=title,
-            subtitle=subtitle,
-            narrative=narrative,
-            metadata=metadata,
+    try:
+        result = await dl.approved_update_canonical_entity(
+            ApprovedCanonicalEntityUpdateParams(
+                id=id,
+                actor=actor,
+                note=note,
+                operation=operation,
+                text=text,
+                type=type,
+                project=project,
+                title=title,
+                subtitle=subtitle,
+                narrative=narrative,
+                metadata=metadata,
+            )
         )
-    )
+    except EpistemicProvenanceValidationError as exc:
+        return json.dumps({"error": exc.code, "message": str(exc)})
+    except OriginProvenanceValidationError as exc:
+        return json.dumps({"error": exc.code, "message": str(exc)})
     return json.dumps({"id": result.id, "message": result.message})
 
 
@@ -914,6 +942,47 @@ async def origin_provenance_report() -> str:
     """Return provenance coverage cohorts without changing the store."""
     dl = get_dl()
     result = await dl.origin_provenance_report()
+    return json.dumps(result, default=str)
+
+
+@mcp.tool(
+    description=(
+        "Manually inspect epistemic provenance coverage. Separate from origin lineage: "
+        "reports labeled/unlabeled/partial/ambiguous cohorts without migrations or writes."
+    )
+)
+async def epistemic_provenance_report() -> str:
+    """Return epistemic provenance coverage cohorts without changing the store."""
+    dl = get_dl()
+    result = await dl.epistemic_provenance_report()
+    return json.dumps(result, default=str)
+
+
+@mcp.tool(
+    description=(
+        "Conservatively backfill epistemic provenance on unlabeled memories. "
+        "Dry-run by default (apply=false) and may inventory the full cohort. "
+        "Apply mode is bounded by limit (default 500, max 1000) and optional after_id "
+        "keyset cursor. Ambiguous rows are counted, never silently promoted. "
+        "Does not modify canonical origin lineage, never rewrites updated_at, "
+        "and never hard-deletes."
+    )
+)
+async def backfill_epistemic_provenance(
+    apply: bool = False,
+    limit: int | None = None,
+    after_id: int | None = None,
+) -> str:
+    """Dry-run or apply conservative epistemic provenance backfill."""
+    dl = get_dl()
+    try:
+        result = await dl.backfill_epistemic_provenance(
+            apply=apply,
+            limit=limit,
+            after_id=after_id,
+        )
+    except EpistemicProvenanceValidationError as exc:
+        return json.dumps({"error": exc.code, "message": str(exc)})
     return json.dumps(result, default=str)
 
 

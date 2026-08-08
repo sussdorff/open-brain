@@ -62,7 +62,13 @@ from open_brain.data_layer.interface import (
     validate_origin_provenance,
 )
 from open_brain.data_layer.refine import analyze_with_llm
-
+from open_brain.epistemic_provenance import (
+    EpistemicProvenanceValidationError,
+    ensure_epistemic_provenance,
+    merge_update_metadata,
+    plan_epistemic_backfill,
+    validate_backfill_apply_limit,
+)
 from open_brain.ingest.runs import get_current_run_id
 
 logger = logging.getLogger(__name__)
@@ -122,8 +128,16 @@ def _merge_append_metadata(
     existing: dict[str, Any],
     incoming: dict[str, Any] | None,
     provenance: OriginProvenance,
+    *,
+    allow_instruction: bool = False,
 ) -> dict[str, Any]:
-    """Merge append metadata while keeping one unambiguous canonical origin."""
+    """Merge append metadata while keeping one unambiguous canonical origin.
+
+    When ``allow_instruction`` is True (server-judge authorized write), incoming
+    epistemic fields overwrite existing ones so a second judged instruction-grade
+    append can take effect. Otherwise fill epistemic gaps only. Ambiguous legacy
+    rows that cannot be repaired via ``repair_orphaned_use`` fail closed.
+    """
     merged = {**existing, **(incoming or {})}
     existing_raw = existing.get("provenance")
     incoming_raw = (incoming or {}).get("provenance")
@@ -138,11 +152,23 @@ def _merge_append_metadata(
             _provenance_container_with_origin(existing_raw, provenance)
         )
     if isinstance(incoming_raw, dict):
-        combined_nested.update(
-            _provenance_container_with_origin(incoming_raw, provenance)
-        )
+        incoming_nested = _provenance_container_with_origin(incoming_raw, provenance)
+        for key, value in incoming_nested.items():
+            # Origin is always normalized via the helper above.
+            # Judged instruction-authorized appends overwrite epistemic fields;
+            # ordinary appends preserve existing citation fields and fill gaps.
+            if key == "origin" or allow_instruction or key not in combined_nested:
+                combined_nested[key] = value
+    ensured = ensure_epistemic_provenance(
+        {"provenance": combined_nested},
+        allow_instruction=allow_instruction,
+        previous={"provenance": existing_raw}
+        if isinstance(existing_raw, dict)
+        else None,
+        repair_orphaned_use=True,
+    )
     merged["provenance"] = _provenance_container_with_origin(
-        combined_nested,
+        ensured["provenance"],
         provenance,
     )
     return merged
@@ -1399,8 +1425,16 @@ class PostgresDataLayer:
         inserting a new row.
         """
         provenance = validate_origin_provenance(params.provenance)
+        incoming_metadata = params.metadata or {}
+        # Authorization comes only from the server-side internal signal.
+        # Caller-authored metadata.memory_write_judge is evidence, not authority.
+        allow_instruction = bool(params.instruction_authorized)
+        epistemic_metadata = ensure_epistemic_provenance(
+            incoming_metadata,
+            allow_instruction=allow_instruction,
+        )
         canonical_metadata = _metadata_with_origin_provenance(
-            params.metadata,
+            epistemic_metadata,
             provenance,
         )
 
@@ -1496,56 +1530,72 @@ class PostgresDataLayer:
                     asyncio.create_task(self._embed_and_link(memory_id_replace, text_to_embed_replace))
                     return SaveMemoryResult(id=memory_id_replace, message="Memory saved")
                 else:
-                    # append mode: merge content into existing row
-                    existing = await conn.fetchrow(
-                        """SELECT id, content, metadata FROM memories
-                           WHERE session_ref = $1
-                             AND type = 'session_summary'
-                             AND (index_id IS NOT DISTINCT FROM $2)
-                           LIMIT 1""",
-                        params.session_ref,
-                        session_summary_index_id,
-                    )
-                    if existing:
-                        existing_id: int = existing["id"]
-                        merged_content = existing["content"] + "\n\n---\n\n" + params.text
-                        merged_metadata = _merge_append_metadata(
-                            _record_metadata(existing),
-                            canonical_metadata,
-                            provenance,
+                    # append mode: merge content into existing row under row lock
+                    existing_id: int | None = None
+                    merged_content_for_embed: str | None = None
+                    async with conn.transaction():
+                        existing = await conn.fetchrow(
+                            """SELECT id, content, metadata FROM memories
+                               WHERE session_ref = $1
+                                 AND type = 'session_summary'
+                                 AND (index_id IS NOT DISTINCT FROM $2)
+                               LIMIT 1
+                               FOR UPDATE""",
+                            params.session_ref,
+                            session_summary_index_id,
                         )
-                        updates: dict[str, Any] = {
-                            "content": merged_content,
-                            "metadata": merged_metadata,
-                        }
-                        if params.title is not None:
-                            updates["title"] = params.title
-                        if params.subtitle is not None:
-                            updates["subtitle"] = params.subtitle
-                        if params.narrative is not None:
-                            updates["narrative"] = params.narrative
+                        if existing:
+                            existing_id = int(existing["id"])
+                            merged_content = (
+                                existing["content"] + "\n\n---\n\n" + params.text
+                            )
+                            merged_metadata = _merge_append_metadata(
+                                _record_metadata(existing),
+                                canonical_metadata,
+                                provenance,
+                                allow_instruction=allow_instruction,
+                            )
+                            updates: dict[str, Any] = {
+                                "content": merged_content,
+                                "metadata": merged_metadata,
+                            }
+                            if params.title is not None:
+                                updates["title"] = params.title
+                            if params.subtitle is not None:
+                                updates["subtitle"] = params.subtitle
+                            if params.narrative is not None:
+                                updates["narrative"] = params.narrative
 
-                        set_parts = []
-                        values: list[Any] = []
-                        param_idx = 1
-                        for col, val in updates.items():
-                            set_parts.append(f"{col} = ${param_idx}")
-                            values.append(val)
-                            param_idx += 1
-                        set_parts.append("updated_at = NOW()")
-                        values.append(existing_id)
-                        await conn.execute(
-                            f"UPDATE memories SET {', '.join(set_parts)} WHERE id = ${param_idx}",
-                            *values,
-                        )
+                            set_parts = []
+                            values: list[Any] = []
+                            param_idx = 1
+                            for col, val in updates.items():
+                                set_parts.append(f"{col} = ${param_idx}")
+                                values.append(val)
+                                param_idx += 1
+                            set_parts.append("updated_at = NOW()")
+                            values.append(existing_id)
+                            await conn.execute(
+                                f"UPDATE memories SET {', '.join(set_parts)} WHERE id = ${param_idx}",
+                                *values,
+                            )
+                            merged_content_for_embed = merged_content
 
+                    if existing_id is not None and merged_content_for_embed is not None:
                         text_to_embed = ": ".join(
                             part
-                            for part in [params.title, params.subtitle, params.narrative, merged_content]
+                            for part in [
+                                params.title,
+                                params.subtitle,
+                                params.narrative,
+                                merged_content_for_embed,
+                            ]
                             if part
                         )
                         asyncio.create_task(self._embed_and_link(existing_id, text_to_embed))
-                        return SaveMemoryResult(id=existing_id, message="Memory updated (upsert)")
+                        return SaveMemoryResult(
+                            id=existing_id, message="Memory updated (upsert)"
+                        )
 
             # ── Semantic dedup (dedup_mode == "merge" only) ──
             if params.dedup_mode == "merge":
@@ -1646,55 +1696,79 @@ class PostgresDataLayer:
         return SaveMemoryResult(id=memory_id, message="Memory saved")
 
     async def update_memory(self, params: UpdateMemoryParams) -> SaveMemoryResult:
-        """Update an existing memory's fields and re-embed if content changed."""
+        """Update an existing memory's fields and re-embed if content changed.
+
+        Provenance-touching metadata merges run under ``SELECT ... FOR UPDATE``
+        so concurrent patches cannot lose each other's metadata writes.
+        """
         pool = await get_pool()
+        existing_title: str | None = None
+        existing_subtitle: str | None = None
+        existing_narrative: str | None = None
+        existing_content: str | None = None
+        updates: dict[str, Any] = {}
         async with pool.acquire() as conn:
-            # Verify the memory exists
-            existing = await conn.fetchrow(
-                "SELECT id, content, title, subtitle, narrative FROM memories WHERE id = $1",
-                params.id,
-            )
-            if not existing:
-                raise ValueError(f"Memory {params.id} not found")
+            async with conn.transaction():
+                # Lock the row for the duration of merge + write.
+                existing = await conn.fetchrow(
+                    """SELECT id, content, title, subtitle, narrative, metadata
+                       FROM memories WHERE id = $1
+                       FOR UPDATE""",
+                    params.id,
+                )
+                if not existing:
+                    raise ValueError(f"Memory {params.id} not found")
 
-            # Build SET clause dynamically from provided fields
-            updates: dict[str, Any] = {}
-            if params.text is not None:
-                updates["content"] = params.text
-            if params.type is not None:
-                updates["type"] = params.type
-            if params.title is not None:
-                updates["title"] = params.title
-            if params.subtitle is not None:
-                updates["subtitle"] = params.subtitle
-            if params.narrative is not None:
-                updates["narrative"] = params.narrative
-            if params.project is not None:
-                index_id = await self._resolve_index_id(conn, params.project)
-                updates["index_id"] = self._scope_index_id(index_id)
+                existing_title = existing["title"]
+                existing_subtitle = existing["subtitle"]
+                existing_narrative = existing["narrative"]
+                existing_content = existing["content"]
 
-            has_metadata_merge = params.metadata is not None
+                # Build SET clause dynamically from provided fields
+                if params.text is not None:
+                    updates["content"] = params.text
+                if params.type is not None:
+                    updates["type"] = params.type
+                if params.title is not None:
+                    updates["title"] = params.title
+                if params.subtitle is not None:
+                    updates["subtitle"] = params.subtitle
+                if params.narrative is not None:
+                    updates["narrative"] = params.narrative
+                if params.project is not None:
+                    index_id = await self._resolve_index_id(conn, params.project)
+                    updates["index_id"] = self._scope_index_id(index_id)
 
-            if not updates and not has_metadata_merge:
-                return SaveMemoryResult(id=params.id, message="No fields to update")
+                has_metadata_merge = params.metadata is not None
+                merged_metadata: dict[str, Any] | None = None
+                if has_metadata_merge:
+                    merged_metadata = merge_update_metadata(
+                        _metadata_from_row(existing),
+                        params.metadata,
+                    )
 
-            # Build parameterized query
-            set_parts = []
-            values: list[Any] = []
-            param_idx = 1
-            for col, val in updates.items():
-                set_parts.append(f"{col} = ${param_idx}")
-                values.append(val)
-                param_idx += 1
-            if has_metadata_merge:
-                set_parts.append(f"metadata = metadata || ${param_idx}::jsonb")
-                values.append(params.metadata)
-                param_idx += 1
-            set_parts.append("updated_at = NOW()")
+                if not updates and not has_metadata_merge:
+                    return SaveMemoryResult(id=params.id, message="No fields to update")
 
-            values.append(params.id)
-            query = f"UPDATE memories SET {', '.join(set_parts)} WHERE id = ${param_idx}"
-            await conn.execute(query, *values)
+                # Build parameterized query
+                set_parts = []
+                values: list[Any] = []
+                param_idx = 1
+                for col, val in updates.items():
+                    set_parts.append(f"{col} = ${param_idx}")
+                    values.append(val)
+                    param_idx += 1
+                if has_metadata_merge:
+                    # Persist the fully merged/validated metadata object so provenance
+                    # cannot be shallow-replaced without origin/epistemic checks.
+                    set_parts.append(f"metadata = ${param_idx}::jsonb")
+                    values.append(merged_metadata)
+                    param_idx += 1
+                set_parts.append("updated_at = NOW()")
+
+                values.append(params.id)
+                query = f"UPDATE memories SET {', '.join(set_parts)} WHERE id = ${param_idx}"
+                await conn.execute(query, *values)
 
         # Re-embed if text-related fields changed
         content_changed = any(
@@ -1705,10 +1779,10 @@ class PostgresDataLayer:
             text_to_embed = ": ".join(
                 part
                 for part in [
-                    params.title if params.title is not None else existing["title"],
-                    params.subtitle if params.subtitle is not None else existing["subtitle"],
-                    params.narrative if params.narrative is not None else existing["narrative"],
-                    params.text if params.text is not None else existing["content"],
+                    params.title if params.title is not None else existing_title,
+                    params.subtitle if params.subtitle is not None else existing_subtitle,
+                    params.narrative if params.narrative is not None else existing_narrative,
+                    params.text if params.text is not None else existing_content,
                 ]
                 if part
             )
@@ -1754,84 +1828,102 @@ class PostgresDataLayer:
     async def approved_update_canonical_entity(
         self, params: ApprovedCanonicalEntityUpdateParams
     ) -> SaveMemoryResult:
-        """Apply an explicitly approved canonical entity update or soft archive."""
+        """Apply an explicitly approved canonical entity update or soft archive.
+
+        Metadata merge depends on the locked current row so concurrent approved
+        patches cannot lose each other's provenance/audit writes.
+        """
         pool = await get_pool()
+        existing_title: str | None = None
+        existing_subtitle: str | None = None
+        existing_narrative: str | None = None
+        existing_content: str | None = None
         async with pool.acquire() as conn:
-            existing = await conn.fetchrow(
-                """
-                SELECT id, content, type, title, subtitle, narrative, metadata
-                FROM memories
-                WHERE id = $1
-                """,
-                params.id,
-            )
-            if not existing:
-                raise ValueError(f"Memory {params.id} not found")
-
-            if not _row_is_protected_canonical_entity(existing):
-                raise ValueError(f"Memory {params.id} is not a canonical entity")
-
-            # Capture the audit trail from the ORIGINAL server-side metadata
-            # BEFORE merging caller-supplied fields. The audit list is
-            # append-only and server-computed: a caller-supplied "audit" key in
-            # params.metadata must never overwrite or truncate prior history.
-            existing_metadata = _metadata_from_row(existing)
-            audit_raw = existing_metadata.get("audit")
-            audit = list(audit_raw) if isinstance(audit_raw, list) else []
-
-            metadata = existing_metadata.copy()
-            metadata.update(params.metadata or {})
-            metadata[CANONICAL_ENTITY_METADATA_KEY] = True
-
-            canonical_kind = metadata.get(CANONICAL_KIND_METADATA_KEY)
-            if canonical_kind not in CANONICAL_KINDS:
-                raise ValueError(
-                    f"canonical_kind must be one of {sorted(CANONICAL_KINDS)!r}"
+            async with conn.transaction():
+                existing = await conn.fetchrow(
+                    """
+                    SELECT id, content, type, title, subtitle, narrative, metadata
+                    FROM memories
+                    WHERE id = $1
+                    FOR UPDATE
+                    """,
+                    params.id,
                 )
+                if not existing:
+                    raise ValueError(f"Memory {params.id} not found")
 
-            audit.append(
-                {
-                    "op": params.operation,
-                    "at": datetime.now(UTC).isoformat(),
-                    "actor": params.actor,
-                    "note": params.note,
-                }
-            )
-            # Always set the server-computed append-only trail last, so any
-            # caller-supplied "audit" key merged above is unconditionally
-            # overwritten and prior history can only ever grow.
-            metadata["audit"] = audit
-            if params.operation == "archive":
-                metadata["status"] = "archived"
+                if not _row_is_protected_canonical_entity(existing):
+                    raise ValueError(f"Memory {params.id} is not a canonical entity")
 
-            updates: dict[str, Any] = {"metadata": metadata}
-            if params.text is not None:
-                updates["content"] = params.text
-            if params.type is not None:
-                updates["type"] = params.type
-            if params.title is not None:
-                updates["title"] = params.title
-            if params.subtitle is not None:
-                updates["subtitle"] = params.subtitle
-            if params.narrative is not None:
-                updates["narrative"] = params.narrative
-            if params.project is not None:
-                index_id = await self._resolve_index_id(conn, params.project)
-                updates["index_id"] = self._scope_index_id(index_id)
+                existing_title = existing["title"]
+                existing_subtitle = existing["subtitle"]
+                existing_narrative = existing["narrative"]
+                existing_content = existing["content"]
 
-            set_parts: list[str] = []
-            values: list[Any] = []
-            param_idx = 1
-            for col, val in updates.items():
-                suffix = "::jsonb" if col == "metadata" else ""
-                set_parts.append(f"{col} = ${param_idx}{suffix}")
-                values.append(val)
-                param_idx += 1
-            set_parts.append("updated_at = NOW()")
+                # Capture the audit trail from the ORIGINAL server-side metadata
+                # BEFORE merging caller-supplied fields. The audit list is
+                # append-only and server-computed: a caller-supplied "audit" key in
+                # params.metadata must never overwrite or truncate prior history.
+                existing_metadata = _metadata_from_row(existing)
+                audit_raw = existing_metadata.get("audit")
+                audit = list(audit_raw) if isinstance(audit_raw, list) else []
 
-            values.append(params.id)
-            query = f"UPDATE memories SET {', '.join(set_parts)} WHERE id = ${param_idx}"
-            await conn.execute(query, *values)
+                # Explicit approval does not authorize malformed epistemic state or
+                # silent origin loss. Merge/validate provenance before persistence.
+                caller_metadata = dict(params.metadata or {})
+                caller_metadata.pop("audit", None)
+                metadata = merge_update_metadata(existing_metadata, caller_metadata)
+                metadata[CANONICAL_ENTITY_METADATA_KEY] = True
+
+                canonical_kind = metadata.get(CANONICAL_KIND_METADATA_KEY)
+                if canonical_kind not in CANONICAL_KINDS:
+                    raise ValueError(
+                        f"canonical_kind must be one of {sorted(CANONICAL_KINDS)!r}"
+                    )
+
+                audit.append(
+                    {
+                        "op": params.operation,
+                        "at": datetime.now(UTC).isoformat(),
+                        "actor": params.actor,
+                        "note": params.note,
+                    }
+                )
+                # Always set the server-computed append-only trail last, so any
+                # caller-supplied "audit" key merged above is unconditionally
+                # overwritten and prior history can only ever grow.
+                metadata["audit"] = audit
+                if params.operation == "archive":
+                    metadata["status"] = "archived"
+
+                updates: dict[str, Any] = {"metadata": metadata}
+                if params.text is not None:
+                    updates["content"] = params.text
+                if params.type is not None:
+                    updates["type"] = params.type
+                if params.title is not None:
+                    updates["title"] = params.title
+                if params.subtitle is not None:
+                    updates["subtitle"] = params.subtitle
+                if params.narrative is not None:
+                    updates["narrative"] = params.narrative
+                if params.project is not None:
+                    index_id = await self._resolve_index_id(conn, params.project)
+                    updates["index_id"] = self._scope_index_id(index_id)
+
+                set_parts: list[str] = []
+                values: list[Any] = []
+                param_idx = 1
+                for col, val in updates.items():
+                    suffix = "::jsonb" if col == "metadata" else ""
+                    set_parts.append(f"{col} = ${param_idx}{suffix}")
+                    values.append(val)
+                    param_idx += 1
+                set_parts.append("updated_at = NOW()")
+
+                values.append(params.id)
+                query = f"UPDATE memories SET {', '.join(set_parts)} WHERE id = ${param_idx}"
+                await conn.execute(query, *values)
 
         content_changed = any(
             field is not None
@@ -1841,10 +1933,10 @@ class PostgresDataLayer:
             text_to_embed = ": ".join(
                 part
                 for part in [
-                    params.title if params.title is not None else existing["title"],
-                    params.subtitle if params.subtitle is not None else existing["subtitle"],
-                    params.narrative if params.narrative is not None else existing["narrative"],
-                    params.text if params.text is not None else existing["content"],
+                    params.title if params.title is not None else existing_title,
+                    params.subtitle if params.subtitle is not None else existing_subtitle,
+                    params.narrative if params.narrative is not None else existing_narrative,
+                    params.text if params.text is not None else existing_content,
                 ]
                 if part
             )
@@ -2246,6 +2338,216 @@ class PostgresDataLayer:
             "total": sum(item["count"] for item in cohorts.values()),
             "cohorts": cohorts,
         }
+
+    async def epistemic_provenance_report(self) -> dict[str, Any]:
+        """Classify epistemic coverage without migrations or memory side effects."""
+        pool = await get_pool(run_migrations=False)
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """WITH classified AS (
+                       SELECT CASE
+                           WHEN metadata->'provenance'->>'source_label' IS NOT NULL
+                            AND metadata->'provenance'->>'expected_use' IS NOT NULL
+                            AND metadata->'provenance'->>'source_label' IN (
+                                'observed', 'inferred', 'generated',
+                                'confirmed', 'disputed', 'superseded'
+                            )
+                            AND metadata->'provenance'->>'expected_use' IN (
+                                'evidence', 'instruction'
+                            )
+                            AND (
+                                (
+                                    metadata->'provenance'->>'source_label' IN (
+                                        'observed', 'confirmed'
+                                    )
+                                    AND metadata->'provenance'->>'expected_use' IN (
+                                        'evidence', 'instruction'
+                                    )
+                                )
+                                OR (
+                                    metadata->'provenance'->>'source_label' IN (
+                                        'inferred', 'generated',
+                                        'disputed', 'superseded'
+                                    )
+                                    AND metadata->'provenance'->>'expected_use' = 'evidence'
+                                )
+                            )
+                            AND COALESCE(
+                                    metadata->'provenance'->>'epistemic_version',
+                                    'epistemic-provenance.v1'
+                                ) = 'epistemic-provenance.v1'
+                               THEN 'labeled'
+                           WHEN metadata->'provenance'->>'source_label' IN (
+                                'observed', 'inferred', 'generated',
+                                'confirmed', 'disputed', 'superseded'
+                            )
+                            AND metadata->'provenance'->>'expected_use' IS NULL
+                               THEN 'partial'
+                           WHEN metadata->'provenance'->>'source_label' IS NOT NULL
+                             OR metadata->'provenance'->>'expected_use' IS NOT NULL
+                               THEN 'ambiguous'
+                           ELSE 'unlabeled'
+                       END AS cohort
+                       FROM memories
+                   )
+                   SELECT cohort, COUNT(*)::int AS count
+                   FROM classified
+                   GROUP BY cohort"""
+            )
+
+        counts = {str(row["cohort"]): int(row["count"]) for row in rows}
+        bases = {
+            "labeled": (
+                "valid metadata.provenance source_label, expected_use, "
+                "and epistemic_version"
+            ),
+            "unlabeled": "no epistemic source_label or expected_use",
+            "partial": (
+                "valid source_label present without expected_use; "
+                "completable as evidence"
+            ),
+            "ambiguous": (
+                "use-only, invalid-label, illegal, or conflicting epistemic "
+                "fields; not promoted"
+            ),
+        }
+        cohorts = {
+            cohort: {"count": counts.get(cohort, 0), "basis": basis}
+            for cohort, basis in bases.items()
+        }
+        return {
+            "read_only": True,
+            "total": sum(item["count"] for item in cohorts.values()),
+            "cohorts": cohorts,
+        }
+
+    async def backfill_epistemic_provenance(
+        self,
+        *,
+        apply: bool = False,
+        limit: int | None = None,
+        after_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Conservatively backfill unlabeled epistemic fields.
+
+        Dry-run is the default and may inventory the full cohort. Apply mode is
+        bounded by an explicit batch limit and keyset cursor (`after_id`) and
+        never rewrites ``updated_at``. Ambiguous rows are counted and never
+        silently promoted. Canonical origin lineage is never rewritten.
+        """
+        if after_id is not None and (
+            not isinstance(after_id, int)
+            or isinstance(after_id, bool)
+            or after_id < 0
+        ):
+            raise EpistemicProvenanceValidationError(
+                "backfill after_id must be a non-negative integer"
+            )
+
+        # Validate bounds before opening a database connection.
+        if apply:
+            batch_limit = validate_backfill_apply_limit(limit)
+        elif limit is not None:
+            batch_limit = validate_backfill_apply_limit(limit)
+        else:
+            batch_limit = None
+
+        pool = await get_pool(run_migrations=False)
+        async with pool.acquire() as conn:
+            if apply:
+                cursor = 0 if after_id is None else after_id
+                rows = await conn.fetch(
+                    """SELECT id, metadata
+                       FROM memories
+                       WHERE id > $1
+                       ORDER BY id
+                       LIMIT $2""",
+                    cursor,
+                    batch_limit,
+                )
+            else:
+                if after_id is None and limit is None:
+                    rows = await conn.fetch(
+                        "SELECT id, metadata FROM memories ORDER BY id"
+                    )
+                else:
+                    # Optional dry-run pagination for large inventories.
+                    cursor = 0 if after_id is None else after_id
+                    if batch_limit is None:
+                        rows = await conn.fetch(
+                            """SELECT id, metadata
+                               FROM memories
+                               WHERE id > $1
+                               ORDER BY id""",
+                            cursor,
+                        )
+                    else:
+                        rows = await conn.fetch(
+                            """SELECT id, metadata
+                               FROM memories
+                               WHERE id > $1
+                               ORDER BY id
+                               LIMIT $2""",
+                            cursor,
+                            batch_limit,
+                        )
+
+            normalized_rows: list[dict[str, Any]] = []
+            for row in rows:
+                metadata = row["metadata"]
+                if isinstance(metadata, str):
+                    try:
+                        metadata = _json.loads(metadata)
+                    except _json.JSONDecodeError:
+                        metadata = {}
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                normalized_rows.append({"id": int(row["id"]), "metadata": metadata})
+
+            plan = plan_epistemic_backfill(normalized_rows, apply=apply)
+            scanned_ids = [int(row["id"]) for row in normalized_rows]
+            next_after_id = scanned_ids[-1] if scanned_ids else after_id
+            has_more = False
+            if scanned_ids:
+                has_more_row = await conn.fetchrow(
+                    "SELECT 1 AS present FROM memories WHERE id > $1 LIMIT 1",
+                    scanned_ids[-1],
+                )
+                has_more = has_more_row is not None
+
+            plan["batch_limit"] = batch_limit
+            plan["after_id"] = after_id
+            plan["next_after_id"] = next_after_id
+            plan["has_more"] = has_more
+            plan["scanned"] = len(normalized_rows)
+
+            if not apply:
+                plan.pop("updates", None)
+                plan["updates"] = []
+                return plan
+
+            updated = 0
+            for item in plan["updates"]:
+                await conn.execute(
+                    """UPDATE memories
+                       SET metadata = $2::jsonb
+                       WHERE id = $1""",
+                    item["id"],
+                    item["metadata"],
+                )
+                updated += 1
+            plan["updated"] = updated
+            plan["would_update"] = updated
+            plan["updates"] = [
+                {
+                    "id": item["id"],
+                    "source_label": item["source_label"],
+                    "expected_use": item["expected_use"],
+                    "epistemic_version": item["epistemic_version"],
+                }
+                for item in plan["updates"]
+            ]
+            return plan
 
     async def portable_closure_counts(self) -> dict[str, int]:
         """Return row counts for the portable knowledge closure."""

@@ -21,6 +21,11 @@ def _make_pool(conn: AsyncMock) -> MagicMock:
     async def fake_acquire():
         yield conn
 
+    @asynccontextmanager
+    async def fake_transaction(*_args, **_kwargs):
+        yield
+
+    conn.transaction = MagicMock(side_effect=fake_transaction)
     pool = MagicMock()
     pool.acquire = fake_acquire
     return pool

@@ -342,6 +342,58 @@ class TestSaveMemoryTool:
         }
 
     @pytest.mark.asyncio
+    async def test_save_memory_defaults_epistemic_classification_without_proposal(
+        self, mock_dl
+    ):
+        """Agent writes without a proposal stay inferred evidence-only."""
+        with (
+            patch("open_brain.server.get_dl", return_value=mock_dl),
+            patch("open_brain.server.classify_and_extract", return_value={}),
+            patch("open_brain.server._extract_entities", return_value={}),
+        ):
+            from open_brain.server import save_memory
+
+            result = await save_memory(
+                text="Unjudged agent memory",
+                provenance={
+                    "producer": "agent",
+                    "source_ref": "agent-session:codex:session-123",
+                },
+            )
+
+        assert json.loads(result)["id"] == 42
+        call_args = mock_dl.save_memory.call_args[0][0]
+        provenance = call_args.metadata["provenance"]
+        assert provenance["source_label"] == "inferred"
+        assert provenance["expected_use"] == "evidence"
+        assert provenance["epistemic_version"] == "epistemic-provenance.v1"
+
+    @pytest.mark.asyncio
+    async def test_save_memory_rejects_authority_raising_epistemic_combination(
+        self, mock_dl
+    ):
+        with patch("open_brain.server.get_dl", return_value=mock_dl):
+            from open_brain.server import save_memory
+
+            result = await save_memory(
+                text="Generated instruction attempt",
+                provenance={
+                    "producer": "agent",
+                    "source_ref": "agent-session:codex:session-123",
+                },
+                metadata={
+                    "provenance": {
+                        "source_label": "generated",
+                        "expected_use": "instruction",
+                    }
+                },
+            )
+
+        data = json.loads(result)
+        assert data["error"] == "invalid_epistemic_provenance"
+        mock_dl.save_memory.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_save_memory_returns_id(self, mock_dl):
         with patch("open_brain.server.get_dl", return_value=mock_dl):
             from open_brain.server import save_memory

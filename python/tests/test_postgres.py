@@ -34,6 +34,12 @@ def _make_pool(conn: AsyncMock) -> MagicMock:
     async def fake_acquire():
         yield conn
 
+    @asynccontextmanager
+    async def fake_transaction(*_args, **_kwargs):
+        yield
+
+    # AsyncMock(transaction) returns a coroutine, not an async CM — replace it.
+    conn.transaction = MagicMock(side_effect=fake_transaction)
     pool = MagicMock()
     pool.acquire = fake_acquire
     return pool
@@ -534,6 +540,7 @@ class TestPostgresSaveMemory:
             "source_ref": "conversation://current/evidence",
             "source_label": "observed",
             "expected_use": "evidence",
+            "epistemic_version": "epistemic-provenance.v1",
             "origin": ORIGIN_PROVENANCE,
         }
 
@@ -621,6 +628,8 @@ class TestPostgresSaveMemory:
             "provenance": {
                 "source_ref": "conversation://current/evidence",
                 "source_label": "observed",
+                "expected_use": "evidence",
+                "epistemic_version": "epistemic-provenance.v1",
                 "origin": ORIGIN_PROVENANCE,
             },
         }
@@ -1449,16 +1458,15 @@ class TestUpdateMemoryMetadataMerge:
 
     @pytest.mark.asyncio
     async def test_update_memory_metadata_merge(self, dl):
-        """AK2: update_memory(metadata={...}) merges JSONB (uses metadata || $n::jsonb)."""
-        existing_row = MagicMock()
-        existing_row_data = {
+        """AK2: update_memory(metadata={...}) persists a fully merged metadata object."""
+        existing_row = {
             "id": 5,
             "content": "existing content",
             "title": "existing title",
             "subtitle": None,
             "narrative": None,
+            "metadata": {"prior": True},
         }
-        existing_row.__getitem__ = lambda self, key: existing_row_data[key]
 
         conn = AsyncMock()
         conn.fetchrow.return_value = existing_row
@@ -1478,12 +1486,11 @@ class TestUpdateMemoryMetadataMerge:
 
         assert result.id == 5
         assert result.message == "Memory updated"
-        # Verify UPDATE was called with JSONB merge syntax
         conn.execute.assert_called_once()
         update_sql = conn.execute.call_args[0][0]
-        assert "metadata || " in update_sql
+        assert "metadata = $" in update_sql
         assert "::jsonb" in update_sql
-        # Verify the metadata JSON was passed
+        assert "metadata ||" not in update_sql
         update_args = conn.execute.call_args[0]
 
         metadata_arg = next(
@@ -1492,15 +1499,19 @@ class TestUpdateMemoryMetadataMerge:
         assert metadata_arg is not None
         assert metadata_arg["status"] == "closed"
         assert metadata_arg["reviewer"] == "alice"
+        assert metadata_arg["prior"] is True
 
     @pytest.mark.asyncio
     async def test_update_memory_metadata_only_no_other_updates(self, dl):
         """update_memory with only metadata (no text/title/etc.) still triggers an UPDATE."""
-        existing_row = MagicMock()
-        existing_row_data = {
-            "id": 7, "content": "c", "title": None, "subtitle": None, "narrative": None,
+        existing_row = {
+            "id": 7,
+            "content": "c",
+            "title": None,
+            "subtitle": None,
+            "narrative": None,
+            "metadata": {},
         }
-        existing_row.__getitem__ = lambda self, key: existing_row_data[key]
 
         conn = AsyncMock()
         conn.fetchrow.return_value = existing_row

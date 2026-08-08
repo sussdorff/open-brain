@@ -137,3 +137,4 @@ def test_allowed_proposal_metadata_preserves_provenance() -> None:
     assert metadata["memory_write_judge"]["policy_version"] == "memory-write-judge.v1"
     assert metadata["provenance"]["source_label"] == "generated"
     assert metadata["provenance"]["expected_use"] == "evidence"
+    assert metadata["provenance"]["epistemic_version"] == "epistemic-provenance.v1"

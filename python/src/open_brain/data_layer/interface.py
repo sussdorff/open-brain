@@ -580,6 +580,9 @@ class SaveMemoryParams:
     importance: str = "medium"  # caller-declared significance: critical|high|medium|low
     dedup_mode: Literal["skip", "merge"] = "skip"  # auto-dedup strategy at store time
     duplicate_of: int | None = None  # caller-asserted duplicate; short-circuits dedup logic
+    # Internal non-wire signal from the MCP/server judge boundary. Ordinary direct
+    # callers remain evidence-only; do not derive this from caller-authored metadata.
+    instruction_authorized: bool = False
 
 
 @dataclass
@@ -1038,6 +1041,16 @@ class DataLayer(Protocol):
     async def stats(self) -> dict[str, Any]: ...
 
     async def origin_provenance_report(self) -> dict[str, Any]: ...
+
+    async def epistemic_provenance_report(self) -> dict[str, Any]: ...
+
+    async def backfill_epistemic_provenance(
+        self,
+        *,
+        apply: bool = False,
+        limit: int | None = None,
+        after_id: int | None = None,
+    ) -> dict[str, Any]: ...
 
     async def refine_memories(self, params: RefineParams) -> RefineResult: ...
 
