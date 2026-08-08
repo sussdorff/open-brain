@@ -2689,8 +2689,15 @@ class ConfiguredEmbeddingAdapter:
         return vectors, {"documents": len(texts), "tokens": tokens}
 
 
+RERANK_MAX_BATCH_DOCUMENTS = 1000
+
+
 class ConfiguredRerankAdapter:
-    """Operational reranking through the configured provider."""
+    """Operational reranking through the configured provider.
+
+    Provider rerank APIs cap documents per request (Voyage: 1000), so
+    full-cohort control measurement chunks documents and merges by score.
+    """
 
     def __init__(self, model: str) -> None:
         self._model = model
@@ -2700,13 +2707,18 @@ class ConfiguredRerankAdapter:
     ) -> tuple[list[int], dict[str, Any]]:
         from open_brain.data_layer.reranker import rerank as configured_rerank
 
-        results = await configured_rerank(query, documents, self._model)
-        return [item.index for item in results], {
+        scored: list[tuple[int, float]] = []
+        for start in range(0, len(documents), RERANK_MAX_BATCH_DOCUMENTS):
+            chunk = documents[start : start + RERANK_MAX_BATCH_DOCUMENTS]
+            results = await configured_rerank(query, chunk, self._model)
+            scored.extend(
+                (start + item.index, item.relevance_score) for item in results
+            )
+        scored.sort(key=lambda pair: pair[1], reverse=True)
+        return [index for index, _ in scored], {
             "model": self._model,
             "documents": len(documents),
-            "max_relevance": max(
-                (item.relevance_score for item in results), default=0.0
-            ),
+            "max_relevance": max((score for _, score in scored), default=0.0),
         }
 
 

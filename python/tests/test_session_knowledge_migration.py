@@ -1735,3 +1735,49 @@ class TestMigrationSchemaIntegration:
             assert int(still) == 1
         finally:
             await conn.close()
+
+
+class TestConfiguredRerankAdapterBatching:
+    """Provider rerank calls must respect the per-request document cap (K3)."""
+
+    async def test_full_cohort_rerank_is_chunked_with_global_indices(self) -> None:
+        from open_brain import session_knowledge_migration as skm
+        from open_brain.data_layer.reranker import RerankResult
+
+        calls: list[int] = []
+
+        async def fake_rerank(
+            query: str, documents: list[str], model: str, top_k: int | None = None
+        ) -> list[RerankResult]:
+            calls.append(len(documents))
+            # highest score for the last document of each chunk
+            return [
+                RerankResult(index=i, relevance_score=float(i) / len(documents))
+                for i in range(len(documents))
+            ]
+
+        adapter = skm.ConfiguredRerankAdapter("rerank-2.5")
+        documents = [f"doc-{i}" for i in range(2350)]
+        with patch("open_brain.data_layer.reranker.rerank", new=fake_rerank):
+            indices, metrics = await adapter.rerank("query", documents)
+
+        assert calls == [1000, 1000, 350]
+        assert all(size <= skm.RERANK_MAX_BATCH_DOCUMENTS for size in calls)
+        assert len(indices) == 2350
+        assert sorted(indices) == list(range(2350))
+        # best global index of each chunk ranks first (score 999/1000)
+        assert indices[0] in {999, 1999}
+        assert metrics["documents"] == 2350
+        assert metrics["max_relevance"] == pytest.approx(999.0 / 1000.0)
+
+    async def test_empty_documents_need_no_provider_call(self) -> None:
+        from open_brain import session_knowledge_migration as skm
+
+        async def fail_rerank(*args: Any, **kwargs: Any) -> None:
+            raise AssertionError("provider must not be called for empty input")
+
+        adapter = skm.ConfiguredRerankAdapter("rerank-2.5")
+        with patch("open_brain.data_layer.reranker.rerank", new=fail_rerank):
+            indices, metrics = await adapter.rerank("query", [])
+        assert indices == []
+        assert metrics["max_relevance"] == 0.0
