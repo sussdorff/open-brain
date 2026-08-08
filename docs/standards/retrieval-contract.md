@@ -17,24 +17,23 @@ consumer declares what retrieved memory may influence. Write-time judging remain
 owned by the Memory-Write Judge; this contract prevents untrusted or externally
 derived memories from becoming control instructions during retrieval.
 
-## High authority status (open-brain-ekn.4)
+## High authority status (open-brain-ekn.5)
 
 High-authority elevation (`identity`, `constraint`, `policy`,
-`system_instruction`) is intentionally disabled until `open-brain-ekn.5`
-supplies a server-issued, ledger-backed promotion record.
+`system_instruction`) requires a server-supplied, ledger-backed promotion
+projection from `memory_promotion_events`. See
+`docs/standards/memory-promotion.md`.
 
 - Actor-authored `metadata.retrieval_promotion` is never trusted.
 - Write-time Judge `ALLOW` is admissibility only, never read-time promotion.
-- Profiles may still declare `allow_high_authority=true` and high-authority
-  compiled-context candidates for future compatibility, but the `.4` runtime
-  demotes every such unit to evidence/context and emits a concrete audit reason
-  (for example `high_authority_disabled_pending_open_brain_ekn_5_promotion_ledger`,
-  `promotion_record_not_server_issued`, or
-  `judge_allow_is_not_read_time_promotion`).
+- Direct library calls without a ledger projection remain fail-closed.
+- Profiles may declare `allow_high_authority=true` and high-authority compiled
+  sections; elevation still requires a current accepted promoted ledger event,
+  matching confirmed/instruction metadata, positive origin/ingestion
+  attestation, and an audit reason/source.
+- Dispute and supersession win over every earlier grant.
 
-A future trusted issuer must provide positive origin/ingestion attestation
-before high authority can be considered; `.4` does not stamp every existing
-ingestion path and fails closed for unattested rows.
+Unknown or absent attestation stays evidence-only.
 
 ## Seven dimensions (runtime-enforced)
 
@@ -50,11 +49,11 @@ ingestion path and fails closed for unattested rows.
 
 ## Allowed influence (trust lattice)
 
-| Influence | Authority class | `.4` runtime |
+| Influence | Authority class | Runtime |
 |-----------|-----------------|--------------|
 | `evidence` | Data only | Allowed when section permits |
 | `context` | Session context | Allowed when section permits |
-| `identity` / `constraint` / `policy` / `system_instruction` | High authority | Declared in vocabulary; always demoted pending `.5` |
+| `identity` / `constraint` / `policy` / `system_instruction` | High authority | Only via ledger projection + section caps |
 
 Category names, `stability=canonical`, importance, actor-authored metadata, Judge
 ALLOW, and forged `retrieval_promotion` alone are insufficient.
@@ -116,8 +115,9 @@ within the configured estimate; genuinely tiny budgets fail closed.
 
 - Work object: `project`
 - Authoritative sources include `open-brain.memories` and future promoted kinds
-- Permissions: read; `allow_high_authority=true` reserved for `.5`
-- Runtime: high-authority sections remain demoted until the promotion ledger exists
+- Permissions: read; `allow_high_authority=true`
+- Runtime: identity/constraint elevate only through the promotion ledger;
+  policy/system-instruction stay absent unless the profile declares them
 
 ### iOS / mobile read-only
 

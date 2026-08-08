@@ -679,6 +679,73 @@ async def _run_migrations(conn: asyncpg.Connection) -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
     """)
+    # Append-only epistemic promotion ledger (open-brain-ekn.5).
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS memory_promotion_events (
+            id BIGSERIAL PRIMARY KEY,
+            memory_id INTEGER NOT NULL,
+            actor TEXT NOT NULL CHECK (length(btrim(actor)) > 0),
+            source_state TEXT NOT NULL,
+            target_state TEXT NOT NULL,
+            reason TEXT NOT NULL CHECK (length(btrim(reason)) > 0),
+            evidence_refs JSONB NOT NULL DEFAULT '[]'::jsonb,
+            policy_version TEXT NOT NULL,
+            rule_version TEXT,
+            grant_jti TEXT,
+            grant_digest TEXT,
+            origin_attestation_digest TEXT,
+            decision TEXT NOT NULL
+                CHECK (decision IN ('accepted', 'rejected')),
+            outcome TEXT NOT NULL,
+            rejection_code TEXT,
+            relationship_id INTEGER,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CHECK (
+                (decision = 'accepted' AND rejection_code IS NULL)
+                OR (decision = 'rejected' AND rejection_code IS NOT NULL)
+            )
+        );
+    """)
+    # Idempotent for DBs created before origin attestation digests existed.
+    await conn.execute("""
+        ALTER TABLE memory_promotion_events
+            ADD COLUMN IF NOT EXISTS origin_attestation_digest TEXT;
+    """)
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_memory_promotion_events_memory_created
+        ON memory_promotion_events (memory_id, created_at ASC, id ASC);
+    """)
+    await conn.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS memory_promotion_events_accepted_grant_jti_uidx
+        ON memory_promotion_events (grant_jti)
+        WHERE grant_jti IS NOT NULL AND decision = 'accepted';
+    """)
+    await conn.execute("""
+        CREATE OR REPLACE FUNCTION reject_memory_promotion_events_mutation()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+            RAISE EXCEPTION 'memory_promotion_events is append-only';
+        END;
+        $$;
+    """)
+    await conn.execute("""
+        DROP TRIGGER IF EXISTS memory_promotion_events_no_update
+            ON memory_promotion_events;
+        CREATE TRIGGER memory_promotion_events_no_update
+            BEFORE UPDATE ON memory_promotion_events
+            FOR EACH ROW
+            EXECUTE PROCEDURE reject_memory_promotion_events_mutation();
+    """)
+    await conn.execute("""
+        DROP TRIGGER IF EXISTS memory_promotion_events_no_delete
+            ON memory_promotion_events;
+        CREATE TRIGGER memory_promotion_events_no_delete
+            BEFORE DELETE ON memory_promotion_events
+            FOR EACH ROW
+            EXECUTE PROCEDURE reject_memory_promotion_events_mutation();
+    """)
     # Drop every known hybrid_search signature before recreating the canonical one.
     # Postgres treats different argument-type lists as separate overloads, so
     # CREATE OR REPLACE leaves stale legacy signatures untouched; it also cannot
@@ -3754,6 +3821,28 @@ class PostgresDataLayer:
             }
             for row in rows
         ]
+
+    async def attempt_memory_promotion(self, params: Any) -> Any:
+        """Attempt an audited epistemic promotion/dispute/supersession."""
+        from open_brain.memory_promotion import attempt_memory_promotion
+
+        return await attempt_memory_promotion(params)
+
+    async def list_memory_promotion_history(
+        self, memory_id: int
+    ) -> list[dict[str, Any]]:
+        """Return append-only promotion ledger events for one memory."""
+        from open_brain.memory_promotion import list_memory_promotion_history
+
+        return await list_memory_promotion_history(memory_id)
+
+    async def fetch_promotion_projections(
+        self, memory_ids: list[int]
+    ) -> dict[int, Any]:
+        """Return current ledger-backed promotion projections by memory id."""
+        from open_brain.memory_promotion import fetch_promotion_projections
+
+        return await fetch_promotion_projections(memory_ids)
 
     async def people_discussed_with(
         self,

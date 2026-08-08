@@ -662,6 +662,11 @@ async def _cmd_provenance(args: argparse.Namespace) -> Any:
         if getattr(args, "after_id", None) is not None:
             payload["after_id"] = args.after_id
         return await call_tool("backfill_epistemic_provenance", payload)
+    if args.provenance_command == "history":
+        return await call_tool(
+            "get_memory_promotion_history",
+            {"memory_id": int(args.memory_id)},
+        )
     raise ValueError(f"Unknown provenance command: {args.provenance_command}")
 
 
@@ -1463,6 +1468,15 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         dest="after_id",
         help="Keyset cursor: only consider memory ids greater than this value",
+    )
+    p_history = provenance_sub.add_parser(
+        "history",
+        help="Reconstruct promotion, dispute, and supersession history for a memory",
+    )
+    p_history.add_argument(
+        "memory_id",
+        type=int,
+        help="Memory ID whose promotion ledger history to fetch",
     )
 
     # export

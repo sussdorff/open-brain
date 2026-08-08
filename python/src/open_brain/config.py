@@ -17,6 +17,16 @@ class Config(BaseSettings):
     AUTH_USER: str
     AUTH_PASSWORD: str
     JWT_SECRET: str
+    # Optional secret for verifying promotion grants (min 32 chars when set).
+    # Never falls back to JWT_SECRET. Empty disables grant verification (fail closed).
+    # get_config() is process-cached: restart after rotating this secret.
+    PROMOTION_GRANT_SECRET: str = ""
+    # Comma-separated exact OAuth subjects allowed to call promote_memory_authority.
+    # Default empty = fail closed (self-requested admin scope alone is insufficient).
+    # get_config() is process-cached: restart after changing this allowlist.
+    PROMOTION_ADMIN_USERS: str = ""
+    # Exact automatic promotion rule version. Empty disables automated promotion.
+    PROMOTION_AUTOMATIC_RULE_VERSION: str = ""
     CLIENTS_FILE: str = "/opt/open-brain/clients.json"
     # Path to users.json file for multi-user auth. NOT in git — managed on the server.
     # Format: [{"username": "alice", "password": "secret"}, ...]

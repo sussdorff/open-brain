@@ -1104,6 +1104,27 @@ class DataLayer(Protocol):
         link_types: list[str] | None = None,
     ) -> list[dict[str, Any]]: ...
 
+    async def attempt_memory_promotion(
+        self,
+        params: Any,
+    ) -> Any:
+        """Attempt an audited epistemic promotion/dispute/supersession."""
+        ...
+
+    async def list_memory_promotion_history(
+        self,
+        memory_id: int,
+    ) -> list[dict[str, Any]]:
+        """Return append-only promotion ledger events for one memory."""
+        ...
+
+    async def fetch_promotion_projections(
+        self,
+        memory_ids: list[int],
+    ) -> dict[int, Any]:
+        """Return current ledger-backed promotion projections by memory id."""
+        ...
+
     async def delete_by_run_id(self, run_id: str) -> DeleteByRunIdResult: ...
 
     async def people_discussed_with(

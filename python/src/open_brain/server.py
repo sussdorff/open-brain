@@ -100,6 +100,14 @@ from open_brain.memory_write_judge import (
     judge_memory_write_proposal,
     memory_metadata_from_judged_proposal,
 )
+from open_brain.memory_promotion import (
+    PromotionAttemptParams,
+    PromotionError,
+    attempt_memory_promotion,
+    fetch_promotion_projections,
+    is_promotion_admin_actor,
+    list_memory_promotion_history,
+)
 from open_brain.retrieval_contract import (
     RetrievalContractValidationError,
     apply_retrieval_contract,
@@ -148,7 +156,7 @@ def _normalize_retrieval_contract_arg(
     return retrieval_contract
 
 
-def _retrieval_units_payload(
+async def _retrieval_units_payload(
     memories: list[Memory],
     *,
     retrieval_contract: dict[str, Any] | str | None = None,
@@ -157,11 +165,13 @@ def _retrieval_units_payload(
 ) -> dict[str, Any]:
     """Compatibility wrapper: always attach provenance-preserving retrieval units."""
     contract_arg = _normalize_retrieval_contract_arg(retrieval_contract)
+    projection = await fetch_promotion_projections([m.id for m in memories])
     result = apply_retrieval_contract(
         memories,
         contract=contract_arg,
         work_object=work_object,
         query_project=query_project,
+        promotion_projection=projection,
     )
     return result.to_dict()
 
@@ -237,8 +247,10 @@ _EVOLUTION_TOOLS: frozenset[str] = frozenset({
     "query_evolution_history_tool",
 })
 
-# Admin tools require the `admin` OAuth scope (none defined yet)
-_ADMIN_TOOLS: frozenset[str] = frozenset()
+# Admin tools require the `admin` OAuth scope (never granted to API keys / URL tokens)
+_ADMIN_TOOLS: frozenset[str] = frozenset({
+    "promote_memory_authority",
+})
 
 # Valid scopes that can be granted to URL tokens
 _VALID_URL_TOKEN_SCOPES: frozenset[str] = frozenset({"memory", "evolution"})
@@ -354,8 +366,15 @@ class ScopedFastMCP(FastMCP):
         for tool in all_tools:
             if tool.name in _EVOLUTION_TOOLS and "evolution" not in scopes:
                 continue
-            if tool.name in _ADMIN_TOOLS and "admin" not in scopes:
-                continue
+            if tool.name in _ADMIN_TOOLS:
+                # Admin scope alone is insufficient for promotion mutations:
+                # require non-API-key auth and PROMOTION_ADMIN_USERS membership.
+                if "admin" not in scopes or _is_api_key_auth.get():
+                    continue
+                if tool.name == "promote_memory_authority" and not is_promotion_admin_actor(
+                    _current_user_id.get()
+                ):
+                    continue
             filtered.append(tool)
         return filtered
 
@@ -485,7 +504,7 @@ async def search(
             {"kind": "project", "id": project} if project else None
         )
         try:
-            retrieval = _retrieval_units_payload(
+            retrieval = await _retrieval_units_payload(
                 list(result.results),
                 retrieval_contract=retrieval_contract,
                 work_object=resolved_work_object,
@@ -1017,7 +1036,7 @@ async def get_context(
                 {"kind": "project", "id": project} if project else None
             )
             # Same typed failure contract + project/work-object binding as search.
-            retrieval = _retrieval_units_payload(
+            retrieval = await _retrieval_units_payload(
                 [],
                 retrieval_contract=retrieval_contract,
                 work_object=resolved_work_object,
@@ -1060,11 +1079,13 @@ async def get_wake_up_pack(
         "id": project or "wake-up",
     }
     contract_arg = _normalize_retrieval_contract_arg(retrieval_contract)
+    projection = await fetch_promotion_projections([m.id for m in memories])
     markdown = build_wake_up_pack(
         memories,
         token_budget,
         retrieval_contract=contract_arg,
         work_object=resolved_work_object,
+        promotion_projection=projection,
     )
     if not as_envelope and contract_arg is None:
         # Additive compatibility: legacy callers still receive markdown text.
@@ -1074,6 +1095,7 @@ async def get_wake_up_pack(
         memories,
         retrieval_contract=contract_arg,
         work_object=resolved_work_object,
+        promotion_projection=projection,
     )
     envelope = build_wake_up_pack(
         memories,
@@ -1081,6 +1103,7 @@ async def get_wake_up_pack(
         retrieval_contract=contract_arg,
         work_object=resolved_work_object,
         as_envelope=True,
+        promotion_projection=projection,
     )
     return json.dumps(
         {
@@ -1161,6 +1184,76 @@ async def backfill_epistemic_provenance(
     except EpistemicProvenanceValidationError as exc:
         return json.dumps({"error": exc.code, "message": str(exc)})
     return json.dumps(result, default=str)
+
+
+@mcp.tool(
+    description=(
+        "Promote, dispute, or supersede a memory's epistemic authority. "
+        "Requires OAuth admin scope, membership in PROMOTION_ADMIN_USERS, and a "
+        "signed promotion grant for every transition (including dispute and "
+        "supersession). API keys and URL tokens are denied. Supersession requires "
+        "successor_memory_id and creates a supersedes relationship. Every attempt "
+        "appends an immutable ledger event."
+    )
+)
+@logged_tool
+async def promote_memory_authority(
+    memory_id: int,
+    target_state: str,
+    reason: str,
+    evidence_refs: list[str] | None = None,
+    promotion_grant: str | None = None,
+    successor_memory_id: int | None = None,
+    authorization_mode: str = "signed_grant",
+    rule_version: str | None = None,
+) -> str:
+    """Allowlisted-admin epistemic promotion / dispute / supersession mutation."""
+    if _is_api_key_auth.get():
+        raise ScopeDeniedError(
+            "Scope 'admin' required; API keys cannot obtain promotion authority"
+        )
+    _require_scope("admin")
+    actor = _current_user_id.get()
+    if not actor:
+        raise ScopeDeniedError("Scope 'admin' required; authenticated actor missing")
+    if not is_promotion_admin_actor(actor):
+        raise ScopeDeniedError(
+            "Scope 'admin' required; actor is not in PROMOTION_ADMIN_USERS"
+        )
+    try:
+        params = PromotionAttemptParams(
+            memory_id=memory_id,
+            target_state=target_state,
+            reason=reason,
+            evidence_refs=list(evidence_refs or []),
+            actor=actor,
+            promotion_grant=promotion_grant,
+            successor_memory_id=successor_memory_id,
+            authorization_mode=authorization_mode,  # type: ignore[arg-type]
+            rule_version=rule_version,
+        )
+        result = await attempt_memory_promotion(params)
+    except (PromotionError, ValueError) as exc:
+        code = getattr(exc, "code", "invalid_request")
+        return json.dumps({"error": code, "message": str(exc)})
+    return json.dumps(result.to_dict(), default=str)
+
+
+@mcp.tool(
+    description=(
+        "Read-only reconstruction of promotion, dispute, and supersession history "
+        "for a memory. Available under ordinary authenticated memory scope."
+    )
+)
+@logged_tool
+async def get_memory_promotion_history(memory_id: int) -> str:
+    """Return append-only promotion ledger events for one memory."""
+    _require_scope("memory")
+    try:
+        events = await list_memory_promotion_history(memory_id)
+    except PromotionError as exc:
+        return json.dumps({"error": exc.code, "message": str(exc)})
+    return json.dumps({"memory_id": memory_id, "events": events}, default=str)
 
 
 @mcp.tool(description="Get ingest observability stats: counters for ingests, LLM calls, dedup decisions, relationships, memories written, and ingest durations.")
@@ -3246,6 +3339,7 @@ async def api_wake_up_pack(
     memories = await dl.get_wake_up_memories(project=project)
     work_object = {"kind": "project", "id": project or "wake-up"}
     contract = {"profile": profile, "work_object": work_object}
+    projection = await fetch_promotion_projections([m.id for m in memories])
     try:
         if format == "markdown":
             result = build_wake_up_pack(
@@ -3253,6 +3347,7 @@ async def api_wake_up_pack(
                 token_budget,
                 retrieval_contract=contract,
                 work_object=work_object,
+                promotion_projection=projection,
             )
             return Response(content=result, media_type="text/markdown")
 
@@ -3262,6 +3357,7 @@ async def api_wake_up_pack(
             retrieval_contract=contract,
             work_object=work_object,
             as_envelope=True,
+            promotion_projection=projection,
         )
         return Response(content=envelope, media_type="text/plain")
     except RetrievalContractValidationError as exc:

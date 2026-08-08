@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from open_brain.data_layer.interface import Memory, rank_importance
+from open_brain.memory_promotion import PromotionProjection
 from open_brain.retrieval_contract import (
     HIGH_AUTHORITY_INFLUENCES,
     RETRIEVAL_CONTRACT_SCHEMA_VERSION,
@@ -158,6 +159,7 @@ def compile_wake_up_units(
     *,
     retrieval_contract: Mapping[str, Any] | RetrievalContract | None = None,
     work_object: Mapping[str, Any] | None = None,
+    promotion_projection: Mapping[int, PromotionProjection] | None = None,
 ) -> RetrievalResult:
     """Compile memories into contract-bound retrieval units for wake-up."""
     contract = _resolve_wake_up_contract(retrieval_contract, work_object)
@@ -165,6 +167,7 @@ def compile_wake_up_units(
         memories,
         contract=contract,
         work_object=work_object,
+        promotion_projection=promotion_projection,
     )
 
 
@@ -175,6 +178,7 @@ def build_wake_up_pack(
     retrieval_contract: Mapping[str, Any] | RetrievalContract | None = None,
     work_object: Mapping[str, Any] | None = None,
     as_envelope: bool = False,
+    promotion_projection: Mapping[int, PromotionProjection] | None = None,
 ) -> str:
     """Build a token-budgeted wake-up pack from memories under a retrieval contract.
 
@@ -192,6 +196,7 @@ def build_wake_up_pack(
         memories,
         retrieval_contract=retrieval_contract,
         work_object=work_object,
+        promotion_projection=promotion_projection,
     )
     memory_by_id = {memory.id: memory for memory in memories}
 

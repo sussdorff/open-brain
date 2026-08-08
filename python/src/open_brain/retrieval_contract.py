@@ -6,10 +6,10 @@ Every consumer declares what retrieved memory may influence. Missing provenance,
 legacy unlabeled rows, external ingestion, and evidence-only epistemic labels
 never become identity, constraint, policy, or system-instruction authority.
 
-High-authority elevation is intentionally disabled until open-brain-ekn.5
-supplies a server-issued, ledger-backed promotion record. Actor-authored
+High-authority elevation requires a server-supplied, ledger-backed promotion
+projection from ``memory_promotion_events``. Actor-authored
 ``metadata.retrieval_promotion`` and write-time Judge ``ALLOW`` are never
-trusted as read-time promotion.
+trusted as read-time promotion. Direct calls without a projection fail closed.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from open_brain.epistemic_provenance import (
     EPISTEMIC_LABELS,
     EXPECTED_USES,
 )
+from open_brain.memory_promotion import PromotionProjection
 
 RETRIEVAL_CONTRACT_SCHEMA_VERSION = "retrieval-contract.v1"
 RETRIEVAL_CONTRACT_SCHEMA_ID = (
@@ -1383,8 +1384,8 @@ def profile_retrieval_contract(
             profile="bead-orchestrator",
         )
     if profile == "claude-wake-up":
-        # Future-compatible vocabulary: allow_high_authority and HA candidates
-        # remain declared, but runtime never elevates until the .5 ledger exists.
+        # Identity/constraint may elevate only through a ledger projection.
+        # Policy/system-instruction sections are intentionally undeclared.
         resolved = _coerce_work_object(
             work_object, default_kind="project", default_id="unspecified-project"
         )
@@ -1538,11 +1539,32 @@ def is_external_unattested_for_high_authority(metadata: Mapping[str, Any]) -> bo
     return False
 
 
+def _promotion_origin_attestation_matches(
+    memory_id: int,
+    metadata: Mapping[str, Any],
+    projection: PromotionProjection,
+) -> bool:
+    """Require exact recomputation of the ledger-bound origin attestation digest."""
+    stored = getattr(projection, "origin_attestation_digest", None)
+    if not isinstance(stored, str) or not stored.strip():
+        return False
+    try:
+        from open_brain.memory_promotion import origin_attestation_digest_from_metadata
+
+        recomputed = origin_attestation_digest_from_metadata(memory_id, metadata)
+    except Exception:
+        return False
+    return recomputed == stored.strip().lower()
+
+
 def inspect_promotion(
     metadata: Mapping[str, Any],
+    *,
+    projection: PromotionProjection | None = None,
 ) -> tuple[PromotionState, str]:
     """Derive confirmation/promotion state and an audit reason.
 
+    The ledger projection is the sole read-time promotion authority.
     Actor-authored promotion metadata and write-time Judge ALLOW are never
     treated as server-issued read-time promotion.
     """
@@ -1554,6 +1576,21 @@ def inspect_promotion(
         return "legacy_unlabeled", "missing_epistemic_provenance_defaults_to_evidence"
     if source_label is None:
         return "legacy_unlabeled", "missing_epistemic_source_label"
+
+    if (
+        projection is not None
+        and projection.is_current
+        and projection.decision == "accepted"
+    ):
+        if projection.target_state == "disputed" or source_label == "disputed":
+            return "disputed", projection.audit_reason or "ledger_disputed"
+        if projection.target_state == "superseded" or source_label == "superseded":
+            return "superseded", projection.audit_reason or "ledger_superseded"
+        if projection.outcome == "promoted" and projection.target_state == "confirmed":
+            if source_label != "confirmed":
+                return "unpromoted", "ledger_metadata_state_mismatch"
+            return "promoted", projection.audit_reason or "ledger_promotion_grant"
+
     if source_label == "disputed":
         return "disputed", "epistemic_label_disputed"
     if source_label == "superseded":
@@ -1711,7 +1748,14 @@ def _epistemic_fields(
     return source_label, expected_use, epistemic_status
 
 
-def _high_authority_denial_reason(metadata: Mapping[str, Any]) -> str:
+def _high_authority_denial_reason(
+    metadata: Mapping[str, Any],
+    *,
+    allow_high_authority: bool,
+    promotion_reason: str,
+) -> str:
+    if promotion_reason == "ledger_metadata_state_mismatch":
+        return promotion_reason
     if isinstance(metadata.get("retrieval_promotion"), Mapping):
         return "promotion_record_not_server_issued"
     judge = metadata.get("memory_write_judge")
@@ -1719,7 +1763,19 @@ def _high_authority_denial_reason(metadata: Mapping[str, Any]) -> str:
         return "judge_allow_is_not_read_time_promotion"
     if is_external_unattested_for_high_authority(metadata):
         return "external_trust_unattested_pending_trusted_issuer"
-    return HIGH_AUTHORITY_DISABLED_REASON
+    if not allow_high_authority:
+        return HIGH_AUTHORITY_DISABLED_REASON
+    if promotion_reason and promotion_reason != "no_server_issued_promotion_record":
+        return promotion_reason
+    return "no_server_issued_promotion_record"
+
+
+def _unit_kind_for_influence(influence: Influence) -> str:
+    if influence == "identity":
+        return "promoted_identity"
+    if influence in {"constraint", "policy"}:
+        return "promoted_constraint"
+    return "memory"
 
 
 def memory_to_retrieval_unit(
@@ -1727,6 +1783,7 @@ def memory_to_retrieval_unit(
     contract: RetrievalContract,
     *,
     requested_influence: Influence | str | None = None,
+    promotion_projection: Mapping[int, PromotionProjection] | None = None,
 ) -> RetrievalUnit:
     """Convert a Memory into a provenance-preserving retrieval unit."""
     metadata = _metadata_mapping(memory)
@@ -1734,7 +1791,13 @@ def memory_to_retrieval_unit(
     origin_producer, origin_source_ref = _origin_fields(provenance)
 
     source_label, expected_use, epistemic_status = _epistemic_fields(provenance)
-    promotion_state, promotion_reason = inspect_promotion(metadata)
+    memory_id = int(getattr(memory, "id"))
+    projection = None
+    if promotion_projection is not None:
+        projection = promotion_projection.get(memory_id)
+    promotion_state, promotion_reason = inspect_promotion(
+        metadata, projection=projection
+    )
 
     requested = requested_influence or classify_requested_influence(memory)
     if requested not in INFLUENCES:
@@ -1761,11 +1824,45 @@ def memory_to_retrieval_unit(
     external = is_external_untrusted(metadata)
     effective: Influence = "evidence"
     audit_reason = promotion_reason
+    floor_labels = contract.provenance_requirements.min_labels_for_high_authority
+    requires_instruction = (
+        contract.provenance_requirements.require_instruction_expected_use
+    )
 
-    if capped in HIGH_AUTHORITY_INFLUENCES:
-        # Pending open-brain-ekn.5: never elevate, even with allow_high_authority.
+    can_consider_ha = (
+        capped in HIGH_AUTHORITY_INFLUENCES
+        and contract.permissions.allow_high_authority
+        and promotion_state == "promoted"
+        and epistemic_status == "declared"
+        and source_label in floor_labels
+        and (not requires_instruction or expected_use == "instruction")
+        and source_label not in contract.provenance_requirements.exclude_labels
+        and not is_external_unattested_for_high_authority(metadata)
+        and candidate is not None
+        and candidate.require_promotion
+        and projection is not None
+        and projection.is_current
+        and projection.decision == "accepted"
+        and projection.outcome == "promoted"
+        and projection.target_state == "confirmed"
+        and source_label == "confirmed"
+        and bool(projection.audit_reason.strip())
+        and bool(projection.audit_source.strip())
+        and _promotion_origin_attestation_matches(
+            memory_id, metadata, projection
+        )
+    )
+
+    if can_consider_ha:
+        effective = capped
+        audit_reason = projection.audit_reason if projection else promotion_reason
+    elif capped in HIGH_AUTHORITY_INFLUENCES:
         effective = "evidence"
-        audit_reason = _high_authority_denial_reason(metadata)
+        audit_reason = _high_authority_denial_reason(
+            metadata,
+            allow_high_authority=contract.permissions.allow_high_authority,
+            promotion_reason=promotion_reason,
+        )
     elif capped in EVIDENCE_INFLUENCES:
         effective = capped
         if external:
@@ -1774,7 +1871,11 @@ def memory_to_retrieval_unit(
             promotion_state == "unpromoted"
             and requested_typed in HIGH_AUTHORITY_INFLUENCES
         ):
-            audit_reason = _high_authority_denial_reason(metadata)
+            audit_reason = _high_authority_denial_reason(
+                metadata,
+                allow_high_authority=contract.permissions.allow_high_authority,
+                promotion_reason=promotion_reason,
+            )
         elif (
             epistemic_status == "declared"
             and source_label in contract.provenance_requirements.exclude_labels
@@ -1786,12 +1887,11 @@ def memory_to_retrieval_unit(
             audit_reason = promotion_reason
     else:
         effective = "evidence"
-        audit_reason = _high_authority_denial_reason(metadata)
-
-    if effective in HIGH_AUTHORITY_INFLUENCES:
-        # Belt-and-suspenders: runtime must never emit HA until .5.
-        effective = "evidence"
-        audit_reason = _high_authority_denial_reason(metadata)
+        audit_reason = _high_authority_denial_reason(
+            metadata,
+            allow_high_authority=contract.permissions.allow_high_authority,
+            promotion_reason=promotion_reason,
+        )
 
     section = _section_for_influence(effective, requested_typed)
     memory_type = getattr(memory, "type", None)
@@ -1822,24 +1922,46 @@ def memory_to_retrieval_unit(
             and effective in HIGH_AUTHORITY_INFLUENCES
         ):
             effective = "evidence"
-            audit_reason = _high_authority_denial_reason(metadata)
+            audit_reason = _high_authority_denial_reason(
+                metadata,
+                allow_high_authority=contract.permissions.allow_high_authority,
+                promotion_reason=promotion_reason,
+            )
     else:
-        effective = "evidence"
+        # Undeclared sections (e.g. policy/system_instruction on wake-up) fail closed.
+        if effective in HIGH_AUTHORITY_INFLUENCES:
+            effective = "evidence"
+            audit_reason = "section_not_declared_for_high_authority"
 
-    if effective in HIGH_AUTHORITY_INFLUENCES:
+    if effective in HIGH_AUTHORITY_INFLUENCES and not can_consider_ha:
         effective = "evidence"
-        audit_reason = _high_authority_denial_reason(metadata)
+        audit_reason = _high_authority_denial_reason(
+            metadata,
+            allow_high_authority=contract.permissions.allow_high_authority,
+            promotion_reason=promotion_reason,
+        )
 
     ingestion_route = metadata.get("ingestion_route")
     content_type = metadata.get("content_type")
     category = meta_cat if isinstance(meta_cat, str) else None
 
-    # Memory rows remain unit kind "memory" while HA elevation is disabled.
-    unit_kind = "memory"
-    authoritative_source = contract.source_for_unit_kind(unit_kind)
+    unit_kind = (
+        _unit_kind_for_influence(effective)
+        if effective in HIGH_AUTHORITY_INFLUENCES
+        else "memory"
+    )
+    try:
+        authoritative_source = contract.source_for_unit_kind(unit_kind)
+    except RetrievalContractValidationError:
+        # Profile declared HA influence but not the promoted unit kind.
+        effective = "evidence"
+        audit_reason = "authoritative_source_missing_for_promoted_unit"
+        unit_kind = "memory"
+        authoritative_source = contract.source_for_unit_kind(unit_kind)
+        section = "evidence"
 
     return RetrievalUnit(
-        memory_id=int(getattr(memory, "id")),
+        memory_id=memory_id,
         content=str(getattr(memory, "content", "") or ""),
         title=getattr(memory, "title", None),
         subtitle=getattr(memory, "subtitle", None),
@@ -1903,8 +2025,13 @@ def apply_retrieval_contract(
     contract: Mapping[str, Any] | RetrievalContract | None = None,
     work_object: Mapping[str, Any] | WorkObject | None = None,
     query_project: str | None = None,
+    promotion_projection: Mapping[int, PromotionProjection] | None = None,
 ) -> RetrievalResult:
-    """Apply a retrieval contract (or compatibility path) to memories."""
+    """Apply a retrieval contract (or compatibility path) to memories.
+
+    ``promotion_projection`` must be supplied by server seams that load the
+    ledger. Direct calls with no projection remain fail-closed for HA.
+    """
     resolved = resolve_retrieval_contract(contract, work_object=work_object)
 
     if (
@@ -1922,16 +2049,16 @@ def apply_retrieval_contract(
     units_list: list[RetrievalUnit] = []
     if "memory" in resolved.retrieval_units:
         for memory in memories:
-            units_list.append(memory_to_retrieval_unit(memory, resolved))
+            units_list.append(
+                memory_to_retrieval_unit(
+                    memory,
+                    resolved,
+                    promotion_projection=promotion_projection,
+                )
+            )
 
     units = tuple(units_list)
     for unit in units:
-        if unit.effective_influence in HIGH_AUTHORITY_INFLUENCES:
-            raise RetrievalContractValidationError(
-                "retrieval contract runtime cannot emit high-authority units "
-                "until open-brain-ekn.5 promotion ledger exists",
-                field="effective_influence",
-            )
         if (
             unit.effective_influence in HIGH_AUTHORITY_INFLUENCES
             and not unit.audit_reason.strip()
@@ -1939,6 +2066,14 @@ def apply_retrieval_contract(
             raise RetrievalContractValidationError(
                 "high-authority units require a non-empty audit_reason",
                 field="audit_reason",
+            )
+        if (
+            unit.effective_influence in HIGH_AUTHORITY_INFLUENCES
+            and unit.promotion_state != "promoted"
+        ):
+            raise RetrievalContractValidationError(
+                "high-authority units require a current ledger promotion",
+                field="promotion_state",
             )
     return RetrievalResult(contract=resolved, units=units)
 

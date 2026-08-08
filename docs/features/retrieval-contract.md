@@ -12,9 +12,10 @@ Open Brain retrieval consumers declare a versioned retrieval contract so memory
 can influence evidence/context without silently becoming identity, constraint,
 policy, or system-instruction authority.
 
-High authority is intentionally disabled until `open-brain-ekn.5` lands a
-server-issued promotion ledger. Actor-authored promotion metadata and Judge
-`ALLOW` are never read-time promotion sources.
+High authority elevates only through a server-supplied ledger projection from
+`memory_promotion_events` (see `docs/standards/memory-promotion.md`).
+Actor-authored promotion metadata and Judge `ALLOW` are never read-time
+promotion sources. Direct calls without a projection remain fail-closed.
 
 ## Behavior
 
