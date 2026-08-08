@@ -23,7 +23,10 @@ ob --json session-knowledge-migration dry-run > dry-run.json
 The report includes route counts, unresolved/quarantine examples (bounded, no
 source bodies), configured provider document/token/cost estimates, cohort
 watermark + digest, catch-up plan, proposed operation ID, review-ledger
-before digest/count, structured-record skip count, and `evidence_digest`.
+before digest/count, structured-record skip count, and `evidence_digest`. It
+also binds one retrieval-control baseline per source. Apply derives each
+bounded batch's baseline from exactly those approved source measurements, so a
+full-cohort MAX score cannot make a later subset batch fail indefinitely.
 `inventory` never calls a provider and therefore marks retrieval controls as
 unmeasured. `dry-run` uses the configured embedding and rerank instruments when
 provider credentials are present; without credentials it still inventories the
@@ -90,6 +93,11 @@ replay safety, initial no-hard-delete.
   excluded. The historical cutover never clones or archives live EKN records.
 - Never promote by type, repetition, review acceptance, or model output.
 - Canonical `metadata.provenance.origin` is preserved.
+- Inferred legacy origins are normalized to the canonical
+  `{ producer, source_ref }` shape before persistence; inference details stay
+  in migration provenance rather than inside `origin`.
+- Derived records retain the source memory's project through their physical
+  `memory_indexes` assignment, including idempotent replay.
 - Review ledger rows are untouched; before/after digests are recorded.
 
 ## Semantic rebuild mapping ("Cohere / re-embed")

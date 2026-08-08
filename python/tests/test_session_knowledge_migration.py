@@ -593,6 +593,8 @@ class TestHumanDecisionGate:
                 "vector": 0.9,
                 "rerank": 0.9,
             },
+            "retrieval_control_source_baselines": {},
+            "plans": [],
         }
         digest = compute_report_digest(report)
         report["evidence_digest"] = digest
@@ -1508,6 +1510,7 @@ class TestMigrationSchemaIntegration:
                 mem = await store.get_memory(oid)
                 assert mem is not None and mem.embedding is not None
                 assert isinstance(mem.metadata, dict)
+                assert mem.project == "open-brain"
 
             # Derived learning outputs must never re-enter the eligible cohort.
             cohort_ids = {int(getattr(m, "id")) for m in await store.list_eligible_cohort()}

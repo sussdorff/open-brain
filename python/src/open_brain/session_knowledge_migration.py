@@ -20,6 +20,11 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 from uuid import UUID
 
+from open_brain.data_layer.interface import (
+    OriginProvenanceValidationError,
+    build_origin_provenance,
+    validate_origin_provenance,
+)
 from open_brain.epistemic_provenance import (
     EPISTEMIC_PROVENANCE_SCHEMA_VERSION,
     ensure_epistemic_provenance,
@@ -388,7 +393,20 @@ def _origin_from_metadata(
             producer = origin.get("producer")
             source_ref = origin.get("source_ref")
             if isinstance(producer, str) and isinstance(source_ref, str):
-                return {"producer": producer, "source_ref": source_ref}, False
+                try:
+                    return dict(
+                        validate_origin_provenance(
+                            {"producer": producer, "source_ref": source_ref}
+                        )
+                    ), False
+                except OriginProvenanceValidationError:
+                    return dict(
+                        build_origin_provenance(
+                            producer,
+                            source_ref,
+                            default_namespace="legacy-session",
+                        )
+                    ), True
     source = metadata.get("source")
     session_ref = getattr(memory, "session_ref", None) or metadata.get("session_ref")
     producer = (
@@ -401,15 +419,20 @@ def _origin_from_metadata(
         if isinstance(session_ref, str) and session_ref
         else f"memory:{_memory_id(memory)}"
     )
-    return {
-        "producer": producer,
-        "source_ref": str(ref),
-        "origin_basis": "legacy_fallback",
-    }, True
+    return dict(
+        build_origin_provenance(
+            producer,
+            str(ref),
+            default_namespace="legacy-session",
+        )
+    ), True
 
 
 def _project_from_memory(memory: Any, metadata: Mapping[str, Any]) -> str:
-    project = getattr(memory, "project", None) or metadata.get("project")
+    # Historical records commonly carried their logical project only in
+    # metadata while remaining physically attached to the default index.
+    # Prefer that explicit legacy value; fall back to the joined index name.
+    project = metadata.get("project") or getattr(memory, "project", None)
     if isinstance(project, str) and project.strip():
         return project.strip()
     return "unknown"
@@ -922,6 +945,10 @@ def estimate_provider_usage(
         "estimated_cost": cost,
         "currency_unit": "configured",
         "scope": "batch_plans",
+        # The dry-run records both a full-cohort diagnostic and one control
+        # measurement per source. The latter keeps later bounded apply batches
+        # comparable without reusing an unrelated full-cohort MAX baseline.
+        "retrieval_control_measurements": 1 + len(plans),
     }
 
 
@@ -1054,10 +1081,19 @@ async def dry_run_session_knowledge_migration(
     provider_estimate = estimate_provider_usage(plans, provider_metadata)
 
     retrieval_baseline: dict[str, Any]
+    retrieval_source_baselines: dict[str, dict[str, Any]] = {}
     if control_adapter is not None:
         retrieval_baseline = await measure_retrieval_controls(
             store, plans=plans, control_adapter=control_adapter
         )
+        for plan in plans:
+            retrieval_source_baselines[str(plan.source_id)] = (
+                await measure_retrieval_controls(
+                    store,
+                    plans=[plan],
+                    control_adapter=control_adapter,
+                )
+            )
     else:
         retrieval_baseline = {
             "schema_version": RETRIEVAL_CONTROL_SCHEMA_VERSION,
@@ -1095,6 +1131,7 @@ async def dry_run_session_knowledge_migration(
             "digest": str(review_before.get("digest") or ""),
         },
         "retrieval_control_baseline": retrieval_baseline,
+        "retrieval_control_source_baselines": retrieval_source_baselines,
         "plans": [p.to_dict() for p in plans],
     }
     report["evidence_digest"] = compute_report_digest(report)
@@ -1174,6 +1211,28 @@ def evaluate_migration_gate(
                         reasons.append("retrieval_control_baseline_mismatch")
                         break
 
+    source_baselines = dry_run_report.get("retrieval_control_source_baselines")
+    plans = dry_run_report.get("plans")
+    if not isinstance(source_baselines, Mapping) or not isinstance(plans, list):
+        reasons.append("retrieval_control_source_baselines_missing")
+    else:
+        expected_source_ids = {
+            str(plan.get("source_id"))
+            for plan in plans
+            if isinstance(plan, Mapping) and plan.get("source_id") is not None
+        }
+        if set(source_baselines) != expected_source_ids:
+            reasons.append("retrieval_control_source_baselines_mismatch")
+        elif isinstance(report_baseline, Mapping):
+            expected_instrument = report_baseline.get("instrument")
+            if any(
+                not isinstance(source_baseline, Mapping)
+                or source_baseline.get("unmeasured") is True
+                or source_baseline.get("instrument") != expected_instrument
+                for source_baseline in source_baselines.values()
+            ):
+                reasons.append("retrieval_control_source_baselines_invalid")
+
     if evidence.get("unresolved_acknowledgement") is not True:
         reasons.append("unresolved_acknowledgement_missing")
 
@@ -1230,6 +1289,17 @@ async def persist_source_unit(
     for ordinal, out in enumerate(outputs):
         if not out.persist:
             continue
+        metadata = dict(out.metadata)
+        provenance = metadata.get("provenance")
+        if not isinstance(provenance, Mapping):
+            raise OriginProvenanceValidationError(
+                "derived migration output lacks provenance"
+            )
+        normalized_origin = validate_origin_provenance(provenance.get("origin"))
+        metadata["provenance"] = {
+            **dict(provenance),
+            "origin": dict(normalized_origin),
+        }
         rid = out.metadata.get("session_knowledge_record_identity")
         if isinstance(rid, str) and rid in identity_to_id:
             mid = identity_to_id[rid]
@@ -1237,7 +1307,7 @@ async def persist_source_unit(
             mid = await store.save_derived(
                 memory_type=out.memory_type or "note",
                 content=out.content,
-                metadata=out.metadata,
+                metadata=metadata,
                 title=f"migrated:{out.route}:{plan.source_id}",
                 embedding=embeddings.get(ordinal),
             )
@@ -1426,12 +1496,13 @@ async def apply_session_knowledge_migration_batch(
 
     batch_scope = dict(gate.get("batch_scope") or gate_evidence.get("batch_scope") or {})
     limit = int(batch_scope.get("limit") or DEFAULT_APPLY_LIMIT)
-    if "after_id" in batch_scope:
-        after_id = int(batch_scope.get("after_id") or 0)
-    elif existing and existing.get("cursor") is not None:
-        after_id = int(existing.get("cursor") or 0)
-    else:
-        after_id = 0
+    requested_after_id = int(batch_scope.get("after_id") or 0)
+    stored_after_id = (
+        int(existing.get("cursor") or 0)
+        if existing and existing.get("cursor") is not None
+        else 0
+    )
+    after_id = max(requested_after_id, stored_after_id)
 
     async def _source_hash(source_id: int) -> str | None:
         mem = await store.get_memory(source_id)
@@ -1445,57 +1516,74 @@ async def apply_session_knowledge_migration_batch(
         "completed_with_errors",
     }:
         mappings = await store.list_mappings(op_id)
-        for mapping in mappings:
-            current_hash = await _source_hash(int(mapping["source_id"]))
-            if (
-                current_hash is not None
-                and mapping.get("source_content_hash")
-                and current_hash != mapping.get("source_content_hash")
-            ):
-                return {
-                    "status": "conflict",
-                    "operation_id": op_id,
-                    "writes": 0,
-                    "output_ids": list(
-                        (existing.get("counters") or {}).get("output_ids") or []
-                    ),
-                    "errors": [
-                        _bounded_error(
-                            "payload changed under stable operation/evidence id",
-                            code="operation_payload_conflict",
-                        )
-                    ],
-                }
-            for oid in mapping.get("output_ids") or []:
-                if await store.get_memory(int(oid)) is None:
+        existing_params = coerce_jsonb_object(existing.get("parameters"))
+        existing_pack = coerce_jsonb_object(existing_params.get("approved_pack"))
+        terminal_approved_sources = approved_sources_from_report(
+            dry_run_report,
+            existing_approved_pack=existing_pack,
+        )
+        terminal_source_ids = {
+            int(mapping["source_id"])
+            for mapping in mappings
+            if mapping.get("status") in {"completed", "unresolved", "quarantine"}
+        }
+        approved_source_ids = {
+            int(source["source_id"]) for source in terminal_approved_sources
+        }
+        if not approved_source_ids.issubset(terminal_source_ids):
+            mappings = []
+        if mappings:
+            for mapping in mappings:
+                current_hash = await _source_hash(int(mapping["source_id"]))
+                if (
+                    current_hash is not None
+                    and mapping.get("source_content_hash")
+                    and current_hash != mapping.get("source_content_hash")
+                ):
                     return {
                         "status": "conflict",
                         "operation_id": op_id,
                         "writes": 0,
-                        "output_ids": [],
+                        "output_ids": list(
+                            (existing.get("counters") or {}).get("output_ids") or []
+                        ),
                         "errors": [
                             _bounded_error(
-                                "replay output missing",
-                                code="replay_output_missing",
+                                "payload changed under stable operation/evidence id",
+                                code="operation_payload_conflict",
                             )
                         ],
                     }
-        replayed_output_ids = sorted(
-            {
-                int(oid)
-                for mapping in mappings
-                for oid in (mapping.get("output_ids") or [])
+                for oid in mapping.get("output_ids") or []:
+                    if await store.get_memory(int(oid)) is None:
+                        return {
+                            "status": "conflict",
+                            "operation_id": op_id,
+                            "writes": 0,
+                            "output_ids": [],
+                            "errors": [
+                                _bounded_error(
+                                    "replay output missing",
+                                    code="replay_output_missing",
+                                )
+                            ],
+                        }
+            replayed_output_ids = sorted(
+                {
+                    int(oid)
+                    for mapping in mappings
+                    for oid in (mapping.get("output_ids") or [])
+                }
+            )
+            return {
+                "status": "replayed",
+                "operation_id": op_id,
+                "writes": 0,
+                "output_ids": replayed_output_ids,
+                "cursor": existing.get("cursor"),
+                "counters": existing.get("counters") or {},
+                "errors": [],
             }
-        )
-        return {
-            "status": "replayed",
-            "operation_id": op_id,
-            "writes": 0,
-            "output_ids": replayed_output_ids,
-            "cursor": existing.get("cursor"),
-            "counters": existing.get("counters") or {},
-            "errors": [],
-        }
 
     existing_params = coerce_jsonb_object((existing or {}).get("parameters"))
     existing_pack = coerce_jsonb_object(existing_params.get("approved_pack"))
@@ -1599,11 +1687,15 @@ async def apply_session_knowledge_migration_batch(
     approved_baseline = gate_evidence.get("retrieval_control_baseline") or dry_run_report.get(
         "retrieval_control_baseline"
     )
+    approved_source_baselines = dry_run_report.get(
+        "retrieval_control_source_baselines"
+    )
     approved_pack = {
         "cohort_digest": dry_run_report.get("cohort_digest"),
         "cohort_watermark": dry_run_report.get("cohort_watermark"),
         "review_ledger_before": dry_run_report.get("review_ledger_before"),
         "retrieval_control_baseline": approved_baseline,
+        "retrieval_control_source_baselines": approved_source_baselines,
         "evidence_digest": evidence_digest,
         "approved_sources": approved_sources,
         "catch_up_delta": catch_up_delta,
@@ -1644,11 +1736,48 @@ async def apply_session_knowledge_migration_batch(
     source_ids: list[int] = []
     batch_source_ids: list[int] = []
     errors: list[dict[str, str]] = []
-    phase_metrics: dict[str, Any] = {"tokens": 0, "documents": 0, "phases": []}
+    prior_provider_metrics = resume_counters.get("provider_metrics")
+    if not isinstance(prior_provider_metrics, Mapping):
+        prior_provider_metrics = {}
+    phase_metrics: dict[str, Any] = {
+        "tokens": int(prior_provider_metrics.get("tokens") or 0),
+        "documents": int(prior_provider_metrics.get("documents") or 0),
+        "phases": list(prior_provider_metrics.get("phases") or []),
+    }
     created_ids: list[int] = []
     pending_archive: list[tuple[TransitionPlan, list[int]]] = []
 
     try:
+        if not isinstance(approved_source_baselines, Mapping):
+            raise ValueError("retrieval_control_source_baselines_missing")
+        source_baselines = []
+        for plan in plans:
+            source_baseline = approved_source_baselines.get(str(plan.source_id))
+            if not isinstance(source_baseline, Mapping):
+                raise ValueError(
+                    f"retrieval_control_source_baseline_missing:{plan.source_id}"
+                )
+            source_baselines.append(source_baseline)
+        batch_baseline = {
+            "instrument": (approved_baseline or {}).get("instrument"),
+            **{
+                name: max(
+                    (float(baseline.get(name) or 0.0) for baseline in source_baselines),
+                    default=0.0,
+                )
+                for name in ("lexical", "vector", "rerank")
+            },
+        }
+        if any(
+            baseline.get("instrument") != batch_baseline["instrument"]
+            for baseline in source_baselines
+        ):
+            raise RuntimeError("retrieval_control_instrument_mismatch")
+        if batch_baseline.get("instrument") != (
+            approved_baseline or {}
+        ).get("instrument"):
+            raise RuntimeError("retrieval_control_instrument_mismatch")
+
         for plan in plans:
             prior = await store.get_mapping(op_id, plan.source_id)
             if prior and prior.get("status") == "completed":
@@ -1735,17 +1864,15 @@ async def apply_session_knowledge_migration_batch(
             )
             derived_docs = contents or ["empty"]
             phase_metrics["phases"].append("rerank")
-            _, rerank_metrics = await rerank_adapter.rerank(
+            await rerank_adapter.rerank(
                 FIXED_CONTROL_QUERIES["rerank"], derived_docs
             )
-            if isinstance(rerank_metrics.get("max_relevance"), (int, float)):
-                measured["rerank"] = float(rerank_metrics["max_relevance"])
 
             baseline = approved_baseline or {}
             if measured.get("instrument") != baseline.get("instrument"):
                 raise RuntimeError("retrieval_control_instrument_mismatch")
             for name in ("lexical", "vector", "rerank"):
-                base = float(baseline.get(name) or 0.0)
+                base = float(batch_baseline.get(name) or 0.0)
                 score = float(measured.get(name) or 0.0)
                 if score < base:
                     raise RuntimeError(
@@ -1779,7 +1906,7 @@ async def apply_session_knowledge_migration_batch(
                     }
                 )
 
-        status = "completed"
+        status = "running"
     except Exception as exc:  # noqa: BLE001 - bounded terminal failure
         msg = f"{type(exc).__name__}: {exc}"
         code = "apply_phase_failed"
@@ -1833,6 +1960,12 @@ async def apply_session_knowledge_migration_batch(
         {int(oid) for m in mappings for oid in (m.get("output_ids") or [])}
     )
     all_sources = sorted({int(m["source_id"]) for m in mappings})
+    terminal_source_ids = {
+        int(mapping["source_id"])
+        for mapping in mappings
+        if mapping.get("status") in {"completed", "unresolved", "quarantine"}
+    }
+    status = "completed" if approved_ids.issubset(terminal_source_ids) else "running"
     cursor = str(
         max((int(p.source_id) for p in plans), default=after_id)
     )
@@ -1962,6 +2095,7 @@ async def reconcile_session_knowledge_migration(
     )
     rollback_ready = bool(
         operation is not None
+        and operation.get("status") in {"completed", "replayed"}
         and lineage_closed
         and review_preserved
         and missing_embeddings == 0
@@ -2046,22 +2180,24 @@ class PostgresMigrationStore:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT id, type, content, title, metadata, session_ref, embedding
-                  FROM memories
-                 WHERE type IN ('session_summary', 'learning')
-                   AND COALESCE(metadata->>'status', '') <> 'archived'
-                   AND metadata #>> '{session_knowledge_migration,superseded_by_operation}'
+                SELECT m.id, m.type, m.content, m.title, m.metadata,
+                       m.session_ref, m.embedding, mi.name AS project
+                  FROM memories AS m
+                  LEFT JOIN memory_indexes AS mi ON mi.id = m.index_id
+                 WHERE m.type IN ('session_summary', 'learning')
+                   AND COALESCE(m.metadata->>'status', '') <> 'archived'
+                   AND m.metadata #>> '{session_knowledge_migration,superseded_by_operation}'
                        IS NULL
                    AND COALESCE(
-                         (metadata->>'legacy_session_knowledge_migration_output')::boolean,
+                         (m.metadata->>'legacy_session_knowledge_migration_output')::boolean,
                          false
                        ) IS NOT TRUE
-                   AND metadata #>> '{provenance,migration,schema_version}' IS NULL
-                   AND COALESCE(metadata->>'session_knowledge_record_identity', '')
+                   AND m.metadata #>> '{provenance,migration,schema_version}' IS NULL
+                   AND COALESCE(m.metadata->>'session_knowledge_record_identity', '')
                        NOT LIKE $1
-                   AND metadata->>'session_knowledge_capture_identity' IS NULL
-                   AND metadata #>> '{session_knowledge,role}' IS NULL
-                 ORDER BY id ASC
+                   AND m.metadata->>'session_knowledge_capture_identity' IS NULL
+                   AND m.metadata #>> '{session_knowledge,role}' IS NULL
+                 ORDER BY m.id ASC
                 """,
                 f"{MIGRATION_PRODUCER}|%",
             )
@@ -2079,6 +2215,7 @@ class PostgresMigrationStore:
                     metadata=metadata,
                     session_ref=r["session_ref"],
                     embedding=r["embedding"],
+                    project=r["project"],
                 )
             )
         return results
@@ -2109,8 +2246,11 @@ class PostgresMigrationStore:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT id, type, content, title, metadata, session_ref, embedding
-                  FROM memories WHERE id = $1
+                SELECT m.id, m.type, m.content, m.title, m.metadata,
+                       m.session_ref, m.embedding, mi.name AS project
+                  FROM memories AS m
+                  LEFT JOIN memory_indexes AS mi ON mi.id = m.index_id
+                 WHERE m.id = $1
                 """,
                 memory_id,
             )
@@ -2124,6 +2264,7 @@ class PostgresMigrationStore:
             metadata=coerce_jsonb_object(row["metadata"]),
             session_ref=row["session_ref"],
             embedding=row["embedding"],
+            project=row["project"],
         )
 
     async def count_review_ledger(self) -> dict[str, Any]:
@@ -2173,6 +2314,19 @@ class PostgresMigrationStore:
         from open_brain.data_layer.postgres import to_pg_vector
 
         async with self._pool.acquire() as conn:
+            project = metadata.get("project")
+            index_id = 1
+            if isinstance(project, str) and project.strip() and project != "unknown":
+                project_row = await conn.fetchrow(
+                    "SELECT id FROM memory_indexes WHERE name = $1",
+                    project.strip(),
+                )
+                if project_row is None:
+                    project_row = await conn.fetchrow(
+                        "INSERT INTO memory_indexes (name) VALUES ($1) RETURNING id",
+                        project.strip(),
+                    )
+                index_id = int(project_row["id"])
             rid = metadata.get("session_knowledge_record_identity")
             if isinstance(rid, str) and rid:
                 existing = await conn.fetchval(
@@ -2186,9 +2340,26 @@ class PostgresMigrationStore:
                 if existing is not None:
                     if embedding is not None:
                         await conn.execute(
-                            "UPDATE memories SET embedding = $2::vector WHERE id = $1",
+                            """
+                            UPDATE memories
+                               SET index_id = $2,
+                                   embedding = $3::vector,
+                                   updated_at = NOW()
+                             WHERE id = $1
+                            """,
                             int(existing),
+                            index_id,
                             to_pg_vector(embedding),
+                        )
+                    else:
+                        await conn.execute(
+                            """
+                            UPDATE memories
+                               SET index_id = $2, updated_at = NOW()
+                             WHERE id = $1
+                            """,
+                            int(existing),
+                            index_id,
                         )
                     return int(existing)
             row = await conn.fetchrow(
@@ -2196,7 +2367,7 @@ class PostgresMigrationStore:
                 INSERT INTO memories (
                     index_id, type, title, content, metadata, priority, embedding
                 )
-                VALUES (1, $1, $2, $3, $4::jsonb, 0.5, $5::vector)
+                VALUES ($6, $1, $2, $3, $4::jsonb, 0.5, $5::vector)
                 RETURNING id
                 """,
                 memory_type,
@@ -2204,6 +2375,7 @@ class PostgresMigrationStore:
                 content,
                 dict(metadata),
                 to_pg_vector(embedding) if embedding is not None else None,
+                index_id,
             )
         return int(row["id"])
 
