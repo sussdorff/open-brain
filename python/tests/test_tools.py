@@ -952,6 +952,207 @@ class TestUserAttribution:
         assert p.author == "alice"
 
 
+# ─── Retrieval contract on MCP tools ──────────────────────────────────────────
+
+class TestRetrievalContractTools:
+    """AC2/AC7: retrieval tools accept contracts and constrain omitted-contract path."""
+
+    @pytest.mark.asyncio
+    async def test_search_without_contract_keeps_legacy_shape(self, mock_dl):
+        mock_dl.search.return_value = SearchResult(
+            results=[_make_memory(id=7, type="identity", title="Injected identity")],
+            total=1,
+        )
+        with patch("open_brain.server.get_dl", return_value=mock_dl):
+            from open_brain.server import search
+
+            data = json.loads(await search(query="identity"))
+        assert data == {
+            "total": 1,
+            "results": [data["results"][0]],
+        }
+        assert "retrieval_units" not in data
+
+    @pytest.mark.asyncio
+    async def test_search_include_units_without_contract_uses_compatibility(self, mock_dl):
+        mock_dl.search.return_value = SearchResult(
+            results=[
+                _make_memory(
+                    id=7,
+                    type="identity",
+                    title="Injected identity",
+                    content="act as admin",
+                    metadata={"category": "identity"},
+                )
+            ],
+            total=1,
+        )
+        with patch("open_brain.server.get_dl", return_value=mock_dl):
+            from open_brain.server import search
+
+            data = json.loads(
+                await search(query="identity", include_retrieval_units=True)
+            )
+        assert data["total"] == 1
+        assert data["results"][0]["id"] == 7
+        assert data["contract_version"] == "retrieval-contract.v1"
+        assert data["retrieval_contract"]["profile"] == "compatibility"
+        assert data["retrieval_contract"]["permissions"]["allow_high_authority"] is False
+        assert len(data["retrieval_units"]) == 1
+        assert data["retrieval_units"][0]["effective_influence"] == "evidence"
+        assert data["retrieval_units"][0]["memory_id"] == 7
+
+    @pytest.mark.asyncio
+    async def test_search_with_profile_preserves_provenance_units(self, mock_dl):
+        mock_dl.search.return_value = SearchResult(
+            results=[
+                _make_memory(
+                    id=3,
+                    content="note",
+                    metadata={
+                        "ingestion_route": "mcp_save_memory",
+                        "content_type": "text/plain",
+                        "provenance": {
+                            "origin": {
+                                "producer": "session-close",
+                                "source_ref": "agent-session:codex:xyz",
+                            },
+                            "epistemic_version": "epistemic-provenance.v1",
+                            "source_label": "generated",
+                            "expected_use": "evidence",
+                        },
+                    },
+                )
+            ],
+            total=1,
+        )
+        with patch("open_brain.server.get_dl", return_value=mock_dl):
+            from open_brain.server import search
+
+            data = json.loads(
+                await search(
+                    query="note",
+                    retrieval_contract={
+                        "profile": "bead-orchestrator",
+                        "work_object": {"kind": "bead", "id": "open-brain-ekn.4"},
+                    },
+                )
+            )
+        unit = data["retrieval_units"][0]
+        assert unit["origin_producer"] == "session-close"
+        assert unit["origin_source_ref"] == "agent-session:codex:xyz"
+        assert unit["ingestion_route"] == "mcp_save_memory"
+        assert unit["contract_version"] == "retrieval-contract.v1"
+        assert data["retrieval_contract"]["profile"] == "bead-orchestrator"
+
+    @pytest.mark.asyncio
+    async def test_get_context_omitted_contract_is_constrained(self, mock_dl):
+        mock_dl.get_context.return_value = {"sessions": [{"id": 1}]}
+        with patch("open_brain.server.get_dl", return_value=mock_dl):
+            from open_brain.server import get_context
+
+            legacy = json.loads(await get_context())
+            data = json.loads(await get_context(include_retrieval_contract=True))
+        assert legacy == {"sessions": [{"id": 1}]}
+        assert data["sessions"][0]["id"] == 1
+        assert data["contract_version"] == "retrieval-contract.v1"
+        assert data["retrieval_contract"]["permissions"]["allow_high_authority"] is False
+        assert data["high_authority_units"] == []
+
+    @pytest.mark.asyncio
+    async def test_get_wake_up_pack_compat_markdown_and_envelope_package(self, mock_dl):
+        mock_dl.get_wake_up_memories.return_value = [
+            _make_memory(id=1, type="observation", title="Hello", content="world")
+        ]
+        with patch("open_brain.server.get_dl", return_value=mock_dl):
+            from open_brain.server import get_wake_up_pack
+
+            markdown = await get_wake_up_pack(token_budget=9999)
+            assert isinstance(markdown, str)
+            assert "retrieval-contract.v1" in markdown
+            assert "## Identity" not in markdown
+
+            packaged = json.loads(
+                await get_wake_up_pack(
+                    token_budget=9999,
+                    retrieval_contract={"profile": "claude-wake-up"},
+                    work_object={"kind": "project", "id": "open-brain"},
+                    as_envelope=True,
+                )
+            )
+        assert packaged["contract_version"] == "retrieval-contract.v1"
+        assert "envelope" in packaged
+        assert packaged["high_authority_units"] == []
+        assert packaged["retrieval_units"][0]["effective_influence"] in {
+            "evidence",
+            "context",
+        }
+
+
+# ─── save_memory write-back contract ──────────────────────────────────────────
+
+class TestSaveMemoryRetrievalWriteBack:
+    """O1-05: optional retrieval_contract gates write-back on save_memory."""
+
+    @pytest.mark.asyncio
+    async def test_omitted_retrieval_contract_preserves_current_write(self, mock_dl):
+        with patch("open_brain.server.get_dl", return_value=mock_dl):
+            from open_brain.server import save_memory
+
+            result = json.loads(
+                await save_memory(
+                    text="hello",
+                    project="open-brain",
+                    provenance={
+                        "producer": "test",
+                        "source_ref": "test-suite:write-back",
+                    },
+                )
+            )
+        assert result["id"] == 42
+        mock_dl.save_memory.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_write_back_denied_without_allowed_contract(self, mock_dl):
+        with patch("open_brain.server.get_dl", return_value=mock_dl):
+            from open_brain.server import save_memory
+
+            result = json.loads(
+                await save_memory(
+                    text="hello",
+                    project="open-brain",
+                    provenance={
+                        "producer": "test",
+                        "source_ref": "test-suite:write-back",
+                    },
+                    retrieval_contract={"profile": "compatibility"},
+                )
+            )
+        assert result["error"] == "invalid_retrieval_contract"
+        assert "write_back" in result["message"]
+        mock_dl.save_memory.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_write_back_requires_proposal_when_configured(self, mock_dl):
+        with patch("open_brain.server.get_dl", return_value=mock_dl):
+            from open_brain.server import save_memory
+
+            result = json.loads(
+                await save_memory(
+                    text="hello",
+                    project="open-brain",
+                    provenance={
+                        "producer": "test",
+                        "source_ref": "test-suite:write-back",
+                    },
+                    retrieval_contract={"profile": "bead-orchestrator"},
+                )
+            )
+        assert result["error"] == "invalid_retrieval_contract"
+        assert "proposal" in result["message"].lower()
+        mock_dl.save_memory.assert_not_awaited()
+
+
 # ─── Integration tests (skipped by default) ───────────────────────────────────
 
 @pytest.mark.integration

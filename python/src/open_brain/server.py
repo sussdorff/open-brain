@@ -100,6 +100,12 @@ from open_brain.memory_write_judge import (
     judge_memory_write_proposal,
     memory_metadata_from_judged_proposal,
 )
+from open_brain.retrieval_contract import (
+    RetrievalContractValidationError,
+    apply_retrieval_contract,
+    authorize_memory_write_back,
+    resolve_retrieval_contract,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +127,43 @@ def _memory_payload(memory: Memory) -> dict[str, Any]:
     if identity is not None:
         payload["canonical_entity"] = identity
     return payload
+
+
+def _normalize_retrieval_contract_arg(
+    retrieval_contract: dict[str, Any] | str | None,
+) -> dict[str, Any] | None:
+    """Accept a dict or JSON object string for optional retrieval contracts."""
+    if retrieval_contract is None:
+        return None
+    if isinstance(retrieval_contract, str):
+        try:
+            parsed = json.loads(retrieval_contract)
+        except json.JSONDecodeError as exc:
+            raise ValueError("retrieval_contract must be a JSON object") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError("retrieval_contract must be a JSON object")
+        return parsed
+    if not isinstance(retrieval_contract, dict):
+        raise ValueError("retrieval_contract must be a JSON object")
+    return retrieval_contract
+
+
+def _retrieval_units_payload(
+    memories: list[Memory],
+    *,
+    retrieval_contract: dict[str, Any] | str | None = None,
+    work_object: dict[str, Any] | None = None,
+    query_project: str | None = None,
+) -> dict[str, Any]:
+    """Compatibility wrapper: always attach provenance-preserving retrieval units."""
+    contract_arg = _normalize_retrieval_contract_arg(retrieval_contract)
+    result = apply_retrieval_contract(
+        memories,
+        contract=contract_arg,
+        work_object=work_object,
+        query_project=query_project,
+    )
+    return result.to_dict()
 
 # ContextVar to track the OAuth scopes for the current request (Bearer token auth only)
 _current_scopes: ContextVar[tuple[str, ...]] = ContextVar("current_scopes", default=())
@@ -387,7 +430,11 @@ async def __IMPORTANT() -> str:  # noqa: N802
 @mcp.tool(
     description="Step 1: Search memory (hybrid: vector + FTS). Returns index with IDs. "
     "Browse mode: omit query (or use '*') to list memories with filters only. "
-    "Params: query, limit, project, type, obs_type, dateStart, dateEnd, offset, orderBy, filePath, metadata_filter, capture_status, author"
+    "Params: query, limit, project, type, obs_type, dateStart, dateEnd, offset, orderBy, "
+    "filePath, metadata_filter, capture_status, author, retrieval_contract (optional "
+    "retrieval-contract.v1 object or {profile, work_object}), work_object (optional), "
+    "include_retrieval_units (optional; when true or when retrieval_contract is set, "
+    "attach provenance-preserving retrieval units; omitted contract uses compatibility)"
 )
 @logged_tool
 async def search(
@@ -404,6 +451,9 @@ async def search(
     metadata_filter: dict | None = None,
     capture_status: str | None = None,
     author: str | None = None,
+    retrieval_contract: dict | str | None = None,
+    work_object: dict | None = None,
+    include_retrieval_units: bool = False,
 ) -> str:
     """Step 1: Hybrid memory search or browse mode."""
     dl = get_dl()
@@ -424,10 +474,30 @@ async def search(
             author=author,
         )
     )
-    return json.dumps(
-        {"total": result.total, "results": [_memory_payload(m) for m in result.results]},
-        default=str,
-    )
+    payload: dict[str, Any] = {
+        "total": result.total,
+        "results": [_memory_payload(m) for m in result.results],
+    }
+    # Additive: legacy callers keep {total, results}. Typed units are attached when
+    # requested explicitly or when a retrieval contract is supplied.
+    if include_retrieval_units or retrieval_contract is not None:
+        resolved_work_object = work_object or (
+            {"kind": "project", "id": project} if project else None
+        )
+        try:
+            retrieval = _retrieval_units_payload(
+                list(result.results),
+                retrieval_contract=retrieval_contract,
+                work_object=resolved_work_object,
+                query_project=project,
+            )
+        except (ValueError, RetrievalContractValidationError) as exc:
+            code = getattr(exc, "code", "invalid_retrieval_contract")
+            return json.dumps({"error": code, "message": str(exc)})
+        payload["contract_version"] = retrieval["contract_version"]
+        payload["retrieval_contract"] = retrieval["contract"]
+        payload["retrieval_units"] = retrieval["units"]
+    return json.dumps(payload, default=str)
 
 
 @mcp.tool(
@@ -528,10 +598,11 @@ async def resolve_paperless_reference(document_id: int) -> str:
     "ISO datetime format: 'YYYY-MM-DDTHH:MM:SS' (e.g. '2026-04-15T10:00:00'). "
     "Invalid or missing required datetime fields produce a warning in the response but still save the memory. "
     "provenance: required origin object {producer, source_ref}; source_ref must be namespaced. "
-    "Params: text (required), type, project, title, subtitle, narrative, session_ref, is_test, metadata, provenance, importance, dedup_mode, proposal. "
+    "Params: text (required), type, project, title, subtitle, narrative, session_ref, is_test, metadata, provenance, importance, dedup_mode, proposal, retrieval_contract. "
     "importance: optional retention class (critical|high|medium|low, default medium). "
     "dedup_mode: 'skip' (default) or 'merge' — if 'merge', returns existing id when vector similarity >= DEDUP_THRESHOLD instead of inserting. "
-    "proposal: optional seven-field memory-write proposal; when supplied, the Memory-Write Judge must ALLOW it before persistence."
+    "proposal: optional seven-field memory-write proposal; when supplied, the Memory-Write Judge must ALLOW it before persistence. "
+    "retrieval_contract: optional retrieval-contract.v1 object; when supplied, write-back permissions are enforced before persistence. Omitted preserves current write behavior."
 )
 @logged_tool
 async def save_memory(
@@ -548,6 +619,7 @@ async def save_memory(
     importance: str = "medium",
     dedup_mode: str = "skip",
     proposal: dict | None = None,
+    retrieval_contract: dict | str | None = None,
 ) -> str:
     """Save a new memory entry."""
     if is_test:
@@ -560,6 +632,26 @@ async def save_memory(
 
     if dedup_mode not in ("skip", "merge"):
         return json.dumps({"error": "invalid_dedup_mode", "message": f"dedup_mode must be 'skip' or 'merge', got: {dedup_mode!r}"})
+
+    try:
+        contract_arg = _normalize_retrieval_contract_arg(retrieval_contract)
+        resolved_write_contract = (
+            resolve_retrieval_contract(
+                contract_arg,
+                work_object={"kind": "project", "id": project}
+                if project
+                else None,
+            )
+            if contract_arg is not None
+            else None
+        )
+        authorize_memory_write_back(
+            resolved_write_contract,
+            proposal=proposal,
+        )
+    except (ValueError, RetrievalContractValidationError) as exc:
+        code = getattr(exc, "code", "invalid_retrieval_contract")
+        return json.dumps({"error": code, "message": str(exc)})
 
     allow_instruction = False
     if proposal is not None:
@@ -898,29 +990,114 @@ async def search_by_concept(
     )
 
 
-@mcp.tool(description="Get recent session context. Params: limit, project")
+@mcp.tool(
+    description=(
+        "Get recent session context. Params: limit, project, retrieval_contract "
+        "(optional retrieval-contract.v1 object or {profile, work_object}), "
+        "include_retrieval_contract (optional; attach constrained contract metadata)"
+    )
+)
 @logged_tool
-async def get_context(limit: int | None = None, project: str | None = None) -> str:
-    """Get recent sessions."""
+async def get_context(
+    limit: int | None = None,
+    project: str | None = None,
+    retrieval_contract: dict | str | None = None,
+    work_object: dict | None = None,
+    include_retrieval_contract: bool = False,
+) -> str:
+    """Get recent sessions under an optional retrieval contract."""
     dl = get_dl()
     result = await dl.get_context(limit, project)
-    return json.dumps(result, default=str)
+    payload: dict[str, Any] = (
+        dict(result) if isinstance(result, dict) else {"sessions": result}
+    )
+    if include_retrieval_contract or retrieval_contract is not None:
+        try:
+            resolved_work_object = work_object or (
+                {"kind": "project", "id": project} if project else None
+            )
+            # Same typed failure contract + project/work-object binding as search.
+            retrieval = _retrieval_units_payload(
+                [],
+                retrieval_contract=retrieval_contract,
+                work_object=resolved_work_object,
+                query_project=project,
+            )
+        except (ValueError, RetrievalContractValidationError) as exc:
+            code = getattr(exc, "code", "invalid_retrieval_contract")
+            return json.dumps({"error": code, "message": str(exc)})
+        payload["contract_version"] = retrieval["contract_version"]
+        payload["retrieval_contract"] = retrieval["contract"]
+        # Session listings never carry high authority.
+        payload["high_authority_units"] = []
+    return json.dumps(payload, default=str)
 
 
 @mcp.tool(
     description=(
-        "Get session start wake-up pack. Returns memories grouped by category "
-        "(identity, decisions, constraints, errors, project) within a token budget. "
-        "Params: token_budget (default 500), project (optional filter by project name)"
+        "Get session start wake-up pack under retrieval-contract.v1. "
+        "Without retrieval_contract, uses the constrained compatibility profile "
+        "(evidence/context only). Params: token_budget (default 500), project, "
+        "retrieval_contract (optional), work_object (optional), as_envelope "
+        "(default false; when true returns a typed evidence envelope JSON package)"
     )
 )
 @logged_tool
-async def get_wake_up_pack(token_budget: int = 500, project: str | None = None) -> str:
+async def get_wake_up_pack(
+    token_budget: int = 500,
+    project: str | None = None,
+    retrieval_contract: dict | str | None = None,
+    work_object: dict | None = None,
+    as_envelope: bool = False,
+) -> str:
     """Get categorized memory context optimized for session start injection."""
-    from open_brain.wake_up import build_wake_up_pack
+    from open_brain.wake_up import build_wake_up_pack, compile_wake_up_units
+
     dl = get_dl()
     memories = await dl.get_wake_up_memories(project=project)
-    return build_wake_up_pack(memories, token_budget)
+    resolved_work_object = work_object or {
+        "kind": "project",
+        "id": project or "wake-up",
+    }
+    contract_arg = _normalize_retrieval_contract_arg(retrieval_contract)
+    markdown = build_wake_up_pack(
+        memories,
+        token_budget,
+        retrieval_contract=contract_arg,
+        work_object=resolved_work_object,
+    )
+    if not as_envelope and contract_arg is None:
+        # Additive compatibility: legacy callers still receive markdown text.
+        return markdown
+
+    compiled = compile_wake_up_units(
+        memories,
+        retrieval_contract=contract_arg,
+        work_object=resolved_work_object,
+    )
+    envelope = build_wake_up_pack(
+        memories,
+        token_budget,
+        retrieval_contract=contract_arg,
+        work_object=resolved_work_object,
+        as_envelope=True,
+    )
+    return json.dumps(
+        {
+            "contract_version": compiled.contract_version,
+            "retrieval_contract": compiled.contract.to_dict(),
+            "retrieval_units": [unit.to_dict() for unit in compiled.units],
+            "high_authority_units": [
+                unit.to_dict()
+                for unit in compiled.units
+                if unit.effective_influence
+                in {"identity", "constraint", "policy", "system_instruction"}
+            ],
+            "envelope": envelope,
+            "markdown_compat": markdown,
+        },
+        default=str,
+    )
 
 
 @mcp.tool(description="Get database statistics (memory count, sessions, DB size, type taxonomy with counts)")
@@ -3026,17 +3203,73 @@ async def api_context(
 async def api_wake_up_pack(
     token_budget: int = 500,
     project: str | None = None,
+    format: str = "markdown",
+    profile: str = "compatibility",
 ) -> Response:
     """Get session start wake-up pack (for SessionStart hook).
 
-    Returns markdown-formatted memories organized by category within token_budget.
-    Optional project filter: only return memories for this project (filtered at DB level).
+    Defaults preserve legacy markdown + ``text/markdown`` under the constrained
+    compatibility profile. The SessionStart hook opts into
+    ``format=envelope&profile=claude-wake-up`` explicitly.
     """
+    from open_brain.retrieval_contract import (
+        PROFILE_NAMES,
+        RetrievalContractValidationError,
+    )
     from open_brain.wake_up import build_wake_up_pack
+
+    allowed_formats = {"markdown", "envelope"}
+    if format not in allowed_formats:
+        return Response(
+            content=json.dumps(
+                {
+                    "error": "invalid_wake_up_format",
+                    "message": f"format must be one of {sorted(allowed_formats)}",
+                }
+            ),
+            status_code=400,
+            media_type="application/json",
+        )
+    if profile not in PROFILE_NAMES:
+        return Response(
+            content=json.dumps(
+                {
+                    "error": "invalid_wake_up_profile",
+                    "message": f"profile must be one of {sorted(PROFILE_NAMES)}",
+                }
+            ),
+            status_code=400,
+            media_type="application/json",
+        )
+
     dl = get_dl()
     memories = await dl.get_wake_up_memories(project=project)
-    result = build_wake_up_pack(memories, token_budget)
-    return Response(content=result, media_type="text/markdown")
+    work_object = {"kind": "project", "id": project or "wake-up"}
+    contract = {"profile": profile, "work_object": work_object}
+    try:
+        if format == "markdown":
+            result = build_wake_up_pack(
+                memories,
+                token_budget,
+                retrieval_contract=contract,
+                work_object=work_object,
+            )
+            return Response(content=result, media_type="text/markdown")
+
+        envelope = build_wake_up_pack(
+            memories,
+            token_budget,
+            retrieval_contract=contract,
+            work_object=work_object,
+            as_envelope=True,
+        )
+        return Response(content=envelope, media_type="text/plain")
+    except RetrievalContractValidationError as exc:
+        return Response(
+            content=json.dumps({"error": exc.code, "message": str(exc)}),
+            status_code=400,
+            media_type="application/json",
+        )
 
 
 # Mount MCP sub-app AFTER all routes (mount at "/" catches everything)
