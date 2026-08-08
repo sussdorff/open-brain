@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Judge an OpenBrain memory-write proposal from JSON."""
+"""Judge an OpenBrain memory-write proposal from JSON.
+
+Uses the single runtime judge (`open_brain.memory_write_judge`), which consumes
+the public `.2` proposal contract and `.1` epistemic labels. This CLI does not
+define a second judge or wire format.
+"""
 
 from __future__ import annotations
 
@@ -12,7 +17,10 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "python" / "src"))
 
-from open_brain.memory_write_judge import judge_memory_write_proposal  # noqa: E402
+from open_brain.memory_write_judge import (  # noqa: E402
+    MEMORY_WRITE_JUDGE_POLICY_VERSION,
+    judge_memory_write_proposal,
+)
 
 
 def load_json(path: str) -> dict[str, Any]:
@@ -41,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
             "decision": "ESCALATE",
             "reason": f"proposal parse error: {exc}",
             "reason_category": "schema",
-            "policy_version": "memory-write-judge.v1",
+            "policy_version": MEMORY_WRITE_JUDGE_POLICY_VERSION,
             "provenance_refs": [],
             "escalation_target": "memory-policy-owner",
         }, indent=2))

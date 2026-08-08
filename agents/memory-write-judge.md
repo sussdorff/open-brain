@@ -89,6 +89,17 @@ escalation_target: <role or queue; only for ESCALATE>
 issues: <array of {code, field, message}; only for schema failures>
 ```
 
+## Runtime binding
+
+Use the public contracts; do not invent a second proposal or judge schema:
+
+- epistemic labels / expected use: `open_brain.epistemic_provenance` (`.1`)
+- seven-field proposal parse/build: `open_brain.memory_write_proposal` (`.2`)
+- single judge implementation: `open_brain.memory_write_judge`
+- portable CLI: `scripts/judge_memory_write.py`
+
+Wire shape for `save_memory(proposal=...)` remains the seven fields above.
+
 ## Eval Suite
 
 The paired eval suite is `agents/memory-write-judge-eval.json`. It must stay at

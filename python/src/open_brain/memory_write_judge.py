@@ -277,7 +277,13 @@ def memory_metadata_from_judged_proposal(
     raw_proposal: Mapping[str, Any],
     outcome: JudgeOutcome,
 ) -> dict[str, Any]:
-    """Build metadata patch applied to allowed memory writes."""
+    """Build metadata patch applied to allowed memory writes.
+
+    Persists the judge decision, policy version, provenance references,
+    constraints, and expected-use decision. Epistemic fields are written under
+    ``metadata.provenance`` without an ``origin`` key so the separate origin
+    lineage from ``open-brain-ekn.1`` remains authoritative.
+    """
     proposal, errors = parse_memory_write_proposal(raw_proposal)
     if errors or proposal is None:
         return {}
@@ -300,12 +306,18 @@ def memory_metadata_from_judged_proposal(
             "retention_scope": proposal.retention_scope,
         }
     )
+    judge_meta: dict[str, Any] = {
+        "decision": outcome.decision,
+        "policy_version": outcome.policy_version,
+        "reason_category": outcome.reason_category,
+        "provenance_refs": [
+            {"ref": ref.ref, "label": ref.label} for ref in outcome.provenance_refs
+        ],
+    }
+    if outcome.constraints is not None:
+        judge_meta["constraints"] = dict(outcome.constraints)
     return {
-        "memory_write_judge": {
-            "decision": outcome.decision,
-            "policy_version": outcome.policy_version,
-            "reason_category": outcome.reason_category,
-        },
+        "memory_write_judge": judge_meta,
         "provenance": provenance,
         "risk_flags": list(proposal.risk_flags),
     }

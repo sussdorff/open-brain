@@ -81,12 +81,17 @@ The judge implementation is `open_brain.memory_write_judge`.
   retention, and risk policy without model calls after schema validation.
 - `reasoned_gate` is an optional callback that can add model-reasoned judgment
   only after deterministic gates have returned `ALLOW`.
-- `memory_metadata_from_judged_proposal()` records provenance, retention,
-  expected use, risk flags, and `policy_version` on allowed writes.
+- `memory_metadata_from_judged_proposal()` records the judge decision,
+  `policy_version`, provenance references, constraints (when present),
+  epistemic provenance (including expected use), retention, and risk flags on
+  allowed writes. It does not write `metadata.provenance.origin`; origin lineage
+  remains the separate `.1` contract applied by the save path.
 
 `save_memory(..., proposal={...}, provenance={...})` invokes the judge before rate-limit slot
-claiming and before data-layer persistence. Rejected proposals return
-`memory_write_judge_rejected` and do not call the data layer. A proposal remains
+claiming and before data-layer persistence. `BLOCK`, `REVISE`, and `ESCALATE`
+return `memory_write_judge_rejected`, claim no rate-limit slot, and do not call
+the data layer. `REVISE` outcomes include a complete seven-field replacement
+proposal that parses under `memory-write-proposal.v1`. A proposal remains
 optional, but canonical origin provenance is required for every non-test write
 and is validated before duplicate checks, rate limits, or database access.
 
@@ -106,8 +111,19 @@ The judge enforces evidence-not-instruction structurally:
 ## Policy Version
 
 Every outcome includes `policy_version: memory-write-judge.v1`. Allowed writes
-store the policy version under `metadata.memory_write_judge.policy_version`, so
-future prompt or policy changes can detect stale judgment.
+store under `metadata.memory_write_judge`:
+
+| Field | Meaning |
+|-------|---------|
+| `decision` | `ALLOW` for persisted judged writes. |
+| `policy_version` | `memory-write-judge.v1`. |
+| `reason_category` | Stable metrics category for the decision. |
+| `provenance_refs` | Source and authorization references used in the judgment. |
+| `constraints` | Present when the allow decision carries conditions (for example evidence-only). |
+
+Epistemic `expected_use` and related fields live under `metadata.provenance`
+alongside `epistemic_version` from `.1`. Future prompt or policy changes can
+detect stale judgment from `policy_version`.
 
 ## Eval Suite
 

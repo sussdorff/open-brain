@@ -515,6 +515,91 @@ class TestSaveMemoryTool:
         mock_dl.save_memory.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_save_memory_non_allow_outcomes_skip_rate_limit_and_persistence(
+        self, mock_dl
+    ):
+        """AC2: BLOCK/REVISE/ESCALATE never claim a rate-limit slot or persist."""
+        import open_brain.server as server_module
+
+        cases = [
+            (
+                "BLOCK",
+                {
+                    "intended_memory_content": "API token begins with redacted.",
+                    "category": "fact",
+                    "source_citation": {"ref": "terminal://env", "label": "observed"},
+                    "authorization_basis": {
+                        "ref": "conversation://current",
+                        "label": "observed",
+                        "granted_by": "user",
+                    },
+                    "expected_use": "evidence",
+                    "retention_scope": "personal",
+                    "risk_flags": ["secret"],
+                },
+            ),
+            (
+                "REVISE",
+                {
+                    "intended_memory_content": "User probably wants long-form answers.",
+                    "category": "preference",
+                    "source_citation": {
+                        "ref": "agent://style-inference",
+                        "label": "inferred",
+                    },
+                    "authorization_basis": {
+                        "ref": "conversation://current",
+                        "label": "observed",
+                        "granted_by": "user",
+                    },
+                    "expected_use": "instruction",
+                    "retention_scope": "personal",
+                    "risk_flags": [],
+                },
+            ),
+            (
+                "ESCALATE",
+                {
+                    "intended_memory_content": "Share personal identifiers with the team.",
+                    "category": "fact",
+                    "source_citation": {
+                        "ref": "conversation://current/team-share",
+                        "label": "observed",
+                    },
+                    "authorization_basis": {
+                        "ref": "conversation://current/team-share",
+                        "label": "observed",
+                        "granted_by": "user",
+                    },
+                    "expected_use": "evidence",
+                    "retention_scope": "team",
+                    "risk_flags": [],
+                },
+            ),
+        ]
+
+        server_module._save_timestamps.clear()
+        with patch("open_brain.server.get_dl", return_value=mock_dl):
+            from open_brain.server import save_memory
+
+            for decision, proposal in cases:
+                before = len(server_module._save_timestamps.get("__anonymous__", ()))
+                result = await save_memory(
+                    text=proposal["intended_memory_content"],
+                    proposal=proposal,
+                    provenance={
+                        "producer": "test-suite",
+                        "source_ref": "test-suite:non-allow-guard",
+                    },
+                )
+                data = json.loads(result)
+                assert data["error"] == "memory_write_judge_rejected", decision
+                assert data["judge"]["decision"] == decision
+                after = len(server_module._save_timestamps.get("__anonymous__", ()))
+                assert after == before == 0, decision
+                mock_dl.save_memory.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_save_memory_persists_allowed_proposal_metadata(self, mock_dl):
         """Allowed proposals write provenance and policy-version metadata."""
         proposal = {
@@ -548,6 +633,17 @@ class TestSaveMemoryTool:
         assert call_args.metadata["existing"] is True
         assert call_args.metadata["memory_write_judge"]["decision"] == "ALLOW"
         assert call_args.metadata["memory_write_judge"]["policy_version"] == "memory-write-judge.v1"
+        assert call_args.metadata["memory_write_judge"]["provenance_refs"] == [
+            {
+                "ref": "conversation://current/preference",
+                "label": "observed",
+            },
+            {
+                "ref": "conversation://current/preference",
+                "label": "observed",
+            },
+        ]
+        assert "origin" not in call_args.metadata["provenance"]
         assert call_args.metadata["provenance"]["source_label"] == "observed"
         assert call_args.metadata["provenance"]["expected_use"] == "instruction"
         assert call_args.metadata["provenance"]["source_ref"] == "conversation://current/preference"
