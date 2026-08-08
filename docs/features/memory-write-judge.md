@@ -69,11 +69,16 @@ actor's original intent as proof that the memory is instruction-grade.
 
 ## Runtime Shape
 
-The Python implementation is `open_brain.memory_write_judge`.
+The public proposal contract is `open_brain.memory_write_proposal`
+(`memory-write-proposal.v1`). See `docs/standards/memory-write-proposal.md`.
 
+The judge implementation is `open_brain.memory_write_judge`.
+
+- `parse_memory_write_proposal()` and proposal types live in the public module;
+  the judge imports that contract rather than defining a second copy.
 - `judge_memory_write_proposal()` parses a raw proposal and returns an outcome.
-- `deterministic_memory_write_gate()` handles schema, authorization,
-  provenance, retention, and risk checks without model calls.
+- `deterministic_memory_write_gate()` handles authorization, provenance,
+  retention, and risk policy without model calls after schema validation.
 - `reasoned_gate` is an optional callback that can add model-reasoned judgment
   only after deterministic gates have returned `ALLOW`.
 - `memory_metadata_from_judged_proposal()` records provenance, retention,

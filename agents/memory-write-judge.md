@@ -18,7 +18,9 @@ requires human or higher-trust review.
 
 ## Contract
 
-Input is the seven-field Memory Write Proposal:
+Input is the seven-field Memory Write Proposal from
+`docs/standards/memory-write-proposal.md` /
+`open_brain.memory_write_proposal`:
 
 1. `intended_memory_content`
 2. `category`: `preference`, `fact`, `policy`, `lesson`, or `observation`
@@ -26,18 +28,37 @@ Input is the seven-field Memory Write Proposal:
 4. `authorization_basis`: `{ref, label, granted_by?}` or `null`
 5. `expected_use`: `evidence` or `instruction`
 6. `retention_scope`: `session`, `project`, `personal`, or `team`
-7. `risk_flags`: zero or more of `pii`, `secret`, `credential`,
+7. `risk_flags`: zero or more unique values of `pii`, `secret`, `credential`,
    `policy-sensitive`, `external-confidential`
 
-Provenance labels are `observed`, `inferred`, `generated`, `confirmed`,
-`disputed`, and `superseded`.
+Provenance labels are the `.1` epistemic labels: `observed`, `inferred`,
+`generated`, `confirmed`, `disputed`, and `superseded`.
+
+### Source locator grammar
+
+`source_citation.ref` and `authorization_basis.ref` must match the shared
+source-locator grammar (`SOURCE_LOCATOR_PATTERN`), equivalent under Python
+runtime, Python jsonschema, and ECMA-262 (`(?![\s\S])` end anchor; ASCII path
+segments):
+
+- scheme-qualified: `conversation://current/preference`, `agent://summary-draft`
+- namespaced: `agent-session:codex:session-123`
+- path-like, including multi-word ASCII segments: `docs/meeting notes/decision.md`
+
+Reject actor prose, generic single-token claims, trailing newlines, and
+non-ASCII paths (`somewhere`, `user said so earlier today`, `docs/café/note.md`)
+with schema failure code `vague_source`.
 
 ## Decision Rules
 
 Apply deterministic gates before any model-reasoned judgment:
 
-- Schema violations return `ESCALATE` with `reason_category: schema`.
-- `secret` or `credential` risk returns `BLOCK`.
+- Raw `secret` or `credential` risk flags return `BLOCK` / `risk` even when the
+  envelope is schema-invalid; attach structured schema `issues` and never echo
+  proposal content.
+- Other schema violations return `ESCALATE` with `reason_category: schema` and
+  structured `issues` (`code`, `field`, `message`) on the outcome / tool payload.
+- Parsed `secret` or `credential` risk returns `BLOCK`.
 - Missing authorization returns `BLOCK`.
 - `disputed` or `superseded` source/authorization returns `ESCALATE`.
 - `policy` memories require observed or confirmed authorization.
@@ -65,6 +86,7 @@ provenance_refs:
 constraints: <object; only when ALLOW has conditions>
 revised_proposal: <full replacement proposal; only for REVISE>
 escalation_target: <role or queue; only for ESCALATE>
+issues: <array of {code, field, message}; only for schema failures>
 ```
 
 ## Eval Suite
