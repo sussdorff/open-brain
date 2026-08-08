@@ -27,6 +27,8 @@ before digest/count, structured-record skip count, and `evidence_digest`. It
 also binds one retrieval-control baseline per source. Apply derives each
 bounded batch's baseline from exactly those approved source measurements, so a
 full-cohort MAX score cannot make a later subset batch fail indefinitely.
+Unresolved or quarantined sources with no persisted output contribute a neutral
+zero baseline and do not trigger a synthetic provider probe.
 `inventory` never calls a provider and therefore marks retrieval controls as
 unmeasured. `dry-run` uses the configured embedding and rerank instruments when
 provider credentials are present; without credentials it still inventories the

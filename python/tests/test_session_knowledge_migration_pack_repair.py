@@ -12,6 +12,7 @@ import pytest
 from open_brain.data_layer.interface import validate_origin_provenance
 from open_brain.session_knowledge_migration import (
     FIXED_CONTROL_QUERIES,
+    MAX_WHAT_HAPPENED_CHARS,
     PostgresMigrationStore,
     evaluate_migration_gate,
     transform_legacy_memory,
@@ -45,6 +46,18 @@ class ContentDependentControl:
         )
 
 
+class SyntheticEmptySpikeControl:
+    """Expose accidental use of the synthetic empty-cohort document."""
+
+    instrument = "synthetic-empty-spike.v1"
+
+    async def measure(
+        self, *, control: str, query: str, documents: list[str]
+    ) -> float:
+        del control, query
+        return 0.99 if documents == ["empty-cohort"] else 0.8
+
+
 @pytest.mark.asyncio
 async def test_content_dependent_controls_complete_across_two_batches() -> None:
     store = FakeMigrationStore(
@@ -72,6 +85,42 @@ async def test_content_dependent_controls_complete_across_two_batches() -> None:
 
     replay = await _apply(store, report, control=control, evidence=evidence)
     assert replay["status"] == "replayed"
+
+
+@pytest.mark.asyncio
+async def test_unresolved_source_cannot_raise_mixed_batch_control_baseline() -> None:
+    store = FakeMigrationStore(
+        [
+            SimpleNamespace(
+                id=3151,
+                type="session_summary",
+                content=f"Observed:\n{'x' * (MAX_WHAT_HAPPENED_CHARS + 500)}",
+                title="",
+                metadata={
+                    "project": "open-brain",
+                    "provenance": {
+                        "origin": {
+                            "producer": "pack-repair",
+                            "source_ref": "session:3151",
+                        }
+                    },
+                },
+                session_ref="session-3151",
+                embedding=None,
+            ),
+            _learning(3152, "A persistable learning in the same batch."),
+        ]
+    )
+    control = SyntheticEmptySpikeControl()
+    report = await _dry(store, control)
+    unresolved = next(plan for plan in report["plans"] if plan["source_id"] == 3151)
+    assert unresolved["outcome"] == "unresolved"
+
+    result = await _apply(store, report, control=control)
+
+    assert result["status"] == "completed"
+    mapping = await store.get_mapping(result["operation_id"], 3151)
+    assert mapping is not None and mapping["status"] == "unresolved"
 
 
 def test_legacy_origin_fallback_is_canonical_and_keeps_basis_outside_origin() -> None:

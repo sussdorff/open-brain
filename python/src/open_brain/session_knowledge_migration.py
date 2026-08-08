@@ -946,9 +946,15 @@ def estimate_provider_usage(
         "currency_unit": "configured",
         "scope": "batch_plans",
         # The dry-run records both a full-cohort diagnostic and one control
-        # measurement per source. The latter keeps later bounded apply batches
-        # comparable without reusing an unrelated full-cohort MAX baseline.
-        "retrieval_control_measurements": 1 + len(plans),
+        # measurement per source with persistable output. The latter keeps
+        # bounded apply batches comparable without an unrelated cohort MAX.
+        "retrieval_control_measurements": (
+            (1 if docs else 0)
+            + sum(
+                any(out.persist and out.content for out in plan.outputs)
+                for plan in plans
+            )
+        ),
     }
 
 
@@ -994,15 +1000,16 @@ async def measure_retrieval_controls(
                 if out.get("persist") and out.get("content_hash"):
                     # Dry-run plan dicts omit bodies; use hash as opaque stand-in.
                     documents.append(str(out["content_hash"]))
-    if not documents:
-        documents = ["empty-cohort"]
     scores: dict[str, float] = {}
-    for name, query in FIXED_CONTROL_QUERIES.items():
-        scores[name] = float(
-            await control_adapter.measure(
-                control=name, query=query, documents=documents
+    if documents:
+        for name, query in FIXED_CONTROL_QUERIES.items():
+            scores[name] = float(
+                await control_adapter.measure(
+                    control=name, query=query, documents=documents
+                )
             )
-        )
+    else:
+        scores = {name: 0.0 for name in FIXED_CONTROL_QUERIES}
     return {
         "schema_version": RETRIEVAL_CONTROL_SCHEMA_VERSION,
         "instrument": control_instrument(control_adapter),
