@@ -1513,6 +1513,32 @@ class TestCommandHandlers:
 
 
 # ---------------------------------------------------------------------------
+# Provenance history (open-brain-ekn.5)
+# ---------------------------------------------------------------------------
+
+
+class TestProvenanceHistoryCli:
+    def test_provenance_history_parses_memory_id(self):
+        args = parse(["--json", "provenance", "history", "123"])
+        assert args.provenance_command == "history"
+        assert args.memory_id == 123
+
+    @pytest.mark.asyncio
+    async def test_provenance_history_calls_public_mcp_tool(self):
+        args = parse(["--json", "provenance", "history", "55"])
+        with patch("open_brain.cli.main.call_tool", new_callable=AsyncMock) as mock_call:
+            mock_call.return_value = {"memory_id": 55, "events": []}
+            from open_brain.cli.main import _cmd_provenance
+
+            result = await _cmd_provenance(args)
+        mock_call.assert_called_once_with(
+            "get_memory_promotion_history",
+            {"memory_id": 55},
+        )
+        assert result == {"memory_id": 55, "events": []}
+
+
+# ---------------------------------------------------------------------------
 # Integration test (requires live server)
 # ---------------------------------------------------------------------------
 

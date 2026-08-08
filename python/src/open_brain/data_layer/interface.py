@@ -132,6 +132,7 @@ VALID_LINK_TYPES: frozenset[str] = frozenset({
     "contradicts",      # memory -> contradicted memory
     "co_occurs",        # weak co-mention edge
     "references",       # generic note/link reference
+    "derived_from",     # decision/learning -> observed session_event
 })
 
 # ─── Canonical entity metadata contract ───────────────────────────────────────
@@ -580,6 +581,9 @@ class SaveMemoryParams:
     importance: str = "medium"  # caller-declared significance: critical|high|medium|low
     dedup_mode: Literal["skip", "merge"] = "skip"  # auto-dedup strategy at store time
     duplicate_of: int | None = None  # caller-asserted duplicate; short-circuits dedup logic
+    # Internal non-wire signal from the MCP/server judge boundary. Ordinary direct
+    # callers remain evidence-only; do not derive this from caller-authored metadata.
+    instruction_authorized: bool = False
 
 
 @dataclass
@@ -1039,6 +1043,16 @@ class DataLayer(Protocol):
 
     async def origin_provenance_report(self) -> dict[str, Any]: ...
 
+    async def epistemic_provenance_report(self) -> dict[str, Any]: ...
+
+    async def backfill_epistemic_provenance(
+        self,
+        *,
+        apply: bool = False,
+        limit: int | None = None,
+        after_id: int | None = None,
+    ) -> dict[str, Any]: ...
+
     async def refine_memories(self, params: RefineParams) -> RefineResult: ...
 
     async def delete_memories(self, params: DeleteParams) -> DeleteResult: ...
@@ -1090,6 +1104,27 @@ class DataLayer(Protocol):
         memory_id: int,
         link_types: list[str] | None = None,
     ) -> list[dict[str, Any]]: ...
+
+    async def attempt_memory_promotion(
+        self,
+        params: Any,
+    ) -> Any:
+        """Attempt an audited epistemic promotion/dispute/supersession."""
+        ...
+
+    async def list_memory_promotion_history(
+        self,
+        memory_id: int,
+    ) -> list[dict[str, Any]]:
+        """Return append-only promotion ledger events for one memory."""
+        ...
+
+    async def fetch_promotion_projections(
+        self,
+        memory_ids: list[int],
+    ) -> dict[int, Any]:
+        """Return current ledger-backed promotion projections by memory id."""
+        ...
 
     async def delete_by_run_id(self, run_id: str) -> DeleteByRunIdResult: ...
 

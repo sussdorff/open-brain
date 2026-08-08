@@ -2,30 +2,47 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from typing import Any, Literal, TypeAlias
 
+from open_brain.epistemic_provenance import (
+    EPISTEMIC_LABELS as EPISTEMIC_LABELS,
+    EVIDENCE_ONLY_LABELS as SHARED_EVIDENCE_ONLY_LABELS,
+    FAILED_EVIDENCE_LABELS as SHARED_FAILED_EVIDENCE_LABELS,
+    INSTRUCTION_GRADE_LABELS as SHARED_INSTRUCTION_GRADE_LABELS,
+    EpistemicLabel,
+    ExpectedUse as ExpectedUse,
+    merge_epistemic_into_judged_provenance,
+)
+from open_brain.memory_write_proposal import (
+    EXPECTED_USES as EXPECTED_USES,
+    MEMORY_CATEGORIES as MEMORY_CATEGORIES,
+    PROVENANCE_LABELS as PROVENANCE_LABELS,
+    REQUIRED_PROPOSAL_FIELDS as REQUIRED_PROPOSAL_FIELDS,
+    RETENTION_SCOPES as RETENTION_SCOPES,
+    RISK_FLAGS as RISK_FLAGS,
+    AuthorizationBasis as AuthorizationBasis,
+    MemoryCategory as MemoryCategory,
+    MemoryWriteProposal as MemoryWriteProposal,
+    ProposalValidationIssue as ProposalValidationIssue,
+    ProvenanceLabel as ProvenanceLabel,
+    ProvenanceRef as ProvenanceRef,
+    RetentionScope as RetentionScope,
+    RiskFlag as RiskFlag,
+    build_memory_write_proposal as build_memory_write_proposal,
+    memory_write_proposal_json_schema as memory_write_proposal_json_schema,
+    parse_memory_write_proposal as parse_memory_write_proposal,
+    proposal_preflight_issues as proposal_preflight_issues,
+    raw_proposal_payload as raw_proposal_payload,
+)
+
+# ProvenanceLabel is re-exported from the public proposal module, where it is
+# an alias of EpistemicLabel from open-brain-ekn.1 (no hand-copied Literal).
+assert ProvenanceLabel is EpistemicLabel
+
 MEMORY_WRITE_JUDGE_POLICY_VERSION = "memory-write-judge.v1"
 
-MemoryCategory: TypeAlias = Literal["preference", "fact", "policy", "lesson", "observation"]
-ExpectedUse: TypeAlias = Literal["evidence", "instruction"]
-RetentionScope: TypeAlias = Literal["session", "project", "personal", "team"]
-ProvenanceLabel: TypeAlias = Literal[
-    "observed",
-    "inferred",
-    "generated",
-    "confirmed",
-    "disputed",
-    "superseded",
-]
-RiskFlag: TypeAlias = Literal[
-    "pii",
-    "secret",
-    "credential",
-    "policy-sensitive",
-    "external-confidential",
-]
 JudgeDecision: TypeAlias = Literal["ALLOW", "BLOCK", "REVISE", "ESCALATE"]
 ReasonCategory: TypeAlias = Literal[
     "schema",
@@ -37,66 +54,9 @@ ReasonCategory: TypeAlias = Literal[
     "other",
 ]
 
-MEMORY_CATEGORIES: set[str] = {"preference", "fact", "policy", "lesson", "observation"}
-EXPECTED_USES: set[str] = {"evidence", "instruction"}
-RETENTION_SCOPES: set[str] = {"session", "project", "personal", "team"}
-PROVENANCE_LABELS: set[str] = {
-    "observed",
-    "inferred",
-    "generated",
-    "confirmed",
-    "disputed",
-    "superseded",
-}
-RISK_FLAGS: set[str] = {
-    "pii",
-    "secret",
-    "credential",
-    "policy-sensitive",
-    "external-confidential",
-}
-INSTRUCTION_GRADE_LABELS = {"observed", "confirmed"}
-EVIDENCE_ONLY_LABELS = {"inferred", "generated"}
-FAILED_EVIDENCE_LABELS = {"disputed", "superseded"}
-REQUIRED_PROPOSAL_FIELDS = {
-    "intended_memory_content",
-    "category",
-    "source_citation",
-    "authorization_basis",
-    "expected_use",
-    "retention_scope",
-    "risk_flags",
-}
-
-
-@dataclass(frozen=True)
-class ProvenanceRef:
-    """Evidence or authority reference used by the judge."""
-
-    ref: str
-    label: ProvenanceLabel
-
-
-@dataclass(frozen=True)
-class AuthorizationBasis:
-    """Who or what authorized the proposed memory write."""
-
-    ref: str
-    label: ProvenanceLabel
-    granted_by: str | None = None
-
-
-@dataclass(frozen=True)
-class MemoryWriteProposal:
-    """The seven-field proposal surface for an OpenBrain memory write."""
-
-    intended_memory_content: str
-    category: MemoryCategory
-    source_citation: ProvenanceRef
-    authorization_basis: AuthorizationBasis | None
-    expected_use: ExpectedUse
-    retention_scope: RetentionScope
-    risk_flags: tuple[RiskFlag, ...] = ()
+INSTRUCTION_GRADE_LABELS = set(SHARED_INSTRUCTION_GRADE_LABELS)
+EVIDENCE_ONLY_LABELS = set(SHARED_EVIDENCE_ONLY_LABELS)
+FAILED_EVIDENCE_LABELS = set(SHARED_FAILED_EVIDENCE_LABELS)
 
 
 @dataclass(frozen=True)
@@ -111,10 +71,18 @@ class JudgeOutcome:
     constraints: Mapping[str, Any] | None = None
     revised_proposal: Mapping[str, Any] | None = None
     escalation_target: str | None = None
+    issues: tuple[dict[str, str], ...] | None = None
 
     def to_payload(self) -> dict[str, Any]:
-        """Return a JSON-serializable outcome payload."""
-        return asdict(self)
+        """Return a JSON-serializable outcome payload.
+
+        Structured ``issues`` are included for schema failures and omitted
+        when absent so non-schema outcomes stay additive-compatible.
+        """
+        payload = asdict(self)
+        if payload.get("issues") is None:
+            payload.pop("issues", None)
+        return payload
 
 
 ReasonedGate: TypeAlias = Callable[[MemoryWriteProposal], JudgeOutcome | None]
@@ -130,15 +98,38 @@ def judge_memory_write_proposal(
     Deterministic schema, authorization, provenance, and risk gates always run
     first. A model-reasoned gate can only run after those deterministic gates
     return ALLOW.
+
+    Risk-first fail-closed: raw ``secret`` / ``credential`` flags BLOCK even
+    when the envelope is schema-invalid. Structured schema ``issues`` are still
+    attached; proposal content is never echoed in the reason.
     """
     proposal, errors = parse_memory_write_proposal(raw_proposal)
+    issue_payload = tuple(error.to_dict() for error in errors) if errors else None
+
+    if _raw_risk_flags_include_secret_or_credential(raw_proposal):
+        refs: tuple[ProvenanceRef, ...] = ()
+        if proposal is not None:
+            refs = _outcome_refs(proposal)
+        return JudgeOutcome(
+            decision="BLOCK",
+            reason=(
+                "secrets and credentials are ephemeral and must not be "
+                "persisted to memory"
+            ),
+            reason_category="risk",
+            provenance_refs=refs,
+            issues=issue_payload,
+        )
+
     if errors or proposal is None:
         return JudgeOutcome(
             decision="ESCALATE",
-            reason="proposal schema violation: " + "; ".join(errors),
+            reason="proposal schema violation: "
+            + "; ".join(str(error) for error in errors),
             reason_category="schema",
             provenance_refs=(),
             escalation_target="memory-policy-owner",
+            issues=issue_payload,
         )
 
     deterministic = deterministic_memory_write_gate(proposal)
@@ -147,6 +138,19 @@ def judge_memory_write_proposal(
 
     reasoned = reasoned_gate(proposal)
     return reasoned or deterministic
+
+
+def _raw_risk_flags_include_secret_or_credential(raw_proposal: Mapping[str, Any] | Any) -> bool:
+    """Return True when raw risk_flags claims secret/credential material."""
+    if not isinstance(raw_proposal, Mapping):
+        return False
+    flags = raw_proposal.get("risk_flags")
+    if isinstance(flags, (str, bytes)) or not isinstance(flags, (list, tuple)):
+        # Malformed non-sequence flags are schema issues, not risk claims.
+        if isinstance(flags, str):
+            return flags in {"secret", "credential"}
+        return False
+    return any(flag in {"secret", "credential"} for flag in flags)
 
 
 def deterministic_memory_write_gate(proposal: MemoryWriteProposal) -> JudgeOutcome:
@@ -256,69 +260,6 @@ def deterministic_memory_write_gate(proposal: MemoryWriteProposal) -> JudgeOutco
     )
 
 
-def parse_memory_write_proposal(
-    raw_proposal: Mapping[str, Any],
-) -> tuple[MemoryWriteProposal | None, list[str]]:
-    """Parse and validate the seven-field memory-write proposal schema."""
-    errors: list[str] = []
-    if not isinstance(raw_proposal, Mapping):
-        return None, ["proposal: expected object"]
-
-    missing = sorted(REQUIRED_PROPOSAL_FIELDS - set(raw_proposal))
-    if missing:
-        errors.append("missing required field(s): " + ", ".join(missing))
-
-    content = raw_proposal.get("intended_memory_content")
-    if not _is_non_empty_string(content):
-        errors.append("intended_memory_content: expected non-empty string")
-
-    category = raw_proposal.get("category")
-    if category not in MEMORY_CATEGORIES:
-        errors.append(f"category: invalid value {category!r}")
-
-    expected_use = raw_proposal.get("expected_use")
-    if expected_use not in EXPECTED_USES:
-        errors.append(f"expected_use: invalid value {expected_use!r}")
-
-    retention_scope = raw_proposal.get("retention_scope")
-    if retention_scope not in RETENTION_SCOPES:
-        errors.append(f"retention_scope: invalid value {retention_scope!r}")
-
-    source = _parse_provenance_ref(raw_proposal.get("source_citation"), "source_citation", errors)
-    authorization = _parse_authorization_basis(raw_proposal.get("authorization_basis"), errors)
-    risk_flags = _parse_risk_flags(raw_proposal.get("risk_flags"), errors)
-
-    if errors or source is None:
-        return None, errors
-
-    return MemoryWriteProposal(
-        intended_memory_content=content,
-        category=category,
-        source_citation=source,
-        authorization_basis=authorization,
-        expected_use=expected_use,
-        retention_scope=retention_scope,
-        risk_flags=risk_flags,
-    ), []
-
-
-def raw_proposal_payload(proposal: MemoryWriteProposal) -> dict[str, Any]:
-    """Return the canonical JSON-compatible proposal shape."""
-    return {
-        "intended_memory_content": proposal.intended_memory_content,
-        "category": proposal.category,
-        "source_citation": asdict(proposal.source_citation),
-        "authorization_basis": (
-            asdict(proposal.authorization_basis)
-            if proposal.authorization_basis is not None
-            else None
-        ),
-        "expected_use": proposal.expected_use,
-        "retention_scope": proposal.retention_scope,
-        "risk_flags": list(proposal.risk_flags),
-    }
-
-
 def _allow_reason_category(proposal: MemoryWriteProposal) -> ReasonCategory:
     """Return the dominant metrics category for an allowed write."""
     if proposal.risk_flags or proposal.retention_scope == "team":
@@ -336,18 +277,19 @@ def memory_metadata_from_judged_proposal(
     raw_proposal: Mapping[str, Any],
     outcome: JudgeOutcome,
 ) -> dict[str, Any]:
-    """Build metadata patch applied to allowed memory writes."""
+    """Build metadata patch applied to allowed memory writes.
+
+    Persists the judge decision, policy version, provenance references,
+    constraints, and expected-use decision. Epistemic fields are written under
+    ``metadata.provenance`` without an ``origin`` key so the separate origin
+    lineage from ``open-brain-ekn.1`` remains authoritative.
+    """
     proposal, errors = parse_memory_write_proposal(raw_proposal)
     if errors or proposal is None:
         return {}
 
-    return {
-        "memory_write_judge": {
-            "decision": outcome.decision,
-            "policy_version": outcome.policy_version,
-            "reason_category": outcome.reason_category,
-        },
-        "provenance": {
+    provenance = merge_epistemic_into_judged_provenance(
+        {
             "source_ref": proposal.source_citation.ref,
             "source_label": proposal.source_citation.label,
             "authorization_ref": (
@@ -362,7 +304,21 @@ def memory_metadata_from_judged_proposal(
             ),
             "expected_use": proposal.expected_use,
             "retention_scope": proposal.retention_scope,
-        },
+        }
+    )
+    judge_meta: dict[str, Any] = {
+        "decision": outcome.decision,
+        "policy_version": outcome.policy_version,
+        "reason_category": outcome.reason_category,
+        "provenance_refs": [
+            {"ref": ref.ref, "label": ref.label} for ref in outcome.provenance_refs
+        ],
+    }
+    if outcome.constraints is not None:
+        judge_meta["constraints"] = dict(outcome.constraints)
+    return {
+        "memory_write_judge": judge_meta,
+        "provenance": provenance,
         "risk_flags": list(proposal.risk_flags),
     }
 
@@ -386,77 +342,10 @@ def _revise_expected_use_to_evidence(
 def _outcome_refs(proposal: MemoryWriteProposal) -> tuple[ProvenanceRef, ...]:
     refs = [proposal.source_citation]
     if proposal.authorization_basis is not None:
-        refs.append(ProvenanceRef(
-            ref=proposal.authorization_basis.ref,
-            label=proposal.authorization_basis.label,
-        ))
+        refs.append(
+            ProvenanceRef(
+                ref=proposal.authorization_basis.ref,
+                label=proposal.authorization_basis.label,
+            )
+        )
     return tuple(refs)
-
-
-def _parse_provenance_ref(
-    value: Any,
-    field_name: str,
-    errors: list[str],
-) -> ProvenanceRef | None:
-    if not isinstance(value, Mapping):
-        errors.append(f"{field_name}: expected object")
-        return None
-
-    ref = value.get("ref")
-    if not _is_non_empty_string(ref):
-        errors.append(f"{field_name}.ref: expected non-empty string")
-
-    label = value.get("label")
-    if label not in PROVENANCE_LABELS:
-        errors.append(f"{field_name}.label: invalid provenance label {label!r}")
-
-    if errors:
-        return None
-
-    return ProvenanceRef(ref=ref, label=label)
-
-
-def _parse_authorization_basis(
-    value: Any,
-    errors: list[str],
-) -> AuthorizationBasis | None:
-    if value is None:
-        return None
-    if not isinstance(value, Mapping):
-        errors.append("authorization_basis: expected object or null")
-        return None
-
-    ref = value.get("ref")
-    if not _is_non_empty_string(ref):
-        errors.append("authorization_basis.ref: expected non-empty string")
-
-    label = value.get("label")
-    if label not in PROVENANCE_LABELS:
-        errors.append(f"authorization_basis.label: invalid provenance label {label!r}")
-
-    granted_by = value.get("granted_by")
-    if granted_by is not None and not _is_non_empty_string(granted_by):
-        errors.append("authorization_basis.granted_by: expected non-empty string when present")
-
-    if errors:
-        return None
-
-    return AuthorizationBasis(ref=ref, label=label, granted_by=granted_by)
-
-
-def _parse_risk_flags(value: Any, errors: list[str]) -> tuple[RiskFlag, ...]:
-    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
-        errors.append("risk_flags: expected array")
-        return ()
-
-    parsed: list[RiskFlag] = []
-    for index, flag in enumerate(value):
-        if flag not in RISK_FLAGS:
-            errors.append(f"risk_flags[{index}]: invalid value {flag!r}")
-        elif flag not in parsed:
-            parsed.append(flag)
-    return tuple(parsed)
-
-
-def _is_non_empty_string(value: Any) -> bool:
-    return isinstance(value, str) and bool(value.strip())

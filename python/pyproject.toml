@@ -20,6 +20,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "jsonschema>=4.26",
     "mypy>=1.20.2",
     "pyfakefs>=6.2.0",
     "pytest>=8.0.0",

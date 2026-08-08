@@ -650,10 +650,195 @@ async def _cmd_doctor(_args: argparse.Namespace) -> Any:
 
 
 async def _cmd_provenance(args: argparse.Namespace) -> Any:
-    """Run a manual, read-only provenance report."""
+    """Run provenance inspection or conservative epistemic backfill."""
     if args.provenance_command == "report":
         return await call_tool("origin_provenance_report", {})
+    if args.provenance_command == "epistemic-report":
+        return await call_tool("epistemic_provenance_report", {})
+    if args.provenance_command == "epistemic-backfill":
+        payload: dict[str, Any] = {"apply": bool(getattr(args, "apply", False))}
+        if getattr(args, "limit", None) is not None:
+            payload["limit"] = args.limit
+        if getattr(args, "after_id", None) is not None:
+            payload["after_id"] = args.after_id
+        return await call_tool("backfill_epistemic_provenance", payload)
+    if args.provenance_command == "history":
+        return await call_tool(
+            "get_memory_promotion_history",
+            {"memory_id": int(args.memory_id)},
+        )
     raise ValueError(f"Unknown provenance command: {args.provenance_command}")
+
+
+def _load_gate_evidence_file(path: str | None) -> dict[str, Any]:
+    if not path:
+        return {}
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("gate evidence file must contain a JSON object")
+    return payload
+
+
+async def _cmd_session_knowledge_migration(args: argparse.Namespace) -> Any:
+    """Inventory/dry-run/gated apply/status/reconcile for legacy session knowledge."""
+    from open_brain.session_knowledge_migration import (
+        ConfiguredEmbeddingAdapter,
+        ConfiguredRerankAdapter,
+        ConfiguredRetrievalControlAdapter,
+        ScopedReconcileAdapter,
+        apply_session_knowledge_migration_batch,
+        build_postgres_migration_store,
+        configured_provider_metadata_from_config,
+        dry_run_session_knowledge_migration,
+        evaluate_migration_gate,
+        migration_operation_status,
+        reconcile_session_knowledge_migration,
+    )
+
+    command = getattr(args, "skm_command", None)
+    # K1-04: read-only / blocked paths never run DDL and never require provider secrets.
+    store = await build_postgres_migration_store(readonly=True)
+    provider_metadata = configured_provider_metadata_from_config(readonly=True)
+
+    if command == "inventory":
+        return await dry_run_session_knowledge_migration(
+            store,
+            provider_metadata=provider_metadata,
+            control_adapter=None,
+        )
+
+    if command == "dry-run":
+        control = None
+        if os.environ.get("VOYAGE_API_KEY"):
+            provider_metadata = configured_provider_metadata_from_config()
+            control = ConfiguredRetrievalControlAdapter(store.pool, provider_metadata)
+        return await dry_run_session_knowledge_migration(
+            store,
+            provider_metadata=provider_metadata,
+            control_adapter=control,
+        )
+
+    if command == "status":
+        operation_id = getattr(args, "operation_id", None)
+        if not operation_id:
+            raise ValueError("--operation-id is required for status")
+        return await migration_operation_status(store, str(operation_id))
+
+    if command == "reconcile":
+        operation_id = getattr(args, "operation_id", None)
+        if not operation_id:
+            raise ValueError("--operation-id is required for reconcile")
+        return await reconcile_session_knowledge_migration(
+            store,
+            operation_id=str(operation_id),
+            dry_run_report=None,
+        )
+
+    if command == "apply":
+        # K1-13: never synthesize batch_scope/operation_id from CLI flags.
+        if not getattr(args, "apply", False):
+            return {
+                "status": "blocked",
+                "writes": 0,
+                "errors": [
+                    {
+                        "code": "apply_flag_required",
+                        "message": "pass --apply with a complete --gate-evidence-file",
+                    }
+                ],
+            }
+        gate_path = getattr(args, "gate_evidence_file", None)
+        if not gate_path:
+            return {
+                "status": "blocked",
+                "writes": 0,
+                "errors": [
+                    {
+                        "code": "gate_evidence_required",
+                        "message": "--gate-evidence-file is required for apply",
+                    }
+                ],
+            }
+        gate_evidence = _load_gate_evidence_file(gate_path)
+        if "batch_scope" not in gate_evidence or "operation_id" not in gate_evidence:
+            return {
+                "status": "blocked",
+                "writes": 0,
+                "errors": [
+                    {
+                        "code": "gate_evidence_incomplete",
+                        "message": "evidence must include operation_id and batch_scope",
+                    }
+                ],
+            }
+        cli_op = getattr(args, "operation_id", None)
+        if cli_op and str(cli_op) != str(gate_evidence.get("operation_id")):
+            return {
+                "status": "blocked",
+                "writes": 0,
+                "errors": [
+                    {
+                        "code": "operation_id_mismatch",
+                        "message": "CLI --operation-id must match evidence.operation_id",
+                    }
+                ],
+            }
+        if not await store.schema_ready():
+            return {
+                "status": "blocked",
+                "writes": 0,
+                "errors": [
+                    {
+                        "code": "schema_missing",
+                        "message": "migration schema missing; deploy before apply",
+                    }
+                ],
+            }
+        report_path = getattr(args, "dry_run_report_file", None)
+        if not report_path:
+            return {
+                "status": "blocked",
+                "writes": 0,
+                "errors": [{
+                    "code": "dry_run_report_required",
+                    "message": "--dry-run-report-file is required for apply",
+                }],
+            }
+        report = _load_gate_evidence_file(report_path)
+        if not os.environ.get("VOYAGE_API_KEY"):
+            return {
+                "status": "blocked",
+                "writes": 0,
+                "errors": [{
+                    "code": "provider_credentials_required",
+                    "message": "configured provider credentials are required for operational apply",
+                }],
+            }
+        provider_metadata = configured_provider_metadata_from_config()
+        preflight = evaluate_migration_gate(
+            decision=str(gate_evidence.get("decision") or "BLOCK"),
+            dry_run_report=report,
+            evidence=gate_evidence,
+            configured_provider_metadata=provider_metadata,
+        )
+        if not preflight.get("writes_authorized"):
+            return {"status": "blocked", "writes": 0, "gate": preflight}
+        control = ConfiguredRetrievalControlAdapter(store.pool, provider_metadata)
+        return await apply_session_knowledge_migration_batch(
+            store,
+            dry_run_report=report,
+            gate_evidence=gate_evidence,
+            embed_adapter=ConfiguredEmbeddingAdapter(),
+            rerank_adapter=ConfiguredRerankAdapter(
+                str(provider_metadata["rerank_model"])
+            ),
+            reconcile_adapter=ScopedReconcileAdapter(store),
+            provider_metadata=provider_metadata,
+            control_adapter=control,
+            operation_id=str(gate_evidence["operation_id"]),
+        )
+
+    raise ValueError(f"Unknown session-knowledge-migration command: {command}")
 
 
 async def _cmd_export(args: argparse.Namespace) -> Any:
@@ -1415,7 +1600,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # provenance
     p_provenance = subparsers.add_parser(
         "provenance",
-        help="Inspect canonical origin-provenance coverage",
+        help="Inspect origin or epistemic provenance coverage",
     )
     provenance_sub = p_provenance.add_subparsers(
         dest="provenance_command",
@@ -1424,7 +1609,45 @@ def _build_parser() -> argparse.ArgumentParser:
     provenance_sub.required = True
     provenance_sub.add_parser(
         "report",
-        help="Classify coverage without modifying memories",
+        help="Classify origin-provenance coverage without modifying memories",
+    )
+    provenance_sub.add_parser(
+        "epistemic-report",
+        help="Classify epistemic provenance coverage without modifying memories",
+    )
+    p_epistemic_backfill = provenance_sub.add_parser(
+        "epistemic-backfill",
+        help=(
+            "Conservatively backfill unlabeled epistemic fields "
+            "(dry-run by default; apply is batch-bounded)"
+        ),
+    )
+    p_epistemic_backfill.add_argument(
+        "--apply",
+        action="store_true",
+        help="Apply one bounded batch (default is dry-run)",
+    )
+    p_epistemic_backfill.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Apply/dry-run batch size (apply default 500, max 1000)",
+    )
+    p_epistemic_backfill.add_argument(
+        "--after-id",
+        type=int,
+        default=None,
+        dest="after_id",
+        help="Keyset cursor: only consider memory ids greater than this value",
+    )
+    p_history = provenance_sub.add_parser(
+        "history",
+        help="Reconstruct promotion, dispute, and supersession history for a memory",
+    )
+    p_history.add_argument(
+        "memory_id",
+        type=int,
+        help="Memory ID whose promotion ledger history to fetch",
     )
 
     # export
@@ -1775,6 +1998,74 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    # session-knowledge-migration (open-brain-ekn.8)
+    p_skm = subparsers.add_parser(
+        "session-knowledge-migration",
+        help=(
+            "Legacy session_summary/learning -> EKN migration "
+            "(dry-run by default; production apply gated)"
+        ),
+    )
+    skm_sub = p_skm.add_subparsers(dest="skm_command", metavar="ACTION")
+    skm_sub.required = True
+    skm_sub.add_parser(
+        "inventory",
+        help="Alias for dry-run: inventory eligible cohort without writes",
+    )
+    skm_sub.add_parser(
+        "dry-run",
+        help="Side-effect-free full-cohort dry run with cost estimate",
+    )
+    p_skm_apply = skm_sub.add_parser(
+        "apply",
+        help=(
+            "Bounded gated apply/resume. Requires --gate-evidence-file with "
+            "explicit ALLOW plus verified evidence; --apply alone is blocked."
+        ),
+    )
+    p_skm_apply.add_argument(
+        "--apply",
+        action="store_true",
+        help="Request apply mode (still blocked without full gate evidence)",
+    )
+    p_skm_apply.add_argument(
+        "--gate-evidence-file",
+        dest="gate_evidence_file",
+        metavar="PATH",
+        help="JSON file with Human Decision Gate evidence bundle",
+    )
+    p_skm_apply.add_argument(
+        "--operation-id",
+        dest="operation_id",
+        help="Stable operation UUID for resume/replay",
+    )
+    p_skm_apply.add_argument(
+        "--dry-run-report-file",
+        dest="dry_run_report_file",
+        metavar="PATH",
+        help="Approved JSON dry-run report whose digest is bound by the gate",
+    )
+    p_skm_status = skm_sub.add_parser(
+        "status",
+        help="Show migration operation status",
+    )
+    p_skm_status.add_argument(
+        "--operation-id",
+        dest="operation_id",
+        required=True,
+        help="Operation UUID",
+    )
+    p_skm_reconcile = skm_sub.add_parser(
+        "reconcile",
+        help="Emit machine-readable reconciliation for an operation",
+    )
+    p_skm_reconcile.add_argument(
+        "--operation-id",
+        dest="operation_id",
+        required=True,
+        help="Operation UUID",
+    )
+
     return parser
 
 
@@ -1792,6 +2083,7 @@ _COMMAND_MAP = {
     "stats": _cmd_stats,
     "doctor": _cmd_doctor,
     "provenance": _cmd_provenance,
+    "session-knowledge-migration": _cmd_session_knowledge_migration,
     "export": _cmd_export,
     "restore": _cmd_restore,
     "verify": _cmd_verify,

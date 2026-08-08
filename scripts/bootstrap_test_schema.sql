@@ -114,6 +114,13 @@ CREATE INDEX IF NOT EXISTS idx_memories_content_hash
   WHERE metadata->>'content_hash' IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_memory_capture_status
   ON memories ((metadata->>'capture_status'));
+CREATE UNIQUE INDEX IF NOT EXISTS idx_session_knowledge_capture_identity
+  ON memories ((metadata->>'session_knowledge_capture_identity'))
+  WHERE type = 'session_event'
+    AND metadata->>'session_knowledge_capture_identity' IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_session_knowledge_record_identity
+  ON memories ((metadata->>'session_knowledge_record_identity'))
+  WHERE metadata->>'session_knowledge_record_identity' IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS memory_lifecycle_actions (
   id BIGSERIAL PRIMARY KEY,
@@ -179,6 +186,46 @@ CREATE TABLE IF NOT EXISTS session_learning_analysis_runs (
 
 CREATE INDEX IF NOT EXISTS idx_session_learning_analysis_runs_status_created
   ON session_learning_analysis_runs (status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS session_knowledge_migration_operations (
+  operation_id UUID PRIMARY KEY,
+  status TEXT NOT NULL
+    CHECK (status IN (
+      'running', 'completed', 'completed_with_errors',
+      'failed', 'replayed', 'blocked', 'conflict'
+    )),
+  parameters JSONB NOT NULL DEFAULT '{}'::jsonb,
+  evidence_digest TEXT,
+  cursor TEXT,
+  counters JSONB NOT NULL DEFAULT '{}'::jsonb,
+  provider_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  completed_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_skm_operations_status_created
+  ON session_knowledge_migration_operations (status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS session_knowledge_migration_mappings (
+  operation_id UUID NOT NULL
+    REFERENCES session_knowledge_migration_operations(operation_id)
+    ON DELETE CASCADE,
+  source_id BIGINT NOT NULL,
+  source_type TEXT,
+  source_content_hash TEXT,
+  output_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+  routes JSONB NOT NULL DEFAULT '[]'::jsonb,
+  status TEXT NOT NULL DEFAULT 'completed',
+  error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (operation_id, source_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_skm_mappings_source
+  ON session_knowledge_migration_mappings (source_id);
 
 CREATE TABLE IF NOT EXISTS memory_relationships (
   id SERIAL PRIMARY KEY,
@@ -250,6 +297,66 @@ CREATE TABLE IF NOT EXISTS url_tokens (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Append-only epistemic promotion ledger (open-brain-ekn.5).
+CREATE TABLE IF NOT EXISTS memory_promotion_events (
+  id BIGSERIAL PRIMARY KEY,
+  memory_id INTEGER NOT NULL,
+  actor TEXT NOT NULL CHECK (length(btrim(actor)) > 0),
+  source_state TEXT NOT NULL,
+  target_state TEXT NOT NULL,
+  reason TEXT NOT NULL CHECK (length(btrim(reason)) > 0),
+  evidence_refs JSONB NOT NULL DEFAULT '[]'::jsonb,
+  policy_version TEXT NOT NULL,
+  rule_version TEXT,
+  grant_jti TEXT,
+  grant_digest TEXT,
+  origin_attestation_digest TEXT,
+  decision TEXT NOT NULL
+    CHECK (decision IN ('accepted', 'rejected')),
+  outcome TEXT NOT NULL,
+  rejection_code TEXT,
+  relationship_id INTEGER,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CHECK (
+    (decision = 'accepted' AND rejection_code IS NULL)
+    OR (decision = 'rejected' AND rejection_code IS NOT NULL)
+  )
+);
+
+-- Idempotent for DBs created before origin attestation digests existed.
+ALTER TABLE memory_promotion_events
+  ADD COLUMN IF NOT EXISTS origin_attestation_digest TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_memory_promotion_events_memory_created
+  ON memory_promotion_events (memory_id, created_at ASC, id ASC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS memory_promotion_events_accepted_grant_jti_uidx
+  ON memory_promotion_events (grant_jti)
+  WHERE grant_jti IS NOT NULL AND decision = 'accepted';
+
+CREATE OR REPLACE FUNCTION reject_memory_promotion_events_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RAISE EXCEPTION 'memory_promotion_events is append-only';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS memory_promotion_events_no_update
+  ON memory_promotion_events;
+CREATE TRIGGER memory_promotion_events_no_update
+  BEFORE UPDATE ON memory_promotion_events
+  FOR EACH ROW
+  EXECUTE PROCEDURE reject_memory_promotion_events_mutation();
+
+DROP TRIGGER IF EXISTS memory_promotion_events_no_delete
+  ON memory_promotion_events;
+CREATE TRIGGER memory_promotion_events_no_delete
+  BEFORE DELETE ON memory_promotion_events
+  FOR EACH ROW
+  EXECUTE PROCEDURE reject_memory_promotion_events_mutation();
+
 -- Drop every historical hybrid_search overload before recreating the canonical
 -- 8-argument version below. Legacy migrations 004/005 created a 5-argument
 -- hybrid_search(TEXT, vector, INTEGER, INTEGER, INTEGER); the current server
@@ -295,6 +402,12 @@ LANGUAGE sql STABLE AS $fn$
       AND (p_user_id IS NULL OR m.user_id = p_user_id)
       AND (p_metadata_filter IS NULL OR m.metadata @> p_metadata_filter)
       AND (p_capture_status IS NULL OR m.metadata->>'capture_status' = p_capture_status)
+      AND (
+        p_capture_status IS NOT NULL
+        OR m.metadata->>'status' IS NULL
+        OR m.metadata->>'status' <> 'archived'
+      )
+      AND m.metadata #>> '{session_knowledge_migration,superseded_by_operation}' IS NULL
     ORDER BY ts_rank_cd(m.search_vector, websearch_to_tsquery('english', query_text)) DESC
     LIMIT match_limit * 2
   ),
@@ -307,6 +420,12 @@ LANGUAGE sql STABLE AS $fn$
       AND (p_user_id IS NULL OR m.user_id = p_user_id)
       AND (p_metadata_filter IS NULL OR m.metadata @> p_metadata_filter)
       AND (p_capture_status IS NULL OR m.metadata->>'capture_status' = p_capture_status)
+      AND (
+        p_capture_status IS NOT NULL
+        OR m.metadata->>'status' IS NULL
+        OR m.metadata->>'status' <> 'archived'
+      )
+      AND m.metadata #>> '{session_knowledge_migration,superseded_by_operation}' IS NULL
     ORDER BY m.embedding <=> query_embedding
     LIMIT match_limit * 2
   ),

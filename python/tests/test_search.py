@@ -618,3 +618,14 @@ class TestMetadataFilterPreCondition:
         assert values[6] is None, (
             f"Expected None as 7th positional value when no capture_status, got: {values[6]!r}"
         )
+
+
+# ─── Retrieval contract compatibility (ranking unchanged) ─────────────────────
+
+class TestSearchRetrievalContractCompatibility:
+    """AC2 compatibility: retrieval contract is a server overlay, not a ranker input."""
+
+    @pytest.mark.asyncio
+    async def test_search_params_have_no_retrieval_contract_field(self):
+        params = SearchParams(query="hello")
+        assert not hasattr(params, "retrieval_contract")

@@ -549,6 +549,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "jsonschema" },
     { name = "mypy" },
     { name = "pyfakefs" },
     { name = "pytest" },
@@ -576,6 +577,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "jsonschema", specifier = ">=4.26" },
     { name = "mypy", specifier = ">=1.20.2" },
     { name = "pyfakefs", specifier = ">=6.2.0" },
     { name = "pytest", specifier = ">=8.0.0" },

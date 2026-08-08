@@ -321,6 +321,27 @@ If the caller explicitly passes `duplicate_of=<id>` in `save_memory` parameters,
 
 The merge path uses only vector similarity (no LLM call). The `duplicate_of` caller-provided short-circuit always wins over semantic dedup: if both are supplied, merge logic is never consulted.
 
+## Retrieval Contract
+
+Read-time consumers declare `retrieval-contract.v1` (see
+`docs/standards/retrieval-contract.md`). The contract separates searchable
+evidence/context from high-authority influence (`identity`, `constraint`,
+`policy`, `system_instruction`).
+
+- High authority is intentionally disabled until `open-brain-ekn.5` supplies a
+  server-issued promotion ledger. Actor-authored promotion metadata and Judge
+  `ALLOW` are never read-time promotion sources.
+- MCP `search`, `get_context`, and `get_wake_up_pack` accept an optional
+  `retrieval_contract`. When omitted, the constrained compatibility profile
+  still returns evidence but never high-authority units.
+- `/api/wake_up_pack` defaults to markdown + compatibility; the SessionStart
+  hook opts into `format=envelope&profile=claude-wake-up`.
+- SessionStart envelopes reference the contract (`contract_ref` + profile)
+  so the fixed header does not exhaust the production `token_budget=500`.
+- Optional `save_memory(retrieval_contract=...)` enforces write-back rules.
+- Embedding and RRF ranking are unchanged; the contract is a provenance and
+  influence overlay on retrieved rows.
+
 ## Hook Architecture
 
 The hooks bundle (installed via `/library use open-brain-hooks`) provides automatic memory capture without manual MCP tool calls:
@@ -330,8 +351,9 @@ The hooks bundle (installed via `/library use open-brain-hooks`) provides automa
 │            Claude Code Session          │
 │                                         │
 │  SessionStart ──► context_inject.py     │
-│    Injects recent memories + session    │
-│    summaries into conversation start    │
+│    Injects a typed retrieved-evidence   │
+│    envelope (retrieval-contract.v1);    │
+│    never as user/system policy          │
 │                                         │
 │  SessionEnd ──► session_end_summary.py  │
 │    Generates session summary from       │
@@ -345,7 +367,7 @@ The hooks bundle (installed via `/library use open-brain-hooks`) provides automa
 
 | Hook | Script | What it does |
 |------|--------|-------------|
-| `SessionStart` | `context_inject.py` | Fetches recent memories and injects a narrative summary into the session |
+| `SessionStart` | `context_inject.py` | Fetches the wake-up pack as a typed `retrieval-contract.v1` evidence envelope and injects it as retrieved data (not user-authored or system policy) |
 | `SessionEnd` | `session_end_summary.py` | Generates and saves a session summary from recent observations |
 | `Stop` | `worktree_turn_log.py` | Appends turn metadata (user input, assistant response, tool calls) to `.worktree-turns.jsonl` for session analytics |
 | `SubagentStop` | `worktree_turn_log.py` | Same as Stop, for subagent sessions |

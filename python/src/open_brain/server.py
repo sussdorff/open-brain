@@ -59,6 +59,10 @@ from open_brain.data_layer.interface import (
     validate_domain_metadata,
     validate_origin_provenance,
 )
+from open_brain.epistemic_provenance import (
+    EpistemicProvenanceValidationError,
+    ensure_epistemic_provenance,
+)
 from open_brain.capture_router import (
     canonical_type_for_capture_template,
     classify_and_extract,
@@ -96,18 +100,117 @@ from open_brain.memory_write_judge import (
     judge_memory_write_proposal,
     memory_metadata_from_judged_proposal,
 )
+from open_brain.session_knowledge import (
+    capture_session_knowledge as capture_session_knowledge_op,
+)
+from open_brain.memory_promotion import (
+    PromotionAttemptParams,
+    PromotionError,
+    attempt_memory_promotion,
+    fetch_promotion_projections,
+    is_promotion_admin_actor,
+    list_memory_promotion_history,
+)
+from open_brain.retrieval_contract import (
+    RetrievalContractValidationError,
+    apply_retrieval_contract,
+    authorize_memory_write_back,
+    resolve_retrieval_contract,
+)
 
 logger = logging.getLogger(__name__)
 
 # ContextVar to track the authenticated user ID for the current request
 _current_user_id: ContextVar[str | None] = ContextVar("current_user_id", default=None)
 
-# Rate limiter for save_memory: per-user sliding window of timestamps (max 10 per 60 seconds)
+# Rate limiter for save_memory / capture: per-user sliding window (max 10 per 60s)
 _save_timestamps: dict[str, deque[float]] = {}
 _RATE_LIMIT_MAX = 10
 _RATE_LIMIT_WINDOW = 60
 
 _MAX_TURNS_TEXT = 8000
+
+
+async def _reserve_capacity(
+    *,
+    rate_ops: int,
+    daily_slots: int,
+    user_key: str | None = None,
+) -> str | None:
+    """Reserve rate-limit ops and daily row capacity separately (O2-02).
+
+    Rate capacity counts operations (usually 1). Daily capacity counts rows.
+    Returns an error JSON string when unavailable; otherwise None.
+    """
+    if rate_ops <= 0 and daily_slots <= 0:
+        return None
+    now = time.monotonic()
+    key = user_key if user_key is not None else (_current_user_id.get() or "__anonymous__")
+    if key not in _save_timestamps:
+        _save_timestamps[key] = deque()
+    user_timestamps = _save_timestamps[key]
+    while user_timestamps and now - user_timestamps[0] > _RATE_LIMIT_WINDOW:
+        user_timestamps.popleft()
+    if rate_ops > 0 and len(user_timestamps) + rate_ops > _RATE_LIMIT_MAX:
+        oldest = user_timestamps[0] if user_timestamps else now
+        retry_in = int(_RATE_LIMIT_WINDOW - (now - oldest)) + 1
+        return json.dumps({
+            "error": "rate_limit_exceeded",
+            "message": (
+                f"Rate limit exceeded: {_RATE_LIMIT_MAX} saves/{_RATE_LIMIT_WINDOW}s. "
+                f"Try again in {retry_in} seconds."
+            ),
+        })
+
+    config = get_config()
+    if daily_slots > 0 and config.MAX_MEMORIES_PER_DAY > 0:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            today_count = await conn.fetchval(
+                "SELECT COUNT(*)::int FROM memories WHERE created_at >= CURRENT_DATE"
+            ) or 0
+        if today_count + daily_slots > config.MAX_MEMORIES_PER_DAY:
+            return json.dumps({
+                "error": "daily_limit_exceeded",
+                "message": (
+                    f"Daily memory limit of {config.MAX_MEMORIES_PER_DAY} exceeded. "
+                    f"{today_count} memories saved today."
+                ),
+            })
+
+    for _ in range(max(rate_ops, 0)):
+        user_timestamps.append(now)
+    return None
+
+
+async def reserve_write_capacity(*, slots: int = 1, user_key: str | None = None) -> str | None:
+    """Reserve capacity for a single save_memory write (1 rate op + ``slots`` rows)."""
+    if slots <= 0:
+        return None
+    return await _reserve_capacity(rate_ops=1, daily_slots=slots, user_key=user_key)
+
+
+async def reserve_capture_capacity(
+    *, daily_slots: int, user_key: str | None = None
+) -> str | None:
+    """Reserve capacity for one capture operation (1 rate op + ``daily_slots`` rows)."""
+    if daily_slots <= 0:
+        return None
+    return await _reserve_capacity(
+        rate_ops=1, daily_slots=daily_slots, user_key=user_key
+    )
+
+
+def release_capture_rate_reservation(*, user_key: str | None = None) -> None:
+    """Release one previously reserved rate operation for a zero-write capture.
+
+    Daily capacity is a check only (not a retained counter), so only the rate
+    timestamp is popped. Safe no-op when the bucket is empty.
+    """
+    key = user_key if user_key is not None else (_current_user_id.get() or "__anonymous__")
+    timestamps = _save_timestamps.get(key)
+    if timestamps:
+        timestamps.pop()
 
 
 def _memory_payload(memory: Memory) -> dict[str, Any]:
@@ -117,6 +220,45 @@ def _memory_payload(memory: Memory) -> dict[str, Any]:
     if identity is not None:
         payload["canonical_entity"] = identity
     return payload
+
+
+def _normalize_retrieval_contract_arg(
+    retrieval_contract: dict[str, Any] | str | None,
+) -> dict[str, Any] | None:
+    """Accept a dict or JSON object string for optional retrieval contracts."""
+    if retrieval_contract is None:
+        return None
+    if isinstance(retrieval_contract, str):
+        try:
+            parsed = json.loads(retrieval_contract)
+        except json.JSONDecodeError as exc:
+            raise ValueError("retrieval_contract must be a JSON object") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError("retrieval_contract must be a JSON object")
+        return parsed
+    if not isinstance(retrieval_contract, dict):
+        raise ValueError("retrieval_contract must be a JSON object")
+    return retrieval_contract
+
+
+async def _retrieval_units_payload(
+    memories: list[Memory],
+    *,
+    retrieval_contract: dict[str, Any] | str | None = None,
+    work_object: dict[str, Any] | None = None,
+    query_project: str | None = None,
+) -> dict[str, Any]:
+    """Compatibility wrapper: always attach provenance-preserving retrieval units."""
+    contract_arg = _normalize_retrieval_contract_arg(retrieval_contract)
+    projection = await fetch_promotion_projections([m.id for m in memories])
+    result = apply_retrieval_contract(
+        memories,
+        contract=contract_arg,
+        work_object=work_object,
+        query_project=query_project,
+        promotion_projection=projection,
+    )
+    return result.to_dict()
 
 # ContextVar to track the OAuth scopes for the current request (Bearer token auth only)
 _current_scopes: ContextVar[tuple[str, ...]] = ContextVar("current_scopes", default=())
@@ -190,8 +332,10 @@ _EVOLUTION_TOOLS: frozenset[str] = frozenset({
     "query_evolution_history_tool",
 })
 
-# Admin tools require the `admin` OAuth scope (none defined yet)
-_ADMIN_TOOLS: frozenset[str] = frozenset()
+# Admin tools require the `admin` OAuth scope (never granted to API keys / URL tokens)
+_ADMIN_TOOLS: frozenset[str] = frozenset({
+    "promote_memory_authority",
+})
 
 # Valid scopes that can be granted to URL tokens
 _VALID_URL_TOKEN_SCOPES: frozenset[str] = frozenset({"memory", "evolution"})
@@ -307,8 +451,15 @@ class ScopedFastMCP(FastMCP):
         for tool in all_tools:
             if tool.name in _EVOLUTION_TOOLS and "evolution" not in scopes:
                 continue
-            if tool.name in _ADMIN_TOOLS and "admin" not in scopes:
-                continue
+            if tool.name in _ADMIN_TOOLS:
+                # Admin scope alone is insufficient for promotion mutations:
+                # require non-API-key auth and PROMOTION_ADMIN_USERS membership.
+                if "admin" not in scopes or _is_api_key_auth.get():
+                    continue
+                if tool.name == "promote_memory_authority" and not is_promotion_admin_actor(
+                    _current_user_id.get()
+                ):
+                    continue
             filtered.append(tool)
         return filtered
 
@@ -383,7 +534,11 @@ async def __IMPORTANT() -> str:  # noqa: N802
 @mcp.tool(
     description="Step 1: Search memory (hybrid: vector + FTS). Returns index with IDs. "
     "Browse mode: omit query (or use '*') to list memories with filters only. "
-    "Params: query, limit, project, type, obs_type, dateStart, dateEnd, offset, orderBy, filePath, metadata_filter, capture_status, author"
+    "Params: query, limit, project, type, obs_type, dateStart, dateEnd, offset, orderBy, "
+    "filePath, metadata_filter, capture_status, author, retrieval_contract (optional "
+    "retrieval-contract.v1 object or {profile, work_object}), work_object (optional), "
+    "include_retrieval_units (optional; when true or when retrieval_contract is set, "
+    "attach provenance-preserving retrieval units; omitted contract uses compatibility)"
 )
 @logged_tool
 async def search(
@@ -400,6 +555,9 @@ async def search(
     metadata_filter: dict | None = None,
     capture_status: str | None = None,
     author: str | None = None,
+    retrieval_contract: dict | str | None = None,
+    work_object: dict | None = None,
+    include_retrieval_units: bool = False,
 ) -> str:
     """Step 1: Hybrid memory search or browse mode."""
     dl = get_dl()
@@ -420,10 +578,30 @@ async def search(
             author=author,
         )
     )
-    return json.dumps(
-        {"total": result.total, "results": [_memory_payload(m) for m in result.results]},
-        default=str,
-    )
+    payload: dict[str, Any] = {
+        "total": result.total,
+        "results": [_memory_payload(m) for m in result.results],
+    }
+    # Additive: legacy callers keep {total, results}. Typed units are attached when
+    # requested explicitly or when a retrieval contract is supplied.
+    if include_retrieval_units or retrieval_contract is not None:
+        resolved_work_object = work_object or (
+            {"kind": "project", "id": project} if project else None
+        )
+        try:
+            retrieval = await _retrieval_units_payload(
+                list(result.results),
+                retrieval_contract=retrieval_contract,
+                work_object=resolved_work_object,
+                query_project=project,
+            )
+        except (ValueError, RetrievalContractValidationError) as exc:
+            code = getattr(exc, "code", "invalid_retrieval_contract")
+            return json.dumps({"error": code, "message": str(exc)})
+        payload["contract_version"] = retrieval["contract_version"]
+        payload["retrieval_contract"] = retrieval["contract"]
+        payload["retrieval_units"] = retrieval["units"]
+    return json.dumps(payload, default=str)
 
 
 @mcp.tool(
@@ -524,10 +702,11 @@ async def resolve_paperless_reference(document_id: int) -> str:
     "ISO datetime format: 'YYYY-MM-DDTHH:MM:SS' (e.g. '2026-04-15T10:00:00'). "
     "Invalid or missing required datetime fields produce a warning in the response but still save the memory. "
     "provenance: required origin object {producer, source_ref}; source_ref must be namespaced. "
-    "Params: text (required), type, project, title, subtitle, narrative, session_ref, is_test, metadata, provenance, importance, dedup_mode, proposal. "
+    "Params: text (required), type, project, title, subtitle, narrative, session_ref, is_test, metadata, provenance, importance, dedup_mode, proposal, retrieval_contract. "
     "importance: optional retention class (critical|high|medium|low, default medium). "
     "dedup_mode: 'skip' (default) or 'merge' — if 'merge', returns existing id when vector similarity >= DEDUP_THRESHOLD instead of inserting. "
-    "proposal: optional seven-field memory-write proposal; when supplied, the Memory-Write Judge must ALLOW it before persistence."
+    "proposal: optional seven-field memory-write proposal; when supplied, the Memory-Write Judge must ALLOW it before persistence. "
+    "retrieval_contract: optional retrieval-contract.v1 object; when supplied, write-back permissions are enforced before persistence. Omitted preserves current write behavior."
 )
 @logged_tool
 async def save_memory(
@@ -544,6 +723,7 @@ async def save_memory(
     importance: str = "medium",
     dedup_mode: str = "skip",
     proposal: dict | None = None,
+    retrieval_contract: dict | str | None = None,
 ) -> str:
     """Save a new memory entry."""
     if is_test:
@@ -557,6 +737,27 @@ async def save_memory(
     if dedup_mode not in ("skip", "merge"):
         return json.dumps({"error": "invalid_dedup_mode", "message": f"dedup_mode must be 'skip' or 'merge', got: {dedup_mode!r}"})
 
+    try:
+        contract_arg = _normalize_retrieval_contract_arg(retrieval_contract)
+        resolved_write_contract = (
+            resolve_retrieval_contract(
+                contract_arg,
+                work_object={"kind": "project", "id": project}
+                if project
+                else None,
+            )
+            if contract_arg is not None
+            else None
+        )
+        authorize_memory_write_back(
+            resolved_write_contract,
+            proposal=proposal,
+        )
+    except (ValueError, RetrievalContractValidationError) as exc:
+        code = getattr(exc, "code", "invalid_retrieval_contract")
+        return json.dumps({"error": code, "message": str(exc)})
+
+    allow_instruction = False
     if proposal is not None:
         judge_outcome = judge_memory_write_proposal(proposal)
         if judge_outcome.decision != "ALLOW":
@@ -569,6 +770,15 @@ async def save_memory(
             **(metadata or {}),
             **memory_metadata_from_judged_proposal(proposal, judge_outcome),
         }
+        allow_instruction = True
+
+    try:
+        metadata = ensure_epistemic_provenance(
+            metadata,
+            allow_instruction=allow_instruction,
+        )
+    except EpistemicProvenanceValidationError as exc:
+        return json.dumps({"error": exc.code, "message": str(exc)})
 
     # ── AC3 hard invariant: never persist referenced document binaries ─────────
     # paperless_reference metadata may only carry identity/provenance. A binary
@@ -585,41 +795,10 @@ async def save_memory(
             ),
         })
 
-    # ── Rate limit check (per-user sliding window, 10/60s) ─────────────────────
-    # Note: not atomic — concurrent coroutines may slightly exceed the limit. Acceptable for soft guardrail.
-    now = time.monotonic()
-    user_key = _current_user_id.get() or "__anonymous__"
-    if user_key not in _save_timestamps:
-        _save_timestamps[user_key] = deque()
-    user_timestamps = _save_timestamps[user_key]
-    # Prune timestamps older than the window
-    while user_timestamps and now - user_timestamps[0] > _RATE_LIMIT_WINDOW:
-        user_timestamps.popleft()
-    if len(user_timestamps) >= _RATE_LIMIT_MAX:
-        oldest = user_timestamps[0]
-        retry_in = int(_RATE_LIMIT_WINDOW - (now - oldest)) + 1
-        return json.dumps({
-            "error": "rate_limit_exceeded",
-            "message": f"Rate limit exceeded: {_RATE_LIMIT_MAX} saves/{_RATE_LIMIT_WINDOW}s. Try again in {retry_in} seconds.",
-        })
-
-    # ── Daily guard check ──────────────────────────────────────────────────────
-    config = get_config()
-    if config.MAX_MEMORIES_PER_DAY > 0:
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            # DB query for accuracy across restarts and multi-instance deployments
-            today_count = await conn.fetchval(
-                "SELECT COUNT(*)::int FROM memories WHERE created_at >= CURRENT_DATE"
-            ) or 0
-        if today_count >= config.MAX_MEMORIES_PER_DAY:
-            return json.dumps({
-                "error": "daily_limit_exceeded",
-                "message": f"Daily memory limit of {config.MAX_MEMORIES_PER_DAY} exceeded. {today_count} memories saved today.",
-            })
-
-    # Rate-limit slot claimed only after all guards pass
-    user_timestamps.append(now)
+    # ── Rate limit + daily capacity (shared with capture_session_knowledge) ────
+    capacity_error = await reserve_write_capacity(slots=1)
+    if capacity_error is not None:
+        return capacity_error
 
     dl = get_dl()
     user_id = _current_user_id.get()
@@ -646,12 +825,16 @@ async def save_memory(
         user_id=user_id,
         importance=importance,
         dedup_mode=dedup_mode,  # type: ignore[arg-type]
+        # Internal signal only — never derived from caller-authored metadata.
+        instruction_authorized=allow_instruction,
     )
 
     # Save first — must know if duplicate before firing expensive LLM calls.
     try:
         result = await dl.save_memory(save_params)
     except OriginProvenanceValidationError as exc:
+        return json.dumps({"error": exc.code, "message": str(exc)})
+    except EpistemicProvenanceValidationError as exc:
         return json.dumps({"error": exc.code, "message": str(exc)})
 
     # Skip LLM enrichment entirely for duplicates — no wasted API calls, no update_memory.
@@ -753,6 +936,62 @@ async def save_memory(
 
 
 @mcp.tool(
+    description=(
+        "Capture structured session knowledge that separates compact observed "
+        "execution evidence (what_happened) from durable inferred learnings "
+        "(what_was_learned). Decisions are stored as context-specific evidence. "
+        "Unfinished work is returned to the producer and never persisted. "
+        "Idempotent under actor+producer+source_ref+schema_version; a different "
+        "payload under the same identity returns session_knowledge_capture_conflict. "
+        "Does not replace legacy session_summary writers during adapter rollout. "
+        "Params: capture (required typed request object)."
+    )
+)
+@logged_tool
+async def capture_session_knowledge(capture: dict) -> str:
+    """Persist a versioned session-knowledge capture through the judge boundary."""
+    _require_scope("memory")
+    if not isinstance(capture, dict):
+        return json.dumps(
+            {
+                "error": "invalid_capture",
+                "message": "capture must be a JSON object",
+            }
+        )
+    from open_brain.session_knowledge import CaptureCapacityError
+
+    actor = _current_user_id.get()
+    if not actor:
+        return json.dumps(
+            {
+                "error": "missing_actor",
+                "message": "authenticated principal required for session-knowledge capture",
+            }
+        )
+
+    async def _reserve(*, daily_slots: int) -> str | None:
+        return await reserve_capture_capacity(
+            daily_slots=daily_slots, user_key=actor
+        )
+
+    def _release() -> None:
+        release_capture_rate_reservation(user_key=actor)
+
+    dl = get_dl()
+    try:
+        result = await capture_session_knowledge_op(
+            capture,
+            data_layer=dl,
+            actor=actor,
+            capacity_reserve=_reserve,
+            capacity_release=_release,
+        )
+    except CaptureCapacityError as exc:
+        return exc.payload
+    return json.dumps(result.to_dict())
+
+
+@mcp.tool(
     description="Update an existing memory by ID. Only provided fields are changed. "
     "Re-embeds automatically if text/title/subtitle/narrative change. "
     "Use to correct, consolidate, or enrich existing memories instead of creating duplicates. "
@@ -773,18 +1012,23 @@ async def update_memory(
 ) -> str:
     """Update an existing memory entry."""
     dl = get_dl()
-    result = await dl.update_memory(
-        UpdateMemoryParams(
-            id=id,
-            text=text,
-            type=type,
-            project=project,
-            title=title,
-            subtitle=subtitle,
-            narrative=narrative,
-            metadata=metadata,
+    try:
+        result = await dl.update_memory(
+            UpdateMemoryParams(
+                id=id,
+                text=text,
+                type=type,
+                project=project,
+                title=title,
+                subtitle=subtitle,
+                narrative=narrative,
+                metadata=metadata,
+            )
         )
-    )
+    except EpistemicProvenanceValidationError as exc:
+        return json.dumps({"error": exc.code, "message": str(exc)})
+    except OriginProvenanceValidationError as exc:
+        return json.dumps({"error": exc.code, "message": str(exc)})
     return json.dumps({"id": result.id, "message": result.message})
 
 
@@ -834,21 +1078,26 @@ async def approved_canonical_entity_update(
 ) -> str:
     """Apply an explicitly approved canonical entity update or soft archive."""
     dl = get_dl()
-    result = await dl.approved_update_canonical_entity(
-        ApprovedCanonicalEntityUpdateParams(
-            id=id,
-            actor=actor,
-            note=note,
-            operation=operation,
-            text=text,
-            type=type,
-            project=project,
-            title=title,
-            subtitle=subtitle,
-            narrative=narrative,
-            metadata=metadata,
+    try:
+        result = await dl.approved_update_canonical_entity(
+            ApprovedCanonicalEntityUpdateParams(
+                id=id,
+                actor=actor,
+                note=note,
+                operation=operation,
+                text=text,
+                type=type,
+                project=project,
+                title=title,
+                subtitle=subtitle,
+                narrative=narrative,
+                metadata=metadata,
+            )
         )
-    )
+    except EpistemicProvenanceValidationError as exc:
+        return json.dumps({"error": exc.code, "message": str(exc)})
+    except OriginProvenanceValidationError as exc:
+        return json.dumps({"error": exc.code, "message": str(exc)})
     return json.dumps({"id": result.id, "message": result.message})
 
 
@@ -870,29 +1119,118 @@ async def search_by_concept(
     )
 
 
-@mcp.tool(description="Get recent session context. Params: limit, project")
+@mcp.tool(
+    description=(
+        "Get recent session context. Params: limit, project, retrieval_contract "
+        "(optional retrieval-contract.v1 object or {profile, work_object}), "
+        "include_retrieval_contract (optional; attach constrained contract metadata)"
+    )
+)
 @logged_tool
-async def get_context(limit: int | None = None, project: str | None = None) -> str:
-    """Get recent sessions."""
+async def get_context(
+    limit: int | None = None,
+    project: str | None = None,
+    retrieval_contract: dict | str | None = None,
+    work_object: dict | None = None,
+    include_retrieval_contract: bool = False,
+) -> str:
+    """Get recent sessions under an optional retrieval contract."""
     dl = get_dl()
     result = await dl.get_context(limit, project)
-    return json.dumps(result, default=str)
+    payload: dict[str, Any] = (
+        dict(result) if isinstance(result, dict) else {"sessions": result}
+    )
+    if include_retrieval_contract or retrieval_contract is not None:
+        try:
+            resolved_work_object = work_object or (
+                {"kind": "project", "id": project} if project else None
+            )
+            # Same typed failure contract + project/work-object binding as search.
+            retrieval = await _retrieval_units_payload(
+                [],
+                retrieval_contract=retrieval_contract,
+                work_object=resolved_work_object,
+                query_project=project,
+            )
+        except (ValueError, RetrievalContractValidationError) as exc:
+            code = getattr(exc, "code", "invalid_retrieval_contract")
+            return json.dumps({"error": code, "message": str(exc)})
+        payload["contract_version"] = retrieval["contract_version"]
+        payload["retrieval_contract"] = retrieval["contract"]
+        # Session listings never carry high authority.
+        payload["high_authority_units"] = []
+    return json.dumps(payload, default=str)
 
 
 @mcp.tool(
     description=(
-        "Get session start wake-up pack. Returns memories grouped by category "
-        "(identity, decisions, constraints, errors, project) within a token budget. "
-        "Params: token_budget (default 500), project (optional filter by project name)"
+        "Get session start wake-up pack under retrieval-contract.v1. "
+        "Without retrieval_contract, uses the constrained compatibility profile "
+        "(evidence/context only). Params: token_budget (default 500), project, "
+        "retrieval_contract (optional), work_object (optional), as_envelope "
+        "(default false; when true returns a typed evidence envelope JSON package)"
     )
 )
 @logged_tool
-async def get_wake_up_pack(token_budget: int = 500, project: str | None = None) -> str:
+async def get_wake_up_pack(
+    token_budget: int = 500,
+    project: str | None = None,
+    retrieval_contract: dict | str | None = None,
+    work_object: dict | None = None,
+    as_envelope: bool = False,
+) -> str:
     """Get categorized memory context optimized for session start injection."""
-    from open_brain.wake_up import build_wake_up_pack
+    from open_brain.wake_up import build_wake_up_pack, compile_wake_up_units
+
     dl = get_dl()
     memories = await dl.get_wake_up_memories(project=project)
-    return build_wake_up_pack(memories, token_budget)
+    resolved_work_object = work_object or {
+        "kind": "project",
+        "id": project or "wake-up",
+    }
+    contract_arg = _normalize_retrieval_contract_arg(retrieval_contract)
+    projection = await fetch_promotion_projections([m.id for m in memories])
+    markdown = build_wake_up_pack(
+        memories,
+        token_budget,
+        retrieval_contract=contract_arg,
+        work_object=resolved_work_object,
+        promotion_projection=projection,
+    )
+    if not as_envelope and contract_arg is None:
+        # Additive compatibility: legacy callers still receive markdown text.
+        return markdown
+
+    compiled = compile_wake_up_units(
+        memories,
+        retrieval_contract=contract_arg,
+        work_object=resolved_work_object,
+        promotion_projection=projection,
+    )
+    envelope = build_wake_up_pack(
+        memories,
+        token_budget,
+        retrieval_contract=contract_arg,
+        work_object=resolved_work_object,
+        as_envelope=True,
+        promotion_projection=projection,
+    )
+    return json.dumps(
+        {
+            "contract_version": compiled.contract_version,
+            "retrieval_contract": compiled.contract.to_dict(),
+            "retrieval_units": [unit.to_dict() for unit in compiled.units],
+            "high_authority_units": [
+                unit.to_dict()
+                for unit in compiled.units
+                if unit.effective_influence
+                in {"identity", "constraint", "policy", "system_instruction"}
+            ],
+            "envelope": envelope,
+            "markdown_compat": markdown,
+        },
+        default=str,
+    )
 
 
 @mcp.tool(description="Get database statistics (memory count, sessions, DB size, type taxonomy with counts)")
@@ -915,6 +1253,117 @@ async def origin_provenance_report() -> str:
     dl = get_dl()
     result = await dl.origin_provenance_report()
     return json.dumps(result, default=str)
+
+
+@mcp.tool(
+    description=(
+        "Manually inspect epistemic provenance coverage. Separate from origin lineage: "
+        "reports labeled/unlabeled/partial/ambiguous cohorts without migrations or writes."
+    )
+)
+async def epistemic_provenance_report() -> str:
+    """Return epistemic provenance coverage cohorts without changing the store."""
+    dl = get_dl()
+    result = await dl.epistemic_provenance_report()
+    return json.dumps(result, default=str)
+
+
+@mcp.tool(
+    description=(
+        "Conservatively backfill epistemic provenance on unlabeled memories. "
+        "Dry-run by default (apply=false) and may inventory the full cohort. "
+        "Apply mode is bounded by limit (default 500, max 1000) and optional after_id "
+        "keyset cursor. Ambiguous rows are counted, never silently promoted. "
+        "Does not modify canonical origin lineage, never rewrites updated_at, "
+        "and never hard-deletes."
+    )
+)
+async def backfill_epistemic_provenance(
+    apply: bool = False,
+    limit: int | None = None,
+    after_id: int | None = None,
+) -> str:
+    """Dry-run or apply conservative epistemic provenance backfill."""
+    dl = get_dl()
+    try:
+        result = await dl.backfill_epistemic_provenance(
+            apply=apply,
+            limit=limit,
+            after_id=after_id,
+        )
+    except EpistemicProvenanceValidationError as exc:
+        return json.dumps({"error": exc.code, "message": str(exc)})
+    return json.dumps(result, default=str)
+
+
+@mcp.tool(
+    description=(
+        "Promote, dispute, or supersede a memory's epistemic authority. "
+        "Requires OAuth admin scope, membership in PROMOTION_ADMIN_USERS, and a "
+        "signed promotion grant for every transition (including dispute and "
+        "supersession). API keys and URL tokens are denied. Supersession requires "
+        "successor_memory_id and creates a supersedes relationship. Every attempt "
+        "appends an immutable ledger event."
+    )
+)
+@logged_tool
+async def promote_memory_authority(
+    memory_id: int,
+    target_state: str,
+    reason: str,
+    evidence_refs: list[str] | None = None,
+    promotion_grant: str | None = None,
+    successor_memory_id: int | None = None,
+    authorization_mode: str = "signed_grant",
+    rule_version: str | None = None,
+) -> str:
+    """Allowlisted-admin epistemic promotion / dispute / supersession mutation."""
+    if _is_api_key_auth.get():
+        raise ScopeDeniedError(
+            "Scope 'admin' required; API keys cannot obtain promotion authority"
+        )
+    _require_scope("admin")
+    actor = _current_user_id.get()
+    if not actor:
+        raise ScopeDeniedError("Scope 'admin' required; authenticated actor missing")
+    if not is_promotion_admin_actor(actor):
+        raise ScopeDeniedError(
+            "Scope 'admin' required; actor is not in PROMOTION_ADMIN_USERS"
+        )
+    try:
+        params = PromotionAttemptParams(
+            memory_id=memory_id,
+            target_state=target_state,
+            reason=reason,
+            evidence_refs=list(evidence_refs or []),
+            actor=actor,
+            promotion_grant=promotion_grant,
+            successor_memory_id=successor_memory_id,
+            authorization_mode=authorization_mode,  # type: ignore[arg-type]
+            rule_version=rule_version,
+        )
+        result = await attempt_memory_promotion(params)
+    except (PromotionError, ValueError) as exc:
+        code = getattr(exc, "code", "invalid_request")
+        return json.dumps({"error": code, "message": str(exc)})
+    return json.dumps(result.to_dict(), default=str)
+
+
+@mcp.tool(
+    description=(
+        "Read-only reconstruction of promotion, dispute, and supersession history "
+        "for a memory. Available under ordinary authenticated memory scope."
+    )
+)
+@logged_tool
+async def get_memory_promotion_history(memory_id: int) -> str:
+    """Return append-only promotion ledger events for one memory."""
+    _require_scope("memory")
+    try:
+        events = await list_memory_promotion_history(memory_id)
+    except PromotionError as exc:
+        return json.dumps({"error": exc.code, "message": str(exc)})
+    return json.dumps({"memory_id": memory_id, "events": events}, default=str)
 
 
 @mcp.tool(description="Get ingest observability stats: counters for ingests, LLM calls, dedup decisions, relationships, memories written, and ingest durations.")
@@ -1620,13 +2069,17 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
                 # Admin scope is intentionally excluded — admin is reserved for
                 # OAuth sessions. Token management endpoints accept _is_api_key_auth
                 # as an alternative to admin scope.
+                # Stable logical actor for the configured API-key path.
+                # Never derive from raw credential material (including digests).
                 scopes_token = _current_scopes.set(("memory", "evolution"))
                 api_key_token = _is_api_key_auth.set(True)
+                user_token = _current_user_id.set("api-key:configured")
                 try:
                     return await call_next(request)
                 finally:
                     _current_scopes.reset(scopes_token)
                     _is_api_key_auth.reset(api_key_token)
+                    _current_user_id.reset(user_token)
             return JSONResponse(
                 {"error": "unauthorized", "error_description": "Invalid API key"},
                 status_code=401,
@@ -1676,11 +2129,15 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
                 scopes_list = list(raw_scopes)
             safe_scopes = tuple(s for s in scopes_list if s != "admin")
 
+            # Stable actor from the URL-token record name (never the raw secret).
+            token_name = str(row["name"])
             scopes_token = _current_scopes.set(safe_scopes)
+            user_token = _current_user_id.set(f"url-token:{token_name}")
             try:
                 return await call_next(request)
             finally:
                 _current_scopes.reset(scopes_token)
+                _current_user_id.reset(user_token)
 
         # Fall back to Bearer token
         auth_header = request.headers.get("authorization", "")
@@ -2957,17 +3414,76 @@ async def api_context(
 async def api_wake_up_pack(
     token_budget: int = 500,
     project: str | None = None,
+    format: str = "markdown",
+    profile: str = "compatibility",
 ) -> Response:
     """Get session start wake-up pack (for SessionStart hook).
 
-    Returns markdown-formatted memories organized by category within token_budget.
-    Optional project filter: only return memories for this project (filtered at DB level).
+    Defaults preserve legacy markdown + ``text/markdown`` under the constrained
+    compatibility profile. The SessionStart hook opts into
+    ``format=envelope&profile=claude-wake-up`` explicitly.
     """
+    from open_brain.retrieval_contract import (
+        PROFILE_NAMES,
+        RetrievalContractValidationError,
+    )
     from open_brain.wake_up import build_wake_up_pack
+
+    allowed_formats = {"markdown", "envelope"}
+    if format not in allowed_formats:
+        return Response(
+            content=json.dumps(
+                {
+                    "error": "invalid_wake_up_format",
+                    "message": f"format must be one of {sorted(allowed_formats)}",
+                }
+            ),
+            status_code=400,
+            media_type="application/json",
+        )
+    if profile not in PROFILE_NAMES:
+        return Response(
+            content=json.dumps(
+                {
+                    "error": "invalid_wake_up_profile",
+                    "message": f"profile must be one of {sorted(PROFILE_NAMES)}",
+                }
+            ),
+            status_code=400,
+            media_type="application/json",
+        )
+
     dl = get_dl()
     memories = await dl.get_wake_up_memories(project=project)
-    result = build_wake_up_pack(memories, token_budget)
-    return Response(content=result, media_type="text/markdown")
+    work_object = {"kind": "project", "id": project or "wake-up"}
+    contract = {"profile": profile, "work_object": work_object}
+    projection = await fetch_promotion_projections([m.id for m in memories])
+    try:
+        if format == "markdown":
+            result = build_wake_up_pack(
+                memories,
+                token_budget,
+                retrieval_contract=contract,
+                work_object=work_object,
+                promotion_projection=projection,
+            )
+            return Response(content=result, media_type="text/markdown")
+
+        envelope = build_wake_up_pack(
+            memories,
+            token_budget,
+            retrieval_contract=contract,
+            work_object=work_object,
+            as_envelope=True,
+            promotion_projection=projection,
+        )
+        return Response(content=envelope, media_type="text/plain")
+    except RetrievalContractValidationError as exc:
+        return Response(
+            content=json.dumps({"error": exc.code, "message": str(exc)}),
+            status_code=400,
+            media_type="application/json",
+        )
 
 
 # Mount MCP sub-app AFTER all routes (mount at "/" catches everything)

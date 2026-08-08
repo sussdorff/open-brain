@@ -105,9 +105,24 @@ pass `source` as a variable (e.g. chosen at runtime), constrain that
 variable's possible values to `ALLOWED_SESSION_SUMMARY_SOURCES` inside
 the writer itself — do not rely on the AST scan to catch drift.
 
+## Session-knowledge capture (adapter rollout)
+
+Open Brain also owns `capture_session_knowledge`
+(`session-knowledge-capture.v1`), which stores compact observed session events
+separately from inferred learnings. During adapter rollout, existing
+`session_summary` writers in this catalog remain fully supported and unchanged.
+
+The external `ccore session-close` producer is not modified in this repository.
+The handoff is: keep writing `session_summary` until the producer switches to
+`capture_session_knowledge` with the same
+`agent-session:<harness>:<session-id>` identity. See
+`docs/features/session-knowledge-capture.md` and
+`skills/session-knowledge-capture/SKILL.md`.
+
 ## Related beads
 
 - `open-brain-d4n` — introduced `summarize_transcript_turns` and the
   original behavioral allowlist test.
 - `open-brain-d8x` — this hardening pass: AST scan + standards doc +
   single-source-of-truth constant.
+- `open-brain-ekn.9` — structured session-knowledge capture boundary.

@@ -438,6 +438,55 @@ class TestFilterTurns:
         assert turns[1]["content"] == "answer"
 
 
+# ─── Compatibility with session-knowledge capture (open-brain-ekn.9) ──────────
+
+
+class TestSessionSummaryCompatibilityDuringCaptureRollout:
+    """Legacy session_summary writers remain supported during adapter rollout."""
+
+    @pytest.mark.asyncio
+    async def test_session_end_writer_unchanged_alongside_capture_contract(self, mock_dl):
+        from open_brain.session_knowledge import SESSION_KNOWLEDGE_CAPTURE_SCHEMA_VERSION
+        from open_brain.session_summary import ALLOWED_SESSION_SUMMARY_SOURCES
+
+        assert SESSION_KNOWLEDGE_CAPTURE_SCHEMA_VERSION == "session-knowledge-capture.v1"
+        assert "session-end-hook" in ALLOWED_SESSION_SUMMARY_SOURCES
+        assert "session-close" in ALLOWED_SESSION_SUMMARY_SOURCES
+
+        mock_summary = {"title": "Compat", "content": "Still works", "narrative": None}
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(return_value=None)
+        mock_pool = MagicMock()
+        mock_pool.acquire = MagicMock(return_value=_async_ctx_manager(mock_conn))
+
+        with patch("open_brain.session_summary.get_pool", return_value=mock_pool):
+            with patch("open_brain.session_summary.get_dl", return_value=mock_dl):
+                with patch(
+                    "open_brain.session_summary.llm_complete",
+                    new_callable=AsyncMock,
+                    return_value="{}",
+                ):
+                    with patch(
+                        "open_brain.session_summary.parse_llm_json",
+                        return_value=mock_summary,
+                    ):
+                        from open_brain.session_summary import summarize_transcript_turns
+
+                        result = await summarize_transcript_turns(
+                            project=SAMPLE_PROJECT,
+                            session_id=SAMPLE_SESSION_ID,
+                            turns=SAMPLE_TURNS,
+                            source="session-close",
+                            reason="adapter-rollout-compat",
+                        )
+
+        assert result is not None
+        call_params = mock_dl.save_memory.call_args[0][0]
+        assert call_params.type == "session_summary"
+        assert call_params.metadata["source"] == "session-close"
+        assert call_params.provenance["producer"] == "session-close"
+
+
 # ─── Helper ───────────────────────────────────────────────────────────────────
 
 class _async_ctx_manager:

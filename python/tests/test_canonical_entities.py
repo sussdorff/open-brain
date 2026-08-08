@@ -1,11 +1,21 @@
 """Tests for canonical entity identity and approved maintenance paths."""
 
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 import json
 
 import pytest
 
 from open_brain.data_layer.interface import Memory, SearchResult
+
+
+def _attach_transaction(conn: AsyncMock) -> AsyncMock:
+    @asynccontextmanager
+    async def fake_transaction(*_args, **_kwargs):
+        yield
+
+    conn.transaction = MagicMock(side_effect=fake_transaction)
+    return conn
 
 
 def _memory(
@@ -126,7 +136,7 @@ async def test_approved_canonical_update_preserves_id_and_appends_audit() -> Non
         "narrative": None,
         "content": "Original content",
     }
-    conn = AsyncMock()
+    conn = _attach_transaction(AsyncMock())
     conn.fetchrow = AsyncMock(return_value=existing)
     conn.execute = AsyncMock(return_value="UPDATE 1")
     pool = MagicMock()
@@ -173,7 +183,7 @@ async def test_approved_canonical_archive_sets_status_and_preserves_audit() -> N
         "narrative": None,
         "content": "Project content",
     }
-    conn = AsyncMock()
+    conn = _attach_transaction(AsyncMock())
     conn.fetchrow = AsyncMock(return_value=existing)
     conn.execute = AsyncMock(return_value="UPDATE 1")
     pool = MagicMock()
@@ -226,7 +236,7 @@ async def test_approved_canonical_update_ignores_caller_supplied_audit_key() -> 
         "narrative": None,
         "content": "Original content",
     }
-    conn = AsyncMock()
+    conn = _attach_transaction(AsyncMock())
     conn.fetchrow = AsyncMock(return_value=existing)
     conn.execute = AsyncMock(return_value="UPDATE 1")
     pool = MagicMock()

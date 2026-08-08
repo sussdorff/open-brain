@@ -40,3 +40,6 @@ src-ts-DEPRECATED/
 .worktree-handoff.json
 .worktree-turns.jsonl
 session-close-summary.txt
+
+# Orchestrator local scratch (never commit)
+.orchestration/

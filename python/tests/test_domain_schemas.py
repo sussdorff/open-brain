@@ -163,10 +163,21 @@ class TestPersonMetadata:
             )
             data = json.loads(result)
             assert data["id"] == 42
-            # Verify save_memory was called with the person metadata
+            # Verify save_memory was called with the person metadata intact
             call_args = mock_dl.save_memory.call_args[0][0]
-            assert call_args.metadata == person_meta
             assert call_args.type == "person"
+            assert call_args.metadata["name"] == "Alice Smith"
+            assert call_args.metadata["org"] == "Acme Corp"
+            assert call_args.metadata["role"] == "CTO"
+            assert call_args.metadata["relationship"] == "client"
+            assert call_args.metadata["last_contact"] == "2026-04-01T14:00:00"
+            # Conservative default epistemic provenance is additive, not destructive.
+            assert call_args.metadata["provenance"]["source_label"] == "inferred"
+            assert call_args.metadata["provenance"]["expected_use"] == "evidence"
+            assert (
+                call_args.metadata["provenance"]["epistemic_version"]
+                == "epistemic-provenance.v1"
+            )
 
     @pytest.mark.asyncio
     async def test_person_with_invalid_last_contact_saves_with_warning(self, mock_dl):

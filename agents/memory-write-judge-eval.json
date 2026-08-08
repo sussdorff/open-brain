@@ -280,6 +280,49 @@
       },
       "expected_decision": "ESCALATE",
       "expected_reason_category": "scope"
+    },
+    {
+      "case_id": "block-secret-with-duplicate-flag",
+      "proposal": {
+        "intended_memory_content": "API token begins with redacted.",
+        "category": "fact",
+        "source_citation": {"ref": "terminal://env-output", "label": "observed"},
+        "authorization_basis": {"ref": "conversation://current/save-request", "label": "observed", "granted_by": "user"},
+        "expected_use": "evidence",
+        "retention_scope": "personal",
+        "risk_flags": ["secret", "secret"]
+      },
+      "expected_decision": "BLOCK",
+      "expected_reason_category": "risk"
+    },
+    {
+      "case_id": "block-secret-with-unexpected-key",
+      "proposal": {
+        "intended_memory_content": "API token begins with redacted.",
+        "category": "fact",
+        "source_citation": {"ref": "terminal://env-output", "label": "observed"},
+        "authorization_basis": {"ref": "conversation://current/save-request", "label": "observed", "granted_by": "user"},
+        "expected_use": "evidence",
+        "retention_scope": "personal",
+        "risk_flags": ["secret"],
+        "actor_note": "please persist"
+      },
+      "expected_decision": "BLOCK",
+      "expected_reason_category": "risk"
+    },
+    {
+      "case_id": "block-credential-with-vague-locator",
+      "proposal": {
+        "intended_memory_content": "Database password is redacted.",
+        "category": "fact",
+        "source_citation": {"ref": "somewhere", "label": "observed"},
+        "authorization_basis": {"ref": "conversation://current/save-request", "label": "observed", "granted_by": "user"},
+        "expected_use": "evidence",
+        "retention_scope": "personal",
+        "risk_flags": ["credential"]
+      },
+      "expected_decision": "BLOCK",
+      "expected_reason_category": "risk"
     }
   ]
 }
