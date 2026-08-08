@@ -1555,11 +1555,13 @@ class TestSearchMetadataFilter:
             )
 
         assert len(result.results) == 1
-        # Verify the fetch call used @> containment (not per-key ->> text equality)
+        # Verify the fetch call used @> containment (not per-key ->> text equality).
+        # Lifecycle/supersession exclusions may use ->>/#>> independently.
         fetch_call = conn.fetch.call_args
         fetch_sql = fetch_call[0][0]
         assert "metadata @>" in fetch_sql
-        assert "metadata->>" not in fetch_sql
+        assert "metadata->>'status' =" not in fetch_sql
+        assert "superseded_by_operation" in fetch_sql
         # The JSONB value should appear as a single dict arg (asyncpg handles encoding)
         fetch_args = fetch_call[0]
         assert any(isinstance(a, dict) and a.get("status") == "open" for a in fetch_args)
@@ -1588,7 +1590,9 @@ class TestSearchMetadataFilter:
         fetch_sql = fetch_call[0][0]
         # Single @> containment condition for all keys (not one ->> per key)
         assert fetch_sql.count("metadata @>") == 1
-        assert "metadata->>" not in fetch_sql
+        assert "metadata->>'status' =" not in fetch_sql
+        assert "metadata->>'source' =" not in fetch_sql
+        assert "superseded_by_operation" in fetch_sql
         # Both keys and values must appear in one dict arg (asyncpg handles encoding)
         fetch_args = fetch_call[0]
         assert any(

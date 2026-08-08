@@ -799,6 +799,12 @@ async def _run_migrations(conn: asyncpg.Connection) -> None:
                   AND (p_user_id IS NULL OR m.user_id = p_user_id)
                   AND (p_metadata_filter IS NULL OR m.metadata @> p_metadata_filter)
                   AND (p_capture_status IS NULL OR m.metadata->>'capture_status' = p_capture_status)
+                  AND (
+                    p_capture_status IS NOT NULL
+                    OR m.metadata->>'status' IS NULL
+                    OR m.metadata->>'status' <> 'archived'
+                  )
+                  AND m.metadata #>> '{session_knowledge_migration,superseded_by_operation}' IS NULL
                 ORDER BY ts_rank_cd(m.search_vector, websearch_to_tsquery('english', query_text)) DESC
                 LIMIT match_limit * 2
               ),
@@ -811,6 +817,12 @@ async def _run_migrations(conn: asyncpg.Connection) -> None:
                   AND (p_user_id IS NULL OR m.user_id = p_user_id)
                   AND (p_metadata_filter IS NULL OR m.metadata @> p_metadata_filter)
                   AND (p_capture_status IS NULL OR m.metadata->>'capture_status' = p_capture_status)
+                  AND (
+                    p_capture_status IS NOT NULL
+                    OR m.metadata->>'status' IS NULL
+                    OR m.metadata->>'status' <> 'archived'
+                  )
+                  AND m.metadata #>> '{session_knowledge_migration,superseded_by_operation}' IS NULL
                 ORDER BY m.embedding <=> query_embedding
                 LIMIT match_limit * 2
               ),
@@ -893,6 +905,51 @@ async def _run_migrations(conn: asyncpg.Connection) -> None:
             END;
             $$;
         """)
+    # Legacy session-knowledge migration ledgers (open-brain-ekn.8).
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS session_knowledge_migration_operations (
+            operation_id UUID PRIMARY KEY,
+            status TEXT NOT NULL
+                CHECK (status IN (
+                    'running', 'completed', 'completed_with_errors',
+                    'failed', 'replayed', 'blocked', 'conflict'
+                )),
+            parameters JSONB NOT NULL DEFAULT '{}'::jsonb,
+            evidence_digest TEXT,
+            cursor TEXT,
+            counters JSONB NOT NULL DEFAULT '{}'::jsonb,
+            provider_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            error TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            completed_at TIMESTAMPTZ
+        );
+    """)
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_skm_operations_status_created
+        ON session_knowledge_migration_operations (status, created_at DESC);
+    """)
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS session_knowledge_migration_mappings (
+            operation_id UUID NOT NULL
+                REFERENCES session_knowledge_migration_operations(operation_id)
+                ON DELETE CASCADE,
+            source_id BIGINT NOT NULL,
+            source_type TEXT,
+            source_content_hash TEXT,
+            output_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+            routes JSONB NOT NULL DEFAULT '[]'::jsonb,
+            status TEXT NOT NULL DEFAULT 'completed',
+            error TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (operation_id, source_id)
+        );
+    """)
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_skm_mappings_source
+        ON session_knowledge_migration_mappings (source_id);
+    """)
 
 
 async def get_pool(run_migrations: bool | None = None) -> asyncpg.Pool:
@@ -1197,6 +1254,17 @@ class PostgresDataLayer:
                 )
                 values.append(query)
                 param_idx += 1
+            # Normal browse/retrieval excludes archived + migration-superseded rows.
+            # Capture-inbox browse (explicit capture_status) may include archived lifecycle
+            # captures, but still hides migration-superseded sources.
+            conditions.append(
+                "m.metadata #>> '{session_knowledge_migration,superseded_by_operation}' IS NULL"
+            )
+            if params.capture_status is None:
+                conditions.append(
+                    "(m.metadata->>'status' IS NULL "
+                    "OR m.metadata->>'status' <> 'archived')"
+                )
 
             where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
             order_by = "m.created_at ASC" if params.order_by == "oldest" else "m.created_at DESC"

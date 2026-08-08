@@ -187,6 +187,46 @@ CREATE TABLE IF NOT EXISTS session_learning_analysis_runs (
 CREATE INDEX IF NOT EXISTS idx_session_learning_analysis_runs_status_created
   ON session_learning_analysis_runs (status, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS session_knowledge_migration_operations (
+  operation_id UUID PRIMARY KEY,
+  status TEXT NOT NULL
+    CHECK (status IN (
+      'running', 'completed', 'completed_with_errors',
+      'failed', 'replayed', 'blocked', 'conflict'
+    )),
+  parameters JSONB NOT NULL DEFAULT '{}'::jsonb,
+  evidence_digest TEXT,
+  cursor TEXT,
+  counters JSONB NOT NULL DEFAULT '{}'::jsonb,
+  provider_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  completed_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_skm_operations_status_created
+  ON session_knowledge_migration_operations (status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS session_knowledge_migration_mappings (
+  operation_id UUID NOT NULL
+    REFERENCES session_knowledge_migration_operations(operation_id)
+    ON DELETE CASCADE,
+  source_id BIGINT NOT NULL,
+  source_type TEXT,
+  source_content_hash TEXT,
+  output_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+  routes JSONB NOT NULL DEFAULT '[]'::jsonb,
+  status TEXT NOT NULL DEFAULT 'completed',
+  error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (operation_id, source_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_skm_mappings_source
+  ON session_knowledge_migration_mappings (source_id);
+
 CREATE TABLE IF NOT EXISTS memory_relationships (
   id SERIAL PRIMARY KEY,
   source_id INTEGER REFERENCES memories(id) ON DELETE CASCADE,
@@ -362,6 +402,12 @@ LANGUAGE sql STABLE AS $fn$
       AND (p_user_id IS NULL OR m.user_id = p_user_id)
       AND (p_metadata_filter IS NULL OR m.metadata @> p_metadata_filter)
       AND (p_capture_status IS NULL OR m.metadata->>'capture_status' = p_capture_status)
+      AND (
+        p_capture_status IS NOT NULL
+        OR m.metadata->>'status' IS NULL
+        OR m.metadata->>'status' <> 'archived'
+      )
+      AND m.metadata #>> '{session_knowledge_migration,superseded_by_operation}' IS NULL
     ORDER BY ts_rank_cd(m.search_vector, websearch_to_tsquery('english', query_text)) DESC
     LIMIT match_limit * 2
   ),
@@ -374,6 +420,12 @@ LANGUAGE sql STABLE AS $fn$
       AND (p_user_id IS NULL OR m.user_id = p_user_id)
       AND (p_metadata_filter IS NULL OR m.metadata @> p_metadata_filter)
       AND (p_capture_status IS NULL OR m.metadata->>'capture_status' = p_capture_status)
+      AND (
+        p_capture_status IS NOT NULL
+        OR m.metadata->>'status' IS NULL
+        OR m.metadata->>'status' <> 'archived'
+      )
+      AND m.metadata #>> '{session_knowledge_migration,superseded_by_operation}' IS NULL
     ORDER BY m.embedding <=> query_embedding
     LIMIT match_limit * 2
   ),

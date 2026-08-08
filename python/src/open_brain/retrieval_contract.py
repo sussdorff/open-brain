@@ -2071,6 +2071,16 @@ def apply_retrieval_contract(
     units_list: list[RetrievalUnit] = []
     if "memory" in resolved.retrieval_units:
         for memory in memories:
+            metadata = getattr(memory, "metadata", None) or {}
+            if not isinstance(metadata, Mapping):
+                metadata = {}
+            # Reversibly archived / migration-superseded sources stay out of
+            # normal retrieval-contract surfaces (K1-03).
+            if metadata.get("status") == "archived":
+                continue
+            skm = metadata.get("session_knowledge_migration")
+            if isinstance(skm, Mapping) and skm.get("superseded_by_operation"):
+                continue
             units_list.append(
                 memory_to_retrieval_unit(
                     memory,
