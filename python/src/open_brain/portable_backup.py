@@ -104,6 +104,12 @@ FORBIDDEN_METADATA_KEY_MARKERS: tuple[str, ...] = (
     "session_token",
 )
 
+# Key names that match a marker but are known receipt fields, not credentials:
+# session-close ship receipts record secret-scan outcomes ("clean", counters,
+# scanner version) under keys like ``secret_scan`` / ``secret_scan_status``.
+# Only the key NAME is exempted — values are still scanned recursively.
+EXPORT_SAFE_KEY_PREFIXES: tuple[str, ...] = ("secret_scan",)
+
 
 class RestoreTargetNotEmptyError(RuntimeError):
     """Raised when a restore target already contains portable knowledge rows."""
@@ -331,7 +337,9 @@ def _scan_forbidden_keys(value: Any, path: str = "") -> list[str]:
             key_str = str(key)
             key_path = f"{path}.{key_str}" if path else key_str
             lowered = key_str.lower()
-            if any(marker in lowered for marker in FORBIDDEN_METADATA_KEY_MARKERS):
+            if any(
+                marker in lowered for marker in FORBIDDEN_METADATA_KEY_MARKERS
+            ) and not lowered.startswith(EXPORT_SAFE_KEY_PREFIXES):
                 findings.append(key_path)
             findings.extend(_scan_forbidden_keys(item, key_path))
     elif isinstance(value, list):

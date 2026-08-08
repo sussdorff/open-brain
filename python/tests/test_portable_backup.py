@@ -562,6 +562,54 @@ async def test_export_raises_on_deeply_nested_forbidden_key(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
+async def test_export_allows_secret_scan_receipt_keys(tmp_path: Path) -> None:
+    """secret_scan* receipt keys (scan outcomes, not credentials) export cleanly."""
+    bundle = tmp_path / "bundle"
+    store = FixturePortableStore()
+    store.records["memories"][0]["metadata"]["secret_scan"] = "clean"
+    store.records["memories"][0]["metadata"]["secret_scan_status"] = "clean"
+    store.records["memories"][1]["metadata"]["ship_receipt"] = {
+        "secret_scan": {
+            "status": "clean",
+            "findings": [],
+            "commit_count": 5,
+            "scanner_version": "8.30.1",
+        },
+        "secret_scan_commit_count": 4,
+    }
+
+    receipt = await portable_backup.export_bundle(
+        bundle,
+        store,
+        source_label="fixture",
+        created_at=FIXED_EXPORT_TIME,
+    )
+    assert (bundle / "manifest.json").exists()
+    assert receipt["record_counts"]["memories"] >= 2
+
+
+@pytest.mark.asyncio
+async def test_export_still_rejects_credentials_inside_secret_scan_value(
+    tmp_path: Path,
+) -> None:
+    """The secret_scan name exemption never exempts nested credential keys."""
+    bundle = tmp_path / "bundle"
+    store = FixturePortableStore()
+    store.records["memories"][0]["metadata"]["secret_scan"] = {
+        "status": "dirty",
+        "api_key": "sk-leaked",
+    }
+
+    with pytest.raises(ForbiddenExportContentError, match="api_key"):
+        await portable_backup.export_bundle(
+            bundle,
+            store,
+            source_label="fixture",
+            created_at=FIXED_EXPORT_TIME,
+        )
+
+
+@pytest.mark.asyncio
 async def test_restore_rejects_bundle_with_tampered_file_hash(tmp_path: Path) -> None:
     """Restore verifies per-file SHA-256 before any write (finding 3)."""
     bundle = tmp_path / "bundle"
