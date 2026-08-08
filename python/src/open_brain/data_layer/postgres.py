@@ -193,6 +193,45 @@ def _order_by_priority_score(
     ]
 
 
+async def _rerank_non_empty_documents(
+    query: str,
+    memories: list[Memory],
+    *,
+    model: str,
+    top_k: int,
+) -> list[RerankResult | int]:
+    """Rerank memory contents, skipping empty documents the API rejects.
+
+    Legacy rows can carry an embedding with empty content; Voyage rerank
+    rejects empty strings for the whole request. Indices in the returned
+    results refer to positions in ``memories``.
+    """
+    indexed = [
+        (i, m.content) for i, m in enumerate(memories) if m.content and m.content.strip()
+    ]
+    if not indexed:
+        return []
+    results = await rerank(
+        query=query,
+        documents=[document for _, document in indexed],
+        model=model,
+        top_k=top_k,
+    )
+    remapped: list[RerankResult | int] = []
+    for result in results:
+        if isinstance(result, int):
+            if 0 <= result < len(indexed):
+                remapped.append(indexed[result][0])
+        else:
+            remapped.append(
+                RerankResult(
+                    index=indexed[result.index][0],
+                    relevance_score=result.relevance_score,
+                )
+            )
+    return remapped
+
+
 def _order_by_rerank_results(
     memories: list[Memory],
     rerank_results: list[RerankResult | int],
@@ -1180,14 +1219,18 @@ class PostgresDataLayer:
 
                     # Second-pass reranking with Voyage Rerank-2.5
                     if config.RERANK_ENABLED and memories:
-                        documents = [m.content for m in memories]
-                        rerank_results = await rerank(
-                            query=query,
-                            documents=documents,
+                        rerank_results = await _rerank_non_empty_documents(
+                            query,
+                            memories,
                             model=config.RERANK_MODEL,
                             top_k=limit,
                         )
-                        memories = _order_by_rerank_results(memories, rerank_results, limit)
+                        if rerank_results:
+                            memories = _order_by_rerank_results(
+                                memories, rerank_results, limit
+                            )
+                        else:
+                            memories = memories[:limit]
                     else:
                         memories = memories[:limit]
 
@@ -2329,14 +2372,15 @@ class PostgresDataLayer:
             memories = [_row_to_memory(r) for r in rows]
 
             # Second-pass reranking with Voyage Rerank-2.5
+            rerank_results: list[RerankResult] = []
             if config.RERANK_ENABLED and memories:
-                documents = [m.content for m in memories]
-                rerank_results = await rerank(
-                    query=query,
-                    documents=documents,
+                rerank_results = await _rerank_non_empty_documents(
+                    query,
+                    memories,
                     model=config.RERANK_MODEL,
                     top_k=max_results,
                 )
+            if rerank_results:
                 memories = _order_by_rerank_results(memories, rerank_results, max_results)
             else:
                 memories = _order_by_priority_score(

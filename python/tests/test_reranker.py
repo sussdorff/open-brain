@@ -245,6 +245,92 @@ class TestSearchWithReranking:
         del os.environ["RERANK_ENABLED"]
 
 
+class TestRerankSkipsEmptyDocuments:
+    """Empty-content candidates must not reach the rerank API (it 400s on them)."""
+
+    def _row(self, row_id: int, content: str) -> MagicMock:
+        data = {
+            "id": row_id, "index_id": 1, "session_id": None, "type": "observation",
+            "title": f"mem {row_id}", "subtitle": None, "narrative": None,
+            "content": content, "metadata": {}, "priority": 0.8,
+            "stability": "stable", "access_count": 0, "last_accessed_at": None,
+            "created_at": None, "updated_at": None, "user_id": None,
+            "importance": "medium", "last_decay_at": None,
+        }
+        row = MagicMock()
+        row.__getitem__ = MagicMock(side_effect=lambda k: data[k])
+        row.get = MagicMock(side_effect=lambda k, default=None: data.get(k, default))
+        return row
+
+    @pytest.mark.asyncio
+    async def test_empty_content_rows_are_excluded_from_rerank_request(self):
+        os.environ["RERANK_ENABLED"] = "true"
+        import open_brain.config as config_module
+        config_module._config = None
+
+        rows = [self._row(1, ""), self._row(2, "asyncpg is fast"), self._row(3, "   ")]
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(return_value={"id": 1})
+        mock_conn.fetch = AsyncMock(return_value=rows)
+        mock_pool = TestSearchWithReranking._make_mock_pool(self, mock_conn)
+
+        from open_brain.data_layer.reranker import RerankResult
+
+        with (
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=mock_pool),
+            patch("open_brain.data_layer.postgres.embed_query_with_usage", new_callable=AsyncMock, return_value=([0.1] * 1024, 10)),
+            patch(
+                "open_brain.data_layer.postgres.rerank",
+                new_callable=AsyncMock,
+                return_value=[RerankResult(index=0, relevance_score=0.9)],
+            ) as mock_rerank,
+            patch("asyncio.create_task"),
+        ):
+            from open_brain.data_layer.postgres import PostgresDataLayer
+            from open_brain.data_layer.interface import SearchParams
+
+            dl = PostgresDataLayer()
+            result = await dl.search(SearchParams(query="async database", project="test", limit=5))
+
+        mock_rerank.assert_called_once()
+        sent_documents = mock_rerank.call_args.kwargs["documents"]
+        assert sent_documents == ["asyncpg is fast"]
+        # rerank index 0 refers to the non-empty document -> memory id 2
+        assert [m.id for m in result.results] == [2]
+        del os.environ["RERANK_ENABLED"]
+
+    @pytest.mark.asyncio
+    async def test_all_empty_candidates_skip_rerank_entirely(self):
+        os.environ["RERANK_ENABLED"] = "true"
+        import open_brain.config as config_module
+        config_module._config = None
+
+        rows = [self._row(1, ""), self._row(2, "  ")]
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(return_value={"id": 1})
+        mock_conn.fetch = AsyncMock(return_value=rows)
+        mock_pool = TestSearchWithReranking._make_mock_pool(self, mock_conn)
+
+        with (
+            patch("open_brain.data_layer.postgres.get_pool", new_callable=AsyncMock, return_value=mock_pool),
+            patch("open_brain.data_layer.postgres.embed_query_with_usage", new_callable=AsyncMock, return_value=([0.1] * 1024, 10)),
+            patch(
+                "open_brain.data_layer.postgres.rerank",
+                new_callable=AsyncMock,
+            ) as mock_rerank,
+            patch("asyncio.create_task"),
+        ):
+            from open_brain.data_layer.postgres import PostgresDataLayer
+            from open_brain.data_layer.interface import SearchParams
+
+            dl = PostgresDataLayer()
+            result = await dl.search(SearchParams(query="async database", project="test", limit=5))
+
+        mock_rerank.assert_not_called()
+        assert [m.id for m in result.results] == [1, 2]
+        del os.environ["RERANK_ENABLED"]
+
+
 # ─── Integration test ─────────────────────────────────────────────────────────
 
 
