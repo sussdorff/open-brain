@@ -980,6 +980,76 @@ class TestScopedRebuildAndRetrieval:
         assert failed["status"] in {"failed", "failed_retrieval"}
 
 
+class TestRetrievalControlTolerance:
+    """Sub-percent provider jitter must not fail a healthy batch (K4)."""
+
+    async def _run_apply_with_scores(self, apply_scores: dict[str, float]) -> dict:
+        from open_brain.session_knowledge_migration import (
+            apply_session_knowledge_migration_batch,
+            compute_report_digest,
+            dry_run_session_knowledge_migration,
+        )
+
+        store = FakeMigrationStore(
+            [
+                _summary(
+                    62,
+                    "Observed: tolerance check.\nKey Decisions:\n- Bound jitter.\n"
+                    "What was learned:\n- Tolerance bands beat exact floors.",
+                )
+            ]
+        )
+        report = await dry_run_session_knowledge_migration(
+            store,
+            provider_metadata=PROVIDER_META,
+            control_adapter=FakeControlAdapter(),
+        )
+        digest = compute_report_digest(report)
+        report["evidence_digest"] = digest
+        evidence = {
+            "decision": "ALLOW",
+            "operation_id": report["proposed_operation_id"],
+            "dry_run_report_digest": digest,
+            "cohort_digest": report["cohort_digest"],
+            "cohort_watermark": report["cohort_watermark"],
+            "batch_scope": {"limit": 50, "after_id": 0},
+            "backup_restore_receipt": {"verified": True, "bundle_digest": "b1"},
+            "retrieval_control_baseline": report["retrieval_control_baseline"],
+            "unresolved_acknowledgement": True,
+            "provider_metadata": PROVIDER_META,
+        }
+        return await apply_session_knowledge_migration_batch(
+            store,
+            dry_run_report=report,
+            gate_evidence=evidence,
+            embed_adapter=FakeEmbedAdapter(),
+            rerank_adapter=FakeRerankAdapter(),
+            reconcile_adapter=FakeReconcileAdapter(),
+            provider_metadata=PROVIDER_META,
+            control_adapter=FakeControlAdapter(apply_scores),
+        )
+
+    @pytest.mark.asyncio
+    async def test_jitter_within_tolerance_passes(self) -> None:
+        # Baseline 0.95; 0.945 is ~0.5% below — inside the 1% band.
+        result = await self._run_apply_with_scores(
+            {"lexical": 0.945, "vector": 0.945, "rerank": 0.945}
+        )
+        assert result["status"] in {"completed", "completed_with_errors", "replayed"}
+        assert not result["errors"]
+
+    @pytest.mark.asyncio
+    async def test_real_regression_still_fails_closed(self) -> None:
+        # 0.90 is >5% below the 0.95 baseline — outside the band.
+        result = await self._run_apply_with_scores(
+            {"lexical": 0.90, "vector": 0.90, "rerank": 0.90}
+        )
+        assert result["status"] == "failed"
+        assert any(
+            e.get("code") == "retrieval_control_failed" for e in result["errors"]
+        )
+
+
 # ---------------------------------------------------------------------------
 # Reconciliation + review preservation
 # ---------------------------------------------------------------------------

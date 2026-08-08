@@ -55,6 +55,10 @@ RETRIEVAL_CONTROL_SCHEMA_VERSION = (
 MIGRATION_JUDGE_POLICY_VERSION = "legacy-session-knowledge-migration-judge.v1"
 DEFAULT_APPLY_LIMIT = 50
 MAX_APPLY_LIMIT = 200
+# Relative slack for per-batch retrieval-control verification. Provider
+# embeddings/rerank scores jitter between calls (observed ~0.06% on voyage-4),
+# so an exact float floor fails healthy batches nondeterministically.
+RETRIEVAL_CONTROL_RELATIVE_TOLERANCE = 0.01
 MAX_UNRESOLVED_EXAMPLES = 20
 MAX_CONFLICT_EXAMPLES = 20
 MAX_ERROR_CHARS = 500
@@ -1881,7 +1885,12 @@ async def apply_session_knowledge_migration_batch(
             for name in ("lexical", "vector", "rerank"):
                 base = float(batch_baseline.get(name) or 0.0)
                 score = float(measured.get(name) or 0.0)
-                if score < base:
+                # Embedding/rerank providers are not bit-deterministic between
+                # calls; sub-percent jitter must not fail an otherwise healthy
+                # batch. Real regressions (missing embeddings, superseded
+                # duplicates) move scores far beyond this band.
+                threshold = base * (1.0 - RETRIEVAL_CONTROL_RELATIVE_TOLERANCE)
+                if score < threshold:
                     raise RuntimeError(
                         f"retrieval_control_failed:{name}:{score}<{base}"
                     )
