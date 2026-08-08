@@ -13,6 +13,7 @@ Typed relationships allow memories to be connected with semantic edge labels, en
 | `supersedes` | One memory replaces an older memory (newer → older). |
 | `contradicts` | One memory contradicts another. |
 | `co_occurs` | Weak co-mention edge — two memories appear together frequently. |
+| `derived_from` | A decision or learning was derived from an observed session event (decision/learning → session_event). |
 
 ## API
 

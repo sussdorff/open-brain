@@ -1610,6 +1610,28 @@ def classify_requested_influence(memory: Any) -> Influence:
     meta_cat = metadata.get("category") or ""
     stability = getattr(memory, "stability", None) or ""
 
+    # Observed/inferred session-knowledge roles stay evidence-only by default.
+    # Actor-authored category cues (including "policy") cannot raise them.
+    session_knowledge = metadata.get("session_knowledge")
+    session_role = None
+    if isinstance(session_knowledge, Mapping):
+        role_value = session_knowledge.get("role")
+        if isinstance(role_value, str):
+            session_role = role_value
+    if session_role is None:
+        role_value = metadata.get("session_knowledge_role")
+        if isinstance(role_value, str):
+            session_role = role_value
+    # Session-knowledge roles and session_event stay evidence-only.
+    # Legacy session_summary is NOT forced to evidence here (O1-09): it keeps
+    # the normal type/project classification path (often "context").
+    if session_role in {
+        "session_event",
+        "session_decision",
+        "session_learning",
+    } or memory_type == "session_event":
+        return "evidence"
+
     if memory_type == "identity" or meta_cat == "identity":
         return "identity"
     if memory_type == "constraint" or meta_cat == "constraint":

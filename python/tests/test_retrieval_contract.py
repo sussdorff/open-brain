@@ -505,3 +505,48 @@ class TestRetrievalUnits:
         encoded = json.dumps(payload, sort_keys=True, ensure_ascii=True)
         assert "retrieval-contract.v1" in encoded
         assert json.loads(encoded)["units"][0]["memory_id"] == 1
+
+
+# ─── Session-knowledge roles (open-brain-ekn.9) ───────────────────────────────
+
+
+class TestSessionKnowledgeRetrievalInfluence:
+    def test_session_roles_cannot_request_policy_by_category_cue(self) -> None:
+        from open_brain.retrieval_contract import (
+            classify_requested_influence,
+            memory_to_retrieval_unit,
+            profile_retrieval_contract,
+        )
+
+        contract = profile_retrieval_contract(
+            "claude-wake-up",
+            work_object={"kind": "project", "id": "open-brain"},
+        )
+        for role, memory_type in (
+            ("session_event", "session_event"),
+            ("session_decision", "decision"),
+            ("session_learning", "learning"),
+        ):
+            memory = _make_memory(
+                id=20,
+                type=memory_type,
+                metadata={
+                    "category": "policy",
+                    "session_knowledge": {"role": role},
+                    "provenance": {
+                        "source_label": "inferred",
+                        "expected_use": "evidence",
+                    },
+                },
+            )
+            assert classify_requested_influence(memory) == "evidence"
+            unit = memory_to_retrieval_unit(
+                memory, contract, requested_influence="system_instruction"
+            )
+            assert unit.effective_influence == "evidence"
+            assert unit.effective_influence not in {
+                "policy",
+                "system_instruction",
+                "identity",
+                "constraint",
+            }

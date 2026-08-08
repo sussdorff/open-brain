@@ -100,6 +100,9 @@ from open_brain.memory_write_judge import (
     judge_memory_write_proposal,
     memory_metadata_from_judged_proposal,
 )
+from open_brain.session_knowledge import (
+    capture_session_knowledge as capture_session_knowledge_op,
+)
 from open_brain.memory_promotion import (
     PromotionAttemptParams,
     PromotionError,
@@ -120,12 +123,94 @@ logger = logging.getLogger(__name__)
 # ContextVar to track the authenticated user ID for the current request
 _current_user_id: ContextVar[str | None] = ContextVar("current_user_id", default=None)
 
-# Rate limiter for save_memory: per-user sliding window of timestamps (max 10 per 60 seconds)
+# Rate limiter for save_memory / capture: per-user sliding window (max 10 per 60s)
 _save_timestamps: dict[str, deque[float]] = {}
 _RATE_LIMIT_MAX = 10
 _RATE_LIMIT_WINDOW = 60
 
 _MAX_TURNS_TEXT = 8000
+
+
+async def _reserve_capacity(
+    *,
+    rate_ops: int,
+    daily_slots: int,
+    user_key: str | None = None,
+) -> str | None:
+    """Reserve rate-limit ops and daily row capacity separately (O2-02).
+
+    Rate capacity counts operations (usually 1). Daily capacity counts rows.
+    Returns an error JSON string when unavailable; otherwise None.
+    """
+    if rate_ops <= 0 and daily_slots <= 0:
+        return None
+    now = time.monotonic()
+    key = user_key if user_key is not None else (_current_user_id.get() or "__anonymous__")
+    if key not in _save_timestamps:
+        _save_timestamps[key] = deque()
+    user_timestamps = _save_timestamps[key]
+    while user_timestamps and now - user_timestamps[0] > _RATE_LIMIT_WINDOW:
+        user_timestamps.popleft()
+    if rate_ops > 0 and len(user_timestamps) + rate_ops > _RATE_LIMIT_MAX:
+        oldest = user_timestamps[0] if user_timestamps else now
+        retry_in = int(_RATE_LIMIT_WINDOW - (now - oldest)) + 1
+        return json.dumps({
+            "error": "rate_limit_exceeded",
+            "message": (
+                f"Rate limit exceeded: {_RATE_LIMIT_MAX} saves/{_RATE_LIMIT_WINDOW}s. "
+                f"Try again in {retry_in} seconds."
+            ),
+        })
+
+    config = get_config()
+    if daily_slots > 0 and config.MAX_MEMORIES_PER_DAY > 0:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            today_count = await conn.fetchval(
+                "SELECT COUNT(*)::int FROM memories WHERE created_at >= CURRENT_DATE"
+            ) or 0
+        if today_count + daily_slots > config.MAX_MEMORIES_PER_DAY:
+            return json.dumps({
+                "error": "daily_limit_exceeded",
+                "message": (
+                    f"Daily memory limit of {config.MAX_MEMORIES_PER_DAY} exceeded. "
+                    f"{today_count} memories saved today."
+                ),
+            })
+
+    for _ in range(max(rate_ops, 0)):
+        user_timestamps.append(now)
+    return None
+
+
+async def reserve_write_capacity(*, slots: int = 1, user_key: str | None = None) -> str | None:
+    """Reserve capacity for a single save_memory write (1 rate op + ``slots`` rows)."""
+    if slots <= 0:
+        return None
+    return await _reserve_capacity(rate_ops=1, daily_slots=slots, user_key=user_key)
+
+
+async def reserve_capture_capacity(
+    *, daily_slots: int, user_key: str | None = None
+) -> str | None:
+    """Reserve capacity for one capture operation (1 rate op + ``daily_slots`` rows)."""
+    if daily_slots <= 0:
+        return None
+    return await _reserve_capacity(
+        rate_ops=1, daily_slots=daily_slots, user_key=user_key
+    )
+
+
+def release_capture_rate_reservation(*, user_key: str | None = None) -> None:
+    """Release one previously reserved rate operation for a zero-write capture.
+
+    Daily capacity is a check only (not a retained counter), so only the rate
+    timestamp is popped. Safe no-op when the bucket is empty.
+    """
+    key = user_key if user_key is not None else (_current_user_id.get() or "__anonymous__")
+    timestamps = _save_timestamps.get(key)
+    if timestamps:
+        timestamps.pop()
 
 
 def _memory_payload(memory: Memory) -> dict[str, Any]:
@@ -710,41 +795,10 @@ async def save_memory(
             ),
         })
 
-    # ── Rate limit check (per-user sliding window, 10/60s) ─────────────────────
-    # Note: not atomic — concurrent coroutines may slightly exceed the limit. Acceptable for soft guardrail.
-    now = time.monotonic()
-    user_key = _current_user_id.get() or "__anonymous__"
-    if user_key not in _save_timestamps:
-        _save_timestamps[user_key] = deque()
-    user_timestamps = _save_timestamps[user_key]
-    # Prune timestamps older than the window
-    while user_timestamps and now - user_timestamps[0] > _RATE_LIMIT_WINDOW:
-        user_timestamps.popleft()
-    if len(user_timestamps) >= _RATE_LIMIT_MAX:
-        oldest = user_timestamps[0]
-        retry_in = int(_RATE_LIMIT_WINDOW - (now - oldest)) + 1
-        return json.dumps({
-            "error": "rate_limit_exceeded",
-            "message": f"Rate limit exceeded: {_RATE_LIMIT_MAX} saves/{_RATE_LIMIT_WINDOW}s. Try again in {retry_in} seconds.",
-        })
-
-    # ── Daily guard check ──────────────────────────────────────────────────────
-    config = get_config()
-    if config.MAX_MEMORIES_PER_DAY > 0:
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            # DB query for accuracy across restarts and multi-instance deployments
-            today_count = await conn.fetchval(
-                "SELECT COUNT(*)::int FROM memories WHERE created_at >= CURRENT_DATE"
-            ) or 0
-        if today_count >= config.MAX_MEMORIES_PER_DAY:
-            return json.dumps({
-                "error": "daily_limit_exceeded",
-                "message": f"Daily memory limit of {config.MAX_MEMORIES_PER_DAY} exceeded. {today_count} memories saved today.",
-            })
-
-    # Rate-limit slot claimed only after all guards pass
-    user_timestamps.append(now)
+    # ── Rate limit + daily capacity (shared with capture_session_knowledge) ────
+    capacity_error = await reserve_write_capacity(slots=1)
+    if capacity_error is not None:
+        return capacity_error
 
     dl = get_dl()
     user_id = _current_user_id.get()
@@ -879,6 +933,62 @@ async def save_memory(
         payload["warning"] = "; ".join(domain_warnings)
 
     return json.dumps(payload)
+
+
+@mcp.tool(
+    description=(
+        "Capture structured session knowledge that separates compact observed "
+        "execution evidence (what_happened) from durable inferred learnings "
+        "(what_was_learned). Decisions are stored as context-specific evidence. "
+        "Unfinished work is returned to the producer and never persisted. "
+        "Idempotent under actor+producer+source_ref+schema_version; a different "
+        "payload under the same identity returns session_knowledge_capture_conflict. "
+        "Does not replace legacy session_summary writers during adapter rollout. "
+        "Params: capture (required typed request object)."
+    )
+)
+@logged_tool
+async def capture_session_knowledge(capture: dict) -> str:
+    """Persist a versioned session-knowledge capture through the judge boundary."""
+    _require_scope("memory")
+    if not isinstance(capture, dict):
+        return json.dumps(
+            {
+                "error": "invalid_capture",
+                "message": "capture must be a JSON object",
+            }
+        )
+    from open_brain.session_knowledge import CaptureCapacityError
+
+    actor = _current_user_id.get()
+    if not actor:
+        return json.dumps(
+            {
+                "error": "missing_actor",
+                "message": "authenticated principal required for session-knowledge capture",
+            }
+        )
+
+    async def _reserve(*, daily_slots: int) -> str | None:
+        return await reserve_capture_capacity(
+            daily_slots=daily_slots, user_key=actor
+        )
+
+    def _release() -> None:
+        release_capture_rate_reservation(user_key=actor)
+
+    dl = get_dl()
+    try:
+        result = await capture_session_knowledge_op(
+            capture,
+            data_layer=dl,
+            actor=actor,
+            capacity_reserve=_reserve,
+            capacity_release=_release,
+        )
+    except CaptureCapacityError as exc:
+        return exc.payload
+    return json.dumps(result.to_dict())
 
 
 @mcp.tool(
@@ -1959,13 +2069,17 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
                 # Admin scope is intentionally excluded — admin is reserved for
                 # OAuth sessions. Token management endpoints accept _is_api_key_auth
                 # as an alternative to admin scope.
+                # Stable logical actor for the configured API-key path.
+                # Never derive from raw credential material (including digests).
                 scopes_token = _current_scopes.set(("memory", "evolution"))
                 api_key_token = _is_api_key_auth.set(True)
+                user_token = _current_user_id.set("api-key:configured")
                 try:
                     return await call_next(request)
                 finally:
                     _current_scopes.reset(scopes_token)
                     _is_api_key_auth.reset(api_key_token)
+                    _current_user_id.reset(user_token)
             return JSONResponse(
                 {"error": "unauthorized", "error_description": "Invalid API key"},
                 status_code=401,
@@ -2015,11 +2129,15 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
                 scopes_list = list(raw_scopes)
             safe_scopes = tuple(s for s in scopes_list if s != "admin")
 
+            # Stable actor from the URL-token record name (never the raw secret).
+            token_name = str(row["name"])
             scopes_token = _current_scopes.set(safe_scopes)
+            user_token = _current_user_id.set(f"url-token:{token_name}")
             try:
                 return await call_next(request)
             finally:
                 _current_scopes.reset(scopes_token)
+                _current_user_id.reset(user_token)
 
         # Fall back to Bearer token
         auth_header = request.headers.get("authorization", "")

@@ -1,0 +1,25 @@
+{
+  "schema_version": "session-knowledge-capture.v1",
+  "session_id": "sess-fixture-001",
+  "producer": "session-knowledge-capture",
+  "source_ref": "agent-session:codex:sess-fixture-001",
+  "project": "open-brain",
+  "what_happened": "Focused capture tests passed. Verified empty-learning sessions do not fabricate lessons.",
+  "decisions": [
+    {
+      "text": "Keep session_summary writers unchanged during adapter rollout.",
+      "rationale": "Compatibility for existing Session Close producers."
+    }
+  ],
+  "what_was_learned": [
+    {
+      "text": "Durable learnings must carry evidence and start as inferred expected_use=evidence.",
+      "evidence": "conversation://session/sess-fixture-001/learning/0"
+    }
+  ],
+  "unfinished_work": [
+    {
+      "text": "Point ccore session-close at capture_session_knowledge after rollout verification."
+    }
+  ]
+}

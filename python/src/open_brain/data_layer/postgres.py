@@ -574,6 +574,17 @@ async def _run_migrations(conn: asyncpg.Connection) -> None:
         ON memories ((metadata->>'capture_status'));
     """)
     await conn.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_session_knowledge_capture_identity
+        ON memories ((metadata->>'session_knowledge_capture_identity'))
+        WHERE type = 'session_event'
+          AND metadata->>'session_knowledge_capture_identity' IS NOT NULL;
+    """)
+    await conn.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_session_knowledge_record_identity
+        ON memories ((metadata->>'session_knowledge_record_identity'))
+        WHERE metadata->>'session_knowledge_record_identity' IS NOT NULL;
+    """)
+    await conn.execute("""
         CREATE TABLE IF NOT EXISTS memory_lifecycle_actions (
             id BIGSERIAL PRIMARY KEY,
             memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,

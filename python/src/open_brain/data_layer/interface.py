@@ -132,6 +132,7 @@ VALID_LINK_TYPES: frozenset[str] = frozenset({
     "contradicts",      # memory -> contradicted memory
     "co_occurs",        # weak co-mention edge
     "references",       # generic note/link reference
+    "derived_from",     # decision/learning -> observed session_event
 })
 
 # ─── Canonical entity metadata contract ───────────────────────────────────────

@@ -64,6 +64,7 @@ class TestValidLinkTypes:
             "contradicts",
             "co_occurs",
             "references",
+            "derived_from",
         }
         assert expected == VALID_LINK_TYPES
 
