@@ -43,3 +43,6 @@ session-close-summary.txt
 
 # Orchestrator local scratch (never commit)
 .orchestration/
+
+# Local intake scratch (never commit)
+.intake/
