@@ -1,4 +1,4 @@
-"""FastAPI + FastMCP server with OAuth 2.1 middleware."""
+"""FastAPI + MCPServer with OAuth 2.1 middleware."""
 
 from __future__ import annotations
 
@@ -27,7 +27,8 @@ import httpx
 
 from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
+from mcp.server.mcpserver import Context
 from mcp.server.transport_security import TransportSecuritySettings
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -283,9 +284,9 @@ def logged_tool(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[An
     then resets it in the finally block to avoid leaking state across requests.
 
     NOTE: This wrapper only covers errors that occur inside the tool function body.
-    Pydantic argument-validation failures are caught by FastMCP's Tool.run() layer
+    Pydantic argument-validation failures are caught by MCPServer's Tool.run() layer
     *before* this wrapper is invoked.  Those cases are handled by
-    ScopedFastMCP.call_tool(), which emits a tool_error log at that level so that
+    ScopedMCPServer.call_tool(), which emits a tool_error log at that level so that
     AK3 coverage is complete.
     """
     @wraps(fn)
@@ -435,8 +436,8 @@ def _require_scope(scope: str) -> None:
         )
 
 
-class ScopedFastMCP(FastMCP):
-    """FastMCP subclass that filters tool list based on OAuth scopes in current context.
+class ScopedMCPServer(MCPServer):
+    """MCPServer subclass that filters tool list based on OAuth scopes in current context.
 
     Tools in _EVOLUTION_TOOLS are only listed when the caller has the 'evolution' scope.
     Tools in _ADMIN_TOOLS are only listed when the caller has the 'admin' scope.
@@ -463,10 +464,15 @@ class ScopedFastMCP(FastMCP):
             filtered.append(tool)
         return filtered
 
-    async def call_tool(self, name: str, arguments: dict) -> Any:
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        context: Context[Any, Any] | None = None,
+    ) -> Any:
         """Dispatch a tool call and log argument-validation failures.
 
-        FastMCP validates arguments via Pydantic inside Tool.run() *before*
+        MCPServer validates arguments via Pydantic inside Tool.run() *before*
         invoking the registered function.  This means that when validation
         fails the logged_tool wrapper is never reached and no tool_error log
         is emitted.  This override catches those pre-invocation ToolErrors and
@@ -475,7 +481,7 @@ class ScopedFastMCP(FastMCP):
         """
         t0 = time.monotonic()
         try:
-            return await super().call_tool(name, arguments)
+            return await super().call_tool(name, arguments, context)
         except Exception:
             duration_ms = int((time.monotonic() - t0) * 1000)
             user_id = _current_user_id.get()
@@ -488,15 +494,17 @@ class ScopedFastMCP(FastMCP):
             raise
 
 
-# MCP server (ScopedFastMCP for scope-gated tool listing)
+# MCP server (ScopedMCPServer for scope-gated tool listing)
 _config = get_config()
 _host = _config.MCP_SERVER_URL.replace("https://", "").replace("http://", "").rstrip("/")
-mcp = ScopedFastMCP(
+mcp = ScopedMCPServer(
     "open-brain",
-    transport_security=TransportSecuritySettings(
-        enable_dns_rebinding_protection=True,
-        allowed_hosts=[_host, f"{_host}:443"],
-    ),
+    version="0.29.0",
+)
+
+_transport_security = TransportSecuritySettings(
+    enable_dns_rebinding_protection=True,
+    allowed_hosts=[_host, f"{_host}:443"],
 )
 
 # Server start time — set in lifespan, used for uptime calculation
@@ -2040,7 +2048,7 @@ async def ingest_email_inbox(config_ref: str, max_messages: int = 50) -> str:
 # ─── FastAPI App ──────────────────────────────────────────────────────────────
 
 # Build the MCP sub-app first so session_manager is available
-_mcp_app = mcp.streamable_http_app()
+_mcp_app = mcp.streamable_http_app(transport_security=_transport_security)
 
 # OAuth paths that must remain unauthenticated
 _PUBLIC_PATHS = {

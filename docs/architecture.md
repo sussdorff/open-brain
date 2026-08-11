@@ -234,6 +234,8 @@ The MCP server implements two-layer scope enforcement:
 1. **Tool List Filtering** — `/tools/list` returns only tools visible to the client's scopes
 2. **Runtime Guards** — Individual tools check scope at invocation time (defense-in-depth)
 
+The server runs on MCP Python SDK v2. Requests using MCP `2026-07-28` are handled as stateless, self-contained requests and do not receive an `Mcp-Session-Id`. The same Streamable HTTP endpoint retains the SDK's handshake-era compatibility for supported 2025 protocol revisions; application state remains explicit in PostgreSQL or ordinary tool arguments rather than protocol sessions.
+
 Unauthenticated requests (no Bearer token) receive HTTP 401 before reaching MCP. See [Tool Pool Assembly](./features/tool-pool-assembly.md) for detailed scope-gating architecture.
 
 ## Learnings Extraction

@@ -16,6 +16,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- *(open-brain-nc7d)* **Stateless MCP 2026-07-28 support** — The Python server now uses MCP Python SDK v2 and serves the final stateless protocol, including `server/discover` and per-request protocol metadata, without issuing protocol session IDs to modern clients. The same endpoint retains SDK-provided compatibility with supported 2025-era clients, and the existing API-key, URL-token, OAuth, and scope-filtered tool boundaries remain in place.
+
 - *(open-brain-rup9)* **OAuth login for the `ob` CLI** — New `ob auth login`,
   `status`, and `logout` commands provide OAuth discovery, dynamic public-client
   registration, browser authorization with loopback callback, state validation,

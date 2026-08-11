@@ -7,6 +7,8 @@
 
 A pluggable MCP memory server that gives AI assistants long-term, searchable memory across sessions and projects.
 
+The server implements the final stateless MCP `2026-07-28` protocol through MCP Python SDK v2. The same `/mcp` endpoint remains compatible with supported 2025-era clients through the SDK's dual-era negotiation.
+
 **The problem:** AI assistants forget everything between sessions. They can't retain learnings, recall past decisions, or build on previous work. When you're running multiple agents across multiple projects, context is constantly lost.
 
 **open-brain solves this** by providing a shared memory layer that any MCP-compatible assistant can read from and write to — with hybrid search (vector + full-text), human-in-the-loop triage, and a memory lifecycle that promotes valuable learnings into persistent artifacts like coding standards, skills, or project documentation.

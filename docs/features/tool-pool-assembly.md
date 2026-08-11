@@ -43,9 +43,9 @@ _current_scopes: ContextVar[tuple[str, ...]] = ContextVar("current_scopes", defa
 
 The `BearerAuthMiddleware` extracts scopes from the JWT token and sets `_current_scopes` for the duration of the request.
 
-**ScopedFastMCP Subclass:**
+**ScopedMCPServer Subclass:**
 ```python
-class ScopedFastMCP(FastMCP):
+class ScopedMCPServer(MCPServer):
     async def list_tools(self):
         """Return tools filtered by the current request's OAuth scopes."""
         all_tools = await super().list_tools()
@@ -82,7 +82,7 @@ Even if a client somehow calls an evolution tool directly (e.g., via stored refe
 
 1. **Token Exchange** — Client authenticates (OAuth 2.1 PKCE flow)
 2. **Scope Assignment** — Authorization server issues token with `scopes=["memory"]` (no evolution)
-3. **MCP Connection** — Client connects to open-brain, sends Bearer token in MCP handshake
+3. **MCP Connection** — Client connects to open-brain and sends its Bearer token with each HTTP request
 4. **Middleware Processing** — `BearerAuthMiddleware` extracts scopes, calls `_current_scopes.set(("memory",))`
 5. **Tool Discovery** — Client calls `/tools/list` → returns only core memory tools
 6. **Evolution Attempt** — Client attempts to call `generate_evolution_suggestion` → **ScopeDeniedError** (tool error)
@@ -102,7 +102,7 @@ Even if a client somehow calls an evolution tool directly (e.g., via stored refe
 
 - **OAuth Provider** (`open_brain/auth/provider.py`) — Issues tokens with scope claims
 - **BearerAuthMiddleware** — Extracts scopes from JWT and populates `_current_scopes` ContextVar
-- **MCP Server** (`ScopedFastMCP`) — Uses `_current_scopes` to filter `/tools/list` response
+- **MCP Server** (`ScopedMCPServer`) — Uses `_current_scopes` to filter `tools/list` responses
 - **Tool Functions** — Call `_require_scope("evolution")` as entry-point guards
 - **Self-Improvement Loop** — All 5 evolution tools protected by `_require_scope("evolution")`
 
@@ -118,7 +118,7 @@ The existing `BearerAuthMiddleware` enforces authentication at the FastAPI route
 - **Invalid token** → HTTP 401 Unauthorized
 - **Expired token** → HTTP 401 Unauthorized
 
-Thus, unauthenticated callers never reach `ScopedFastMCP.list_tools()`. The tool-level filtering is a **defense-in-depth layer**, not the primary auth boundary.
+Thus, unauthenticated callers never reach `ScopedMCPServer.list_tools()`. The tool-level filtering is a **defense-in-depth layer**, not the primary auth boundary.
 
 ### Scope Assignment in Development
 
@@ -163,7 +163,7 @@ To add a new scope-gated tool group:
    })
    ```
 
-2. **Update `ScopedFastMCP.list_tools()`:**
+2. **Update `ScopedMCPServer.list_tools()`:**
    ```python
    if tool.name in _NEWFEATURE_TOOLS and "newfeature" not in scopes:
        continue
