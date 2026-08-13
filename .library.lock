@@ -1,0 +1,657 @@
+schema_version: 2
+migration:
+  prune_ack_required: false
+requested_roots:
+- id: workspace:https://github.com/cognovis/library#cognovis-base
+  type: workspace
+  name: cognovis-base
+  scope: project
+  catalog_identity: https://github.com/cognovis/library
+  catalog_name: library-platform
+  requested_ref: cognovis-base
+  resolved_version: 0.1.0
+  definition_commit: 123f450894be49563b59ce99f5e06410bdd63431
+  catalogs:
+  - identity: https://github.com/cognovis/library
+    pin_kind: commit
+    pin_value: c2f597410c4969c5fb9c77f34f7cc93168bb1202
+  - identity: https://github.com/cognovis/library-core
+    pin_kind: commit
+    pin_value: 5aa05ca2f5a45d09c15fddb73c69201a477579ee
+  roots:
+  - skill:library
+  - skill:cognovis-beads
+  - skill:inject-standards
+  - skill:ob-cli
+receipts:
+- name: library
+  type: skill
+  marketplace: local
+  source: /Users/malte/code/.worktrees/open-brain/CL-l022-cognovis-base-migration/.library/admitted/671fabf277c94e65ae45f909939b2d08/skill/library/SKILL.md
+  source_commit: bd5ed978831b5ef5030c064c279bfd2104213ffc
+  cache_path: /Users/malte/.local/share/library/skills/local/library@bd5ed978831b5e/
+  install_target: .agents/skills/library/
+  install_timestamp: '2026-08-13T16:27:20Z'
+  checksum_sha256: 4b0fb79187960cb76f828afba17da5331d9e753a5246329cb2f98243a2fd57b1
+  checksum_type: directory
+  content_sha256: 4b0fb79187960cb76f828afba17da5331d9e753a5246329cb2f98243a2fd57b1
+  install_mode: vendor
+  license: unknown
+  bridge_symlinks:
+  - .claude/skills/library -> ../../.agents/skills/library
+  scope: project
+  catalog_identity: https://github.com/cognovis/library
+  id: skill:library
+  resolved_version: legacy
+  verified: true
+  adopted: false
+  prune_blocked_reason: null
+  targets:
+  - path: .agents/skills/library
+    kind: directory
+  - path: .agents/skills/library/SKILL.md
+    kind: file
+    content_sha256: 803501d6f6d0b42b978f89410e9f7e9f63384ae2349bb520f570b8e1566b3d7b
+  - path: .claude/skills/library
+    kind: symlink
+    link_target: ../../.agents/skills/library
+  owners_cache:
+  - workspace:https://github.com/cognovis/library#cognovis-base
+  definition_commit: c2f597410c4969c5fb9c77f34f7cc93168bb1202
+- name: cognovis-beads
+  type: skill
+  marketplace: local
+  source: /Users/malte/code/.worktrees/open-brain/CL-l022-cognovis-base-migration/.library/admitted/671fabf277c94e65ae45f909939b2d08/skill/cognovis-beads/SKILL.md
+  source_commit: bd5ed978831b5ef5030c064c279bfd2104213ffc
+  cache_path: /Users/malte/.local/share/library/skills/local/cognovis-beads@bd5ed978831b5e/
+  install_target: .agents/skills/cognovis-beads/
+  install_timestamp: '2026-08-13T16:27:20Z'
+  checksum_sha256: 5cca85d828056764b6155307b584b745ff0b5a671bb8ec76937ba2748ef5a781
+  checksum_type: directory
+  content_sha256: 5cca85d828056764b6155307b584b745ff0b5a671bb8ec76937ba2748ef5a781
+  install_mode: vendor
+  license: unknown
+  bridge_symlinks:
+  - .claude/skills/cognovis-beads -> ../../.agents/skills/cognovis-beads
+  scope: project
+  catalog_identity: https://github.com/cognovis/library-core
+  id: skill:cognovis-beads
+  resolved_version: legacy
+  verified: true
+  adopted: false
+  prune_blocked_reason: null
+  targets:
+  - path: .agents/skills/cognovis-beads
+    kind: directory
+  - path: .agents/skills/cognovis-beads/SKILL.md
+    kind: file
+    content_sha256: be3cff9a5e0ccd13c22a212e6c4c3ecbbb06f5c5dd4664f4fa1c11a87f6aa83d
+  - path: .agents/skills/cognovis-beads/lib
+    kind: directory
+  - path: .agents/skills/cognovis-beads/lib/orchestrator
+    kind: directory
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/README.md
+    kind: file
+    content_sha256: ea3918263c0c2a49dd6a7f47165bb74af7d748681007083fc34c2cef847eea97
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/__init__.py
+    kind: file
+    content_sha256: 1f1884609468c8b7ef5c79e43a0e3ca029001c2aa6e86e93edcd7dc5ef2db5d2
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/__pycache__
+    kind: directory
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/__pycache__/__init__.cpython-314.pyc
+    kind: file
+    content_sha256: 72d8130828330d9882d2daccdadcc400df1dc4b91204c57410aa3e211c265a5a
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/__pycache__/canonical_metrics_path.cpython-314.pyc
+    kind: file
+    content_sha256: bfe1dde675bb0407ae665020f5c4d04a2e4ca7f0e5d9770e7feb692ebb723555
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/__pycache__/claim.cpython-314.pyc
+    kind: file
+    content_sha256: 4bd8235af8ec3f587f3b5d9f1af2fbd14133dd50f21c528dc91e527e7bda7bc1
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/__pycache__/metrics.cpython-314.pyc
+    kind: file
+    content_sha256: d64c7145e28d5f49d6a8f7cf30d4370790e83334f241fd35bb7c73c6c1936184
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/__pycache__/parse_debrief.cpython-314.pyc
+    kind: file
+    content_sha256: a8ff3bcdbbc99103c2b99fafc68b8a004bf4564ce7f76a21d80c8f79eea674fe
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/__pycache__/review_gate.cpython-314.pyc
+    kind: file
+    content_sha256: ac6eed7cfd407ab189e7ac82b1657dc0d252e1ace32d91f5669d0fb2d8a41bf2
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/__pycache__/route_profiles.cpython-314.pyc
+    kind: file
+    content_sha256: 3f1dd01445387734b965e3bc55a1cf7e70661f40c18d74925912e315d577cdfd
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/__pycache__/routing.cpython-314.pyc
+    kind: file
+    content_sha256: d1b5283d09d34b478bb9a0fcdb41b65b01ba4d7e3d114b6f75c76e5662569ed4
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/__pycache__/workflow_leaf_logger.cpython-314.pyc
+    kind: file
+    content_sha256: ff7c376be60c35797aa16deb31b2b900bebd225901bb435d6d94b2132f508ffd
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/aggregate_debriefs.py
+    kind: file
+    content_sha256: 87c5c891b68ce4deb4dabe7206734a58fe2e57e64323b6924a3248730bdbd970
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/backfill_codex.py
+    kind: file
+    content_sha256: 0effc91493df2e0ecb8b61fb6cbe84e4b8162ccc48274edd03befb0e89d0d9b0
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/canonical_metrics_path.py
+    kind: file
+    content_sha256: 238563c24e6bc7c82f980f1877071f4e38a66295baaf830b02c807abc04ccd98
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/claim.py
+    kind: file
+    content_sha256: 6639b82cfb2de18e6971dc035918758271d4abbed5d50752dcaf27af13c8398a
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/gate.py
+    kind: file
+    content_sha256: fb48b3d89aa787eae52a0cc071c236ecefc8bb3332633363cbce7adf8a0736db
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/ingest_ccusage.py
+    kind: file
+    content_sha256: af232a97ba4dd5f5ae5e491809a00a8c1336f7398986d7b11d12ea6afa5e3b6e
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/ingest_codex.py
+    kind: file
+    content_sha256: 12a6b5f3641cdf929d7247dc121571191fe33b282a5aa52316db0f15c60124dd
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/metrics.py
+    kind: file
+    content_sha256: 19ef58a290109c0359e9895c941e0181d3c12fa1b34c0d46018200cd00d3babf
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/parse_debrief.py
+    kind: file
+    content_sha256: 53b238e824da9ccc34b125028f0dc83e0b98b6a0396e96be26e326f09bf4874b
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/tests
+    kind: directory
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/tests/__init__.py
+    kind: file
+    content_sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/tests/__pycache__
+    kind: directory
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/tests/__pycache__/__init__.cpython-314.pyc
+    kind: file
+    content_sha256: 1b6def116570f84ebb878ddb104b8c954cfdf5d8a6139396a691d44de5ec45b7
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/tests/__pycache__/test_canonical_metrics_path.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: 9b218a63865aa9881a56b80c4e85c81778c3cc76fda9794138e4489d2eb36e9c
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/tests/__pycache__/test_claim.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: 3d1f2f26b5af5e95ce1d13127247ef543ecd8b111d2ddb1ebd8618552792687a
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/tests/__pycache__/test_parse_debrief.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: e72885523fceb29f7275c42cd2931ea6439b8694518e1f642d2acd684c13e818
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/tests/__pycache__/test_review_gate.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: 853eaf0e1cc620bfd2592d63062080f668ca1feacf3ff1d81dc6185e4fe0a698
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/tests/__pycache__/test_route_profiles.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: e22a23603af9d3dd0e237c1605779817958f03404958d62741146962dbe1d805
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/tests/__pycache__/test_routing.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: e4eb8671702cb643ba47cc165c4722482b4dc8545cad081e7b16a7ce451795a0
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/tests/__pycache__/test_workflow_leaf_logger.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: 3f259b522d0afd58a15a9eeea36d985833979e07bfa182a7f73da5a82a8f0a39
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/tests/test_canonical_metrics_path.py
+    kind: file
+    content_sha256: e00bb7415ae03855e6e280a9b37808b717aa1ef2abe07531b818e8b1fb3b00e9
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/tests/test_claim.py
+    kind: file
+    content_sha256: 9a9d48e98a6e8df3a2da33caff4ddd355b775d5f4f532395cb16a341fe890d27
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/tests/test_parse_debrief.py
+    kind: file
+    content_sha256: ea09bf87c21331559b4b6273c1974e5a120afccaccf83522555a2ac9fcd36a09
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/tests/test_workflow_leaf_logger.py
+    kind: file
+    content_sha256: c2564ca3d3d9d338fddb19c85f2141f3b7bbb93dbaa47276820a959d59d225ce
+  - path: .agents/skills/cognovis-beads/lib/orchestrator/workflow_leaf_logger.py
+    kind: file
+    content_sha256: bc84674cf6b026404cdf88d491d4edfd11a74267ef11ed5fd2cc382be59fd9b5
+  - path: .agents/skills/cognovis-beads/references
+    kind: directory
+  - path: .agents/skills/cognovis-beads/references/effort-classifier.md
+    kind: file
+    content_sha256: 239b1a47edf9ca53951585c23f40cf58fecad41ef76dffd9578d7ecfc5b8f1f1
+  - path: .agents/skills/cognovis-beads/scripts
+    kind: directory
+  - path: .agents/skills/cognovis-beads/scripts/__pycache__
+    kind: directory
+  - path: .agents/skills/cognovis-beads/scripts/__pycache__/adr-context.cpython-314.pyc
+    kind: file
+    content_sha256: 1ea43ae5a6d4be896321bd56eb9736b0ff360d129bd1f0e7d16d64f3d02625b0
+  - path: .agents/skills/cognovis-beads/scripts/__pycache__/agent_workspace_guard.cpython-314.pyc
+    kind: file
+    content_sha256: e6d552402a6e1dae1c2ca33ac042f9b69a75f3f650a50aca9cfbe226a998300f
+  - path: .agents/skills/cognovis-beads/scripts/__pycache__/bd_lint_contracts.cpython-314.pyc
+    kind: file
+    content_sha256: ef249f3ade7c4dd9e58af77d6502e77fe2fefb84d7c4535d0487a49358f99aa3
+  - path: .agents/skills/cognovis-beads/scripts/__pycache__/check-debrief-adherence.cpython-314.pyc
+    kind: file
+    content_sha256: 482d11a924ffd329bedbc637be442c96eb5eecf2abaf4a96e44dad9bdf0a2a7c
+  - path: .agents/skills/cognovis-beads/scripts/__pycache__/check_live_network_requirement.cpython-314.pyc
+    kind: file
+    content_sha256: df32f0a8bb4e2de3546c662c6a55fc20f475b3097ac85239e68d055a21cca421
+  - path: .agents/skills/cognovis-beads/scripts/__pycache__/classify_effort.cpython-314.pyc
+    kind: file
+    content_sha256: 94d8411f80a604998c8d7620d24770cafa8dfb189b55a02714ebd7383946dd14
+  - path: .agents/skills/cognovis-beads/scripts/__pycache__/cognovis-beads.cpython-314.pyc
+    kind: file
+    content_sha256: eadd8811bf7dfe257b1182da7812af96d178367c7eeb738c8be875f9e8ce4e64
+  - path: .agents/skills/cognovis-beads/scripts/__pycache__/context_provider.cpython-314.pyc
+    kind: file
+    content_sha256: 966d5628525b7b2b1cbf0826560f79b320afff29fc7356cf4e4212daf750e87c
+  - path: .agents/skills/cognovis-beads/scripts/__pycache__/effort.cpython-314.pyc
+    kind: file
+    content_sha256: 9a2bec52938c324fe14a7d36f79188ce6d3249ac0c4e7443858303e85182fefb
+  - path: .agents/skills/cognovis-beads/scripts/__pycache__/impl_commit_verify.cpython-314.pyc
+    kind: file
+    content_sha256: 3f4b43d3b70f01c3a7a9af09366c80eef1c0130ffc7835f0a15e94f21c988d34
+  - path: .agents/skills/cognovis-beads/scripts/__pycache__/impl_schema.cpython-314.pyc
+    kind: file
+    content_sha256: d81c05b69998c644f67a37ad94f384b922ee8a314a7f4597f46a500e661659bf
+  - path: .agents/skills/cognovis-beads/scripts/__pycache__/implementation_artifacts.cpython-314.pyc
+    kind: file
+    content_sha256: 1a9e0f303c5be84d13a118f10651cc2b4389bf082afa3d0f4f965d6f8fb871b9
+  - path: .agents/skills/cognovis-beads/scripts/__pycache__/model_family.cpython-312.pyc
+    kind: file
+    content_sha256: d32ea79c3d322a1aa0e3b30ee406f329155cc8b9c8ffe9428d2337018340540c
+  - path: .agents/skills/cognovis-beads/scripts/__pycache__/model_family.cpython-314.pyc
+    kind: file
+    content_sha256: 5cf8554c0560bfc6d7b1d86b673315ac540364ceec755ea662f2858104e5c769
+  - path: .agents/skills/cognovis-beads/scripts/__pycache__/normalize_claim_evidence.cpython-314.pyc
+    kind: file
+    content_sha256: a466a32eaa42ee5f7d92ef7f26b3e6a5156d7e1ac8701570c109cd2dbaade9ca
+  - path: .agents/skills/cognovis-beads/scripts/__pycache__/p5_prompt_builders.cpython-314.pyc
+    kind: file
+    content_sha256: 5389459fab7a6a1b64843d2fda4005b664631a53eb88632aa3b2e550f0a3a958
+  - path: .agents/skills/cognovis-beads/scripts/__pycache__/p5_state_machine.cpython-314.pyc
+    kind: file
+    content_sha256: 890f2c9e99ea817220b7f29a99aacd2340df9edac53e2816820201bd2f9f6e78
+  - path: .agents/skills/cognovis-beads/scripts/__pycache__/phase14_diff_scope.cpython-314.pyc
+    kind: file
+    content_sha256: 7070649fec6cb7f096ef43162002552dea179db2162d601d2f2102bc4b3d18bd
+  - path: .agents/skills/cognovis-beads/scripts/__pycache__/probe-urls.cpython-314.pyc
+    kind: file
+    content_sha256: 711a25f3db91cd85e4dfc1d78cd84b4ccaa0675f8c6dad42a098cc2e507e8474
+  - path: .agents/skills/cognovis-beads/scripts/__pycache__/resolve_slot_dispatch.cpython-312.pyc
+    kind: file
+    content_sha256: b7960b8a25451fc91b05b5d9415fec892e026cd8eba91aa5ef6da19d68434dae
+  - path: .agents/skills/cognovis-beads/scripts/__pycache__/resolve_slot_dispatch.cpython-314.pyc
+    kind: file
+    content_sha256: cd5bb7f0726e9d51ef33e6feeeb3e8cbce05018ae628823f231e893a2af5ac49
+  - path: .agents/skills/cognovis-beads/scripts/__pycache__/review_quality_signals_runner.cpython-314.pyc
+    kind: file
+    content_sha256: 3b31fc406a37a949c93b63d1e5b62ae7dc70ea7cee4e5b36ef0881866a52f5ec
+  - path: .agents/skills/cognovis-beads/scripts/__pycache__/validate_reviewer_config.cpython-314.pyc
+    kind: file
+    content_sha256: f0a88880f24d5a3ee410fdd385aa9770957ef184f15a2f225a0d9bf3e104a776
+  - path: .agents/skills/cognovis-beads/scripts/adr-context.py
+    kind: file
+    content_sha256: 682b36b919f50a294bd2265273f1299b7ee20363aa5c9c2fc94f7ba5d4061a32
+  - path: .agents/skills/cognovis-beads/scripts/agent_workspace_guard.py
+    kind: file
+    content_sha256: cb4f768e443de8db361465ccd35f021857f016f3bc09b18071c3abc967c2c51e
+  - path: .agents/skills/cognovis-beads/scripts/bd-lint-extension.sh
+    kind: file
+    content_sha256: 7c8d14a3ce335e66c7a3625c31c0799ba63591948634d00a5e09e23a096dc2f4
+  - path: .agents/skills/cognovis-beads/scripts/bd-wrapper
+    kind: file
+    content_sha256: f4c2185fbbdc8d8936560dc33320cd708841d35875ec57e4d8420b2f9212ecf5
+  - path: .agents/skills/cognovis-beads/scripts/bd_lint_contracts.py
+    kind: file
+    content_sha256: 93f7a00f3bf5bd4a24c065f8acb482471ee8432788cf0318d5bf21bd56a87c8b
+  - path: .agents/skills/cognovis-beads/scripts/check-debrief-adherence.py
+    kind: file
+    content_sha256: 6005a8a432396dbeb3b177e2b72c254edd4295cb6b53fefa9dec0cac701751b6
+  - path: .agents/skills/cognovis-beads/scripts/check_live_network_requirement.py
+    kind: file
+    content_sha256: 9d7bcef0d93ea21fe385e6466155ca320883bc49fc1911cbb09a47bd5abedf24
+  - path: .agents/skills/cognovis-beads/scripts/check_quick_fix_eligibility.py
+    kind: file
+    content_sha256: e9c62303eda050d68240107fc37d021135d06eda8a088d8b1b55908de897da4d
+  - path: .agents/skills/cognovis-beads/scripts/claim-bead.py
+    kind: file
+    content_sha256: e4f2ddeb89a1be34644131ef3a445a62fc75125f74876fecfcdd060bce3163fc
+  - path: .agents/skills/cognovis-beads/scripts/classify_effort.py
+    kind: file
+    content_sha256: 5a0c75656247316b5bfeb2d7c1a9f25e2df75638c7c50422b877cda6d35afa55
+  - path: .agents/skills/cognovis-beads/scripts/cognovis-beads.py
+    kind: file
+    content_sha256: 566d28676cad16c1dc78849a8a9ee494c7abdfc39fc8d9c729df62a5cc5af741
+  - path: .agents/skills/cognovis-beads/scripts/context_provider.py
+    kind: file
+    content_sha256: b8aa132d4d497e69b1e5a32d7037a7c29425ca6baf7a38b891b3d6713b8df61a
+  - path: .agents/skills/cognovis-beads/scripts/effort.py
+    kind: file
+    content_sha256: e4884534b474e2215f57df83b548917aa2819d6966a1c4487a5949f6fe8c2d19
+  - path: .agents/skills/cognovis-beads/scripts/install-bd-wrapper.sh
+    kind: file
+    content_sha256: 4b2318a21e67be9a842268012c697f7f0ecfef60b26fb244fa43cf98c88b1e7e
+  - path: .agents/skills/cognovis-beads/scripts/metrics-rollup.py
+    kind: file
+    content_sha256: f1bdafc874f6dfb2824a29e84608deb2837cf782c96cb255e320250a668a2ebd
+  - path: .agents/skills/cognovis-beads/scripts/metrics-start.py
+    kind: file
+    content_sha256: 88a51ddf7914831e7953a2d045b681f1fbf11c89a65e3cb9a2bcc2353df17cad
+  - path: .agents/skills/cognovis-beads/scripts/migrate_metrics_run_id.py
+    kind: file
+    content_sha256: 815f64d4df6bbbd316db7e0940a80beced62e416e35d5a11ee6e6c47f391e3d8
+  - path: .agents/skills/cognovis-beads/scripts/normalize_claim_evidence.py
+    kind: file
+    content_sha256: 9c85629f82092b13e3a556b34aefd006e5384f34449dbf59549058b1c7e361d5
+  - path: .agents/skills/cognovis-beads/scripts/phase14_diff_scope.py
+    kind: file
+    content_sha256: 8b796bf6613873b7d695bef9f775153827805622cd700dba9eb9a1e526b37244
+  - path: .agents/skills/cognovis-beads/scripts/probe-urls.py
+    kind: file
+    content_sha256: c094fede214b5716e7924cf683550580f3655c5d9309565418cb34800610d2d4
+  - path: .agents/skills/cognovis-beads/scripts/prompt_envelope.py
+    kind: file
+    content_sha256: 7d5b8a54852590c327d8ca950bba4d34674ad4d5a8f22aea813189a42dd18aa8
+  - path: .agents/skills/cognovis-beads/scripts/review_quality_signals_runner.py
+    kind: file
+    content_sha256: de6d659375e67a8d2cb2599f34e0658827e8c9b0a85d3deac6098473bacf91c4
+  - path: .agents/skills/cognovis-beads/scripts/tests
+    kind: directory
+  - path: .agents/skills/cognovis-beads/scripts/tests/__pycache__
+    kind: directory
+  - path: .agents/skills/cognovis-beads/scripts/tests/__pycache__/test_adapter_role_profile_py.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: ffc01cd6288f4e93fa8076c15be1527826b42c1b25da5548e3c37b3150c59b2c
+  - path: .agents/skills/cognovis-beads/scripts/tests/__pycache__/test_adhoc_subagent_metrics.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: 1f7df636a3f9e4e4d9b632a7bb648349e449f08e6dcd2e938ed279cb61a4453f
+  - path: .agents/skills/cognovis-beads/scripts/tests/__pycache__/test_agent_gateway_wiring.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: 0bbfb7dc84e7074b24f0bfb937d9ea04200f9fe26f8a9b61b5843dfd5c7f9110
+  - path: .agents/skills/cognovis-beads/scripts/tests/__pycache__/test_agent_workspace_guard.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: 8dfcdc47d347fdb8df50fd609dfbba1d8f38073b889c60d6737bebf668f9ecca
+  - path: .agents/skills/cognovis-beads/scripts/tests/__pycache__/test_agy_impl_py.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: 62ef06ff4df276beaf6701d63fb858755649ecd7bf626417e34792ac259b4759
+  - path: .agents/skills/cognovis-beads/scripts/tests/__pycache__/test_bd_lint_contracts.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: f1f7b327b30c0adcd6a45ffca23b0c57901b2b5d4d2eb238c7979af3a84fbc0d
+  - path: .agents/skills/cognovis-beads/scripts/tests/__pycache__/test_check_debrief_adherence.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: 34969858de3268e76a52f7ccc7ac4eb783528757fbd3fb3e15336fc3263ddf93
+  - path: .agents/skills/cognovis-beads/scripts/tests/__pycache__/test_check_live_network_requirement.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: e1aa7656c581b1d4188b0e161b8baeccc672cb3146a95a929a4efc935064f95c
+  - path: .agents/skills/cognovis-beads/scripts/tests/__pycache__/test_classify_effort.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: 2fe31e182428cd98761d0843f08ab6c03d097079fabbd4da81861b1c196bb233
+  - path: .agents/skills/cognovis-beads/scripts/tests/__pycache__/test_cognovis_beads.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: bbb2b9890fb7bde3bec52a80d1c7a3dd6ecd2d4d2eef1f03ef10548736e47ba2
+  - path: .agents/skills/cognovis-beads/scripts/tests/__pycache__/test_context_provider.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: df8de0fa09bb569ad09f57580d67442f1c52227a6b2cc809476ab3f905b94101
+  - path: .agents/skills/cognovis-beads/scripts/tests/__pycache__/test_effort_py.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: 10e9fa308b182acb60e2b58dcc742c38a67e028e6f5623cf1c8b20332b1c4338
+  - path: .agents/skills/cognovis-beads/scripts/tests/__pycache__/test_impl_schema_py.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: e9a558a7f8c84c18678231dc990ebb44f0735568f26894ae98d856e06cccac34
+  - path: .agents/skills/cognovis-beads/scripts/tests/__pycache__/test_implementation_artifacts.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: 99093b4c432563653ddbd6daf325c8cdfe308b901925abd01197fa369921a532
+  - path: .agents/skills/cognovis-beads/scripts/tests/__pycache__/test_increment_auto_decisions.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: 8c8418f9d4466afff0879a035c6fe52b5b20952189988e5e404a8d2d87e48f6f
+  - path: .agents/skills/cognovis-beads/scripts/tests/__pycache__/test_metrics_run_api.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: 04d7387f22f3494cb5af7ad830491568c291af0df88b084e42d23b42cc29e0c3
+  - path: .agents/skills/cognovis-beads/scripts/tests/__pycache__/test_metrics_scripts_py.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: 715f0101e83905ec68b82cf394b6d22dbe96ab9d78919311407e78b46158d9a8
+  - path: .agents/skills/cognovis-beads/scripts/tests/__pycache__/test_model_family.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: 418a251c43523820f98a67e2bd16e38c68c780563461c45f0f0dbfc6e5c0b568
+  - path: .agents/skills/cognovis-beads/scripts/tests/__pycache__/test_p5_prompt_builders.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: 4110ebdbf5b516fc72d041ff5ee2bdbdc1247fb579fc80a27069041c8473e78d
+  - path: .agents/skills/cognovis-beads/scripts/tests/__pycache__/test_p5_state_machine.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: b9b2e788ba7e65f15a148a7328cb7faca51e302bb430215d91186354548d776c
+  - path: .agents/skills/cognovis-beads/scripts/tests/__pycache__/test_pep723_invocations.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: e8d79c8bb233a810c875fb24fb4c50b781ced8a5843e30ff2d7e36a7b9cf93df
+  - path: .agents/skills/cognovis-beads/scripts/tests/__pycache__/test_phase0_claim.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: e0a5b0fea8da3c015b8d063d8c878daa017a2a432b2f312113382afe03828df7
+  - path: .agents/skills/cognovis-beads/scripts/tests/__pycache__/test_phase14_diff_scope.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: 46233eaee63c2d5433611a2a2a196599f5951736a6c8fb60ddf273d0b011e22f
+  - path: .agents/skills/cognovis-beads/scripts/tests/__pycache__/test_probe_urls.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: ce917eaf1d0461ae62878362e47ded225f133ced10bac3c9f075048e574b9936
+  - path: .agents/skills/cognovis-beads/scripts/tests/__pycache__/test_resolve_slot_dispatch.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: a3ee27052883cf251eb33aff78e72f8ca00daee797db384aa46db50d99a3fef6
+  - path: .agents/skills/cognovis-beads/scripts/tests/__pycache__/test_validate_reviewer_config.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: abbf0c36f446f68de897fbabd73721b82d38702ce33ad9673ce5b726501ca1c1
+  - path: .agents/skills/cognovis-beads/scripts/tests/__pycache__/worktree_helpers.cpython-314.pyc
+    kind: file
+    content_sha256: b2796a2a014a97c889b409eeff6f027094b9dcb461683a1c147f896388b1045a
+  - path: .agents/skills/cognovis-beads/scripts/tests/test_adhoc_subagent_metrics.py
+    kind: file
+    content_sha256: 609e98a5f47cae77266aa230f961f940a71540d4b7e273e3ae4b1bc8e12a0ad3
+  - path: .agents/skills/cognovis-beads/scripts/tests/test_agent_gateway_wiring.py
+    kind: file
+    content_sha256: 9f2677891dc67c8eaf7041c3d4c3df166d17b598ac5152a1f48aba82d969d3db
+  - path: .agents/skills/cognovis-beads/scripts/tests/test_agent_workspace_guard.py
+    kind: file
+    content_sha256: 5ce848c1cebcf19938c10082a758f220da817ae97afc781ec8b8c1c6b439b5e6
+  - path: .agents/skills/cognovis-beads/scripts/tests/test_bd_lint_contracts.py
+    kind: file
+    content_sha256: 98fdf81153dfd7a72fdc57155ab6310c7be391046721b4e39d7a414c63d20181
+  - path: .agents/skills/cognovis-beads/scripts/tests/test_bd_wrapper.sh
+    kind: file
+    content_sha256: d626c32fae2ae3a755a2e7e821ae14a11a8e0767fc66888ccc6a614a3ca5eb17
+  - path: .agents/skills/cognovis-beads/scripts/tests/test_check_debrief_adherence.py
+    kind: file
+    content_sha256: 80712997e9a9deacff2efe24f509b6389fb691230ee09dcb7f7a9fafda099f37
+  - path: .agents/skills/cognovis-beads/scripts/tests/test_check_live_network_requirement.py
+    kind: file
+    content_sha256: 85d06417bc2c38610df276a4e2061a8e163ef80afd6fd619b02722521f7ca532
+  - path: .agents/skills/cognovis-beads/scripts/tests/test_classify_effort.py
+    kind: file
+    content_sha256: 1dce61ac6f656361047e0eecc4c86e6af7d9db5c3d715c15ce8f4cccf42fb605
+  - path: .agents/skills/cognovis-beads/scripts/tests/test_cognovis_beads.py
+    kind: file
+    content_sha256: 6b0bf3a4ce4317c1dd061174bccf8241a26b546537190b458f36b6af51737008
+  - path: .agents/skills/cognovis-beads/scripts/tests/test_context_provider.py
+    kind: file
+    content_sha256: 71755f7cedc63c283fc79786768ebd3b04452b3ba45771667b9568859d7f1c20
+  - path: .agents/skills/cognovis-beads/scripts/tests/test_effort_py.py
+    kind: file
+    content_sha256: 2dee6daeb30957973d8d4b21376175da07080f8c4cc52e5e70a1471ec0aa721b
+  - path: .agents/skills/cognovis-beads/scripts/tests/test_increment_auto_decisions.py
+    kind: file
+    content_sha256: 7dd0be4430f7ff5929336703bb1f50f3e14300b308c1f4c29ec90240dba250c0
+  - path: .agents/skills/cognovis-beads/scripts/tests/test_metrics_run_api.py
+    kind: file
+    content_sha256: 8db6dc21614579724bf47de138f54398cae812f4c4d96a65b252fa281a95f21d
+  - path: .agents/skills/cognovis-beads/scripts/tests/test_metrics_scripts_py.py
+    kind: file
+    content_sha256: 1446c6daa74e0ea6e97f04821a849290b220f8de108af8a0c9c1a4a599cfc88b
+  - path: .agents/skills/cognovis-beads/scripts/tests/test_pep723_invocations.py
+    kind: file
+    content_sha256: 2a128616007bf4458a726a22dbcc303d598039e3e4a6e34c636c603fc7b4dc6b
+  - path: .agents/skills/cognovis-beads/scripts/tests/test_phase14_diff_scope.py
+    kind: file
+    content_sha256: d9795ce0649c29c079608ecfa60c4ee7d9a8c1d6de17ef1220e28b8ba372f8b2
+  - path: .agents/skills/cognovis-beads/scripts/tests/test_probe_urls.py
+    kind: file
+    content_sha256: 22e7173458ac2758706d31550715f58f08852dffd4958873216578ed30d8f36f
+  - path: .agents/skills/cognovis-beads/scripts/tests/test_prompt_envelope.py
+    kind: file
+    content_sha256: 1eb2e7b0e9ec33a2feabae77febe56acb7df0ea11740a95385de729e50216698
+  - path: .agents/skills/cognovis-beads/scripts/tests/test_retired_p5_pipeline.py
+    kind: file
+    content_sha256: 4485a5f718646deb5c2139b8fb5a4d334d75a93f1c90413a41aeee5491718441
+  - path: .agents/skills/cognovis-beads/scripts/tests/worktree_helpers.py
+    kind: file
+    content_sha256: e16ec2499921286f7052bf1bfbc6a03325228c6c4de0eabc8786993a5272548c
+  - path: .agents/skills/cognovis-beads/scripts/workflow-leaf-logger.py
+    kind: file
+    content_sha256: c6c06800281281bd0fa4a5cfbd64043ec945559e0cb5d9028043cfd5e2661099
+  - path: .agents/skills/cognovis-beads/tests
+    kind: directory
+  - path: .agents/skills/cognovis-beads/tests/__init__.py
+    kind: file
+    content_sha256: 01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+  - path: .agents/skills/cognovis-beads/tests/__pycache__
+    kind: directory
+  - path: .agents/skills/cognovis-beads/tests/__pycache__/__init__.cpython-314.pyc
+    kind: file
+    content_sha256: f74562d4827f9431edbf76aba943c7bd4be42d3d7bdeaecc5fa91907e0f44f22
+  - path: .agents/skills/cognovis-beads/tests/__pycache__/test_routing.cpython-314-pytest-9.0.3.pyc
+    kind: file
+    content_sha256: 3c7685cc4a8756e276a8edda458073a80b9ed4c9e5e2b5e36439599788c54cac
+  - path: .claude/skills/cognovis-beads
+    kind: symlink
+    link_target: ../../.agents/skills/cognovis-beads
+  owners_cache:
+  - workspace:https://github.com/cognovis/library#cognovis-base
+  definition_commit: 5aa05ca2f5a45d09c15fddb73c69201a477579ee
+- name: inject-standards
+  type: skill
+  marketplace: local
+  source: /Users/malte/code/.worktrees/open-brain/CL-l022-cognovis-base-migration/.library/admitted/671fabf277c94e65ae45f909939b2d08/skill/inject-standards/SKILL.md
+  source_commit: bd5ed978831b5ef5030c064c279bfd2104213ffc
+  cache_path: /Users/malte/.local/share/library/skills/local/inject-standards@bd5ed978831b5e/
+  install_target: .agents/skills/inject-standards/
+  install_timestamp: '2026-08-13T16:27:20Z'
+  checksum_sha256: 30ce18c1ce57977b88f4ef2df7b87e4271ecb92a982d2405ed50f9d7b1005b02
+  checksum_type: directory
+  content_sha256: 30ce18c1ce57977b88f4ef2df7b87e4271ecb92a982d2405ed50f9d7b1005b02
+  install_mode: vendor
+  license: unknown
+  bridge_symlinks:
+  - .claude/skills/inject-standards -> ../../.agents/skills/inject-standards
+  scope: project
+  catalog_identity: https://github.com/cognovis/library-core
+  id: skill:inject-standards
+  resolved_version: legacy
+  verified: true
+  adopted: false
+  prune_blocked_reason: null
+  targets:
+  - path: .agents/skills/inject-standards
+    kind: directory
+  - path: .agents/skills/inject-standards/SKILL.md
+    kind: file
+    content_sha256: 1770739a9f848339f318f96500e10d71fd7bea9ffcce3d3e99cbd4a5174ffae7
+  - path: .agents/skills/inject-standards/__pycache__
+    kind: directory
+  - path: .agents/skills/inject-standards/__pycache__/runner.cpython-312.pyc
+    kind: file
+    content_sha256: bc9cda9c3de6ba97fb7da64f496c2c30311d94b0acf21f9ce92a01478d041340
+  - path: .agents/skills/inject-standards/runner.py
+    kind: file
+    content_sha256: 5608f47ab9e4be9814294bfcb79ce39c7f89573d7a71601a5c0f9a8bbff89a7f
+  - path: .claude/skills/inject-standards
+    kind: symlink
+    link_target: ../../.agents/skills/inject-standards
+  owners_cache:
+  - workspace:https://github.com/cognovis/library#cognovis-base
+  definition_commit: 5aa05ca2f5a45d09c15fddb73c69201a477579ee
+- name: ob-cli
+  type: skill
+  marketplace: local
+  source: /Users/malte/code/.worktrees/open-brain/CL-l022-cognovis-base-migration/.library/admitted/671fabf277c94e65ae45f909939b2d08/skill/ob-cli/SKILL.md
+  source_commit: bd5ed978831b5ef5030c064c279bfd2104213ffc
+  cache_path: /Users/malte/.local/share/library/skills/local/ob-cli@bd5ed978831b5e/
+  install_target: .agents/skills/ob-cli/
+  install_timestamp: '2026-08-13T16:27:20Z'
+  checksum_sha256: c8b6c4735cf2479c7619ba7299a6e8c15fc9e87d057cf12190a3a8b9f93e945a
+  checksum_type: directory
+  content_sha256: c8b6c4735cf2479c7619ba7299a6e8c15fc9e87d057cf12190a3a8b9f93e945a
+  install_mode: vendor
+  license: unknown
+  bridge_symlinks:
+  - .claude/skills/ob-cli -> ../../.agents/skills/ob-cli
+  scope: project
+  catalog_identity: https://github.com/cognovis/library-core
+  id: skill:ob-cli
+  resolved_version: legacy
+  verified: true
+  adopted: false
+  prune_blocked_reason: null
+  targets:
+  - path: .agents/skills/ob-cli
+    kind: directory
+  - path: .agents/skills/ob-cli/SKILL.md
+    kind: file
+    content_sha256: 6cdb4ab0f51d93c0f0ed68646d426594bdbaf7c3b84d54de775113f4eccbd250
+  - path: .claude/skills/ob-cli
+    kind: symlink
+    link_target: ../../.agents/skills/ob-cli
+  owners_cache:
+  - workspace:https://github.com/cognovis/library#cognovis-base
+  definition_commit: 5aa05ca2f5a45d09c15fddb73c69201a477579ee
+prerequisites: []
+installed:
+- name: library
+  type: skill
+  marketplace: local
+  source: https://github.com/cognovis/library/blob/main/SKILL.md
+  source_commit: c2f597410c4969c5fb9c77f34f7cc93168bb1202
+  cache_path: /Users/malte/.local/share/library/skills/local/library@bd5ed978831b5e/
+  install_target: .agents/skills/library/
+  install_timestamp: '2026-08-13T16:27:20Z'
+  checksum_sha256: 4b0fb79187960cb76f828afba17da5331d9e753a5246329cb2f98243a2fd57b1
+  checksum_type: directory
+  content_sha256: 4b0fb79187960cb76f828afba17da5331d9e753a5246329cb2f98243a2fd57b1
+  install_mode: vendor
+  license: unknown
+  bridge_symlinks:
+  - .claude/skills/library -> ../../.agents/skills/library
+  scope: project
+  catalog_identity: https://github.com/cognovis/library
+- name: cognovis-beads
+  type: skill
+  marketplace: local
+  source: https://github.com/cognovis/library-core/blob/main/skills/cognovis-beads/SKILL.md
+  source_commit: 5aa05ca2f5a45d09c15fddb73c69201a477579ee
+  cache_path: /Users/malte/.local/share/library/skills/local/cognovis-beads@bd5ed978831b5e/
+  install_target: .agents/skills/cognovis-beads/
+  install_timestamp: '2026-08-13T16:27:20Z'
+  checksum_sha256: 5cca85d828056764b6155307b584b745ff0b5a671bb8ec76937ba2748ef5a781
+  checksum_type: directory
+  content_sha256: 5cca85d828056764b6155307b584b745ff0b5a671bb8ec76937ba2748ef5a781
+  install_mode: vendor
+  license: unknown
+  bridge_symlinks:
+  - .claude/skills/cognovis-beads -> ../../.agents/skills/cognovis-beads
+  scope: project
+  catalog_identity: https://github.com/cognovis/library-core
+- name: inject-standards
+  type: skill
+  marketplace: local
+  source: https://github.com/cognovis/library-core/blob/main/skills/inject-standards/SKILL.md
+  source_commit: 5aa05ca2f5a45d09c15fddb73c69201a477579ee
+  cache_path: /Users/malte/.local/share/library/skills/local/inject-standards@bd5ed978831b5e/
+  install_target: .agents/skills/inject-standards/
+  install_timestamp: '2026-08-13T16:27:20Z'
+  checksum_sha256: 30ce18c1ce57977b88f4ef2df7b87e4271ecb92a982d2405ed50f9d7b1005b02
+  checksum_type: directory
+  content_sha256: 30ce18c1ce57977b88f4ef2df7b87e4271ecb92a982d2405ed50f9d7b1005b02
+  install_mode: vendor
+  license: unknown
+  bridge_symlinks:
+  - .claude/skills/inject-standards -> ../../.agents/skills/inject-standards
+  scope: project
+  catalog_identity: https://github.com/cognovis/library-core
+- name: ob-cli
+  type: skill
+  marketplace: local
+  source: https://github.com/cognovis/library-core/blob/main/skills/ob-cli/SKILL.md
+  source_commit: 5aa05ca2f5a45d09c15fddb73c69201a477579ee
+  cache_path: /Users/malte/.local/share/library/skills/local/ob-cli@bd5ed978831b5e/
+  install_target: .agents/skills/ob-cli/
+  install_timestamp: '2026-08-13T16:27:20Z'
+  checksum_sha256: c8b6c4735cf2479c7619ba7299a6e8c15fc9e87d057cf12190a3a8b9f93e945a
+  checksum_type: directory
+  content_sha256: c8b6c4735cf2479c7619ba7299a6e8c15fc9e87d057cf12190a3a8b9f93e945a
+  install_mode: vendor
+  license: unknown
+  bridge_symlinks:
+  - .claude/skills/ob-cli -> ../../.agents/skills/ob-cli
+  scope: project
+  catalog_identity: https://github.com/cognovis/library-core
