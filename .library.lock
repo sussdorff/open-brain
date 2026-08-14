@@ -29,9 +29,9 @@ receipts:
   marketplace: local
   source: https://github.com/cognovis/library/blob/main/SKILL.md
   source_commit: 00c43f828ca3cce7d29e949f44bced59c7e5e121
-  cache_path: /Users/malte/.local/share/library/skills/local/library@d982ba6ccecd15/
+  cache_path: /Users/malte/.local/share/library/skills/local/library@50d0eb0fe01146/
   install_target: .agents/skills/library/
-  install_timestamp: '2026-08-13T17:30:16Z'
+  install_timestamp: '2026-08-14T07:20:42Z'
   checksum_sha256: b1b706e801350b8c1b10fe10aeab0e2ebf328fc70a5ebb499db173fd22ee7f12
   checksum_type: directory
   content_sha256: b1b706e801350b8c1b10fe10aeab0e2ebf328fc70a5ebb499db173fd22ee7f12
@@ -63,9 +63,9 @@ receipts:
   marketplace: local
   source: https://github.com/cognovis/library-core/blob/main/skills/cognovis-beads/SKILL.md
   source_commit: 5aa05ca2f5a45d09c15fddb73c69201a477579ee
-  cache_path: /Users/malte/.local/share/library/skills/local/cognovis-beads@d982ba6ccecd15/
+  cache_path: /Users/malte/.local/share/library/skills/local/cognovis-beads@50d0eb0fe01146/
   install_target: .agents/skills/cognovis-beads/
-  install_timestamp: '2026-08-13T17:30:16Z'
+  install_timestamp: '2026-08-14T07:20:42Z'
   checksum_sha256: fec973ddd6982b1dd794eca0d804ed8c75f5a0b6af59dad34cd0bb522649bdde
   checksum_type: directory
   content_sha256: fec973ddd6982b1dd794eca0d804ed8c75f5a0b6af59dad34cd0bb522649bdde
@@ -297,9 +297,9 @@ receipts:
   marketplace: local
   source: https://github.com/cognovis/library-core/blob/main/skills/inject-standards/SKILL.md
   source_commit: 5aa05ca2f5a45d09c15fddb73c69201a477579ee
-  cache_path: /Users/malte/.local/share/library/skills/local/inject-standards@d982ba6ccecd15/
+  cache_path: /Users/malte/.local/share/library/skills/local/inject-standards@50d0eb0fe01146/
   install_target: .agents/skills/inject-standards/
-  install_timestamp: '2026-08-13T17:30:16Z'
+  install_timestamp: '2026-08-14T07:20:42Z'
   checksum_sha256: 6176cbbd9c763205d606eb2517936565b7c417273f98351e86354201d75a6901
   checksum_type: directory
   content_sha256: 6176cbbd9c763205d606eb2517936565b7c417273f98351e86354201d75a6901
@@ -334,9 +334,9 @@ receipts:
   marketplace: local
   source: https://github.com/cognovis/library-core/blob/main/skills/ob-cli/SKILL.md
   source_commit: 5aa05ca2f5a45d09c15fddb73c69201a477579ee
-  cache_path: /Users/malte/.local/share/library/skills/local/ob-cli@d982ba6ccecd15/
+  cache_path: /Users/malte/.local/share/library/skills/local/ob-cli@50d0eb0fe01146/
   install_target: .agents/skills/ob-cli/
-  install_timestamp: '2026-08-13T17:30:16Z'
+  install_timestamp: '2026-08-14T07:20:42Z'
   checksum_sha256: c8b6c4735cf2479c7619ba7299a6e8c15fc9e87d057cf12190a3a8b9f93e945a
   checksum_type: directory
   content_sha256: c8b6c4735cf2479c7619ba7299a6e8c15fc9e87d057cf12190a3a8b9f93e945a
@@ -370,9 +370,9 @@ installed:
   marketplace: local
   source: https://github.com/cognovis/library/blob/main/SKILL.md
   source_commit: 00c43f828ca3cce7d29e949f44bced59c7e5e121
-  cache_path: /Users/malte/.local/share/library/skills/local/library@d982ba6ccecd15/
+  cache_path: /Users/malte/.local/share/library/skills/local/library@50d0eb0fe01146/
   install_target: .agents/skills/library/
-  install_timestamp: '2026-08-13T17:30:16Z'
+  install_timestamp: '2026-08-14T07:20:42Z'
   checksum_sha256: b1b706e801350b8c1b10fe10aeab0e2ebf328fc70a5ebb499db173fd22ee7f12
   checksum_type: directory
   content_sha256: b1b706e801350b8c1b10fe10aeab0e2ebf328fc70a5ebb499db173fd22ee7f12
@@ -387,9 +387,9 @@ installed:
   marketplace: local
   source: https://github.com/cognovis/library-core/blob/main/skills/cognovis-beads/SKILL.md
   source_commit: 5aa05ca2f5a45d09c15fddb73c69201a477579ee
-  cache_path: /Users/malte/.local/share/library/skills/local/cognovis-beads@d982ba6ccecd15/
+  cache_path: /Users/malte/.local/share/library/skills/local/cognovis-beads@50d0eb0fe01146/
   install_target: .agents/skills/cognovis-beads/
-  install_timestamp: '2026-08-13T17:30:16Z'
+  install_timestamp: '2026-08-14T07:20:42Z'
   checksum_sha256: fec973ddd6982b1dd794eca0d804ed8c75f5a0b6af59dad34cd0bb522649bdde
   checksum_type: directory
   content_sha256: fec973ddd6982b1dd794eca0d804ed8c75f5a0b6af59dad34cd0bb522649bdde
@@ -404,9 +404,9 @@ installed:
   marketplace: local
   source: https://github.com/cognovis/library-core/blob/main/skills/inject-standards/SKILL.md
   source_commit: 5aa05ca2f5a45d09c15fddb73c69201a477579ee
-  cache_path: /Users/malte/.local/share/library/skills/local/inject-standards@d982ba6ccecd15/
+  cache_path: /Users/malte/.local/share/library/skills/local/inject-standards@50d0eb0fe01146/
   install_target: .agents/skills/inject-standards/
-  install_timestamp: '2026-08-13T17:30:16Z'
+  install_timestamp: '2026-08-14T07:20:42Z'
   checksum_sha256: 6176cbbd9c763205d606eb2517936565b7c417273f98351e86354201d75a6901
   checksum_type: directory
   content_sha256: 6176cbbd9c763205d606eb2517936565b7c417273f98351e86354201d75a6901
@@ -421,9 +421,9 @@ installed:
   marketplace: local
   source: https://github.com/cognovis/library-core/blob/main/skills/ob-cli/SKILL.md
   source_commit: 5aa05ca2f5a45d09c15fddb73c69201a477579ee
-  cache_path: /Users/malte/.local/share/library/skills/local/ob-cli@d982ba6ccecd15/
+  cache_path: /Users/malte/.local/share/library/skills/local/ob-cli@50d0eb0fe01146/
   install_target: .agents/skills/ob-cli/
-  install_timestamp: '2026-08-13T17:30:16Z'
+  install_timestamp: '2026-08-14T07:20:42Z'
   checksum_sha256: c8b6c4735cf2479c7619ba7299a6e8c15fc9e87d057cf12190a3a8b9f93e945a
   checksum_type: directory
   content_sha256: c8b6c4735cf2479c7619ba7299a6e8c15fc9e87d057cf12190a3a8b9f93e945a

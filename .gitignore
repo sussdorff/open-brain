@@ -48,7 +48,9 @@ session-close-summary.txt
 
 # BEGIN Library-managed project installs
 /.library.lock.lock
+/.library.lock.workspace-journal.json
 /.library.lock.workspace-lock
+/.library.lock.workspace-rollback
 /.agents/skills/library
 /.agents/skills/library/SKILL.md
 /.claude/skills/library
