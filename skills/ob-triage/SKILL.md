@@ -14,7 +14,6 @@ requires_standards:
   - open-brain/cli-routing
   - open-brain/memory-status-conventions
 requires:
-  - standard:english-only
   - mcp:open-brain
   - skill:library
   - skill:skill-forge

@@ -7,7 +7,6 @@ description: >
   "was habe ich gelernt", "letzte Session", "memory context".
 version: 0.1.0
 requires:
-  - standard:english-only
   - mcp:open-brain
 ---
 

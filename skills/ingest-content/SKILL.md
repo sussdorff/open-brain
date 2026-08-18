@@ -14,7 +14,6 @@ requires_standards:
   - open-brain/cli-routing
   - open-brain/memory-write-patterns
 requires:
-  - standard:english-only
   - mcp:open-brain
 ---
 
