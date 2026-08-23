@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Run tests
+    runs-on: atlas
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/0.12.5/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Set up Python 3.14
+        run: uv python install 3.14
+
+      - name: Install dependencies
+        working-directory: python
+        run: uv sync --dev
+
+      - name: Run tests (no integration)
+        working-directory: python
+        run: uv run pytest -m "not integration"

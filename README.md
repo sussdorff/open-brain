@@ -44,6 +44,9 @@ See [docs/architecture.md](docs/architecture.md) for detailed diagrams and techn
 
 ## Installation
 
+The canonical git repository is `https://git.cognovis.de/cognovis/open-brain`.
+`https://github.com/sussdorff/open-brain` is a public mirror.
+
 open-brain has two installable components:
 
 - **Server**: the long-running FastAPI/MCP service backed by Postgres + pgvector. Install this on the machine or container host where open-brain runs.
@@ -102,7 +105,7 @@ docker compose -f docker-compose.service.yml up -d
 Use this on the server host when you already have Postgres + pgvector running and want the same installed `ob` command to launch the server.
 
 ```bash
-uv tool install --python 3.14 "git+https://github.com/sussdorff/open-brain.git#subdirectory=python"
+uv tool install --python 3.14 --index-url https://git.cognovis.de/api/packages/cognovis/pypi/simple open-brain
 
 # Set the same variables shown in .env.example, then:
 ob server
@@ -140,7 +143,7 @@ Save the raw token — it is shown exactly once.
 Run this on every machine where you want to use the CLI. If you did not already install `ob` for the Python package server path:
 
 ```bash
-uv tool install --python 3.14 "git+https://github.com/sussdorff/open-brain.git#subdirectory=python"
+uv tool install --python 3.14 --index-url https://git.cognovis.de/api/packages/cognovis/pypi/simple open-brain
 ```
 
 Point the CLI at your MCP endpoint:
@@ -365,7 +368,7 @@ Memory is segmented by `project`, not by user. This works well for individual us
 
 ## Library Marketplace
 
-open-brain is registered as a marketplace in [`the-library`](https://github.com/disler/the-library) (`cognovis/library` fork). The repo's top-level `skills/` and `hooks/` directories are the harness-neutral source primitives; the meta library installs them into any harness (Claude Code, Codex, …) via `/library use`.
+open-brain is registered as a marketplace in [`the-library`](https://github.com/disler/the-library) (`cognovis/library` fork). The repo's top-level `skills/` and `hooks/` directories are the harness-neutral source primitives; the meta library installs them into any harness (Claude Code, Codex, …) via `/library use`. Forgejo is the canonical Cognovis git repository; the marketplace `source` is the public GitHub mirror so clones work without Forgejo credentials.
 
 Register the marketplace once in your `library.yaml`:
 

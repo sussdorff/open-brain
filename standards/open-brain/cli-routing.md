@@ -16,7 +16,7 @@ always prefer `ob` over MCP. MCP is only required when no CLI is available.
 
 ## Installation
 
-`ob` is installed via `uv tool install open-brain` and lives at `~/.local/bin/ob`.
+`ob` is installed via `uv tool install --python 3.14 --index-url https://git.cognovis.de/api/packages/cognovis/pypi/simple open-brain` and lives at `~/.local/bin/ob`.
 No `uv run` prefix needed.
 
 Verify: `ob doctor`

@@ -13,10 +13,22 @@ Thank you for your interest in contributing to open-brain! This document provide
 
 ### Development Setup
 
+The canonical git repository is `https://git.cognovis.de/cognovis/open-brain`.
+`https://github.com/sussdorff/open-brain` is a public mirror.
+
+Operators install the published wheel from the Cognovis PyPI index:
+
 ```bash
-# Clone the repo
+uv tool install --python 3.14 --index-url https://git.cognovis.de/api/packages/cognovis/pypi/simple open-brain
+```
+
+```bash
+# Clone the public mirror
 git clone https://github.com/sussdorff/open-brain.git
 cd open-brain
+
+# Cognovis operators with Forgejo HTTPS credentials may clone the canonical repo:
+# git clone https://git.cognovis.de/cognovis/open-brain.git
 
 # Install dependencies
 cd python
