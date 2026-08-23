@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [unreleased]
 
+## [0.33.0] - 2026-08-23
+
+First wheel published to the Cognovis Forgejo PyPI index from canonical git `cognovis/open-brain`.
+
 ### Changed
 
 - *(open-brain-scut)* Operators install the `open-brain` wheel from the Cognovis Forgejo PyPI index. Origin and development git is `https://git.cognovis.de/cognovis/open-brain`; `https://github.com/sussdorff/open-brain` is a public read-only mirror only.
