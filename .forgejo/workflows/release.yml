@@ -1,0 +1,156 @@
+name: Release
+
+on:
+  push:
+    tags: ["v[0-9]*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish (for example v0.29.0)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: atlas
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - name: Select release tag
+        env:
+          FORGEJO_EVENT_NAME: ${{ github.event_name }}
+          FORGEJO_REF_NAME: ${{ github.ref_name }}
+          REQUESTED_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          set -e
+          if test "$FORGEJO_EVENT_NAME" = "workflow_dispatch"; then
+            RELEASE_TAG="$REQUESTED_TAG"
+          else
+            RELEASE_TAG="$FORGEJO_REF_NAME"
+          fi
+          if ! printf '%s\n' "$RELEASE_TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Expected an existing vMAJOR.MINOR.PATCH release tag" >&2
+            exit 64
+          fi
+          git rev-parse --verify --quiet "refs/tags/$RELEASE_TAG^{commit}" > /dev/null
+          git checkout --detach "$RELEASE_TAG"
+          RELEASE_SHA=$(git rev-parse HEAD)
+          RELEASE_VERSION="${RELEASE_TAG#v}"
+          printf 'RELEASE_TAG=%s\n' "$RELEASE_TAG" >> "$GITHUB_ENV"
+          printf 'RELEASE_SHA=%s\n' "$RELEASE_SHA" >> "$GITHUB_ENV"
+          printf 'RELEASE_VERSION=%s\n' "$RELEASE_VERSION" >> "$GITHUB_ENV"
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/0.12.5/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Set up Python 3.14
+        run: uv python install 3.14
+      - name: Verify tag and package version
+        env:
+          RELEASE_VERSION: ${{ env.RELEASE_VERSION }}
+        run: |
+          set -e
+          package_version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' python/pyproject.toml | head -n 1)
+          if test "$package_version" != "$RELEASE_VERSION"; then
+            echo "Tag version $RELEASE_VERSION does not match python/pyproject.toml version $package_version" >&2
+            exit 64
+          fi
+      - name: Install dependencies
+        working-directory: python
+        run: uv sync --dev
+      - name: Test
+        working-directory: python
+        run: uv run pytest -m "not integration"
+      - name: Build
+        working-directory: python
+        run: uv build
+      - name: Publish Forgejo PyPI package
+        working-directory: python
+        env:
+          RELEASE_VERSION: ${{ env.RELEASE_VERSION }}
+          TWINE_USERNAME: malte
+          TWINE_PASSWORD: ${{ secrets.PACKAGE_REGISTRY_TOKEN }}
+        run: |
+          set -e
+          test -n "$TWINE_PASSWORD"
+          wheel=$(printf '%s\n' dist/*-py3-none-any.whl)
+          test -f "$wheel"
+          package_url="https://git.cognovis.de/api/v1/packages/cognovis/pypi/open-brain/$RELEASE_VERSION"
+          package_status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            -H "Authorization: token $TWINE_PASSWORD" \
+            "$package_url")
+          case "$package_status" in
+            200)
+              echo "Package version $RELEASE_VERSION already exists; skipping upload."
+              ;;
+            404)
+              uvx twine upload --non-interactive --disable-progress-bar \
+                --repository-url "https://git.cognovis.de/api/packages/cognovis/pypi" \
+                "$wheel"
+              ;;
+            *)
+              echo "Unexpected package lookup status: $package_status" >&2
+              exit 1
+              ;;
+          esac
+      - name: Publish Forgejo release
+        env:
+          # The job token is needed only for the release API and asset uploads.
+          FORGEJO_TOKEN: ${{ github.token }}
+          FORGEJO_SERVER_URL: ${{ github.server_url }}
+          FORGEJO_REPOSITORY: ${{ github.repository }}
+          FORGEJO_REF_NAME: ${{ env.RELEASE_TAG }}
+          FORGEJO_SHA: ${{ env.RELEASE_SHA }}
+        run: |
+          set -e
+          release_url="$FORGEJO_SERVER_URL/api/v1/repos/$FORGEJO_REPOSITORY/releases"
+          release_by_tag_url="$release_url/tags/$FORGEJO_REF_NAME"
+          release_status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            -H "Authorization: token $FORGEJO_TOKEN" \
+            "$release_by_tag_url")
+          case "$release_status" in
+            200)
+              release_id=$(curl --fail-with-body -sS \
+                -H "Authorization: token $FORGEJO_TOKEN" \
+                "$release_by_tag_url" | jq -er '.id')
+              ;;
+            404)
+              release_payload=$(jq -n \
+                --arg tag "$FORGEJO_REF_NAME" \
+                --arg sha "$FORGEJO_SHA" \
+                '{tag_name: $tag, target_commitish: $sha, name: $tag, draft: false, prerelease: false}')
+              release_id=$(curl --fail-with-body -sS \
+                -H "Authorization: token $FORGEJO_TOKEN" \
+                -H "Content-Type: application/json" \
+                -d "$release_payload" \
+                "$release_url" | jq -er '.id')
+              ;;
+            *)
+              echo "Unexpected release lookup status: $release_status" >&2
+              exit 1
+              ;;
+          esac
+          release_assets=$(curl --fail-with-body -sS \
+            -H "Authorization: token $FORGEJO_TOKEN" \
+            "$release_url/$release_id/assets?limit=100")
+          for artifact in python/dist/*; do
+            test -f "$artifact"
+            asset_name=$(basename "$artifact")
+            asset_id=$(printf '%s\n' "$release_assets" | jq -r --arg value "$asset_name" \
+              '.[] | select(.name == $value) | .id' | head -n 1)
+            if test -n "$asset_id"; then
+              continue
+            fi
+            encoded_name=$(jq -rn --arg value "$asset_name" '$value | @uri')
+            curl --fail-with-body -sS \
+              -H "Authorization: token $FORGEJO_TOKEN" \
+              -F "attachment=@$artifact" \
+              "$release_url/$release_id/assets?name=$encoded_name" \
+              -o /dev/null
+          done

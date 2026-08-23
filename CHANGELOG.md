@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [unreleased]
 
+### Changed
+
+- *(open-brain-scut)* Operators install the `open-brain` wheel from the Cognovis Forgejo PyPI index. Origin and development git is `https://git.cognovis.de/cognovis/open-brain`; `https://github.com/sussdorff/open-brain` is a public read-only mirror only.
+
 ### Security
 
 - *(open-brain-m8p)* **Dependency security upgrades** — Six packages updated to resolve known CVEs:

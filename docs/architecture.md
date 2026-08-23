@@ -387,6 +387,12 @@ The server exposes additional REST endpoints that the hooks (and other HTTP clie
 
 ## Deployment Options
 
+The canonical origin and development git repository is
+`https://git.cognovis.de/cognovis/open-brain`.
+`https://github.com/sussdorff/open-brain` is a public read-only mirror, not
+origin. Operators install the published wheel from the Cognovis PyPI index;
+Docker Compose file downloads may still use the public GitHub mirror.
+
 ### 1. Standalone Docker Compose
 
 Includes Postgres + open-brain. Best for getting started:
@@ -409,7 +415,7 @@ docker compose -f docker-compose.service.yml up -d
 For direct installation without Docker:
 
 ```bash
-uv tool install --python 3.14 "git+https://github.com/sussdorff/open-brain.git#subdirectory=python"
+uv tool install --python 3.14 --index-url https://git.cognovis.de/api/packages/cognovis/pypi/simple open-brain
 ob server
 ```
 
