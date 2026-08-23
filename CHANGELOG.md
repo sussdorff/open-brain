@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- *(open-brain-scut)* Operators install the `open-brain` wheel from the Cognovis Forgejo PyPI index. Canonical git is `https://git.cognovis.de/cognovis/open-brain`; `https://github.com/sussdorff/open-brain` remains the public mirror for clones and the Library marketplace source.
+- *(open-brain-scut)* Operators install the `open-brain` wheel from the Cognovis Forgejo PyPI index. Origin and development git is `https://git.cognovis.de/cognovis/open-brain`; `https://github.com/sussdorff/open-brain` is a public read-only mirror only.
 
 ### Security
 

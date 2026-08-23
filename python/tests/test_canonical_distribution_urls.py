@@ -1,4 +1,4 @@
-"""Operator docs name Forgejo as canonical and the Cognovis PyPI install."""
+"""Operator docs name Forgejo as canonical origin and the Cognovis PyPI install."""
 
 from pathlib import Path
 
@@ -22,8 +22,8 @@ RECOMMENDED_INSTALL = (
 )
 CANONICAL_CLONE_URL = "https://git.cognovis.de/cognovis/open-brain"
 PUBLIC_MIRROR_URL = "https://github.com/sussdorff/open-brain"
-PUBLIC_CLONE_COMMAND = "git clone https://github.com/sussdorff/open-brain.git"
-MARKETPLACE_SOURCE = "source: https://github.com/sussdorff/open-brain"
+CANONICAL_CLONE_COMMAND = "git clone https://git.cognovis.de/cognovis/open-brain.git"
+MARKETPLACE_SOURCE = "source: https://git.cognovis.de/cognovis/open-brain"
 DEPRECATED_GIT_INSTALL = (
     "git+https://github.com/sussdorff/open-brain.git#subdirectory=python"
 )
@@ -42,7 +42,7 @@ def test_operator_docs_document_cognovis_pypi_install() -> None:
 
 
 def test_git_docs_name_canonical_forgejo_and_github_mirror() -> None:
-    """Git-facing docs name Forgejo as canonical and GitHub as the public mirror."""
+    """Git-facing docs name Forgejo as origin and GitHub as a public mirror only."""
     for path in GIT_DOC_PATHS:
         text = path.read_text(encoding="utf-8")
         lowered = text.lower()
@@ -60,17 +60,30 @@ def test_git_docs_name_canonical_forgejo_and_github_mirror() -> None:
         )
 
 
-def test_contributing_clone_uses_public_github_mirror() -> None:
-    """Public contributors clone GitHub; Forgejo is not the working clone command."""
-    text = (REPO_ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
-    assert PUBLIC_CLONE_COMMAND in text, (
-        "CONTRIBUTING.md must document git clone from the public GitHub mirror"
+def _uncommented_text(text: str) -> str:
+    return "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
     )
 
 
-def test_readme_marketplace_source_is_public_github_mirror() -> None:
-    """Library marketplace source must be publicly cloneable GitHub."""
+def test_contributing_clone_uses_canonical_forgejo() -> None:
+    """Development clone is Forgejo origin, not the GitHub mirror."""
+    text = (REPO_ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    working = _uncommented_text(text)
+    assert CANONICAL_CLONE_COMMAND in working, (
+        "CONTRIBUTING.md must document git clone from canonical Forgejo origin"
+    )
+    assert "git clone https://github.com/sussdorff/open-brain.git" not in working, (
+        "CONTRIBUTING.md must not use the GitHub mirror as the working clone command"
+    )
+
+
+def test_readme_marketplace_source_is_canonical_forgejo() -> None:
+    """Library marketplace source is the canonical Forgejo repository."""
     text = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     assert MARKETPLACE_SOURCE in text, (
-        "README.md marketplace source must be the public GitHub mirror"
+        "README.md marketplace source must be the canonical Forgejo repository"
+    )
+    assert "source: https://github.com/sussdorff/open-brain" not in text, (
+        "README.md marketplace source must not be the GitHub mirror"
     )

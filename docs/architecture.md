@@ -387,10 +387,11 @@ The server exposes additional REST endpoints that the hooks (and other HTTP clie
 
 ## Deployment Options
 
-The canonical git repository is `https://git.cognovis.de/cognovis/open-brain`.
-`https://github.com/sussdorff/open-brain` is a public mirror. Operators install
-the published wheel from the Cognovis PyPI index; Docker Compose file downloads
-may still use the public GitHub mirror.
+The canonical origin and development git repository is
+`https://git.cognovis.de/cognovis/open-brain`.
+`https://github.com/sussdorff/open-brain` is a public read-only mirror, not
+origin. Operators install the published wheel from the Cognovis PyPI index;
+Docker Compose file downloads may still use the public GitHub mirror.
 
 ### 1. Standalone Docker Compose
 

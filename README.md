@@ -44,8 +44,8 @@ See [docs/architecture.md](docs/architecture.md) for detailed diagrams and techn
 
 ## Installation
 
-The canonical git repository is `https://git.cognovis.de/cognovis/open-brain`.
-`https://github.com/sussdorff/open-brain` is a public mirror.
+The canonical origin and development git repository is `https://git.cognovis.de/cognovis/open-brain`.
+`https://github.com/sussdorff/open-brain` is a public read-only mirror, not origin.
 
 open-brain has two installable components:
 
@@ -368,14 +368,14 @@ Memory is segmented by `project`, not by user. This works well for individual us
 
 ## Library Marketplace
 
-open-brain is registered as a marketplace in [`the-library`](https://github.com/disler/the-library) (`cognovis/library` fork). The repo's top-level `skills/` and `hooks/` directories are the harness-neutral source primitives; the meta library installs them into any harness (Claude Code, Codex, …) via `/library use`. Forgejo is the canonical Cognovis git repository; the marketplace `source` is the public GitHub mirror so clones work without Forgejo credentials.
+open-brain is registered as a marketplace in [`the-library`](https://github.com/disler/the-library) (`cognovis/library` fork). The repo's top-level `skills/` and `hooks/` directories are the harness-neutral source primitives; the meta library installs them into any harness (Claude Code, Codex, …) via `/library use`. The marketplace `source` is the canonical Forgejo origin; `https://github.com/sussdorff/open-brain` is a public read-only mirror.
 
 Register the marketplace once in your `library.yaml`:
 
 ```yaml
 marketplaces:
   - name: open-brain
-    source: https://github.com/sussdorff/open-brain
+    source: https://git.cognovis.de/cognovis/open-brain
     description: open-brain memory store with skills+hooks for memory capture
     type: git
 ```
